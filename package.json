@@ -1,0 +1,63 @@
+{
+  "name": "performance-helpers",
+  "version": "1.0.0",
+  "description": "Performance toolbox",
+  "keywords": [
+    "node",
+    "javascript",
+    "performance",
+    "workers",
+    "cache",
+    "buffer",
+    "logger"
+  ],
+  "homepage": "https://github.com/AbelVM/performance-helpers#readme",
+  "bugs": {
+    "url": "https://github.com/AbelVM/performance-helpers/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbelVM/performance-helpers.git"
+  },
+  "license": "MIT",
+  "author": "Abel Vázquez Montoro",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.js",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "lint": "eslint \"src/**/*.js\" \"test/**/*.js\"",
+    "lint:fix": "eslint --fix \"src/**/*.js\" \"test/**/*.js\"",
+    "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\" \"*.md\"",
+    "test:coverage": "vitest run --coverage --reporter=verbose",
+    "docs": "typedoc",
+    "bench": "node bench/run.js",
+    "bench:pool": "node bench/run.js pool",
+    "bench:cache": "node bench/run.js cache",
+    "prepare": "npm run build && npm run test && npm run docs"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.2",
+    "@vitest/web-worker": "^4.1.2",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "prettier": "^3.8.1",
+    "terser": "^5.46.1",
+    "typedoc": "^0.28.18",
+    "typedoc-plugin-markdown": "^4.11.0",
+    "vite": "^8.0.3",
+    "vitest": "^4.1.2"
+  }
+}

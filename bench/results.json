@@ -1,0 +1,94 @@
+{
+  "timestamp": "2026-04-04T23:18:55.332Z",
+  "config": {
+    "mode": "pool",
+    "TASKS": 1000,
+    "ITERS": 1000000,
+    "POOL_SIZES": [
+      1,
+      2,
+      4,
+      8
+    ]
+  },
+  "singleThreaded": null,
+  "pool": [
+    {
+      "size": 1,
+      "totalMs": 2299.469849,
+      "avgMs": 2.269999999999998,
+      "results": null,
+      "stats": {
+        "poolLiveDuration": 2301.187255859375,
+        "totalWorkersCreated": 1,
+        "totalTasksPerformed": 1000,
+        "averageTasksPerWorkerUntilTermination": 1000,
+        "timePerTask": {
+          "max": 6,
+          "min": 1,
+          "average": 2.269999999999998,
+          "stddev": 0.8228608630868288
+        },
+        "percentSlowTasks": 0
+      }
+    },
+    {
+      "size": 2,
+      "totalMs": 848.360402,
+      "avgMs": 1.6319999999999995,
+      "results": null,
+      "stats": {
+        "poolLiveDuration": 849.44970703125,
+        "totalWorkersCreated": 2,
+        "totalTasksPerformed": 1000,
+        "averageTasksPerWorkerUntilTermination": 500,
+        "timePerTask": {
+          "max": 4,
+          "min": 1,
+          "average": 1.6319999999999995,
+          "stddev": 0.5626508686565768
+        },
+        "percentSlowTasks": 0
+      }
+    },
+    {
+      "size": 4,
+      "totalMs": 455.987718,
+      "avgMs": 1.6529999999999996,
+      "results": null,
+      "stats": {
+        "poolLiveDuration": 458.03759765625,
+        "totalWorkersCreated": 4,
+        "totalTasksPerformed": 1000,
+        "averageTasksPerWorkerUntilTermination": 250,
+        "timePerTask": {
+          "max": 4,
+          "min": 1,
+          "average": 1.6529999999999996,
+          "stddev": 0.5555096758833277
+        },
+        "percentSlowTasks": 0
+      }
+    },
+    {
+      "size": 8,
+      "totalMs": 322.707512,
+      "avgMs": 1.9759999999999989,
+      "results": null,
+      "stats": {
+        "poolLiveDuration": 326.047607421875,
+        "totalWorkersCreated": 8,
+        "totalTasksPerformed": 1000,
+        "averageTasksPerWorkerUntilTermination": 125,
+        "timePerTask": {
+          "max": 4,
+          "min": 1,
+          "average": 1.9759999999999989,
+          "stddev": 0.6304157358442131
+        },
+        "percentSlowTasks": 0
+      }
+    }
+  ],
+  "cache": null
+}

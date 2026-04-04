@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>performance-helpers</title>
+    <meta name="description" content="Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a small worker pool wrapper, a tiny runtime debug logger, and much more.">
+
+  <meta property="og:title" content="performance-helpers">
+  <meta property="og:description" content="Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a small worker pool wrapper, a tiny runtime debug logger, and much more.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://abelvm.github.io/nimbiCMS/assets/logo.png">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="performance-helpers">
+  <meta name="twitter:description" content="Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a small worker pool wrapper, a tiny runtime debug logger, and much more.">
+  <meta name="twitter:image" content="https://abelvm.github.io/nimbiCMS/assets/logo.png">
+
+  <link rel="icon" href="./assets/logo.png">
+  <style>
+    html,
+    body,
+    #app {
+      height: 100vh;
+      max-height: 100vh;
+      margin: 0;
+      display: block;
+    }
+  </style>
+    <link rel="preload" href="https://unpkg.com/nimbi-cms@1.0.8/dist/nimbi-cms.css" as="style"
+        onload="this.rel='stylesheet'">
+    <noscript>
+        <link rel="stylesheet" href="https://unpkg.com/nimbi-cms@1.0.8/dist/nimbi-cms.css">
+    </noscript>
+    <script src="https://unpkg.com/nimbi-cms@1.0.8/dist/nimbi-cms.js"></script>
+</head>
+
+<body>
+  <div id="app"></div>
+  <script defer>
+    window.addEventListener('DOMContentLoaded', function () {
+      nimbiCMS.initCMS({
+          el: '#app',
+          contentPath: './',
+          indexDepth: 3,
+          defaultStyle: 'system',
+          homePage: 'README.md',
+          notFoundPage: 'assets/404.md',
+          navigationPage: 'assets/navigation.md',
+          debugLevel: 0,
+        });
+    });
+  </script>
+</body>
+
+</html>

@@ -1,0 +1,25 @@
+{
+  "entryPoints": [
+    "src/**/*.js"
+  ],
+  "entryPointStrategy": "resolve",
+  "out": "docs",
+  "cleanOutputDir": true,
+  "exclude": [
+    "**/tests/**"
+  ],
+  "json": "./docs/docs-typedoc.json",
+  "readme": "none",
+  "plugin": [
+    "typedoc-plugin-markdown"
+  ],
+  "disableSources": true,
+  "highlightLanguages": [
+    "javascript",
+    "typescript",
+    "html",
+    "markdown",
+    "bash",
+    "json"
+  ]
+}
