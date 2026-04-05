@@ -9,7 +9,7 @@ Simple circuit breaker primitive to protect external services from cascading fai
 ## Options
 
 | Option | Type | Default | Description |
-|---|---:|---:---|---|
+|---|---:|---:|---|
 | `threshold` | `number` | `5` | Consecutive failure threshold to open the circuit. |
 | `timeout` | `number` (ms) | `30000` | Milliseconds to keep the circuit open before allowing a trial (`half-open`) call. |
 

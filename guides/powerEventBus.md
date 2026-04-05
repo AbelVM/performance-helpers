@@ -5,7 +5,7 @@ Typed micro event bus for intra-process pub/sub. Useful for wiring multiple help
 ## Constructor
 
 | Option | Type | Default | Description |
-|---|---:|---:---|---|
+|---|---:|---:|---|
 | `maxListeners` | `number` | `0` | Maximum listeners per event; `0` means unlimited. |
 | `weak` | `boolean` | `false` | When `true` listeners are stored as `WeakRef` (when supported) and automatically cleaned by GC. |
 

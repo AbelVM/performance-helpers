@@ -7,7 +7,7 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 | option | type | default | description |
 |---|---:|---:|---|
 | `level` | `number` | `0` | Initial debug level (0..3). 0 disables logging. |
-| `format` | `'text | json'` | `'text'` | When `'json'`, the logger emits structured payloads (stringified by default) suitable for log pipelines. |
+| `format` | `'text \| json'` | `'text'` | When `'json'`, the logger emits structured payloads (stringified by default) suitable for log pipelines. |
 | `name` | `string` | `null` | Optional instance name included in JSON payloads as `name`. |
 | `formatter` | `(payload) => any` | `null` | Optional function to transform the structured payload before emission. May return an object (serialized) or a string (emitted directly). |
 | `output` | `(payload) => any` | `null` | Optional transport function; when provided the logger will call this instead of writing to `console.*`. Receives the structured payload or the formatter's returned value. |

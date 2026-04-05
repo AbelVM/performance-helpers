@@ -9,7 +9,7 @@ Retry helper with configurable backoff and jitter. Use to wrap flaky async opera
 ## Options
 
 | Option | Type | Default | Description |
-|---|---:|---:---|---|
+|---|---:|---:|---|
 | `maxAttempts` | `number` | `3` | Maximum attempts (initial try + retries). |
 | `backoff \| exponential \| linear \| fixed` | `'exponential'` | Backoff strategy. |
 | `baseDelay` | `number` (ms) | `100` | Base delay used to compute backoff. |

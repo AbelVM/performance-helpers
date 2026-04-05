@@ -5,7 +5,7 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 ## Constructor
 
 | Option | Type | Default | Description |
-|---|---:|---:---|---|
+|---|---:|---:|---|
 | `defaultTTL` | `number` (ms) | `0` | Default TTL applied when `set(key, value)` is called without a `ttl`. `0` disables expiry. |
 | `onExpire` | `Function` | `undefined` | Optional callback called when an entry expires: `(key, value) => void`. Callback errors are swallowed. |
 

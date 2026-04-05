@@ -5,7 +5,7 @@ Counting barrier primitive. Resolves pending waiters when the internal count rea
 ## Constructor
 
 | Option | Type | Default | Description |
-|---|---:|---:---|---|
+|---|---:|---:|---|
 | `count` | `number` | `1` | Initial count required before the latch is released. |
 
 ## API

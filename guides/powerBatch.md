@@ -11,7 +11,7 @@ Useful for coalescing DB writes, network calls, or other I/O that benefits from 
 ## Options
 
 | Option | Type | Default | Description |
-|---|---:|---:---|---|
+|---|---:|---:|---|
 | `maxSize` | `number` | `Infinity` | When the queue reaches `maxSize`, the batch flushes immediately. |
 
 ## API
