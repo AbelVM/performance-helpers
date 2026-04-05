@@ -11,7 +11,7 @@ describe('PowerPool per-worker targeting', () => {
       }
     }
 
-    const pool = new PowerPool(MockUnderlying, { size: 2, idleTimeout: 1000 });
+    const pool = new PowerPool(MockUnderlying, { size: 2, minSize: 2, idleTimeout: 1000 });
     try {
       expect(pool.workers.length).toBeGreaterThanOrEqual(2);
       const target = pool.workers[0];

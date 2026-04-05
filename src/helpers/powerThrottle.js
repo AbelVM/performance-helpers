@@ -9,6 +9,13 @@
  * - `refillRate` (number): tokens per second to add (default 0)
  * - `refillInterval` (number): ms interval used for bookkeeping (default 1000)
  */
+/**
+ * @typedef {Object} PowerThrottleOptions
+ * @property {number} [capacity]
+ * @property {number} [tokens]
+ * @property {number} [refillRate]
+ * @property {number} [refillInterval]
+ */
 import { nowMs } from '../utils/now.js';
 
 export class PowerThrottle {
@@ -49,9 +56,10 @@ export class PowerThrottle {
     const tokensToAdd = (elapsedMs / 1000) * this.refillRate + this._tokenRemainder;
     const whole = Math.floor(tokensToAdd);
     this._tokenRemainder = tokensToAdd - whole;
+    // advance the last refill timestamp to avoid double-counting elapsed time
+    this._lastRefill = now;
     if (whole > 0) {
       this.tokens = Math.min(this.capacity, this.tokens + whole);
-      this._lastRefill = now;
     }
   }
 
@@ -61,7 +69,7 @@ export class PowerThrottle {
    * @returns {boolean} `true` when tokens were consumed; `false` otherwise.
    */
   tryConsume(n = 1) {
-    const want = Math.max(0, Math.floor(n) || 0) || 0;
+    const want = Math.max(0, Math.floor(+n) || 0);
     if (want === 0) return true;
     const now = nowMs();
     this._refill(now);
@@ -79,7 +87,7 @@ export class PowerThrottle {
    * @returns {void}
    */
   addTokens(n) {
-    const add = Math.max(0, Math.floor(n) || 0);
+    const add = Math.max(0, Math.floor(+n) || 0);
     if (add === 0) return;
     this.tokens = Math.min(this.capacity, this.tokens + add);
   }

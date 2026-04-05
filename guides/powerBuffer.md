@@ -8,33 +8,39 @@ Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / Arra
 
 Encode a value to a `Uint8Array` (UTF-8 JSON).
 
-| name | type | default | description |
-|---|---:|---:|---|
-| `obj` | * | — | Any value to encode. If already a `Uint8Array`/TypedArray/ArrayBuffer it will be returned or converted to a view. |
+- `obj` — Any value to encode. If the vcontinue manual pass file-by-file alue is already a `Uint8Array`/TypedArray/ArrayBuffer it will be returned or converted to a view.
 
-Returns: `Uint8Array` — UTF-8 encoded bytes. Throws if no encoder available.
+Returns: `Uint8Array` — UTF-8 encoded bytes. Throws if no encoder is available in the environment.
 
 Example
 ```javascript
-const payload = { hello: 'world' }
-const bytes = o2u8(payload)
-// bytes.buffer can be transferred to a Worker
+import { o2u8, u82o } from '../src/helpers/powerBuffer.js';
+
+// encode a JSON payload to transferable Uint8Array and post to a worker
+const payload = { id: 42, name: 'big-image', meta: { size: 1024 * 1024 } };
+const bytes = o2u8(payload);
+// `bytes.buffer` can be transferred to a Worker to avoid structured-clone copies
+worker.postMessage(bytes, [bytes.buffer]);
 ```
 
 ## u82o(buf)
 
 Decode a binary buffer (Uint8Array/ArrayBuffer/Buffer) containing JSON UTF-8 to a JS value.
 
-| name | type | default | description |
-|---|---:|---:|---|
-| `buf` | `Uint8Array \| ArrayBuffer \| TypedArray \| Buffer` | — | Binary input containing JSON UTF-8. |
+- `buf` — The binary input to decode. Accepted types: `Uint8Array`, `ArrayBuffer`, TypedArray, or Node `Buffer`.
 
-Returns: `*` — parsed JS value. Throws `TypeError` for unsupported input types.
+Returns: parsed JS value. Throws `TypeError` for unsupported input types or malformed UTF-8 JSON.
 
-Example
+Example — worker receiver
 
 ```javascript
-const obj = u82o(bytes)
+import { u82o } from '../src/helpers/powerBuffer.js';
+
+self.onmessage = (e) => {
+    // decode transferable Uint8Array back to JS value
+    const obj = u82o(e.data);
+    // process obj
+};
 ```
 
 ## o2b(obj)
@@ -58,22 +64,23 @@ Legacy wrapper around `u82o` for ArrayBuffer/TypedArray/Buffer.
 self.onmessage(e => {
     const json_input = u82o(e.data);
     ...
-    const output = o28u(json_output);
-    self.postMessage(output, [output])
+    const output = o2u8(json_output);
+    self.postMessage(output, [output.buffer])
 })
 ```
 
 ```javascript
-// main.js
-worker.onmessage(e => {
-    const json_input = u82o(e.data);
-    ...
-})
+// worker.js
+self.onmessage = (e) => {
+    const jsonInput = u82o(e.data);
+    const result = process(jsonInput);
+    const out = o2u8(result);
+    self.postMessage(out, [out.buffer]);
+};
 
-const output = o28u(json_output);
-worker.postMessage(output, [output])
-
+// main thread
+worker.onmessage = (e) => {
+    const jsonOut = u82o(e.data);
+    handleResult(jsonOut);
+};
 ```
-
-- If you're already working with ArrayBuffer views, these helpers prefer zero-copy views to avoid allocations.
-- Do not use these helpers for non-JSON binary protocols — they are JSON-centric.

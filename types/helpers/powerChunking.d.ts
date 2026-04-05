@@ -1,9 +1,25 @@
 /**
- * PowerChunking helper
+ * @typedef {Object} PowerChunkingOptions
+ * @property {Object} [poolOptions]
+ * @property {Object} [postOptions]
+ * @property {number} [chunkSize]
+ * @property {'light'|'medium'|'heavy'} [fnComplexity]
+ */
+/**
+ * PowerChunking helper (class `PowerChunker`)
  *
- * Heuristically chunk an iterable and run `fn` for every item inside worker-like
- * inline workers managed by a `PowerPool`. Returns the result of
- * `PowerPool.postMessageBatch(...)` for the created chunked tasks.
+ * Construct with `new PowerChunker(iterable, fn, options)` to create a
+ * helper that heuristically chunks an iterable and runs `fn` for every item
+ * inside lightweight inline worker-like instances managed by a `PowerPool`.
+ * The constructor returns the created `PowerPool` instance so callers can
+ * interact with it (listen `onmessage`, call `drain()`, `terminate()`, etc.).
+ *
+ * Usage:
+ * ```js
+ * const pool = new PowerChunker(iterable, fn, options);
+ * pool.onmessage = (e) => { // handle per-chunk results };
+ * await pool.drain();
+ * ```
  *
  * Notes:
  * - This helper creates lightweight inline worker-like instances that execute
@@ -22,9 +38,10 @@
  *   will attempt to analyze `fn`'s source to infer a complexity score ('light'|'medium'|'heavy') and use that
  *   to bias the chunk size. If analysis fails the helper falls back to 'medium'.
  * @returns {PowerPool} The created `PowerPool` instance managing the chunked work.
- *   The helper enqueues chunk tasks internally (via `pool.postMessageBatch`).
- *   Listen to `pool.onmessage` to collect per-chunk results and call
- *   `await pool.drain()` to wait until all work is finished.
+ *   The constructor returns the `PowerPool` instance; the helper enqueues
+ *   chunk tasks internally (via `pool.postMessageBatch`). Listen to
+ *   `pool.onmessage` to collect per-chunk results and call `await pool.drain()`
+ *   to wait until all work is finished.
  *
  * Each `message` event `data` includes:
  * - `processed`: number of items processed in the chunk
@@ -36,5 +53,12 @@
  * { error: true, code: string, message?: string, stack?: string }
  * ```
  */
-export function PowerChunking(iterable: Iterable<any>, fn: Function, options?: Object | undefined): PowerPool;
-import { PowerPool } from './powerPool.js';
+export class PowerChunker {
+    constructor(iterable: any, fn: any, options?: {});
+}
+export type PowerChunkingOptions = {
+    poolOptions?: Object | undefined;
+    postOptions?: Object | undefined;
+    chunkSize?: number | undefined;
+    fnComplexity?: "light" | "medium" | "heavy" | undefined;
+};

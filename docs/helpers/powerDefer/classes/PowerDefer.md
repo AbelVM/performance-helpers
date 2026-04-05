@@ -6,18 +6,6 @@
 
 # Class: PowerDefer
 
-Deferred promise primitive.
-Separates a `Promise` from its `resolve`/`reject` functions.
-Useful for barriers and manual promise coordination.
-
-## Example
-
-```ts
-const d = new PowerDefer();
-setTimeout(() => d.resolve(42), 10);
-await d.promise; // 42
-```
-
 ## Constructors
 
 ### Constructor
@@ -30,41 +18,15 @@ await d.promise; // 42
 
 ## Properties
 
-### \_reject
-
-> **\_reject**: (`err`) => `void`
-
-#### Parameters
-
-##### err
-
-`any`
-
-#### Returns
-
-`void`
-
-***
-
-### \_resolve
-
-> **\_resolve**: (`v`) => `void`
-
-#### Parameters
-
-##### v
-
-`any`
-
-#### Returns
-
-`void`
-
-***
-
 ### \_settled
 
 > **\_settled**: `boolean`
+
+***
+
+### \_status
+
+> **\_status**: `string`
 
 ***
 
@@ -73,6 +35,34 @@ await d.promise; // 42
 > **promise**: `Promise`\<`any`\>
 
 ## Accessors
+
+### fulfilled
+
+#### Get Signature
+
+> **get** **fulfilled**(): `boolean`
+
+Convenience boolean: true if resolved successfully
+
+##### Returns
+
+`boolean`
+
+***
+
+### rejected
+
+#### Get Signature
+
+> **get** **rejected**(): `boolean`
+
+Convenience boolean: true if rejected
+
+##### Returns
+
+`boolean`
+
+***
 
 ### settled
 
@@ -85,6 +75,20 @@ Whether the deferred has been settled.
 ##### Returns
 
 `boolean`
+
+***
+
+### status
+
+#### Get Signature
+
+> **get** **status**(): `"pending"` \| `"fulfilled"` \| `"rejected"`
+
+Status of the deferred: 'pending' | 'fulfilled' | 'rejected'
+
+##### Returns
+
+`"pending"` \| `"fulfilled"` \| `"rejected"`
 
 ## Methods
 

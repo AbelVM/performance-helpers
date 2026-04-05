@@ -5,15 +5,17 @@ globalThis.Worker = NodeWorker;
 
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { PowerCache } from '../src/helpers/powerCache.js';
+import { o2u8 } from '../src/helpers/powerBuffer.js';
 
 const args = process.argv.slice(2);
 const mode = args[0] || 'all';
 const TASKS = Number(process.env.BENCH_TASKS || 1000);
 const ITERS = Number(process.env.BENCH_ITERS || 1000000);
-const POOL_SIZES = (process.env.BENCH_POOLS || '1,2,4,8').split(',').map(s => Number(s));
+const POOL_SIZES = (process.env.BENCH_POOLS || '1,2,4,8').split(',').map((s) => Number(s));
 // Timeout for PowerPool per-pool run in ms. Set to 0 to disable timeout.
 // Default to 0 so the harness exercises PowerPool fully unless overridden.
-const POOL_TIMEOUT = process.env.BENCH_POOL_TIMEOUT === undefined ? 0 : Number(process.env.BENCH_POOL_TIMEOUT);
+const POOL_TIMEOUT =
+  process.env.BENCH_POOL_TIMEOUT === undefined ? 0 : Number(process.env.BENCH_POOL_TIMEOUT);
 
 // Generate samples from a normal distribution using Box-Muller transform.
 // Works like numpy.random.normal: mean and std can be provided.
@@ -47,7 +49,11 @@ async function runSingleThreaded(tasks, iterations) {
     durations.push(Number(s1 - s0) / 1e6);
   }
   const t1 = process.hrtime.bigint();
-  return { totalMs: Number(t1 - t0) / 1e6, avgMs: durations.reduce((a, b) => a + b, 0) / durations.length, durations };
+  return {
+    totalMs: Number(t1 - t0) / 1e6,
+    avgMs: durations.reduce((a, b) => a + b, 0) / durations.length,
+    durations,
+  };
 }
 
 async function runSingleThreadedVariable(tasks, iterationsArray) {
@@ -61,7 +67,11 @@ async function runSingleThreadedVariable(tasks, iterationsArray) {
     durations.push(Number(s1 - s0) / 1e6);
   }
   const t1 = process.hrtime.bigint();
-  return { totalMs: Number(t1 - t0) / 1e6, avgMs: durations.reduce((a, b) => a + b, 0) / durations.length, durations };
+  return {
+    totalMs: Number(t1 - t0) / 1e6,
+    avgMs: durations.reduce((a, b) => a + b, 0) / durations.length,
+    durations,
+  };
 }
 
 async function runWorkerPool(poolSize, tasks, iterations) {
@@ -80,7 +90,11 @@ async function runWorkerPool(poolSize, tasks, iterations) {
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
     // fire-and-forget; PowerPool will track task timings
-    pool.postMessage({ iterations }, undefined, {});
+    // Encode each payload to a fresh Uint8Array and transfer its buffer
+    // to avoid the pool's plain-object encoding path which may reuse
+    // internal cached buffers and cause unsupported transfer errors.
+    const payload = o2u8({ iterations });
+    pool.postMessage(payload, [payload.buffer]);
   }
 
   // Wait until pool drains (queue empty and workers idle). `drain()` resolves with getStats().
@@ -90,9 +104,12 @@ async function runWorkerPool(poolSize, tasks, iterations) {
 
   // Derive average from pool stats when available, fallback to total/tasks
   const perf = (statsObj && statsObj.performance) || {};
-  const avgMs = perf.timePerTask && typeof perf.timePerTask.average === 'number' && perf.timePerTask.average > 0
-    ? perf.timePerTask.average
-    : tasks ? totalMs / tasks : 0;
+  const avgMs =
+    perf.timePerTask && typeof perf.timePerTask.average === 'number' && perf.timePerTask.average > 0
+      ? perf.timePerTask.average
+      : tasks
+        ? totalMs / tasks
+        : 0;
 
   pool.terminate();
   return { totalMs, avgMs, results: null, stats: perf };
@@ -111,7 +128,8 @@ async function runWorkerPoolVariable(poolSize, tasks, iterationsArray) {
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
     const iters = Math.max(1, Math.round(iterationsArray[i]));
-    pool.postMessage({ iterations: iters }, undefined, {});
+    const payload = o2u8({ iterations: iters });
+    pool.postMessage(payload, [payload.buffer]);
   }
 
   const statsObj = await pool.drain();
@@ -119,9 +137,12 @@ async function runWorkerPoolVariable(poolSize, tasks, iterationsArray) {
   const totalMs = Number(t1 - t0) / 1e6;
 
   const perf = (statsObj && statsObj.performance) || {};
-  const avgMs = perf.timePerTask && typeof perf.timePerTask.average === 'number' && perf.timePerTask.average > 0
-    ? perf.timePerTask.average
-    : tasks ? totalMs / tasks : 0;
+  const avgMs =
+    perf.timePerTask && typeof perf.timePerTask.average === 'number' && perf.timePerTask.average > 0
+      ? perf.timePerTask.average
+      : tasks
+        ? totalMs / tasks
+        : 0;
 
   pool.terminate();
   return { totalMs, avgMs, results: null, stats: perf };
@@ -178,16 +199,19 @@ function formatMd(report, filename) {
       const pb = LABELS[`${a}.${b}`] || b;
       return `${pa} ${pb}`;
     }
-    return k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').replace(/^./, s => s.toUpperCase());
+    return k
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/_/g, ' ')
+      .replace(/^./, (s) => s.toUpperCase());
   }
-  lines.push(`# Benchmark Results`);
+  lines.push('# Benchmark Results');
   lines.push(`\nGenerated: ${report.timestamp}\n`);
-  lines.push(`## Configuration`);
+  lines.push('## Configuration');
   lines.push(`- TASKS: ${report.config.TASKS}`);
   lines.push(`- ITERS: ${report.config.ITERS}`);
   lines.push(`- POOL_SIZES: ${report.config.POOL_SIZES.join(', ')}`);
   // Constant-load benchmark (single-threaded + pool)
-  lines.push(`\n## Constant-load benchmark`);
+  lines.push('\n## Constant-load benchmark');
   if (report.singleThreaded) {
     lines.push(`- Single-threaded total: ${report.singleThreaded.totalMs.toFixed(2)} ms`);
     lines.push(`- Single-threaded avg per task: ${report.singleThreaded.avgMs.toFixed(2)} ms`);
@@ -216,21 +240,29 @@ function formatMd(report, filename) {
     // header
     lines.push('');
     lines.push(`| ${keys.map((k) => headerLabel(k)).join(' | ')} |`);
-    lines.push(`| ${keys.map((k) => (k === 'size' ? '----------:' : '-----------:')).join(' | ')} |`);
+    lines.push(
+      `| ${keys.map((k) => (k === 'size' ? '----------:' : '-----------:')).join(' | ')} |`
+    );
     // rows
     for (const pr of report.pool) {
       const p = pr.stats || {};
       const row = [];
       for (const k of keys) {
-        if (k === 'size') { row.push(String(pr.size)); continue; }
-        if (k === 'totalMs') { row.push(pr.totalMs == null ? '' : pr.totalMs.toFixed(2)); continue; }
+        if (k === 'size') {
+          row.push(String(pr.size));
+          continue;
+        }
+        if (k === 'totalMs') {
+          row.push(pr.totalMs == null ? '' : pr.totalMs.toFixed(2));
+          continue;
+        }
         if (k.includes('.')) {
           const [a, b] = k.split('.');
           const v = p[a] && typeof p[a] === 'object' ? p[a][b] : undefined;
-          row.push(v == null ? '' : (typeof v === 'number' ? v.toFixed(2) : String(v)));
+          row.push(v == null ? '' : typeof v === 'number' ? v.toFixed(2) : String(v));
         } else {
           const v = p[k];
-          row.push(v == null ? '' : (typeof v === 'number' ? v.toFixed(2) : String(v)));
+          row.push(v == null ? '' : typeof v === 'number' ? v.toFixed(2) : String(v));
         }
       }
       lines.push(`| ${row.join(' | ')} |`);
@@ -239,13 +271,16 @@ function formatMd(report, filename) {
     lines.push('- No pool results');
   }
 
-
   // Variable-load benchmark reporting
-  lines.push(`\n## Variable-load benchmark`);
+  lines.push('\n## Variable-load benchmark');
   if (report.variable) {
     if (report.variable.singleThreaded) {
-      lines.push(`- Single-threaded total: ${report.variable.singleThreaded.totalMs.toFixed(2)} ms`);
-      lines.push(`- Single-threaded avg per task: ${report.variable.singleThreaded.avgMs.toFixed(2)} ms`);
+      lines.push(
+        `- Single-threaded total: ${report.variable.singleThreaded.totalMs.toFixed(2)} ms`
+      );
+      lines.push(
+        `- Single-threaded avg per task: ${report.variable.singleThreaded.avgMs.toFixed(2)} ms`
+      );
     }
 
     if (report.variable.pool && report.variable.pool.length) {
@@ -269,20 +304,28 @@ function formatMd(report, filename) {
       // include runner-level totals/avg as columns
       const keysVar = ['size', 'totalMs', ...Array.from(varPerfKeys)];
       lines.push(`| ${keysVar.map((k) => headerLabel(k)).join(' | ')} |`);
-      lines.push(`| ${keysVar.map((k) => (k === 'size' ? '----------:' : '-----------:')).join(' | ')} |`);
+      lines.push(
+        `| ${keysVar.map((k) => (k === 'size' ? '----------:' : '-----------:')).join(' | ')} |`
+      );
       for (const pr of report.variable.pool) {
         const p = pr.stats || {};
         const row = [];
         for (const k of keysVar) {
-          if (k === 'size') { row.push(String(pr.size)); continue; }
-          if (k === 'totalMs') { row.push(pr.totalMs == null ? '' : pr.totalMs.toFixed(2)); continue; }
+          if (k === 'size') {
+            row.push(String(pr.size));
+            continue;
+          }
+          if (k === 'totalMs') {
+            row.push(pr.totalMs == null ? '' : pr.totalMs.toFixed(2));
+            continue;
+          }
           if (k.includes('.')) {
             const [a, b] = k.split('.');
             const v = p[a] && typeof p[a] === 'object' ? p[a][b] : undefined;
-            row.push(v == null ? '' : (typeof v === 'number' ? v.toFixed(2) : String(v)));
+            row.push(v == null ? '' : typeof v === 'number' ? v.toFixed(2) : String(v));
           } else {
             const v = p[k];
-            row.push(v == null ? '' : (typeof v === 'number' ? v.toFixed(2) : String(v)));
+            row.push(v == null ? '' : typeof v === 'number' ? v.toFixed(2) : String(v));
           }
         }
         lines.push(`| ${row.join(' | ')} |`);
@@ -293,7 +336,7 @@ function formatMd(report, filename) {
   } else {
     lines.push('- No variable-load results');
   }
-  lines.push(`\n## Cache benchmark`);
+  lines.push('\n## Cache benchmark');
   if (report.cache) {
     lines.push(`- Miss total: ${report.cache.missTotal.toFixed(2)} ms`);
     lines.push(`- Hit total (${report.cache.reps} reps): ${report.cache.hitTotal.toFixed(2)} ms`);
@@ -307,7 +350,7 @@ function formatMd(report, filename) {
   } catch (err) {
     console.error('Failed to write JSON results file', err);
   }
-/*   lines.push(`\n## Raw results data`);
+  /*   lines.push(`\n## Raw results data`);
   lines.push('');
   lines.push(`[Raw JSON file](${jsonFilename})`);
  */
@@ -316,7 +359,13 @@ function formatMd(report, filename) {
 }
 
 async function main() {
-  const report = { timestamp: new Date().toISOString(), config: { mode, TASKS, ITERS, POOL_SIZES }, singleThreaded: null, pool: [], cache: null };
+  const report = {
+    timestamp: new Date().toISOString(),
+    config: { mode, TASKS, ITERS, POOL_SIZES },
+    singleThreaded: null,
+    pool: [],
+    cache: null,
+  };
 
   console.log('Bench config:', { mode, TASKS, ITERS, POOL_SIZES });
   if (mode === 'all' || mode === 'single') {
@@ -331,8 +380,13 @@ async function main() {
       let r;
       try {
         // attempt PowerPool but allow configurable per-pool timeout (0 = no timeout)
-        const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
-        if (POOL_TIMEOUT > 0) r = await withTimeout(runWorkerPool(size, TASKS, ITERS), POOL_TIMEOUT);
+        const withTimeout = (p, ms) =>
+          Promise.race([
+            p,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
+          ]);
+        if (POOL_TIMEOUT > 0)
+          r = await withTimeout(runWorkerPool(size, TASKS, ITERS), POOL_TIMEOUT);
         else r = await runWorkerPool(size, TASKS, ITERS);
       } catch (err) {
         console.warn('PowerPool run failed or timed out:', err && err.message);
@@ -346,7 +400,9 @@ async function main() {
   if (mode === 'all' || mode === 'cache') {
     console.log('Running cache benchmark...');
     const r = await runCacheBenchmark(TASKS, Math.max(1, Math.floor(ITERS / 1000)));
-    console.log(`Cache miss total ${r.missTotal.toFixed(2)}ms, hit total (${r.reps} reps) ${r.hitTotal.toFixed(2)}ms`);
+    console.log(
+      `Cache miss total ${r.missTotal.toFixed(2)}ms, hit total (${r.reps} reps) ${r.hitTotal.toFixed(2)}ms`
+    );
     report.cache = r;
   }
 
@@ -354,11 +410,13 @@ async function main() {
   if (mode === 'all' || mode === 'variable') {
     console.log('Running variable-load benchmark (per-task iterations sampled from normal)...');
     // Generate samples centered at 0.5 (so mapping v*2*ITERS produces values around ITERS)
-    const samples = randomNormalArray(TASKS, 0.5, 0.15).map(v => Math.max(0, v) * 2 * ITERS);
+    const samples = randomNormalArray(TASKS, 0.5, 0.15).map((v) => Math.max(0, v) * 2 * ITERS);
     // single-threaded variable load
     try {
       const rVarSingle = await runSingleThreadedVariable(TASKS, samples);
-      console.log(`Single-threaded (variable) total ${rVarSingle.totalMs.toFixed(2)}ms avg ${rVarSingle.avgMs.toFixed(2)}ms`);
+      console.log(
+        `Single-threaded (variable) total ${rVarSingle.totalMs.toFixed(2)}ms avg ${rVarSingle.avgMs.toFixed(2)}ms`
+      );
       report.variable = report.variable || { singleThreaded: null, pool: [] };
       report.variable.singleThreaded = rVarSingle;
     } catch (err) {
@@ -372,14 +430,21 @@ async function main() {
       console.log(`Running worker pool (variable) benchmark with poolSize=${size}...`);
       let r;
       try {
-        const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
-        if (POOL_TIMEOUT > 0) r = await withTimeout(runWorkerPoolVariable(size, TASKS, samples), POOL_TIMEOUT);
+        const withTimeout = (p, ms) =>
+          Promise.race([
+            p,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
+          ]);
+        if (POOL_TIMEOUT > 0)
+          r = await withTimeout(runWorkerPoolVariable(size, TASKS, samples), POOL_TIMEOUT);
         else r = await runWorkerPoolVariable(size, TASKS, samples);
       } catch (err) {
         console.warn('PowerPool variable run failed or timed out:', err && err.message);
         r = { totalMs: 0, avgMs: 0, results: null, stats: {} };
       }
-      console.log(`Pool variable size ${size} total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`);
+      console.log(
+        `Pool variable size ${size} total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`
+      );
       report.variable = report.variable || { singleThreaded: null, pool: [] };
       report.variable.pool.push({ size, ...r });
     }
@@ -390,4 +455,7 @@ async function main() {
   console.log('Wrote results to', fname);
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

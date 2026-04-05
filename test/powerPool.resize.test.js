@@ -10,7 +10,12 @@ describe('PowerPool.resize()', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(MockUnderlying, { size: 3, minSize: 1, idleTimeout: 1000 });
+    const pool = new PowerPool(MockUnderlying, {
+      size: 3,
+      minSize: 1,
+      idleTimeout: 1000,
+      lazy: false,
+    });
     try {
       expect(pool.workers.length).toBe(3);
       pool.resize(1);

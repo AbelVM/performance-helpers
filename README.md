@@ -6,27 +6,34 @@
 
 Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a small worker pool wrapper, a tiny runtime debug logger, and much more:
 
-**Caching**
+## Caching
 
 - [PowerCache: Caching (LRU + TTL + weight) and memoizing](guides/powerCache.md). An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an optional reusable node pool.
 - [PowerTTLMap: Map with per-key TTL](guides/powerTTLMap.md). Lightweight `Map`-like store where keys expire lazily on access.
 
-**Parallelizing**
+## Parallelizing
 
 - [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances.
-- [PowerChunking: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
+- [PowerChunker: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
+- [PowerCircuit: Circuit breaker](guides/powerCircuit.md). Small circuit breaker to protect external services from cascading failures.
+- [PowerRetry: Retry with backoff](guides/powerRetry.md). Helper for retrying flaky async operations with configurable backoff and jitter.
+- [PowerRetry: Retry with backoff](guides/powerRetry.md). Helper for retrying flaky async operations with configurable backoff and jitter.
+- [PowerBatch: Microtask coalescing dispatcher](guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
+- [PowerLatch: Counting barrier](guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
 - [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`.
 - [PowerSlidingWindow: Sliding-window limiter](guides/powerSlidingWindow.md). A simple rolling-window limiter for quota-style rate limiting.
 - [PowerQueue: O(1) ring-buffer queue](guides/powerQueue.md). A resizable, high-performance queue intended for use in `PowerPool` and other high-throughput scenarios.
+- [PowerEventBus: Typed micro event bus](guides/powerEventBus.md). Lightweight pub/sub for intra-process coordination between helpers.
 
-**Logging**
+## Logging
 
 - [PowerLogging: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
 
-**Utils**
+## Utils
 
 - [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
 - [PowerDefer: Deferred promise primitive](guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
+- [PowerObserver: Lightweight reactive value](guides/powerObserver.md). Tiny observable primitive for synchronous subscriptions to a single value.
 
 ## Quick start
 
@@ -85,6 +92,7 @@ import {
   PowerQueue,
   PowerDefer,
   PowerTTLMap,
+  PowerObserver,
   o2u8,
   u82o,
 } from 'performance-helpers';

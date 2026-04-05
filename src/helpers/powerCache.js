@@ -9,6 +9,20 @@
  */
 
 /**
+ * @typedef {Object} PowerCacheOptions
+ * @property {number} [maxEntries]
+ * @property {number} [maxWeight]
+ * @property {function(*):number} [weightFn]
+ * @property {number} [defaultTTL]
+ * @property {number} [maxPoolSize]
+ * @property {boolean} [rejectOversized]
+ * @property {function(*, *, string):void} [onEvict]
+ * @property {function(*, *):void} [onExpire]
+ * @property {number} [initialPoolSize]
+ * @property {number} [maxCleanupPerTick]
+ */
+
+/**
  * @example
  * // Create a cache with caps and a simple weight function
  * const cache = new PowerCache({
@@ -167,8 +181,9 @@ export class PowerCache {
    * @private
    * @param {CacheNode} node
    * @param {number} now - Current timestamp (ms) used for comparisons
+   * @param {boolean} [countMiss=false] - When true, increment the `misses` counter for user-facing lookups.
    */
-  _removeExpiredNode(node, now) {
+  _removeExpiredNode(node, now, countMiss = false) {
     // Only remove when the node is actually expired according to `now`.
     if (!node || !node.expiresAt || node.expiresAt > now) return false;
     const k = node.key;
@@ -183,7 +198,7 @@ export class PowerCache {
       if (this.onExpire) this.onExpire(k, v);
     } catch (err) {}
     this._freeNode(node);
-    this.misses++;
+    if (countMiss) this.misses++;
     this.expirations++;
     return true;
   }
@@ -342,7 +357,7 @@ export class PowerCache {
     }
     const now = Date.now();
     if (node.expiresAt && node.expiresAt <= now) {
-      this._removeExpiredNode(node, now);
+      this._removeExpiredNode(node, now, true);
       return undefined;
     }
     this._moveToTail(node);

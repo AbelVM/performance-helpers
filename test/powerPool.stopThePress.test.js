@@ -25,6 +25,9 @@ describe('PowerPool.stopThePress', () => {
       maxTasksPerWorker: 1,
       idleTimeout: 1000,
       taskQueue: true,
+      // ensure eager creation so second post queues instead of creating another worker
+      minSize: 1,
+      lazy: false,
     });
 
     try {

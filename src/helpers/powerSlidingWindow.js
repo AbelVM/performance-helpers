@@ -3,6 +3,7 @@
  * Uses a timestamp queue to track event occurrences.
  */
 import { nowMs } from '../utils/now.js';
+import { PowerQueue } from './powerQueue.js';
 
 export class PowerSlidingWindow {
   /**
@@ -10,12 +11,17 @@ export class PowerSlidingWindow {
    * @param {number} [options.capacity=1] Max events allowed in window.
    * @param {number} [options.windowMs=1000] Window size in milliseconds.
    */
+  /**
+   * @typedef {Object} PowerSlidingWindowOptions
+   * @property {number} [capacity]
+   * @property {number} [windowMs]
+   */
   constructor(options = {}) {
     const { capacity = 1, windowMs = 1000 } = options;
     this.capacity = Math.max(0, Number(capacity) || 0);
     this.windowMs = Math.max(1, Number(windowMs) || 1000);
-    // simple timestamp queue (ms)
-    this._timestamps = [];
+    // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
+    this._timestamps = new PowerQueue(16);
   }
 
   /**
@@ -32,9 +38,12 @@ export class PowerSlidingWindow {
    */
   _prune(now) {
     const threshold = now - this.windowMs;
-    let i = 0;
-    while (i < this._timestamps.length && this._timestamps[i] <= threshold) i++;
-    if (i > 0) this._timestamps.splice(0, i);
+    // remove from head while timestamps are older than the threshold
+    while (this._timestamps.length > 0) {
+      const t = this._timestamps.peek();
+      if (t === undefined || t > threshold) break;
+      this._timestamps.shift();
+    }
   }
 
   /**
@@ -48,7 +57,12 @@ export class PowerSlidingWindow {
     const now = nowMs();
     this._prune(now);
     if (this._timestamps.length + want <= this.capacity) {
-      for (let i = 0; i < want; i++) this._timestamps.push(now);
+      if (want === 1) this._timestamps.push(now);
+      else {
+        const arr = new Array(want);
+        for (let i = 0; i < want; i++) arr[i] = now;
+        this._timestamps.pushMany(arr);
+      }
       return true;
     }
     return false;
@@ -68,6 +82,6 @@ export class PowerSlidingWindow {
    * @returns {void}
    */
   reset() {
-    this._timestamps.length = 0;
+    this._timestamps.clear();
   }
 }

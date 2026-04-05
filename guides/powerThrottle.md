@@ -4,8 +4,6 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 
 ## Constructor
 
-`new PowerThrottle(options)`
-
 | option | type | default | description |
 |---|---:|---:|---|
 | `capacity` | `number` | `1` | Maximum tokens the bucket can hold.
@@ -13,26 +11,52 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 | `refillRate` | `number` | `0` | Tokens added per second (fractional accumulation supported).
 | `refillInterval` | `number` | `1000` | Internal bookkeeping interval (ms) used for refill math.
 
-## Methods
+## API
 
-| method | params | returns | description |
-|---|---|---|---|
-| `tryConsume(n = 1)` | `n: number` | `boolean` | Attempt to consume `n` tokens. Returns `true` if tokens were available and consumed, `false` otherwise.
-| `available()` | — | `number` | Returns current available tokens (performs a refill before returning).
-| `addTokens(n)` | `n: number` | `void` | Force-add up to `n` tokens (clamped to `capacity`). Useful for tests or manual replenishment.
-| `reset(count?)` | `count?: number` | `void` | Reset the token count to `count` or full `capacity` when omitted.
+- `tryConsume(n = 1)` — Attempt to consume `n` tokens (default `1`). Returns `true` when tokens were available and consumed; otherwise returns `false`.
+
+- `available()` — Return the current number of available tokens (performs a refill calculation before reporting).
+
+- `addTokens(n)` — Forcefully add up to `n` tokens to the bucket (clamped to `capacity`). Handy for tests or to manually replenish tokens.
+
+- `reset(count?)` — Reset the token count to `count`. When omitted the bucket is refilled to full `capacity`.
 
 ## Example
 
 ```javascript
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
+import { PowerPool } from '../src/index.js';
 
-const limiter = new PowerThrottle({ capacity: 5, refillRate: 1 });
-if (limiter.tryConsume()) {
-  // make request
-} else {
-  // backoff or retry later
+// Real-world example: pace API calls and buffer pending work with gentle backoff.
+const limiter = new PowerThrottle({ capacity: 5, refillRate: 1 }); // burst 5, 1 token/sec
+const pool = new PowerPool(MyWorker, { size: 2 });
+const pending = [];
+
+function scheduleRequest(payload) {
+  if (limiter.tryConsume()) {
+    pool.postMessage({ task: 'call', payload });
+    return;
+  }
+  // push into pending buffer with retry metadata
+  pending.push({ payload, attempts: 0, nextDelay: 200 });
 }
+
+// Periodically drain pending with small backoff per-item to avoid bursts
+const drainInterval = setInterval(() => {
+  for (let i = 0; i < pending.length; ) {
+    const item = pending[i];
+    if (!limiter.tryConsume()) break;
+    // dispatch
+    pool.postMessage({ task: 'call', payload: item.payload });
+    pending.splice(i, 1);
+  }
+  // if queue still contains items, apply exponential backoff to retry scheduling later
+  for (const it of pending) {
+    it.attempts += 1;
+    it.nextDelay = Math.min(30_000, Math.round(it.nextDelay * 1.5));
+  }
+  if (!pending.length) clearInterval(drainInterval);
+}, 250);
 ```
 
 ### Example: cooperating with `PowerPool`

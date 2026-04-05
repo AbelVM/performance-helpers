@@ -21,28 +21,32 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 
 ## API
 
-| method | params | returns | description |
-|---|---|---|---|   
-| `setDebugLevel(level)` | `number` | `void` | Set runtime debug level. Handles non-numeric input gracefully. |
-| `getDebugLevel()` | — | `number` | Return current level. |
-| `isDebugLevel(level=1)` | `number` | `boolean` | True if current level >= `level`. |
-| `isDebug()` | — | `boolean` | Shorthand for `isDebugLevel(1)`. | 
-| `error(...args)` | `...any \| function` | `void` | Log via `console.error` when level >= 1. Accepts lazy functions. |
-| `warn(...args)` | `...any \| function` | `void` | Log via `console.warn` when level >= 2. |
-| `info(...args)` | `...any \| function` | `void` | Log via `console.info` when level >= 3. |
-| `log(...args)` | `...any \| function` | `void` | Log via `console.log` when level >= 3. |
-| `debug(...args)` | `...any \| function` | `void` | Verbose debug output via `console.debug` when level >= 3. Supports JSON mode. |
-| `table(...args)` | `...any \| function` | `void` | Tabular display using `console.table` when available; in JSON mode emits structured payload. |
-| `incrementCounter(name)` | `string` | `void` | Increment an internal counter (no-op when debug disabled). Useful for tests. |
-| `getDebugCounters()` | — | `Record<string,number>` | Snapshot of internal counters. |
-| `resetDebugCounters()` | — | `void` | Reset all counters. |
+- `setDebugLevel(level)` — Set runtime debug level (number). Accepts non-numeric input gracefully by coercion where useful; controls which log methods emit output.
+
+- `getDebugLevel()` — Return the current numeric debug level.
+
+- `isDebugLevel(level = 1)` — Returns `true` when the current debug level is greater than or equal to `level`.
+
+- `isDebug()` — Convenience shorthand for `isDebugLevel(1)`.
+
+- `error(...args)` / `warn(...args)` / `info(...args)` / `log(...args)` / `debug(...args)` — Logging methods that behave according to the configured level. Each accepts variadic arguments or lazy functions (functions that will be invoked only when the message will actually be emitted) to avoid unnecessary work when logging is disabled.
+
+- `table(...args)` — When available calls `console.table` for tabular display; in JSON `format` mode it will instead emit a structured payload that can be consumed by log pipelines.
+
+- `incrementCounter(name)` — Increment a named internal counter (no-op when logging disabled). Useful for lightweight metrics and in tests where assertions on counters are required.
+
+- `getDebugCounters()` — Return a snapshot object `{ [name]: count }` of internal counters.
+
+- `resetDebugCounters()` — Reset all internal counters to zero.
 
 ## Example
 
 ```javascript
-const logger = new PowerLogger(2)
-logger.warn('This is a warning')
-logger.incrementCounter('cache-miss')
+import { PowerLogger } from '../src/helpers/powerLogger.js';
+
+const logger = new PowerLogger(2);
+logger.warn('This is a warning');
+logger.incrementCounter('cache-miss');
 ```
 
 ### Formatter example
@@ -50,7 +54,9 @@ logger.incrementCounter('cache-miss')
 You can customize the JSON payload shape by passing a `formatter` function in `options`. The formatter may return an object (which will be JSON.stringified) or a string which will be emitted as-is. Example:
 
 ```javascript
-const logger = new PowerLogger(3, {
+import { PowerLogger as PowerLoggerJSON } from '../src/helpers/powerLogger.js';
+
+const logger = new PowerLoggerJSON(3, {
 	format: 'json',
 	name: 'my-app',
 	formatter(payload) {
@@ -66,11 +72,11 @@ const logger = new PowerLogger(3, {
 logger.info('started')
 
 // string-returning formatter example:
-const sLogger = new PowerLogger(3, {
+const sLogger = new PowerLoggerJSON(3, {
 	format: 'json',
 	formatter: p => `${p.ts}|${p.level}|${String(p.msg)}`
-})
-sLogger.log('boot')
+});
+sLogger.log('boot');
 ```
 
 ## Recommendations
@@ -79,6 +85,8 @@ sLogger.log('boot')
 - Pass lazy functions to debug methods when computing the string is expensive; they will only be evaluated when the message will actually be emitted.
 
 ```javascript
-const logger = new PowerLogger(2)
-logger.warn(() => `Expensive message: ${compute()}`)
+import { PowerLogger as PowerLoggerLite } from '../src/helpers/powerLogger.js';
+
+const logger = new PowerLoggerLite(2);
+logger.warn(() => `Expensive message: ${compute()}`);
 ```

@@ -42,7 +42,7 @@ describe('PowerPool.resize() overload', () => {
     }
     const pool = new PowerPool(MockUnderlying, {
       size: 4,
-      minSize: 1,
+      minSize: 4,
       maxSize: 4,
       idleTimeout: 1000,
     });

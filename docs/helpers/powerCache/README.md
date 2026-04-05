@@ -14,6 +14,7 @@
 ## Interfaces
 
 - [CacheNode](interfaces/CacheNode.md)
+- [PowerCacheOptions](interfaces/PowerCacheOptions.md)
 
 ## Functions
 

@@ -160,6 +160,27 @@ New queue length after push.
 
 ***
 
+### pushMany()
+
+> **pushMany**(`items`): `number`
+
+Enqueue multiple items in one call. Optimized to resize buffer once and
+copy items in contiguous blocks when possible.
+
+#### Parameters
+
+##### items
+
+`any`[]
+
+#### Returns
+
+`number`
+
+New queue length after all pushes.
+
+***
+
 ### shift()
 
 > **shift**(): `any`
@@ -171,3 +192,24 @@ Dequeue and return the head item.
 `any`
 
 The dequeued item or `undefined` when empty.
+
+***
+
+### unshiftMany()
+
+> **unshiftMany**(`items`): `number`
+
+Prepend multiple items to the head of the queue.
+The first element of `items` will become the next value returned by `shift()`.
+
+#### Parameters
+
+##### items
+
+`any`[]
+
+#### Returns
+
+`number`
+
+New queue length after all unshifts.

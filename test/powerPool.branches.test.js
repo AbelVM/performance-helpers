@@ -31,7 +31,8 @@ describe('PowerPool branch coverage', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(Underlying, { size: 1, minSize: 0 });
+    // force eager creation for this test so underlying event handlers exist
+    const pool = new PowerPool(Underlying, { size: 1, minSize: 0, lazy: false });
     try {
       const errSpy = vi.fn();
       const msgErrSpy = vi.fn();
@@ -61,7 +62,8 @@ describe('PowerPool branch coverage', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(Underlying, { size: 2, minSize: 0, idleTimeout: 10 });
+    // create workers eagerly then allow reaper to remove them (minSize:0)
+    const pool = new PowerPool(Underlying, { size: 2, minSize: 0, lazy: false, idleTimeout: 10 });
     try {
       // make workers appear stale
       for (const w of pool.workers) {

@@ -16,18 +16,6 @@
 
 ##### options?
 
-###### capacity?
-
-`number`
-
-Max events allowed in window.
-
-###### windowMs?
-
-`number`
-
-Window size in milliseconds.
-
 #### Returns
 
 `PowerSlidingWindow`
@@ -36,7 +24,7 @@ Window size in milliseconds.
 
 ### \_timestamps
 
-> **\_timestamps**: `any`[]
+> **\_timestamps**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
 ***
 

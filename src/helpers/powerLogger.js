@@ -23,6 +23,13 @@ import { formatErrorObj, normalizeError } from '../utils/errors.js';
  *
  * @class PowerLogger
  */
+/**
+ * @typedef {Object} PowerLoggerOptions
+ * @property {'text'|'json'} [format]
+ * @property {string} [name]
+ * @property {(payload:Object)=>string|Object|null} [formatter]
+ * @property {(payload:Object|string)=>void} [output]
+ */
 export class PowerLogger {
   /**
    * Create a PowerLogger instance.
@@ -46,12 +53,13 @@ export class PowerLogger {
    * @returns {void}
    */
   setDebugLevel(level) {
+    let n;
     try {
-      const n = Number(level);
-      this._debugLevel = Number.isFinite(n) && n >= 0 ? Math.max(0, Math.min(3, Math.floor(n))) : 0;
+      n = Number(level);
     } catch (e) {
-      this._debugLevel = 0;
+      n = NaN;
     }
+    this._debugLevel = Number.isFinite(n) && n >= 0 ? Math.max(0, Math.min(3, Math.floor(n))) : 0;
   }
 
   /**
@@ -89,7 +97,16 @@ export class PowerLogger {
    */
   _emit(threshold, consoleMethod, levelLabel, args, opts = {}) {
     if (!this.isDebugLevel(threshold)) return;
-    const resolved = args.map((a) => (typeof a === 'function' ? a() : a));
+    const resolved = args.map((a) => {
+      if (typeof a === 'function') {
+        try {
+          return a();
+        } catch (e) {
+          return e;
+        }
+      }
+      return a;
+    });
 
     // Build a structured payload that output() handlers can use.
     const msg = opts.msgArray ? resolved : resolved.length === 1 ? resolved[0] : resolved;
@@ -159,19 +176,17 @@ export class PowerLogger {
    * @returns {void}
    */
   error(...args) {
-    try {
-      const formatted = args.map((a) => {
-        try {
-          if (a && a.error) return formatErrorObj(a);
-          if (a instanceof Error || (a && typeof a === 'object'))
-            return formatErrorObj(normalizeError(a));
-        } catch (e) {
-          /* ignore formatting failures */
-        }
-        return a;
-      });
-      this._emit(1, 'error', 'error', formatted);
-    } catch (e) {}
+    const formatted = args.map((a) => {
+      try {
+        if (a && a.error) return formatErrorObj(a);
+        if (a instanceof Error || (a && typeof a === 'object'))
+          return formatErrorObj(normalizeError(a));
+      } catch (e) {
+        /* ignore formatting failures */
+      }
+      return a;
+    });
+    this._emit(1, 'error', 'error', formatted);
   }
 
   /**
@@ -180,9 +195,7 @@ export class PowerLogger {
    * @returns {void}
    */
   warn(...args) {
-    try {
-      this._emit(2, 'warn', 'warn', args);
-    } catch (e) {}
+    this._emit(2, 'warn', 'warn', args);
   }
 
   /**
@@ -191,9 +204,7 @@ export class PowerLogger {
    * @returns {void}
    */
   info(...args) {
-    try {
-      this._emit(3, 'info', 'info', args);
-    } catch (e) {}
+    this._emit(3, 'info', 'info', args);
   }
 
   /**
@@ -202,9 +213,7 @@ export class PowerLogger {
    * @returns {void}
    */
   log(...args) {
-    try {
-      this._emit(3, 'log', 'log', args);
-    } catch (e) {}
+    this._emit(3, 'log', 'log', args);
   }
 
   /**
@@ -212,9 +221,7 @@ export class PowerLogger {
    * Supports JSON mode similar to other methods.
    */
   debug(...args) {
-    try {
-      this._emit(3, 'debug', 'debug', args);
-    } catch (e) {}
+    this._emit(3, 'debug', 'debug', args);
   }
 
   /**
@@ -222,17 +229,15 @@ export class PowerLogger {
    * In JSON mode emits `{ level: 'table', msg: args, ts }` where `msg` is an array of arguments.
    */
   table(...args) {
-    try {
-      if (!this.isDebugLevel(3) || !console) return;
-      // For JSON mode reuse the _emit helper but force the message to be an array
-      if (this._format === 'json') {
-        this._emit(3, 'log', 'table', args, { msgArray: true });
-        return;
-      }
-      const resolved = args.map((a) => (typeof a === 'function' ? a() : a));
-      if (typeof console.table === 'function') console.table(...resolved);
-      else if (typeof console.log === 'function') console.log(...resolved);
-    } catch (e) {}
+    if (!this.isDebugLevel(3) || !console) return;
+    // For JSON mode reuse the _emit helper but force the message to be an array
+    if (this._format === 'json') {
+      this._emit(3, 'log', 'table', args, { msgArray: true });
+      return;
+    }
+    const resolved = args.map((a) => (typeof a === 'function' ? a() : a));
+    if (typeof console.table === 'function') console.table(...resolved);
+    else if (typeof console.log === 'function') console.log(...resolved);
   }
 
   /**
@@ -242,12 +247,10 @@ export class PowerLogger {
    * @returns {void}
    */
   incrementCounter(name) {
-    try {
-      if (!this.isDebug()) return;
-      const k = String(name || '');
-      if (!k) return;
-      this._counters[k] = (this._counters[k] || 0) + 1;
-    } catch (e) {}
+    if (!this.isDebug()) return;
+    const k = String(name || '');
+    if (!k) return;
+    this._counters[k] = (this._counters[k] || 0) + 1;
   }
 
   /**
@@ -255,11 +258,7 @@ export class PowerLogger {
    * @returns {Record<string,number>}
    */
   getDebugCounters() {
-    try {
-      return Object.assign({}, this._counters);
-    } catch (e) {
-      return {};
-    }
+    return Object.assign({}, this._counters);
   }
 
   /**
@@ -267,8 +266,6 @@ export class PowerLogger {
    * @returns {void}
    */
   resetDebugCounters() {
-    try {
-      this._counters = Object.create(null);
-    } catch (e) {}
+    this._counters = Object.create(null);
   }
 }

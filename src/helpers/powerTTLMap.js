@@ -7,9 +7,17 @@ export class PowerTTLMap {
   /**
    * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
    */
-  constructor(defaultTTL = 0) {
+  /**
+   * @typedef {Object} PowerTTLMapOptions
+   * @property {(key:any,value:any)=>void} [onExpire]
+   */
+  constructor(defaultTTL = 0, options = {}) {
     this._defaultTTL = Number(defaultTTL) || 0; // milliseconds; 0 = no expiry
+    this._onExpire = options && typeof options.onExpire === 'function' ? options.onExpire : null;
     this._map = new Map(); // key -> { value, expiresAt }
+    // Track keys that have an expiry to allow faster purging of expired
+    // entries without scanning the entire map on each `size` access.
+    this._expirations = new Map(); // key -> expiresAt (ms)
   }
 
   /**
@@ -21,8 +29,11 @@ export class PowerTTLMap {
    */
   set(key, value, ttl) {
     const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
-    const expiresAt = ms > 0 ? Date.now() + ms : 0;
+    // add a small slack (+1ms) to account for timer scheduling jitter
+    const expiresAt = ms > 0 ? Date.now() + ms + 1 : 0;
     this._map.set(key, { value, expiresAt });
+    if (expiresAt) this._expirations.set(key, expiresAt);
+    else this._expirations.delete(key);
     return this;
   }
 
@@ -37,10 +48,28 @@ export class PowerTTLMap {
    * @param {{value:any,expiresAt:number}|undefined} entry - Stored entry or undefined
    * @returns {boolean} true when the entry is missing or expired (and removed)
    */
+  _expireKey(key, entry) {
+    if (!entry) return;
+    try {
+      const val = entry.value;
+      this._map.delete(key);
+      this._expirations.delete(key);
+      if (typeof this._onExpire === 'function') {
+        try {
+          this._onExpire(key, val);
+        } catch (e) {
+          /* swallow user callback errors */
+        }
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
   _checkExpire(key, entry) {
     if (!entry) return true;
     if (entry.expiresAt && Date.now() > entry.expiresAt) {
-      this._map.delete(key);
+      this._expireKey(key, entry);
       return true;
     }
     return false;
@@ -73,6 +102,7 @@ export class PowerTTLMap {
    * @returns {boolean}
    */
   delete(key) {
+    this._expirations.delete(key);
     return this._map.delete(key);
   }
 
@@ -82,6 +112,7 @@ export class PowerTTLMap {
    */
   clear() {
     this._map.clear();
+    this._expirations.clear();
   }
 
   /**
@@ -94,11 +125,14 @@ export class PowerTTLMap {
     const entry = this._map.get(key);
     if (!entry) return false;
     if (entry.expiresAt && Date.now() > entry.expiresAt) {
-      this._map.delete(key);
+      this._expireKey(key, entry);
       return false;
     }
     const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
-    entry.expiresAt = ms > 0 ? Date.now() + ms : 0;
+    // add a small slack (+1ms) to account for timer scheduling jitter
+    entry.expiresAt = ms > 0 ? Date.now() + ms + 1 : 0;
+    if (entry.expiresAt) this._expirations.set(key, entry.expiresAt);
+    else this._expirations.delete(key);
     return true;
   }
 
@@ -107,11 +141,17 @@ export class PowerTTLMap {
    * @returns {number}
    */
   get size() {
-    // purge expired lazily
+    // Purge expired entries lazily, but iterate only the subset of keys
+    // that have expirations recorded. This avoids scanning non-expiring
+    // entries on every `.size` access.
     if (!this._map.size) return 0;
+    if (!this._expirations.size) return this._map.size;
     const now = Date.now();
-    for (const [k, entry] of this._map) {
-      if (entry.expiresAt && now > entry.expiresAt) this._map.delete(k);
+    for (const [k, exp] of this._expirations) {
+      if (exp && now > exp) {
+        const entry = this._map.get(k);
+        this._expireKey(k, entry);
+      }
     }
     return this._map.size;
   }
@@ -124,7 +164,7 @@ export class PowerTTLMap {
     const now = Date.now();
     for (const [k, entry] of this._map) {
       if (entry.expiresAt && now > entry.expiresAt) {
-        this._map.delete(k);
+        this._expireKey(k, entry);
         continue;
       }
       yield [k, entry.value];

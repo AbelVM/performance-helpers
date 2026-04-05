@@ -21,6 +21,13 @@
  *
  * @class PowerLogger
  */
+/**
+ * @typedef {Object} PowerLoggerOptions
+ * @property {'text'|'json'} [format]
+ * @property {string} [name]
+ * @property {(payload:Object)=>string|Object|null} [formatter]
+ * @property {(payload:Object|string)=>void} [output]
+ */
 export class PowerLogger {
     /**
      * Create a PowerLogger instance.
@@ -121,3 +128,9 @@ export class PowerLogger {
      */
     resetDebugCounters(): void;
 }
+export type PowerLoggerOptions = {
+    format?: "text" | "json" | undefined;
+    name?: string | undefined;
+    formatter?: ((payload: Object) => string | Object | null) | undefined;
+    output?: ((payload: Object | string) => void) | undefined;
+};

@@ -1,4 +1,9 @@
 /**
+ * Error used when the pool is shutdown and pending promises are rejected.
+ */
+export class PowerPoolShutdownError extends Error {
+}
+/**
  * @typedef {Object} WorkerObj
  * @property {number} id - Numeric id for the worker entry.
  * @property {Worker} worker - The underlying Worker instance or worker-like object.
@@ -6,6 +11,33 @@
  * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
  * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).
  * @property {number[]} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
+ */
+/**
+ * @typedef {Object} PostMessageOptions
+ * @property {boolean} [awaitResponse] - If true, returns a Promise resolved when a response with a matching `correlationId` is received.
+ * @property {number} [timeout] - Timeout in milliseconds for `awaitResponse` promises. If omitted, the pool's default is used.
+ * @property {number|string} [workerId] - Optional id of the target worker to prefer when dispatching the message. If omitted, the pool chooses the least-loaded worker.
+ * @property {boolean} [zeroCopy] - When true and the message is a plain object, attempt zero-copy transfer (use internal encoding to a Uint8Array and transfer its buffer).
+ */
+/**
+ * @typedef {Object} PendingResponseEntry
+ * @property {function(any):void} resolve - Function to resolve the pending Promise with the worker response.
+ * @property {function(any):void} reject - Function to reject the pending Promise with an error.
+ * @property {number|NodeJS.Timeout|null} [timer] - Optional timeout handle used to cancel the pending request.
+ */
+/**
+ * @typedef {Object} PowerPoolOptions
+ * @property {number} [size]
+ * @property {number} [minSize]
+ * @property {number} [maxSize]
+ * @property {Object} [workerOptions] - Options forwarded to the underlying `Worker` constructor when using a string path.
+ * @property {number} [maxTasksPerWorker]
+ * @property {number} [idleTimeout]
+ * @property {boolean} [taskQueue]
+ * @property {boolean} [lazy]
+ * @property {number} [debugLevel]
+ * @property {number} [listenerMaxListeners]
+ * @property {boolean} [weakListeners]
  */
 /**
  * Manager for a pool of web workers.
@@ -22,7 +54,7 @@ export class PowerPool {
      * Create a PowerPool.
      *
      * @param {Function|string} workerSource - A Worker constructor/factory (callable) or a relative path string to pass to `new Worker(new URL(path, import.meta.url))`.
-     * @param {Object} [options]
+     * @param {PowerPoolOptions=} options
      * @param {number} [options.size] - Initial number of workers to create.
      * @param {number} [options.minSize=1] - Minimum number of workers to keep alive.
      * @param {number} [options.maxSize] - Maximum number of workers allowed in the pool.
@@ -30,16 +62,9 @@ export class PowerPool {
      * @param {number} [options.maxTasksPerWorker=Infinity] - Soft capacity per worker before considering it busy.
      * @param {number} [options.idleTimeout=60000] - Milliseconds after which idle workers (beyond `minSize`) will be terminated.
      * @param {boolean} [options.taskQueue=true] - Whether to queue tasks when all workers are busy.
+     * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
      */
-    constructor(workerSource: Function | string, options?: {
-        size?: number | undefined;
-        minSize?: number | undefined;
-        maxSize?: number | undefined;
-        workerOptions?: Object | undefined;
-        maxTasksPerWorker?: number | undefined;
-        idleTimeout?: number | undefined;
-        taskQueue?: boolean | undefined;
-    });
+    constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined);
     _workerSource: string | Function;
     _workerOptions: Object;
     _maxTasksPerWorker: number;
@@ -55,18 +80,28 @@ export class PowerPool {
     _taskDurationsWelfordM2: number;
     _taskDurationsMin: number;
     _taskDurationsMax: number;
+    _ewmaLatency: any;
+    _autoScale: {
+        enabled: boolean;
+        intervalMs: number;
+        targetMs: number;
+        alpha: number;
+        cooldownMs: number;
+        hysteresis: number;
+        stepUp: number;
+        stepDown: number;
+        backoffFactor: number;
+        backoffMaxMultiplier: number;
+        backoffResetMs: number;
+    } | null;
+    _autoScaleInterval: number | null;
+    _lastAutoScaleAt: number | null;
     _terminatedWorkerTaskCountsTotal: number;
     _terminatedWorkerTaskCountsCount: number;
     /** @type {WorkerObj[]} */
     workers: WorkerObj[];
     queue: PowerQueue;
-    _listeners: {
-        message: Set<any>;
-        error: Set<any>;
-        messageerror: Set<any>;
-        idle: Set<any>;
-        resize: Set<any>;
-    };
+    _bus: PowerEventBus;
     _onmessage: Function | null;
     _onerror: Function | null;
     _onidle: Function | null;
@@ -80,7 +115,76 @@ export class PowerPool {
     _logger: PowerLogger;
     _reaperInterval: number;
     _pendingResponses: Map<any, any>;
-    _nextCorrelationId: number;
+    _encodeCache: Map<any, any>;
+    _encodeCacheLimit: number;
+    _autoScaleBackoffMultiplier: number | undefined;
+    /**
+     * Log debug information about swallowed errors when debug logging is enabled.
+     * @private
+     */
+    private _debugLog;
+    /** Ensure the reaper interval exists; recreate it if missing. @private */
+    private _ensureReaper;
+    /**
+     * Shutdown the pool: clear timers, reject pending responses, terminate workers,
+     * and clear internal queues. This is a full stop that prevents background
+     * timers from keeping the process alive.
+     */
+    shutdown(): void;
+    /**
+     * Encode a plain object to a Uint8Array, using a small cache to avoid
+     * repeated encoding work for identical messages. Returns a Uint8Array.
+     * @private
+     * @param {Object} obj
+     * @returns {Uint8Array}
+     */
+    private _encodeForTransfer;
+    /**
+     * Prepare a transferable Uint8Array for the given object.
+     * Returns a new Uint8Array when `clone` is true (safe to transfer), or
+     * the cached Uint8Array when `clone` is false (do not transfer the returned buffer).
+     * @param {Object} obj
+     * @param {{clone?:boolean}=} options
+     * @returns {Uint8Array}
+     */
+    prepareBuffer(obj: Object, options?: {
+        clone?: boolean;
+    } | undefined): Uint8Array;
+    /**
+     * Prepare an array of transferable buffers for a batch of items.
+     * Each item may be a plain object, a TypedArray/ArrayBuffer view, or
+     * an object `{ message, transfer? }`. The returned array contains
+     * normalized `{ message, transfer }` entries ready for `postMessageBatch`.
+     * By default each buffer is a cloned Uint8Array safe to transfer; pass
+     * `{ clone: false }` to return references to internal cached buffers
+     * (do NOT transfer those buffers if `clone:false`).
+     *
+     * @param {Array<any|{message:any,transfer?:Transferable[]}>} items
+     * @param {{clone?:boolean}=} options
+     * @returns {{message:*,transfer:Transferable[]|undefined}[]}
+     */
+    prepareBuffers(items: Array<any | {
+        message: any;
+        transfer?: Transferable[];
+    }>, options?: {
+        clone?: boolean;
+    } | undefined): {
+        message: any;
+        transfer: Transferable[] | undefined;
+    }[];
+    /**
+     * Class-level helper to prepare a message and optional transfer list for posting to a worker.
+     * Accepts `opts` with `zeroCopy` flag to control forwarding of raw buffers.
+     * @private
+     */
+    private _prepareForTransfer;
+    /**
+     * Decrement the global active task counter safely.
+     * Ensures the counter never goes negative and centralizes error handling.
+     * @private
+     * @param {number} [n=1]
+     */
+    private _decrementActiveTasks;
     /**
      * Resize the pool's maximum size at runtime.
      * If `n` is smaller than the current number of workers, extra workers
@@ -117,6 +221,15 @@ export class PowerPool {
      */
     private _addWorkerInstance;
     /**
+     * Autoscale tick: simple policy that grows/shrinks by one worker based on
+     * pool-level EWMA latency and queue pressure. Runs only when `autoScale`
+     * is configured on the pool.
+     *
+     * - scale up: when EWMA > targetMs OR queue length exceeds worker count
+     * - scale down: when EWMA < targetMs * 0.5 AND queue is empty
+     */
+    _autoScaleTick: (() => void) | undefined;
+    /**
      * Return the least-loaded worker (smallest `tasks` count).
      *
      * When multiple workers share the same `tasks` count prefer the one with
@@ -137,9 +250,25 @@ export class PowerPool {
      * a plain JS object is supplied, the pool will internally encode the object
      * to a transferable `Uint8Array` (via `o2u8`) and pass its `ArrayBuffer` as
      * the transfer list to avoid structured-clone copies.
-     * @returns {boolean} True if the message was accepted (dispatched or queued).
+     * @param {PostMessageOptions=} options - Optional flags controlling behavior such as `awaitResponse`, `timeout`, `workerId`, and `zeroCopy`.
+     * @returns {boolean|Promise<any>} When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
      */
-    postMessage(message: any, transfer?: Transferable[] | undefined, options: any): boolean;
+    postMessage(message: any, transfer?: Transferable[] | undefined, options?: PostMessageOptions | undefined): boolean | Promise<any>;
+    /**
+     * Generate a safe correlation id. Prefer `crypto.randomUUID()` when
+     * available, otherwise fall back to a timestamp + random suffix.
+     * @private
+     * @returns {string}
+     */
+    private _generateCorrelationId;
+    /**
+     * Centralized cleanup for a pending response entry.
+     * Ensures the timer is cleared and the entry is resolved/rejected exactly once.
+     * @private
+     * @param {string|number} key
+     * @param {{resolveWith?:any, rejectWith?:any}} opts
+     */
+    private _cleanupPendingResponse;
     /**
      * Broadcasts a message to all workers in the pool.
      * @param {*} message
@@ -337,5 +466,54 @@ export type WorkerObj = {
      */
     _startTimes?: number[] | undefined;
 };
+export type PostMessageOptions = {
+    /**
+     * - If true, returns a Promise resolved when a response with a matching `correlationId` is received.
+     */
+    awaitResponse?: boolean | undefined;
+    /**
+     * - Timeout in milliseconds for `awaitResponse` promises. If omitted, the pool's default is used.
+     */
+    timeout?: number | undefined;
+    /**
+     * - Optional id of the target worker to prefer when dispatching the message. If omitted, the pool chooses the least-loaded worker.
+     */
+    workerId?: string | number | undefined;
+    /**
+     * - When true and the message is a plain object, attempt zero-copy transfer (use internal encoding to a Uint8Array and transfer its buffer).
+     */
+    zeroCopy?: boolean | undefined;
+};
+export type PendingResponseEntry = {
+    /**
+     * - Function to resolve the pending Promise with the worker response.
+     */
+    resolve: (arg0: any) => void;
+    /**
+     * - Function to reject the pending Promise with an error.
+     */
+    reject: (arg0: any) => void;
+    /**
+     * - Optional timeout handle used to cancel the pending request.
+     */
+    timer?: number | NodeJS.Timeout | null;
+};
+export type PowerPoolOptions = {
+    size?: number | undefined;
+    minSize?: number | undefined;
+    maxSize?: number | undefined;
+    /**
+     * - Options forwarded to the underlying `Worker` constructor when using a string path.
+     */
+    workerOptions?: Object | undefined;
+    maxTasksPerWorker?: number | undefined;
+    idleTimeout?: number | undefined;
+    taskQueue?: boolean | undefined;
+    lazy?: boolean | undefined;
+    debugLevel?: number | undefined;
+    listenerMaxListeners?: number | undefined;
+    weakListeners?: boolean | undefined;
+};
 import { PowerQueue } from './powerQueue.js';
+import { PowerEventBus } from './powerEventBus.js';
 import { PowerLogger } from './powerLogger.js';

@@ -19,27 +19,43 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 ### API
 
-| method | params | returns | description |
-|---|---|---|---|
-| `set(key, value, { ttl, weight })` | `key`, `value`, `options` | `this \| false` | Add or update an entry. Returns `false` if rejected due to `rejectOversized`. |
-| `get(key)` | `key` | `value \| undefined` | Retrieve and mark entry as recently used; expired entries are removed. |
-| `peek(key)` | `key` | `value \| undefined` | Retrieve without affecting recency. |
-| `has(key, { ignoreExpiry=false })` | `key`, `options` | `boolean` | Check presence; can optionally ignore expiry. |
-| `hasEqual(key, value, { ignoreExpiry=false })` | `key`, `value` | `boolean` | Deep-equality check of stored value vs provided value. |
-| `delete(key)` | `key` | `boolean` | Remove an entry; returns `true` when removed. |
-| `clear()` | — | `void` | Remove all entries and return nodes to the pool. |
-| `cleanupExpiredUpTo(maxScan=Infinity)` | `maxScan` | `number` | Scan and remove up to `maxScan` expired nodes; returns number scanned. |
-| `startCleanup(intervalOrOptions)` | `number\|object` | `void` | Start periodic non-blocking cleanup loop. |
-| `stopCleanup()` | — | `void` | Stop periodic cleanup. |
-| `getOrSet(key, factory, options)` | `key, factory, { ttl, weight }` | `value\|Promise<value>` | Atomically read-or-compute a value; if `factory` returns a Promise it is stored when resolved. Eliminates the common race pattern of `if (!cache.has(k)) cache.set(k, compute())`|
-| `getOrSetAsync(key, asyncFactory, options)` | `key, asyncFactory, { ttl, weight }` | `Promise<value>` | Async read-or-compute with inflight deduplication; concurrent callers share the same in-flight Promise. |
-| `resize({ maxEntries, maxWeight })` | `options` | `void` | Change caps and trigger eviction if needed. |
-| `entries(order='MRU')` | `order` | `IterableIterator<[key,value]>` | Iterate entries in MRU or LRU order. |
-| `setMany(entries, { ttl, weight })` | `Iterable<[key,value]>, options` | `this` | Bulk set multiple entries; performs a single eviction pass after insertion. |
-| `getMany(keys, { ignoreExpiry=false })` | `Iterable<key>, options` | `Map` | Bulk get; returns a `Map` of found keys -> values. |
-| `touch(key, ttl?)` | `key, ttl?` | `boolean` | Update recency of `key` and optionally refresh TTL without reading the value. Returns `true` when the key existed and was not expired, `false` otherwise. |
-| `stats()` | — | `object` | Return runtime stats (`size`, `weight`, `hits`, `misses`, `evictions`, `rejected`, `poolSize`). |
-| `hitRate` | — | `number` | Convenience getter returning `hits / (hits + misses)` (0 when no samples). |
+- `set(key, value, { ttl, weight })` — Add or update an entry. Accepts an optional `{ ttl, weight }` options object; returns `this` on success or `false` when insertion is rejected due to `rejectOversized`.
+
+- `get(key)` — Retrieve the stored value and mark the entry as recently used. Returns the value or `undefined` when missing or expired.
+
+- `peek(key)` — Read the value without affecting recency; returns `value | undefined`.
+
+- `has(key, { ignoreExpiry = false })` — Check whether a key exists and is not expired. When `ignoreExpiry` is true expired entries are considered present.
+
+- `hasEqual(key, value, { ignoreExpiry = false })` — Deep-equality compare the stored value against `value` using optimized fast paths for primitives, typed arrays, Maps/Sets, and cyclic-safe comparison. Respects the `ignoreExpiry` option.
+
+- `delete(key)` — Remove an entry. Returns `true` when a key was removed.
+
+- `clear()` — Remove all entries and return nodes to the internal pool (no return value).
+
+- `cleanupExpiredUpTo(maxScan = Infinity)` — Scan up to `maxScan` nodes for expired entries and remove them; returns the number of nodes scanned in this pass.
+
+- `startCleanup(intervalOrOptions)` — Start a periodic, non-blocking cleanup loop. Accepts either a numeric interval (ms) or `{ interval, maxCleanupPerTick }` options.
+
+- `stopCleanup()` — Stop the periodic cleanup loop and clear internal timers.
+
+- `getOrSet(key, factory, { ttl, weight })` — Atomically read-or-compute a value. If `factory` is a function its result (or resolved Promise) is stored and returned. Use for synchronous or promise-returning factories when inflight deduplication is not required.
+
+- `getOrSetAsync(key, asyncFactory, { ttl, weight })` — Async read-or-compute with inflight deduplication: concurrent callers share the same in-flight Promise and the resolved value is cached when settled.
+
+- `resize({ maxEntries, maxWeight })` — Change cache caps and trigger eviction as needed.
+
+- `entries(order = 'MRU')` — Iterator yielding `[key, value]` pairs in MRU or LRU order. Useful for debugging or bulk exports.
+
+- `setMany(entries, { ttl, weight })` — Bulk-insert multiple `[key, value]` pairs; performs a single eviction pass after insertion for efficiency.
+
+- `getMany(keys, { ignoreExpiry = false })` — Bulk get; returns a `Map` of found keys -> values.
+
+- `touch(key, ttl?)` — Refresh recency and optionally TTL for an existing key; returns `true` when the key existed and was not expired.
+
+- `stats()` — Return runtime statistics object: `{ size, weight, hits, misses, evictions, rejected, poolSize, expirations }`.
+
+- `hitRate` (getter) — Convenience fraction `hits / (hits + misses)` (0 when no samples).
 
 #### Iteration
 
@@ -56,12 +72,25 @@ for (const [k, v] of c) {
 
 If you need LRU order, use `Array.from(c.entries('LRU'))` or the `entries('LRU')` iterator directly.
 
-### Example
+### Example — caching API responses with async factory
 
 ```javascript
-const cache = new PowerCache({ maxEntries: 100, defaultTTL: 5_000 })
-cache.set('x', { hello: 'world' })
-console.log(cache.get('x'))
+import { PowerCache } from '../src/helpers/powerCache.js';
+
+// Cache user profiles for 30s to avoid repeated HTTP calls
+const cache = new PowerCache({ maxEntries: 5000, defaultTTL: 30_000 });
+
+async function fetchUserProfile(id) {
+	return cache.getOrSetAsync(id, async () => {
+		const res = await fetch(`https://api.example.com/users/${id}`);
+		if (!res.ok) throw new Error('fetch failed');
+		return res.json();
+	}, { ttl: 30_000 });
+}
+
+// Usage
+const profile = await fetchUserProfile('alice');
+console.log(profile.name, profile.email);
 ```
 
 ## PowerMemoizer
@@ -70,13 +99,15 @@ Small memoization helper that uses a `PowerCache` instance internally. It dedupl
 
 The constructor returns the memoized function directly (callable). The returned function has helper methods attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
 
+#### Memoizer constructor params
+
 | param | type | default | description |
 |---|---:|---:|---|
-| `fn` | `Function` |  | Optional function to memoize. The constructor returns the callable memoized function (instead of a `PowerMemoizer` instance). |
+| `fn` | `Function?` | — | Optional function to memoize immediately. When provided the constructor returns the callable memoized function instead of a `PowerMemoizer` instance. |
 | `options.keyResolver` | `function(...args):string` | `(...args)=>JSON.stringify(args)` | Function mapping call args to a stable cache key. |
-| `options.cacheOptions` | `Object` | `{}` | Options forwarded to the underlying `PowerCache` constructor. |
-| `options.ttl` | `number` | `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor (overrides cache default for this wrapper). |
-| `options.weight` | `number` | `undefined` | Default weight used when caching results for the `fn` passed to the constructor. |
+| `options.cacheOptions` | `Object` | `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`). |
+| `options.ttl` | `number?` | `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor. |
+| `options.weight` | `number?` | `undefined` | Default weight used when caching results for the `fn` passed to the constructor. |
 
 You can also create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
 
@@ -87,15 +118,17 @@ const memoA = pm.memoize(fnA)
 const memoB = pm.memoize(fnB, { ttl: 5000 })
 ```
 
-### API
+### Memoizer API
 
-| method | params | returns | description |
-|---|---|---|---|
-| `get(...args)` | `...args` | `value|undefined` | Read cached value by resolved key. |
-| `has(...args)` | `...args` | `boolean` | Check presence. |
-| `delete(...args)` | `...args` | `boolean` | Remove cached entry and any inflight Promise. |
-| `clear()` | — | `void` | Clear cache and inflight markers. |
-| `mwmoize(fn)` | `fn` | `function` | Attach a new function to an existing underliying cache |
+- `get(...args)` — Retrieve the cached value for the resolved key, or `undefined` when missing.
+
+- `has(...args)` — Check presence in the memoizer's underlying cache.
+
+- `delete(...args)` — Remove a cached entry and any tracked inflight Promise; returns `true` when removed.
+
+- `clear()` — Clear the memoizer's cache and any inflight markers.
+
+- `memoize(fn)` — Wrap and return a memoized version of `fn` using this instance's cache. The returned function has helper methods attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
 
 ### Example
 

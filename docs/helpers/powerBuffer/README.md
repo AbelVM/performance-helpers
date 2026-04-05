@@ -6,6 +6,11 @@
 
 # helpers/powerBuffer
 
+## Interfaces
+
+- [BufferDecoder](interfaces/BufferDecoder.md)
+- [BufferEncoder](interfaces/BufferEncoder.md)
+
 ## Functions
 
 - [b2o](functions/b2o.md)

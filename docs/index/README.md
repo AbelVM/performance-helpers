@@ -26,15 +26,39 @@ Re-exports [o2u8](../helpers/powerBuffer/functions/o2u8.md)
 
 ***
 
+### PowerBatch
+
+Re-exports [PowerBatch](../helpers/powerBatch/classes/PowerBatch.md)
+
+***
+
 ### PowerCache
 
 Re-exports [PowerCache](../helpers/powerCache/classes/PowerCache.md)
 
 ***
 
+### PowerCircuit
+
+Re-exports [PowerCircuit](../helpers/powerCircuit/classes/PowerCircuit.md)
+
+***
+
 ### PowerDefer
 
 Re-exports [PowerDefer](../helpers/powerDefer/classes/PowerDefer.md)
+
+***
+
+### PowerEventBus
+
+Re-exports [PowerEventBus](../helpers/powerEventBus/classes/PowerEventBus.md)
+
+***
+
+### PowerLatch
+
+Re-exports [PowerLatch](../helpers/powerLatch/classes/PowerLatch.md)
 
 ***
 
@@ -50,6 +74,12 @@ Re-exports [PowerMemoizer](../helpers/powerCache/classes/PowerMemoizer.md)
 
 ***
 
+### PowerObserver
+
+Re-exports [PowerObserver](../helpers/powerObserver/classes/PowerObserver.md)
+
+***
+
 ### PowerPool
 
 Re-exports [PowerPool](../helpers/powerPool/classes/PowerPool.md)
@@ -59,6 +89,12 @@ Re-exports [PowerPool](../helpers/powerPool/classes/PowerPool.md)
 ### PowerQueue
 
 Re-exports [PowerQueue](../helpers/powerQueue/classes/PowerQueue.md)
+
+***
+
+### PowerRetry
+
+Re-exports [PowerRetry](../helpers/powerRetry/functions/PowerRetry.md)
 
 ***
 

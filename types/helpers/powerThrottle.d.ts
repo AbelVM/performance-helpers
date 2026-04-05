@@ -53,3 +53,9 @@ export class PowerThrottle {
      */
     reset(count?: number): void;
 }
+export type PowerThrottleOptions = {
+    capacity?: number | undefined;
+    tokens?: number | undefined;
+    refillRate?: number | undefined;
+    refillInterval?: number | undefined;
+};

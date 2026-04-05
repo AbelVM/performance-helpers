@@ -49,4 +49,16 @@ describe('PowerTTLMap', () => {
     m.clear();
     expect(m.size).toBe(0);
   });
+
+  it('invokes onExpire callback when entries expire', async () => {
+    const called = [];
+    const onExpire = (k, v) => called.push([k, v]);
+    const m = new PowerTTLMap(0, { onExpire });
+    m.set('o', 'val', 10);
+    // wait for expiry
+    await new Promise((r) => setTimeout(r, 20));
+    // trigger lazy purge
+    void m.size;
+    expect(called).toEqual([['o', 'val']]);
+  });
 });

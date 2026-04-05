@@ -14,7 +14,7 @@ is unnecessary and a simple time-to-live map is desired.
 
 ### Constructor
 
-> **new PowerTTLMap**(`defaultTTL?`): `PowerTTLMap`
+> **new PowerTTLMap**(`defaultTTL?`, `options?`): `PowerTTLMap`
 
 #### Parameters
 
@@ -22,7 +22,7 @@ is unnecessary and a simple time-to-live map is desired.
 
 `number` = `0`
 
-Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
+##### options?
 
 #### Returns
 
@@ -36,9 +36,21 @@ Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
 
 ***
 
+### \_expirations
+
+> **\_expirations**: `Map`\<`any`, `any`\>
+
+***
+
 ### \_map
 
 > **\_map**: `Map`\<`any`, `any`\>
+
+***
+
+### \_onExpire
+
+> **\_onExpire**: `any`
 
 ## Accessors
 
@@ -55,6 +67,26 @@ Number of non-expired entries (purges expired entries lazily).
 `number`
 
 ## Methods
+
+### \_checkExpire()
+
+> **\_checkExpire**(`key`, `entry`): `boolean`
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### entry
+
+`any`
+
+#### Returns
+
+`boolean`
+
+***
 
 ### \[iterator\]()
 

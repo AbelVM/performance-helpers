@@ -10,6 +10,16 @@
 let _encoder;
 let _decoder;
 
+/**
+ * @typedef {Object} BufferEncoder
+ * @property {(s:string)=>Uint8Array} encode
+ */
+
+/**
+ * @typedef {Object} BufferDecoder
+ * @property {(u8:Uint8Array)=>string} decode
+ */
+
 function getEncoder() {
   if (_encoder !== undefined) return _encoder === false ? null : _encoder;
   if (typeof TextEncoder !== 'undefined') {

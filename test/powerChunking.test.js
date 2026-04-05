@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { describe, it } from 'vitest';
-import { PowerChunking } from '../src/helpers/powerChunking.js';
+import { PowerChunker } from '../src/helpers/powerChunking.js';
 
 describe('PowerChunking helper', () => {
   it('processes all items in chunks and returns processed counts (awaitResponse)', async () => {
@@ -9,7 +9,7 @@ describe('PowerChunking helper', () => {
     const fn = (item) => {
       processed.push(item);
     };
-    const pool = PowerChunking(items, fn, { poolOptions: { size: 2 } });
+    const pool = new PowerChunker(items, fn, { poolOptions: { size: 2 } });
     expect(pool && typeof pool.postMessageBatch === 'function').to.equal(true);
     // wait until the pool has finished processing all chunks
     await pool.drain();
@@ -21,7 +21,7 @@ describe('PowerChunking helper', () => {
   it('uses explicit chunkSize when provided', () => {
     const items = Array.from({ length: 10 }, (_, i) => i);
     const fn = () => {};
-    const pool = PowerChunking(items, fn, { poolOptions: { size: 2 }, chunkSize: 3 });
+    const pool = new PowerChunker(items, fn, { poolOptions: { size: 2 }, chunkSize: 3 });
     // Each processed chunk emits one `message` event; wait for drain and verify
     let messageCount = 0;
     let totalProcessed = 0;

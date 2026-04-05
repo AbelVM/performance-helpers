@@ -17,6 +17,17 @@ import { o2u8, u82o } from './powerBuffer.js';
 import { nowMs } from '../utils/now.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
+import { PowerEventBus } from './powerEventBus.js';
+
+/**
+ * Error used when the pool is shutdown and pending promises are rejected.
+ */
+export class PowerPoolShutdownError extends Error {
+  constructor(message = 'PowerPool has been shut down') {
+    super(message);
+    this.name = 'PowerPoolShutdownError';
+  }
+}
 
 /**
  * @typedef {Object} WorkerObj
@@ -26,6 +37,36 @@ import { PowerLogger } from './powerLogger.js';
  * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
  * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).
  * @property {number[]} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
+ */
+
+/**
+ * @typedef {Object} PostMessageOptions
+ * @property {boolean} [awaitResponse] - If true, returns a Promise resolved when a response with a matching `correlationId` is received.
+ * @property {number} [timeout] - Timeout in milliseconds for `awaitResponse` promises. If omitted, the pool's default is used.
+ * @property {number|string} [workerId] - Optional id of the target worker to prefer when dispatching the message. If omitted, the pool chooses the least-loaded worker.
+ * @property {boolean} [zeroCopy] - When true and the message is a plain object, attempt zero-copy transfer (use internal encoding to a Uint8Array and transfer its buffer).
+ */
+
+/**
+ * @typedef {Object} PendingResponseEntry
+ * @property {function(any):void} resolve - Function to resolve the pending Promise with the worker response.
+ * @property {function(any):void} reject - Function to reject the pending Promise with an error.
+ * @property {number|NodeJS.Timeout|null} [timer] - Optional timeout handle used to cancel the pending request.
+ */
+
+/**
+ * @typedef {Object} PowerPoolOptions
+ * @property {number} [size]
+ * @property {number} [minSize]
+ * @property {number} [maxSize]
+ * @property {Object} [workerOptions] - Options forwarded to the underlying `Worker` constructor when using a string path.
+ * @property {number} [maxTasksPerWorker]
+ * @property {number} [idleTimeout]
+ * @property {boolean} [taskQueue]
+ * @property {boolean} [lazy]
+ * @property {number} [debugLevel]
+ * @property {number} [listenerMaxListeners]
+ * @property {boolean} [weakListeners]
  */
 
 /**
@@ -42,7 +83,7 @@ export class PowerPool {
    * Create a PowerPool.
    *
    * @param {Function|string} workerSource - A Worker constructor/factory (callable) or a relative path string to pass to `new Worker(new URL(path, import.meta.url))`.
-   * @param {Object} [options]
+   * @param {PowerPoolOptions=} options
    * @param {number} [options.size] - Initial number of workers to create.
    * @param {number} [options.minSize=1] - Minimum number of workers to keep alive.
    * @param {number} [options.maxSize] - Maximum number of workers allowed in the pool.
@@ -50,17 +91,19 @@ export class PowerPool {
    * @param {number} [options.maxTasksPerWorker=Infinity] - Soft capacity per worker before considering it busy.
    * @param {number} [options.idleTimeout=60000] - Milliseconds after which idle workers (beyond `minSize`) will be terminated.
    * @param {boolean} [options.taskQueue=true] - Whether to queue tasks when all workers are busy.
+   * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
    */
   constructor(workerSource, options = {}) {
     const hwConcurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
     const {
       size = Math.min(hwConcurrency, 2),
-      minSize = 1,
+      minSize = 2,
       maxSize = Math.max(size, hwConcurrency),
       workerOptions = {},
       maxTasksPerWorker = Infinity,
       idleTimeout = 60_000,
       taskQueue = true,
+      lazy = true,
     } = options;
 
     this._workerSource = workerSource;
@@ -81,6 +124,11 @@ export class PowerPool {
     this._taskDurationsWelfordM2 = 0;
     this._taskDurationsMin = Number.POSITIVE_INFINITY;
     this._taskDurationsMax = Number.NEGATIVE_INFINITY;
+    // optional autoscaling configuration (disabled by default)
+    this._ewmaLatency = null; // pool-level EWMA for recent task latency (ms)
+    this._autoScale = null; // { enabled, intervalMs, targetMs, alpha, cooldownMs, hysteresis }
+    this._autoScaleInterval = null;
+    this._lastAutoScaleAt = null; // timestamp (ms) of last scale action
     // running aggregate for terminated workers: total completed tasks and count
     this._terminatedWorkerTaskCountsTotal = 0;
     this._terminatedWorkerTaskCountsCount = 0;
@@ -88,13 +136,11 @@ export class PowerPool {
     /** @type {WorkerObj[]} */
     this.workers = [];
     this.queue = new PowerQueue();
-    this._listeners = {
-      message: new Set(),
-      error: new Set(),
-      messageerror: new Set(),
-      idle: new Set(),
-      resize: new Set(),
+    const busOptions = {
+      maxListeners: options && (options.listenerMaxListeners ?? options.maxListeners),
+      weak: options && Boolean(options.weakListeners),
     };
+    this._bus = new PowerEventBus(busOptions);
     this._onmessage = null;
     this._onerror = null;
     this._onidle = null;
@@ -111,7 +157,11 @@ export class PowerPool {
     const dbg = options && typeof options.debugLevel === 'number' ? options.debugLevel : 1;
     this._logger = new PowerLogger(dbg, { name: 'powerPool' });
 
-    const initial = Math.min(Math.max(size, this.minSize), this.maxSize);
+    // When `lazy` is truthy only create `minSize` workers now and allow the
+    // pool to grow on demand when tasks are posted. Default is `true`.
+    const initial = lazy
+      ? Math.min(this.minSize, this.maxSize)
+      : Math.min(Math.max(size, this.minSize), this.maxSize);
     for (let i = 0; i < initial; i++) this._addWorkerInstance();
 
     // reaper checks periodically and terminates idle workers
@@ -121,7 +171,307 @@ export class PowerPool {
     );
     // correlation map for Promise-style postMessage responses
     this._pendingResponses = new Map(); // correlationId -> { resolve, reject, timer }
-    this._nextCorrelationId = 1;
+    // no Node `crypto` import: prefer Web Crypto APIs where available
+    // small LRU-like cache for encoded messages (keyed by JSON string)
+    // stores recent serialized messages to avoid re-encoding identical messages
+    this._encodeCache = new Map();
+    this._encodeCacheLimit = Math.max(
+      16,
+      options && options.encodeCacheLimit ? options.encodeCacheLimit : 64
+    );
+
+    // configure optional autoscaling
+    if (options && options.autoScale) {
+      const as = typeof options.autoScale === 'object' ? options.autoScale : {};
+      const intervalMs = Number.isFinite(Number(as.intervalMs))
+        ? Math.max(100, Math.floor(as.intervalMs))
+        : 1000;
+      const targetMs = Number.isFinite(Number(as.targetMs)) ? Math.max(1, Number(as.targetMs)) : 50;
+      const alpha = Number.isFinite(Number(as.alpha))
+        ? Math.max(0, Math.min(1, Number(as.alpha)))
+        : 0.2;
+      const cooldownMs = Number.isFinite(Number(as.cooldownMs))
+        ? Math.max(0, Math.floor(as.cooldownMs))
+        : 5000;
+      const hysteresis = Number.isFinite(Number(as.hysteresis))
+        ? Math.max(0, Math.min(1, Number(as.hysteresis)))
+        : 0.2;
+      // stepUp/stepDown: allow multi-step scaling per tick (default 1)
+      const stepUp = Number.isFinite(Number(as.stepUp))
+        ? Math.max(1, Math.floor(Number(as.stepUp)))
+        : 1;
+      const stepDown = Number.isFinite(Number(as.stepDown))
+        ? Math.max(1, Math.floor(Number(as.stepDown)))
+        : 1;
+      // backoff controls multiplicative increase of cooldown after successive scale actions
+      const backoffFactor = Number.isFinite(Number(as.backoffFactor))
+        ? Math.max(1, Number(as.backoffFactor))
+        : 1;
+      const backoffMaxMultiplier = Number.isFinite(Number(as.backoffMaxMultiplier))
+        ? Math.max(1, Number(as.backoffMaxMultiplier))
+        : 8;
+      // time (ms) since last scale after which backoff multiplier is reset to 1
+      const backoffResetMs = Number.isFinite(Number(as.backoffResetMs))
+        ? Math.max(0, Math.floor(Number(as.backoffResetMs)))
+        : cooldownMs * 4;
+
+      this._autoScale = {
+        enabled: true,
+        intervalMs,
+        targetMs,
+        alpha,
+        cooldownMs,
+        hysteresis,
+        stepUp,
+        stepDown,
+        backoffFactor,
+        backoffMaxMultiplier,
+        backoffResetMs,
+      };
+      // runtime backoff multiplier (starts at 1)
+      this._autoScaleBackoffMultiplier = 1;
+      // start periodic autoscale tick
+      try {
+        this._autoScaleInterval = setInterval(() => this._autoScaleTick(), intervalMs);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+  }
+
+  /* Node crypto dynamic import removed to avoid bundler externalization. */
+
+  /**
+   * Log debug information about swallowed errors when debug logging is enabled.
+   * @private
+   */
+  _debugLog(err, msg) {
+    try {
+      if (this && this._logger && typeof this._logger.debug === 'function') {
+        if (err) this._logger.debug(err, msg || 'swallowed error');
+        else this._logger.debug(msg || 'swallowed error');
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  /** Ensure the reaper interval exists; recreate it if missing. @private */
+  _ensureReaper() {
+    try {
+      if (!this._reaperInterval) {
+        this._reaperInterval = setInterval(
+          () => this._reapIdleWorkers(),
+          Math.max(1000, Math.floor(this.idleTimeout / 2))
+        );
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Shutdown the pool: clear timers, reject pending responses, terminate workers,
+   * and clear internal queues. This is a full stop that prevents background
+   * timers from keeping the process alive.
+   */
+  shutdown() {
+    // clear reaper
+    try {
+      if (this._reaperInterval) {
+        clearInterval(this._reaperInterval);
+        this._reaperInterval = null;
+      }
+    } catch (e) {
+      this._debugLog && this._debugLog(e, 'shutdown: clear reaper');
+    }
+
+    // reject pending responses (centralized to avoid races)
+    try {
+      for (const [cid] of Array.from(this._pendingResponses.entries())) {
+        try {
+          this._cleanupPendingResponse(cid, {
+            rejectWith: new PowerPoolShutdownError('pool:shutdown'),
+          });
+        } catch (e) {
+          this._debugLog && this._debugLog(e, 'shutdown: cleanup pending response');
+        }
+      }
+    } catch (e) {
+      this._debugLog && this._debugLog(e, 'shutdown: iterate pending responses');
+    }
+
+    // terminate workers
+    try {
+      for (const w of this.workers) {
+        try {
+          w.worker.terminate();
+        } catch (e) {
+          this._debugLog && this._debugLog(e, 'shutdown: terminate worker');
+        }
+      }
+    } catch (e) {
+      this._debugLog && this._debugLog(e, 'shutdown: terminate workers loop');
+    }
+
+    // reset state
+    this.workers = [];
+    this.queue = new PowerQueue();
+    this._activeTasks = 0;
+    // clear autoscale interval if present
+    try {
+      if (this._autoScaleInterval) {
+        clearInterval(this._autoScaleInterval);
+        this._autoScaleInterval = null;
+      }
+    } catch (e) {
+      this._debugLog && this._debugLog(e, 'shutdown: clear autoscale');
+    }
+  }
+
+  /**
+   * Encode a plain object to a Uint8Array, using a small cache to avoid
+   * repeated encoding work for identical messages. Returns a Uint8Array.
+   * @private
+   * @param {Object} obj
+   * @returns {Uint8Array}
+   */
+  _encodeForTransfer(obj) {
+    try {
+      const s = JSON.stringify(obj);
+      const hit = this._encodeCache.get(s);
+      if (hit) return hit;
+      const u8 = o2u8(obj);
+      // maintain simple insertion-order eviction
+      if (this._encodeCache.size >= this._encodeCacheLimit) {
+        const firstKey = this._encodeCache.keys().next().value;
+        if (firstKey) this._encodeCache.delete(firstKey);
+      }
+      this._encodeCache.set(s, u8);
+      return u8;
+    } catch (err) {
+      // Fall back to direct encoding attempt
+      return o2u8(obj);
+    }
+  }
+
+  /**
+   * Prepare a transferable Uint8Array for the given object.
+   * Returns a new Uint8Array when `clone` is true (safe to transfer), or
+   * the cached Uint8Array when `clone` is false (do not transfer the returned buffer).
+   * @param {Object} obj
+   * @param {{clone?:boolean}=} options
+   * @returns {Uint8Array}
+   */
+  prepareBuffer(obj, options = {}) {
+    const { clone = true } = options;
+    const shared = this._encodeForTransfer(obj);
+    return clone ? shared.slice() : shared;
+  }
+
+  /**
+   * Prepare an array of transferable buffers for a batch of items.
+   * Each item may be a plain object, a TypedArray/ArrayBuffer view, or
+   * an object `{ message, transfer? }`. The returned array contains
+   * normalized `{ message, transfer }` entries ready for `postMessageBatch`.
+   * By default each buffer is a cloned Uint8Array safe to transfer; pass
+   * `{ clone: false }` to return references to internal cached buffers
+   * (do NOT transfer those buffers if `clone:false`).
+   *
+   * @param {Array<any|{message:any,transfer?:Transferable[]}>} items
+   * @param {{clone?:boolean}=} options
+   * @returns {{message:*,transfer:Transferable[]|undefined}[]}
+   */
+  prepareBuffers(items, options = {}) {
+    if (!Array.isArray(items)) throw new Error('prepareBuffers expects an array');
+    const { clone = true } = options;
+    const out = new Array(items.length);
+    for (let i = 0; i < items.length; i++) {
+      const it =
+        items[i] && typeof items[i] === 'object' && 'message' in items[i]
+          ? items[i]
+          : { message: items[i] };
+      const msg = it.message;
+      const tr = it.transfer;
+      if (tr) {
+        out[i] = { message: msg, transfer: tr };
+        continue;
+      }
+      // plain object -> encode via cache
+      const isPlainObject =
+        msg !== null &&
+        typeof msg === 'object' &&
+        !ArrayBuffer.isView(msg) &&
+        !(msg instanceof ArrayBuffer);
+      if (isPlainObject) {
+        try {
+          const u8 = this._encodeForTransfer(msg);
+          out[i] = {
+            message: clone ? u8.slice() : u8,
+            transfer: [clone ? u8.slice().buffer : u8.buffer],
+          };
+          continue;
+        } catch (err) {
+          out[i] = { message: msg, transfer: undefined };
+          continue;
+        }
+      }
+      // TypedArray or ArrayBuffer view -> make transferable
+      if (msg instanceof Uint8Array || ArrayBuffer.isView(msg)) {
+        out[i] = { message: msg, transfer: [msg.buffer] };
+        continue;
+      }
+      // fallback: keep as-is
+      out[i] = { message: msg, transfer: undefined };
+    }
+    return out;
+  }
+
+  /**
+   * Class-level helper to prepare a message and optional transfer list for posting to a worker.
+   * Accepts `opts` with `zeroCopy` flag to control forwarding of raw buffers.
+   * @private
+   */
+  _prepareForTransfer(msg, tr, opts) {
+    if (tr) return { message: msg, transfer: tr };
+    const zeroCopy = opts && Boolean(opts.zeroCopy);
+    const isPlainObject =
+      msg !== null &&
+      typeof msg === 'object' &&
+      !ArrayBuffer.isView(msg) &&
+      !(msg instanceof ArrayBuffer);
+    // If zeroCopy mode is requested, do not encode plain objects here — the
+    // caller is explicitly opting in to supplying already-transferable payloads
+    // (e.g. ArrayBuffer/TypedArray). For plain objects we fall back to encoding
+    // unless `zeroCopy` is truthy, in which case we forward as-is.
+    if (isPlainObject) {
+      if (zeroCopy) return { message: msg, transfer: tr };
+      try {
+        const u8 = this._encodeForTransfer(msg);
+        return { message: u8, transfer: [u8.buffer] };
+      } catch (err) {
+        return { message: msg, transfer: tr };
+      }
+    }
+    if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer) {
+      return { message: msg, transfer: [msg.buffer || msg] };
+    }
+    return { message: msg, transfer: tr };
+  }
+
+  /**
+   * Decrement the global active task counter safely.
+   * Ensures the counter never goes negative and centralizes error handling.
+   * @private
+   * @param {number} [n=1]
+   */
+  _decrementActiveTasks(n = 1) {
+    try {
+      const dec = Number.isFinite(Number(n)) ? Math.max(0, Math.floor(Number(n))) : 1;
+      this._activeTasks = Math.max(0, this._activeTasks - dec);
+    } catch (err) {
+      this._activeTasks = 0;
+    }
   }
 
   /**
@@ -162,27 +512,15 @@ export class PowerPool {
       const w = this.workers.pop();
       if (w) {
         // adjust active task counter if worker had inflight tasks
-        try {
-          this._activeTasks = Math.max(0, this._activeTasks - (w.tasks || 0));
-        } catch (e) {
-          this._activeTasks = Math.max(0, this._activeTasks - (w.tasks || 0));
-        }
+        this._decrementActiveTasks(w.tasks || 0);
         try {
           w.worker.terminate();
         } catch (e) {
           /* ignore */
         }
-        try {
-          this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-          this._terminatedWorkerTaskCountsCount += 1;
-        } catch (e) {
-          /* ignore */
-        }
-        try {
-          terminatedIds.push(w.id);
-        } catch (e) {
-          /* ignore */
-        }
+        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
+        this._terminatedWorkerTaskCountsCount += 1;
+        terminatedIds.push(w.id);
       }
     }
 
@@ -204,12 +542,10 @@ export class PowerPool {
           this._logger.error(err, 'Pool onresize handler error');
         }
       }
-      for (const cb of this._listeners.resize) {
-        try {
-          cb(ev);
-        } catch (err) {
-          this._logger.error(err, 'pool resize listener error');
-        }
+      try {
+        this._bus.emit('resize', ev);
+      } catch (err) {
+        this._logger.error(err, 'pool resize listener error');
       }
     }
 
@@ -286,9 +622,20 @@ export class PowerPool {
     // wrapper around the underlying worker that transparently encodes
     // outgoing object messages to a transferable Uint8Array and decodes
     // incoming Uint8Array/ArrayBuffer messages back to objects.
-    const worker = {
-      _underlying: underlying,
-      postMessage: (message, transfer) => {
+    // Use a small stable-shape wrapper class instead of an object literal
+    // to reduce per-worker allocation overhead and improve V8 hidden-class
+    // stability when pools resize frequently.
+    const pool = this;
+    class WorkerWrapper {
+      constructor(_underlying, _logger) {
+        this._underlying = _underlying;
+        this._logger = _logger;
+        this.onmessage = null;
+        this.onerror = null;
+        this.onmessageerror = null;
+      }
+
+      postMessage(message, transfer) {
         let msg = message;
         let tr = transfer;
         const isPlainObject =
@@ -298,39 +645,46 @@ export class PowerPool {
           !(message instanceof ArrayBuffer);
         if (isPlainObject) {
           try {
-            const u8 = o2u8(message);
-            // normalize transfer list to array and ensure buffer is included
+            // Use pool-level encode cache to avoid repeated JSON.stringify/o2u8
+            const u8 = pool._encodeForTransfer(message);
             const tarr = tr ? Array.from(tr) : [];
             if (!tarr.includes(u8.buffer)) tarr.push(u8.buffer);
             tr = tarr;
             msg = u8;
           } catch (err) {
-            // fall back to original message if encoding fails
             tr = transfer;
             msg = message;
           }
         }
+        // If caller passed a typed array and didn't supply transfer list,
+        // auto-add its underlying buffer so the post can be zero-copy.
+        if (!tr && (msg instanceof Uint8Array || ArrayBuffer.isView(msg))) {
+          tr = [msg.buffer];
+        }
 
         try {
-          if (tr && tr.length) underlying.postMessage(msg, tr);
-          else underlying.postMessage(msg);
+          if (tr && tr.length) this._underlying.postMessage(msg, tr);
+          else this._underlying.postMessage(msg);
         } catch (err) {
-          // surface the error to caller environment (console for now)
           this._logger.error(err, 'Failed to postMessage to underlying worker');
           throw err;
         }
-      },
-      addEventListener: (...args) => underlying.addEventListener(...args),
-      removeEventListener: (...args) => underlying.removeEventListener(...args),
-      terminate: () => {
-        if (typeof underlying.terminate === 'function') underlying.terminate();
-      },
-      // these will be assigned by the pool and invoked when underlying
-      // forwards decoded messages
-      onmessage: null,
-      onerror: null,
-      onmessageerror: null,
-    };
+      }
+
+      addEventListener(...args) {
+        return this._underlying.addEventListener(...args);
+      }
+
+      removeEventListener(...args) {
+        return this._underlying.removeEventListener(...args);
+      }
+
+      terminate() {
+        if (typeof this._underlying.terminate === 'function') this._underlying.terminate();
+      }
+    }
+
+    const worker = new WorkerWrapper(underlying, this._logger);
 
     const workerObj = {
       id,
@@ -353,39 +707,21 @@ export class PowerPool {
       const now = nowMs();
       workerObj.tasks = Math.max(0, workerObj.tasks - 1);
       // decrement global active task count for the completed task
-      try {
-        this._activeTasks = Math.max(0, this._activeTasks - 1);
-      } catch (err) {
-        this._activeTasks = 0;
-      }
+      this._decrementActiveTasks(1);
       workerObj.lastActive = now;
 
       // If the worker's response carries a correlationId, resolve any pending Promise.
       try {
         const data = e && e.data;
         if (data && typeof data === 'object' && data.correlationId != null) {
-          const pid = data.correlationId;
-          const pending = this._pendingResponses.get(pid);
-          if (pending) {
-            try {
-              const resp = Object.prototype.hasOwnProperty.call(data, 'response')
-                ? data.response
-                : data;
-              pending.resolve(resp);
-            } catch (err) {
-              try {
-                pending.reject(err);
-              } catch (e2) {
-                /* ignore */
-              }
-            } finally {
-              if (pending.timer) clearTimeout(pending.timer);
-              this._pendingResponses.delete(pid);
-            }
-          }
+          const pid = String(data.correlationId);
+          const resp = Object.prototype.hasOwnProperty.call(data, 'response')
+            ? data.response
+            : data;
+          this._cleanupPendingResponse(pid, { resolveWith: resp });
         }
       } catch (err) {
-        /* non-fatal */
+        this._debugLog && this._debugLog(err, 'worker.onmessage: resolve pending response');
       }
 
       // Update EWMA latency using the oldest start timestamp for this worker if present
@@ -406,9 +742,14 @@ export class PowerPool {
           }
 
           if (x != null) {
-            const alpha = 0.2; // smoothing factor for EWMA
+            // smoothing factor for per-worker EWMA; allow pool-level alpha when configured
+            const alpha = (this._autoScale && this._autoScale.alpha) || 0.2;
             if (workerObj.latencyEwma == null) workerObj.latencyEwma = x;
             else workerObj.latencyEwma = alpha * x + (1 - alpha) * workerObj.latencyEwma;
+
+            // update pool-level EWMA (aggregate) for autoscaling decisions
+            if (this._ewmaLatency == null) this._ewmaLatency = x;
+            else this._ewmaLatency = alpha * x + (1 - alpha) * this._ewmaLatency;
 
             // record pool-level performance metrics using worker-observed or computed task time
             // Update counts and Welford streaming stats (O(1) memory/time)
@@ -425,10 +766,10 @@ export class PowerPool {
             if (x > this._taskDurationsMax) this._taskDurationsMax = x;
           }
         } catch (err) {
-          // non-fatal: ignore latency tracking failures
+          this._debugLog && this._debugLog(err, 'worker.onmessage: latency tracking inner');
         }
       } catch (err) {
-        // non-fatal: ignore latency tracking failures
+        this._debugLog && this._debugLog(err, 'worker.onmessage: latency tracking outer');
       }
 
       // dispatch queued task if any
@@ -442,6 +783,7 @@ export class PowerPool {
           workerObj.tasks++;
           this._activeTasks++;
         } catch (err) {
+          this._debugLog && this._debugLog(err, 'dispatch queued message to worker failed');
           this._logger.error(err, 'Failed to dispatch queued message to worker');
         }
       }
@@ -453,16 +795,102 @@ export class PowerPool {
           this._logger.error(err, 'Pool onmessage handler error');
         }
       }
-      for (const cb of this._listeners.message) {
-        try {
-          cb(e);
-        } catch (err) {
-          this._logger.error(err, 'pool listener error');
-        }
+      try {
+        this._bus.emit('message', e);
+      } catch (err) {
+        this._logger.error(err, 'pool listener error');
       }
 
       // update idle state after processing a message (and possibly dispatching queued tasks)
       this._updateIdleState();
+    };
+
+    /**
+     * Autoscale tick: simple policy that grows/shrinks by one worker based on
+     * pool-level EWMA latency and queue pressure. Runs only when `autoScale`
+     * is configured on the pool.
+     *
+     * - scale up: when EWMA > targetMs OR queue length exceeds worker count
+     * - scale down: when EWMA < targetMs * 0.5 AND queue is empty
+     */
+    this._autoScaleTick = () => {
+      try {
+        if (!this._autoScale || !this._autoScale.enabled) return;
+        const now = nowMs();
+        const cfg = this._autoScale;
+
+        // reset backoff multiplier if enough time has passed since last scale
+        if (
+          this._lastAutoScaleAt &&
+          cfg.backoffResetMs &&
+          now - this._lastAutoScaleAt > cfg.backoffResetMs
+        ) {
+          this._autoScaleBackoffMultiplier = 1;
+        }
+
+        // enforce effective cooldown between scale actions (taking backoff into account)
+        const effectiveCooldown = Math.floor(
+          (cfg.cooldownMs || 0) * (this._autoScaleBackoffMultiplier || 1)
+        );
+        if (this._lastAutoScaleAt && now - this._lastAutoScaleAt < effectiveCooldown) return;
+
+        const target = cfg.targetMs;
+        const hysteresis = cfg.hysteresis || 0.2;
+        const ewma = this._ewmaLatency;
+        const workers = this.workers.length;
+
+        // scale-up heuristics: require EWMA to exceed target by hysteresis
+        const upThreshold = target * (1 + hysteresis);
+        const needScaleUp = ewma != null ? ewma > upThreshold : false;
+        const queuePressure = this.queue.length > Math.ceil(workers * (1 + hysteresis));
+        if (needScaleUp || queuePressure) {
+          if (workers < this.maxSize) {
+            try {
+              const maxAdd = Math.min(this.maxSize - workers, cfg.stepUp || 1);
+              for (let i = 0; i < maxAdd; i++) this._addWorkerInstance();
+              this._lastAutoScaleAt = now;
+              // increase backoff multiplier for successive rapid scales
+              this._autoScaleBackoffMultiplier = Math.min(
+                cfg.backoffMaxMultiplier || 8,
+                Math.max(1, (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1))
+              );
+            } catch (e) {
+              this._debugLog && this._debugLog(e, 'autoScale: addWorker failed');
+            }
+          }
+          return;
+        }
+
+        // scale-down heuristics: require EWMA to be below target by hysteresis
+        const downThreshold = target * Math.max(0, 1 - hysteresis);
+        const needScaleDown = ewma != null ? ewma < downThreshold : false;
+        if (needScaleDown && this.queue.length === 0) {
+          if (workers > this.minSize) {
+            try {
+              const maxRemove = Math.min(workers - this.minSize, cfg.stepDown || 1);
+              for (let i = 0; i < maxRemove; i++) {
+                const w = this.workers.pop();
+                if (w) {
+                  try {
+                    w.worker.terminate();
+                  } catch (e) {
+                    this._debugLog && this._debugLog(e, 'autoScale: terminate worker');
+                  }
+                }
+              }
+              this._lastAutoScaleAt = now;
+              this._autoScaleBackoffMultiplier = Math.min(
+                cfg.backoffMaxMultiplier || 8,
+                Math.max(1, (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1))
+              );
+            } catch (e) {
+              this._debugLog && this._debugLog(e, 'autoScale: remove worker failed');
+            }
+          }
+        }
+      } catch (e) {
+        this._debugLog && this._debugLog(e, 'autoScaleTick outer');
+      }
     };
 
     // forward underlying events, decoding binary payloads to JS objects
@@ -482,6 +910,11 @@ export class PowerPool {
         try {
           decoded = u82o(data);
         } catch (err) {
+          try {
+            _handleMessageError(err);
+          } catch (ee) {
+            /* ignore */
+          }
           decoded = data;
         }
       }
@@ -510,12 +943,10 @@ export class PowerPool {
           this._logger.error(err, 'worker wrapper onerror error');
         }
       }
-      for (const cb of this._listeners.error) {
-        try {
-          cb(e);
-        } catch (err) {
-          this._logger.error(err, 'pool error listener error');
-        }
+      try {
+        this._bus.emit('error', e);
+      } catch (err) {
+        this._logger.error(err, 'pool error listener error');
       }
     };
 
@@ -534,12 +965,10 @@ export class PowerPool {
           this._logger.error(err, 'worker wrapper onmessageerror error');
         }
       }
-      for (const cb of this._listeners.messageerror) {
-        try {
-          cb(e);
-        } catch (err) {
-          this._logger.error(err, 'pool messageerror listener error');
-        }
+      try {
+        this._bus.emit('messageerror', e);
+      } catch (err) {
+        this._logger.error(err, 'pool messageerror listener error');
       }
     };
 
@@ -548,50 +977,50 @@ export class PowerPool {
       try {
         underlying.addEventListener('message', _handleMessage);
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'attach addEventListener message');
       }
       try {
         underlying.addEventListener('error', _handleError);
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'attach addEventListener error');
       }
       try {
         underlying.addEventListener('messageerror', _handleMessageError);
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'attach addEventListener messageerror');
       }
     } else if (typeof underlying.on === 'function') {
       try {
         underlying.on('message', _handleMessage);
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'attach underlying.on message');
       }
       try {
         underlying.on('error', _handleError);
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'attach underlying.on error');
       }
       try {
         underlying.on('messageerror', _handleMessageError);
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'attach underlying.on messageerror');
       }
     } else {
       // last-resort assignments
       try {
         underlying.onmessage = _handleMessage;
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'assign underlying.onmessage');
       }
       try {
         underlying.onerror = _handleError;
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'assign underlying.onerror');
       }
       try {
         underlying.onmessageerror = _handleMessageError;
       } catch (e) {
-        /* ignore */
+        this._debugLog && this._debugLog(e, 'assign underlying.onmessageerror');
       }
     }
 
@@ -635,7 +1064,8 @@ export class PowerPool {
    * a plain JS object is supplied, the pool will internally encode the object
    * to a transferable `Uint8Array` (via `o2u8`) and pass its `ArrayBuffer` as
    * the transfer list to avoid structured-clone copies.
-   * @returns {boolean} True if the message was accepted (dispatched or queued).
+   * @param {PostMessageOptions=} options - Optional flags controlling behavior such as `awaitResponse`, `timeout`, `workerId`, and `zeroCopy`.
+   * @returns {boolean|Promise<any>} When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
    */
   postMessage(message, transfer, options) {
     // support optional third-argument `options` for Promise-based responses
@@ -659,8 +1089,8 @@ export class PowerPool {
       // in extremely long-lived pools. Use unsigned 32-bit wrap-around.
       correlationId =
         options.correlationId != null
-          ? options.correlationId
-          : String(this._nextCorrelationId++ >>> 0);
+          ? String(options.correlationId)
+          : this._generateCorrelationId();
       // only plain-object messages can be augmented with correlationId
       const isPlainObject =
         message !== null &&
@@ -676,54 +1106,34 @@ export class PowerPool {
 
       pendingPromise = new Promise((resolve, reject) => {
         const entry = { resolve, reject, timer: null };
+        const correlationKey = correlationId != null ? String(correlationId) : correlationId;
         if (options && options.timeout) {
           entry.timer = setTimeout(() => {
-            if (this._pendingResponses.has(correlationId)) {
-              this._pendingResponses.delete(correlationId);
-              reject(new Error('postMessage response timeout'));
+            try {
+              this._cleanupPendingResponse(correlationKey, {
+                rejectWith: new Error('postMessage response timeout'),
+              });
+            } catch (e) {
+              try {
+                reject(new Error('postMessage response timeout'));
+              } catch (e2) {
+                /* ignore */
+              }
             }
           }, options.timeout);
         }
-        this._pendingResponses.set(correlationId, entry);
+        this._pendingResponses.set(correlationKey, entry);
       });
+      // normalize correlationId for later cleanup paths
+      correlationId = correlationId != null ? String(correlationId) : correlationId;
     }
 
-    // Helper: prepare message and transfer when caller omitted transfer.
-    /**
-     * Prepare a message and optional transfer list for posting to a worker.
-     * If `tr` (transfer) is omitted and `msg` is a plain object this function
-     * will attempt to encode the object into a transferable `Uint8Array`
-     * using `o2u8` and return `{ message: Uint8Array, transfer: [ArrayBuffer] }`.
-     * On failure it falls back to the original message and transfer list.
-     *
-     * @private
-     * @param {*} msg - Message to prepare.
-     * @param {Transferable[]=|undefined} tr - Optional transfer list.
-     * @returns {{message:*,transfer:Transferable[]|undefined}}
-     */
-    const _prepareForTransfer = (msg, tr) => {
-      if (tr) return { message: msg, transfer: tr };
-      const isPlainObject =
-        msg !== null &&
-        typeof msg === 'object' &&
-        !ArrayBuffer.isView(msg) &&
-        !(msg instanceof ArrayBuffer);
-      if (isPlainObject) {
-        try {
-          const u8 = o2u8(msg);
-          return { message: u8, transfer: [u8.buffer] };
-        } catch (err) {
-          // encoding failed; fall back to original message without transfer
-          return { message: msg, transfer: tr };
-        }
-      }
-      return { message: msg, transfer: tr };
-    };
+    // (moved to class method `_prepareForTransfer`) use that instead
 
     if (least && least.tasks < this._maxTasksPerWorker) {
       try {
         const startTime = nowMs();
-        const prepared = _prepareForTransfer(message, transfer);
+        const prepared = this._prepareForTransfer(message, transfer, options);
         if (prepared.transfer && prepared.transfer.length)
           least.worker.postMessage(prepared.message, prepared.transfer);
         else least.worker.postMessage(prepared.message);
@@ -738,15 +1148,10 @@ export class PowerPool {
       } catch (err) {
         // cleanup pending on failure and return the rejected Promise when caller awaited a response
         if (wantResponse && correlationId) {
-          const p = this._pendingResponses.get(correlationId);
-          if (p) {
-            if (p.timer) clearTimeout(p.timer);
-            this._pendingResponses.delete(correlationId);
-            try {
-              p.reject(err);
-            } catch (e) {
-              /* ignore */
-            }
+          try {
+            this._cleanupPendingResponse(correlationId, { rejectWith: err });
+          } catch (e) {
+            /* ignore */
           }
           this._logger.error(err, 'Failed to postMessage to worker');
           return pendingPromise;
@@ -760,15 +1165,12 @@ export class PowerPool {
     // fail fast: the targeted worker is missing or at capacity.
     if (targetWorkerId != null && (!least || least.tasks >= this._maxTasksPerWorker)) {
       if (wantResponse && correlationId) {
-        const p = this._pendingResponses.get(correlationId);
-        if (p) {
-          if (p.timer) clearTimeout(p.timer);
-          this._pendingResponses.delete(correlationId);
-          try {
-            p.reject(new Error('targeted worker unavailable'));
-          } catch (e) {
-            /* ignore */
-          }
+        try {
+          this._cleanupPendingResponse(correlationId, {
+            rejectWith: new Error('targeted worker unavailable'),
+          });
+        } catch (e) {
+          /* ignore */
         }
         return pendingPromise;
       }
@@ -781,7 +1183,7 @@ export class PowerPool {
       const obj = this._addWorkerInstance();
       try {
         const startTime = nowMs();
-        const prepared = _prepareForTransfer(message, transfer);
+        const prepared = this._prepareForTransfer(message, transfer, options);
         if (prepared.transfer && prepared.transfer.length)
           obj.worker.postMessage(prepared.message, prepared.transfer);
         else obj.worker.postMessage(prepared.message);
@@ -795,15 +1197,10 @@ export class PowerPool {
       } catch (err) {
         // cleanup pending on failure and return rejected Promise if caller awaited a response
         if (wantResponse && correlationId) {
-          const p = this._pendingResponses.get(correlationId);
-          if (p) {
-            if (p.timer) clearTimeout(p.timer);
-            this._pendingResponses.delete(correlationId);
-            try {
-              p.reject(err);
-            } catch (e) {
-              /* ignore */
-            }
+          try {
+            this._cleanupPendingResponse(correlationId, { rejectWith: err });
+          } catch (e) {
+            /* ignore */
           }
           this._logger.error(err, 'Failed to postMessage to new worker');
           return pendingPromise;
@@ -815,7 +1212,7 @@ export class PowerPool {
 
     // pool full and all workers at capacity (or targeted worker busy/missing)
     if (this.taskQueueEnabled) {
-      const prepared = _prepareForTransfer(message, transfer);
+      const prepared = this._prepareForTransfer(message, transfer, options);
       this.queue.push({ message: prepared.message, transfer: prepared.transfer });
       // queued task means pool not idle (but not an active dispatched task)
       this._updateIdleState();
@@ -830,7 +1227,7 @@ export class PowerPool {
     const fallback = this.workers[idx];
     try {
       const startTime = nowMs();
-      const prepared = _prepareForTransfer(message, transfer);
+      const prepared = this._prepareForTransfer(message, transfer);
       if (prepared.transfer && prepared.transfer.length)
         fallback.worker.postMessage(prepared.message, prepared.transfer);
       else fallback.worker.postMessage(prepared.message);
@@ -843,15 +1240,10 @@ export class PowerPool {
     } catch (err) {
       // cleanup pending on failure and return rejected Promise if caller awaited a response
       if (wantResponse && correlationId) {
-        const p = this._pendingResponses.get(correlationId);
-        if (p) {
-          if (p.timer) clearTimeout(p.timer);
-          this._pendingResponses.delete(correlationId);
-          try {
-            p.reject(err);
-          } catch (e) {
-            /* ignore */
-          }
+        try {
+          this._cleanupPendingResponse(correlationId, { rejectWith: err });
+        } catch (e) {
+          /* ignore */
         }
         this._logger.error(err, 'Failed to postMessage to fallback worker');
         return pendingPromise;
@@ -859,6 +1251,90 @@ export class PowerPool {
       this._logger.error(err, 'Failed to postMessage to fallback worker');
       return false;
     }
+  }
+
+  /**
+   * Generate a safe correlation id. Prefer `crypto.randomUUID()` when
+   * available, otherwise fall back to a timestamp + random suffix.
+   * @private
+   * @returns {string}
+   */
+  _generateCorrelationId() {
+    // Prefer standard Web Crypto `randomUUID` when available
+    try {
+      if (
+        typeof globalThis !== 'undefined' &&
+        globalThis.crypto &&
+        typeof globalThis.crypto.randomUUID === 'function'
+      ) {
+        return globalThis.crypto.randomUUID();
+      }
+    } catch (e) {
+      // ignore and fall back
+    }
+
+    // If an async dynamic import completed earlier, use the cached
+    // (No Node crypto fallback here) — rely on Web Crypto or last-resort Math.random
+
+    // Fallback: WebCrypto `getRandomValues` if available
+    try {
+      if (
+        typeof globalThis !== 'undefined' &&
+        globalThis.crypto &&
+        typeof globalThis.crypto.getRandomValues === 'function'
+      ) {
+        const arr = new Uint8Array(16);
+        globalThis.crypto.getRandomValues(arr);
+        return Array.from(arr)
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Last-resort fallback: timestamp + Math.random
+    const rand = Math.floor(Math.random() * 0xffffffff).toString(16);
+    return `cid-${Date.now().toString(36)}-${rand}`;
+  }
+
+  /**
+   * Centralized cleanup for a pending response entry.
+   * Ensures the timer is cleared and the entry is resolved/rejected exactly once.
+   * @private
+   * @param {string|number} key
+   * @param {{resolveWith?:any, rejectWith?:any}} opts
+   */
+  _cleanupPendingResponse(key, opts = {}) {
+    const k = key != null ? String(key) : key;
+    const entry = this._pendingResponses.get(k);
+    if (!entry) return false;
+    try {
+      if (entry.timer) {
+        try {
+          clearTimeout(entry.timer);
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    try {
+      if (Object.prototype.hasOwnProperty.call(opts, 'resolveWith'))
+        entry.resolve(opts.resolveWith);
+      else if (Object.prototype.hasOwnProperty.call(opts, 'rejectWith'))
+        entry.reject(opts.rejectWith);
+    } catch (e) {
+      /* ignore */
+    } finally {
+      try {
+        this._pendingResponses.delete(k);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    return true;
   }
 
   /**
@@ -874,27 +1350,28 @@ export class PowerPool {
     // Snapshot the time once for this broadcast to avoid multiple syscalls
     // and to keep `lastActive` consistent across all workers in this broadcast.
     const now = nowMs();
+    // If a plain object and no transfer supplied, encode once and reuse the encoded
+    // payload for each worker (slice per-worker to create transferable buffers).
+    let sharedU8 = null;
+    const isPlainObject =
+      message !== null &&
+      typeof message === 'object' &&
+      !ArrayBuffer.isView(message) &&
+      !(message instanceof ArrayBuffer);
     for (const w of this.workers) {
       try {
         let msg = message;
         let tr = transfer;
-        if (!tr) {
-          const isPlainObject =
-            message !== null &&
-            typeof message === 'object' &&
-            !ArrayBuffer.isView(message) &&
-            !(message instanceof ArrayBuffer);
-          if (isPlainObject) {
-            try {
-              // Each worker needs its own transferable buffer; encode per-worker.
-              const u8 = o2u8(message);
-              msg = u8;
-              tr = [u8.buffer];
-            } catch (err) {
-              // fall back to original message if encoding fails
-              msg = message;
-              tr = undefined;
-            }
+        if (!tr && isPlainObject) {
+          try {
+            if (sharedU8 == null) sharedU8 = this._encodeForTransfer(message);
+            // create a per-worker copy of the encoded data (slice creates a new ArrayBuffer)
+            const copy = sharedU8.slice();
+            msg = copy;
+            tr = [copy.buffer];
+          } catch (err) {
+            msg = message;
+            tr = undefined;
           }
         }
         if (tr && tr.length) w.worker.postMessage(msg, tr);
@@ -944,14 +1421,14 @@ export class PowerPool {
 
     // 2) reject any pending Promise responses (they will never arrive)
     try {
-      for (const [cid, entry] of Array.from(this._pendingResponses.entries())) {
+      for (const [cid] of Array.from(this._pendingResponses.entries())) {
         try {
-          if (entry.timer) clearTimeout(entry.timer);
-          entry.reject(new Error('stopThePress: cancelled pending response'));
+          this._cleanupPendingResponse(cid, {
+            rejectWith: new Error('stopThePress: cancelled pending response'),
+          });
         } catch (e) {
           /* ignore */
         }
-        this._pendingResponses.delete(cid);
       }
     } catch (err) {
       this._logger.error(err, 'stopThePress: failed to cancel pending responses');
@@ -963,13 +1440,9 @@ export class PowerPool {
     try {
       for (let i = this.workers.length - 1; i >= 0; i--) {
         const w = this.workers[i];
-        try {
-          // account completed tasks for terminated worker bookkeeping
-          this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-          this._terminatedWorkerTaskCountsCount += 1;
-        } catch (e) {
-          /* ignore */
-        }
+        // account completed tasks for terminated worker bookkeeping
+        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
+        this._terminatedWorkerTaskCountsCount += 1;
         try {
           w.worker.terminate();
         } catch (e) {
@@ -983,10 +1456,29 @@ export class PowerPool {
       this._logger.error(err, 'stopThePress: failed while terminating workers');
     }
 
+    // If caller requested not to recreate workers, clear the reaper interval
+    // to avoid leaving a background timer running and keeping the process alive.
+    if (!recreate) {
+      try {
+        if (this._reaperInterval) {
+          clearInterval(this._reaperInterval);
+          this._reaperInterval = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
     if (recreate) {
       // Recreate replacement workers up to previous count (respecting max/min)
       const desired = Math.max(this.minSize, Math.min(currentCount, this.maxSize));
       for (let i = 0; i < desired; i++) this._addWorkerInstance();
+      // ensure the reaper interval is running after recreating workers
+      try {
+        this._ensureReaper();
+      } catch (e) {
+        /* ignore */
+      }
     }
 
     // re-evaluate idle state after cancelling inflight work
@@ -1032,23 +1524,7 @@ export class PowerPool {
     const queuedPrepared = [];
     const targetWorkerId = options && options.workerId != null ? options.workerId : null;
 
-    const prepare = (msg, tr) => {
-      if (tr) return { message: msg, transfer: tr };
-      const isPlainObject =
-        msg !== null &&
-        typeof msg === 'object' &&
-        !ArrayBuffer.isView(msg) &&
-        !(msg instanceof ArrayBuffer);
-      if (isPlainObject) {
-        try {
-          const u8 = o2u8(msg);
-          return { message: u8, transfer: [u8.buffer] };
-        } catch (err) {
-          return { message: msg, transfer: tr };
-        }
-      }
-      return { message: msg, transfer: tr };
-    };
+    const prepare = (msg, tr) => this._prepareForTransfer(msg, tr, options);
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i] || {};
@@ -1185,14 +1661,14 @@ export class PowerPool {
     }
 
     try {
-      for (const [cid, entry] of Array.from(this._pendingResponses.entries())) {
+      for (const [cid] of Array.from(this._pendingResponses.entries())) {
         try {
-          if (entry.timer) clearTimeout(entry.timer);
-          entry.reject(new Error('stopThePressBatch: cancelled pending response'));
+          this._cleanupPendingResponse(cid, {
+            rejectWith: new Error('stopThePressBatch: cancelled pending response'),
+          });
         } catch (e) {
           /* ignore */
         }
-        this._pendingResponses.delete(cid);
       }
     } catch (err) {
       this._logger.error(err, 'stopThePressBatch: failed to cancel pending responses');
@@ -1202,12 +1678,9 @@ export class PowerPool {
     try {
       for (let i = this.workers.length - 1; i >= 0; i--) {
         const w = this.workers[i];
-        try {
-          this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-          this._terminatedWorkerTaskCountsCount += 1;
-        } catch (e) {
-          /* ignore */
-        }
+        // record termination counts
+        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
+        this._terminatedWorkerTaskCountsCount += 1;
         try {
           w.worker.terminate();
         } catch (e) {
@@ -1220,9 +1693,27 @@ export class PowerPool {
       this._logger.error(err, 'stopThePressBatch: failed while terminating workers');
     }
 
+    // If caller requested not to recreate workers, clear the reaper interval
+    // to avoid leaving a background timer running and keeping the process alive.
+    if (!recreate) {
+      try {
+        if (this._reaperInterval) {
+          clearInterval(this._reaperInterval);
+          this._reaperInterval = null;
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
     if (recreate) {
       const desired = Math.max(this.minSize, Math.min(currentCount, this.maxSize));
       for (let i = 0; i < desired; i++) this._addWorkerInstance();
+      try {
+        this._ensureReaper();
+      } catch (e) {
+        /* ignore */
+      }
     }
 
     this._updateIdleState();
@@ -1246,22 +1737,14 @@ export class PowerPool {
     const w = this.workers.pop();
     if (w) {
       // adjust global active task counter if worker had inflight tasks
-      try {
-        this._activeTasks = Math.max(0, this._activeTasks - (w.tasks || 0));
-      } catch (err) {
-        this._activeTasks = Math.max(0, this._activeTasks - (w.tasks || 0));
-      }
+      this._decrementActiveTasks(w.tasks || 0);
       try {
         w.worker.terminate();
       } catch (err) {
         /* ignore */
       }
-      try {
-        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-        this._terminatedWorkerTaskCountsCount += 1;
-      } catch (err) {
-        /* ignore */
-      }
+      this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
+      this._terminatedWorkerTaskCountsCount += 1;
     }
   }
 
@@ -1289,13 +1772,22 @@ export class PowerPool {
         } catch (err) {
           /* ignore */
         }
-        try {
-          this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-          this._terminatedWorkerTaskCountsCount += 1;
-        } catch (err) {
-          /* ignore */
+        // Remove the worker without O(n) splice by swapping with the last
+        // element and popping. This keeps removal O(1) and avoids shifting
+        // the remaining array entries.
+        const lastIndex = this.workers.length - 1;
+        if (i === lastIndex) {
+          this.workers.pop();
+        } else {
+          // Move last into position i and pop the tail.
+          this.workers[i] = this.workers.pop();
         }
-        this.workers.splice(i, 1);
+        if (i === lastIndex) {
+          this.workers.pop();
+        } else {
+          // Move last into position i and pop the tail.
+          this.workers[i] = this.workers.pop();
+        }
       }
     }
     // re-evaluate idle state after pruning
@@ -1336,19 +1828,15 @@ export class PowerPool {
         this._logger.error(err, 'Pool onidle handler error');
       }
     }
-    for (const cb of this._listeners.message) {
-      try {
-        cb(ev);
-      } catch (err) {
-        this._logger.error(err, 'pool listener error');
-      }
+    try {
+      this._bus.emit('message', ev);
+    } catch (err) {
+      this._logger.error(err, 'pool listener error');
     }
-    for (const cb of this._listeners.idle) {
-      try {
-        cb(ev);
-      } catch (err) {
-        this._logger.error(err, 'pool idle listener error');
-      }
+    try {
+      this._bus.emit('idle', ev);
+    } catch (err) {
+      this._logger.error(err, 'pool idle listener error');
     }
   }
 
@@ -1380,26 +1868,12 @@ export class PowerPool {
    * Terminate the entire pool, clear queue and the reaper interval.
    */
   terminate() {
-    if (this._reaperInterval) {
-      clearInterval(this._reaperInterval);
-      this._reaperInterval = null;
+    // Delegate to shutdown to ensure timers cleared and pending Promises rejected
+    try {
+      this.shutdown();
+    } catch (e) {
+      // best-effort: swallow to preserve original terminate() semantics
     }
-    for (const w of this.workers) {
-      try {
-        w.worker.terminate();
-      } catch (err) {
-        /* ignore */
-      }
-      try {
-        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-        this._terminatedWorkerTaskCountsCount += 1;
-      } catch (err) {
-        /* ignore */
-      }
-    }
-    this.workers = [];
-    this.queue = new PowerQueue();
-    this._activeTasks = 0;
   }
 
   /**
@@ -1514,8 +1988,9 @@ export class PowerPool {
    * @param {Function} cb
    */
   addEventListener(type, cb) {
-    if (!(type in this._listeners)) return;
-    this._listeners[type].add(cb);
+    // Supported types: message, error, messageerror, idle, resize
+    if (typeof cb !== 'function') return;
+    this._bus.on(type, cb);
     // If registering an 'idle' listener while the pool is actually idle,
     // invoke it immediately. Use the same logic as `_updateIdleState`.
     if (type === 'idle') {
@@ -1538,7 +2013,8 @@ export class PowerPool {
    * @param {Function} cb
    */
   removeEventListener(type, cb) {
-    if (type in this._listeners) this._listeners[type].delete(cb);
+    if (!cb || typeof cb !== 'function') return;
+    this._bus.off(type, cb);
   }
 
   /**

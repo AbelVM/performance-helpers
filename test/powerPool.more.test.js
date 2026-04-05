@@ -10,7 +10,8 @@ describe('PowerPool additional branches', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0 });
+    // eager create a worker for testing
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0, lazy: false });
     try {
       const spy = vi.fn();
       pool.addEventListener('idle', spy);
@@ -28,7 +29,7 @@ describe('PowerPool additional branches', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0 });
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0, lazy: false });
     try {
       const data = new Uint8Array([1, 2, 3]);
       expect(pool.postMessage(data)).toBe(true);
@@ -52,7 +53,7 @@ describe('PowerPool additional branches', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0 });
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0, lazy: false });
     try {
       const obj = {};
       obj.self = obj; // circular
@@ -82,7 +83,7 @@ describe('PowerPool additional branches', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0 });
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0, lazy: false });
     try {
       const p = new Promise((resolve) => {
         pool.onmessage = (e) => resolve(e.data);
@@ -118,7 +119,7 @@ describe('PowerPool additional branches', () => {
     try {
       // @ts-ignore
       global.Worker = FakeWorker;
-      const pool = new PowerPool('some-worker.js', { size: 1, minSize: 0 });
+      const pool = new PowerPool('some-worker.js', { size: 1, minSize: 1 });
       try {
         expect(pool.workers.length).toBeGreaterThan(0);
         const underlying =
@@ -193,7 +194,7 @@ describe('PowerPool additional branches', () => {
       }
     }
     // use a manual addWorker flow to control underlying instances
-    const pool = new PowerPool(GoodUnderlying, { size: 1, minSize: 0 });
+    const pool = new PowerPool(GoodUnderlying, { size: 1, minSize: 0, lazy: false });
     try {
       // replace first underlying to a BAD one
       const bad = pool.workers[0];
@@ -237,6 +238,7 @@ describe('PowerPool additional branches', () => {
     const pool = new PowerPool(MockUnderlying, {
       size: 1,
       minSize: 0,
+      lazy: false,
       maxSize: 2,
       maxTasksPerWorker: 0,
     });
@@ -258,7 +260,7 @@ describe('PowerPool additional branches', () => {
         this.terminate = vi.fn();
       }
     }
-    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0 });
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 0, lazy: false });
     try {
       // unsupported type should be ignored
       expect(() => pool.addEventListener('bogus', () => {})).not.toThrow();

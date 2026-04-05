@@ -8,21 +8,32 @@
  * setTimeout(() => d.resolve(42), 10);
  * await d.promise; // 42
  */
+const _deferInternals = new WeakMap();
+
 export class PowerDefer {
+  /**
+   * @typedef {Object} PowerDeferOptions
+   * @property {boolean} [autoReject]
+   */
   constructor() {
     this._settled = false;
+    this._status = 'pending';
     /** @type {Promise<any>} */
     this.promise = new Promise((resolve, reject) => {
-      this._resolve = (v) => {
+      const resolveFn = (v) => {
         if (this._settled) return;
         this._settled = true;
+        this._status = 'fulfilled';
         resolve(v);
       };
-      this._reject = (err) => {
+      const rejectFn = (err) => {
         if (this._settled) return;
         this._settled = true;
+        this._status = 'rejected';
         reject(err);
       };
+      // store resolver/rejector in WeakMap so they are not assignable from user code
+      _deferInternals.set(this, { resolve: resolveFn, reject: rejectFn });
     });
   }
 
@@ -32,7 +43,8 @@ export class PowerDefer {
    * @returns {void}
    */
   resolve(value) {
-    this._resolve(value);
+    const i = _deferInternals.get(this);
+    if (i && typeof i.resolve === 'function') i.resolve(value);
   }
 
   /**
@@ -41,7 +53,8 @@ export class PowerDefer {
    * @returns {void}
    */
   reject(err) {
-    this._reject(err);
+    const i = _deferInternals.get(this);
+    if (i && typeof i.reject === 'function') i.reject(err);
   }
 
   /**
@@ -50,6 +63,30 @@ export class PowerDefer {
    */
   get settled() {
     return this._settled;
+  }
+
+  /**
+   * Status of the deferred: 'pending' | 'fulfilled' | 'rejected'
+   * @returns {'pending'|'fulfilled'|'rejected'}
+   */
+  get status() {
+    return this._status;
+  }
+
+  /**
+   * Convenience boolean: true if resolved successfully
+   * @returns {boolean}
+   */
+  get fulfilled() {
+    return this._status === 'fulfilled';
+  }
+
+  /**
+   * Convenience boolean: true if rejected
+   * @returns {boolean}
+   */
+  get rejected() {
+    return this._status === 'rejected';
   }
 }
 

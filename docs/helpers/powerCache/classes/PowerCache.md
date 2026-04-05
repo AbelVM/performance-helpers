@@ -31,7 +31,7 @@ for (const [key, value] of cache.entries('MRU')) { ... }
 cache.startCleanup({ interval: 10000, maxCleanupPerTick: 200 });
 
 // Inspect stats
-console.log(cache.stats());
+logger.log(cache.stats());
 
 @class PowerCache
 ```

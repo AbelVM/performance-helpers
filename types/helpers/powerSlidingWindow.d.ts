@@ -4,13 +4,15 @@ export class PowerSlidingWindow {
      * @param {number} [options.capacity=1] Max events allowed in window.
      * @param {number} [options.windowMs=1000] Window size in milliseconds.
      */
-    constructor(options?: {
-        capacity?: number | undefined;
-        windowMs?: number | undefined;
-    });
+    /**
+     * @typedef {Object} PowerSlidingWindowOptions
+     * @property {number} [capacity]
+     * @property {number} [windowMs]
+     */
+    constructor(options?: {});
     capacity: number;
     windowMs: number;
-    _timestamps: any[];
+    _timestamps: PowerQueue;
     /**
      * Remove timestamps older than now - windowMs.
      *
@@ -41,3 +43,4 @@ export class PowerSlidingWindow {
      */
     reset(): void;
 }
+import { PowerQueue } from './powerQueue.js';

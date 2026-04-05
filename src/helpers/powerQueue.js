@@ -10,6 +10,10 @@
  */
 export class PowerQueue {
   /**
+   * @typedef {Object} PowerQueueOptions
+   * @property {number} [initialCapacity]
+   */
+  /**
    * Create a PowerQueue.
    * @param {number} [initialCapacity=16] Initial capacity (rounded up to power-of-two).
    */

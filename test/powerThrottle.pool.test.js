@@ -15,7 +15,8 @@ describe('PowerThrottle + PowerPool integration', () => {
       }
     }
 
-    const pool = new PowerPool(MockUnderlying, { size: 1 });
+    // ensure a single eager worker so postMessage calls target the same underlying
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 1, lazy: false });
     const limiter = new PowerThrottle({ capacity: 2, tokens: 2, refillRate: 1 });
 
     const pending = [];

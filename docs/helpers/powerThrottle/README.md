@@ -9,3 +9,7 @@
 ## Classes
 
 - [PowerThrottle](classes/PowerThrottle.md)
+
+## Interfaces
+
+- [PowerThrottleOptions](interfaces/PowerThrottleOptions.md)

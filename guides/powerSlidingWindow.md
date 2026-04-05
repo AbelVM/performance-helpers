@@ -4,25 +4,24 @@ A sliding-window rate limiter that allows up to `capacity` events per `windowMs`
 
 ## Constructor
 
-`new PowerSlidingWindow(options)`
-
 | option | type | default | description |
 |---|---:|---:|---|
 | `capacity` | `number` | `1` | Maximum allowed events in a window.
 | `windowMs` | `number` | `1000` | Window size in milliseconds.
 
-## Methods
+## API
 
-| method | params | returns | description |
-|---|---|---|---|
-| `tryConsume(n = 1)` | `n: number` | `boolean` | Attempt to consume `n` slots in the current window. Returns `true` when within quota.
-| `available()` | — | `number` | Number of remaining slots in the current window.
-| `reset()` | — | `void` | Clear internal state.
+- `tryConsume(n = 1)` — Attempt to consume `n` slots (default `1`) in the current rolling window. Returns `true` when the requested slots are available and the call consumes them; otherwise returns `false`.
+
+- `available()` — Return the current number of available slots in the window. This performs a prune of stale timestamps before reporting.
+
+- `reset()` — Clear internal state and timestamp queue, effectively refilling the window.
 
 ## Example
 
 ```javascript
 import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
+import { PowerPool } from '../src/index.js';
 
 const limiter = new PowerSlidingWindow({ capacity: 5, windowMs: 1000 });
 if (limiter.tryConsume()) {

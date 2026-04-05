@@ -6,7 +6,7 @@ describe('PowerPool.batch APIs', () => {
     class SlowUnderlying {
       constructor() {
         this.onmessage = null;
-        this.postMessage = vi.fn((msg) => {
+        this.postMessage = vi.fn(() => {
           // do not reply quickly
         });
         this.terminate = vi.fn();
@@ -18,6 +18,9 @@ describe('PowerPool.batch APIs', () => {
       maxSize: 1,
       maxTasksPerWorker: 1,
       taskQueue: true,
+      // create worker eagerly for this test
+      minSize: 1,
+      lazy: false,
     });
     try {
       const batch = [{ message: { a: 1 } }, { message: { a: 2 } }, { message: { a: 3 } }];

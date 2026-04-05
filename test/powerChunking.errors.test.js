@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { describe, it } from 'vitest';
-import { PowerChunking } from '../src/helpers/powerChunking.js';
+import { PowerChunker } from '../src/helpers/powerChunking.js';
 
 describe('PowerChunking error handling', () => {
   it('emits per-item normalized error objects for sync throws and async rejections', async () => {
@@ -20,7 +20,7 @@ describe('PowerChunking error handling', () => {
       return item * 10;
     };
 
-    const pool = PowerChunking(items, fn, { poolOptions: { size: 2 }, chunkSize: 2 });
+    const pool = new PowerChunker(items, fn, { poolOptions: { size: 2 }, chunkSize: 2 });
 
     const chunkResults = [];
     pool.onmessage = (e) => {

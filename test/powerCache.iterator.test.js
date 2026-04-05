@@ -9,7 +9,7 @@ describe('PowerCache iteration', () => {
     c.set('c', 3);
     // c was last-set so it should be MRU
     const keys = [];
-    for (const [k, v] of c) {
+    for (const [k] of c) {
       keys.push(k);
     }
     expect(keys[0]).toBe('c');

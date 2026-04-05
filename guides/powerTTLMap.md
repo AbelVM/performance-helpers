@@ -4,42 +4,55 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 
 ## Constructor
 
-`new PowerTTLMap(defaultTTL = 0)`
-
-- `defaultTTL` (ms): default TTL to apply when `set(key, value)` is called without a TTL. `0` disables expiry by default.
--
-## Options
-
 | Option | Type | Default | Description |
-|---|---:|---:|---|
+|---|---:|---:---|---|
 | `defaultTTL` | `number` (ms) | `0` | Default TTL applied when `set(key, value)` is called without a `ttl`. `0` disables expiry. |
+| `onExpire` | `Function` | `undefined` | Optional callback called when an entry expires: `(key, value) => void`. Callback errors are swallowed. |
 
 ## API
 
-| Method / Property | Params | Returns | Description |
-|---|---|---|---|
-| `set(key, value, ttl?)` | `ttl?: number` (ms) | `this` | Set a value. `ttl` overrides `defaultTTL` for this key. |
-| `get(key)` | — | `any \| undefined` | Return value or `undefined` if missing or expired. |
-| `has(key)` | — | `boolean` | `true` if key exists and is not expired. |
-| `delete(key)` | — | `boolean` | Remove a key. Returns whether an entry was removed. |
-| `clear()` | — | `void` | Remove all keys. |
-| `touch(key, ttl?)` | `ttl?: number` (ms) | `boolean` | Refresh TTL for an existing key. Returns `true` when refreshed. |
-| `size` | — | `number` | Number of non-expired entries (getter; purges expired entries lazily). |
-| `entries()` | — | `Iterator<[key, value]>` | Iterate non-expired entries. |
-| `keys()` | — | `Iterator<key>` | Iterate non-expired keys. |
-| `values()` | — | `Iterator<value>` | Iterate non-expired values. |
-| `forEach(cb, thisArg?)` | `cb(value, key, map)` | `void` | Iterate non-expired entries calling `cb`. |
-| `[Symbol.iterator]()` | — | `Iterator<[key, value]>` | Alias for `entries()`. |
+- `set(key, value, ttl?)` — Set a value for `key`. Optionally provide `ttl` in milliseconds to override the map's `defaultTTL`. Returns the map instance to allow chaining.
+
+- `get(key)` — Retrieve the value for `key` or `undefined` if it is missing or expired. Access will lazily purge expired entries.
+
+- `has(key)` — Boolean indicating whether the key exists and is not expired.
+
+- `delete(key)` — Remove an entry. Returns `true` if an entry was removed.
+
+- `clear()` — Remove all entries immediately.
+
+- `touch(key, ttl?)` — Refresh the TTL of an existing key; returns `true` when the TTL was updated.
+
+- `size` (getter) — Number of non-expired entries; accessing this getter will purge expired entries lazily.
+
+- Iteration helpers: `entries()`, `keys()`, `values()` — Iterators over non-expired entries/keys/values respectively. `forEach(cb, thisArg?)` iterates non-expired entries calling `cb(value, key, map)`. `[Symbol.iterator]()` is an alias for `entries()`.
 
 ## Example
 
 ```javascript
 import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
 
-const m = new PowerTTLMap(5000); // default TTL 5s
-m.set('token', 'abc123');
-if (m.has('token')) {
-  console.log('token present');
+// Example — manage expirable object URLs for served images
+
+const urls = new PowerTTLMap(30_000); // default TTL 30s
+
+// Store an object URL for a generated image and revoke it on expiry
+function storePreview(id, objectUrl) {
+  urls.set(id, objectUrl);
 }
-// token auto-expires on access after TTL elapses
+
+urls.set('img-1', URL.createObjectURL(blob));
+
+// register onExpire to revoke underlying resources when entries age out
+const m = new PowerTTLMap(30_000);
+m.set('img-1', URL.createObjectURL(blob));
+m.onExpire = (key, value) => {
+  try {
+    URL.revokeObjectURL(value);
+  } catch (e) {
+    /* ignore */
+  }
+};
+
+if (m.has('img-1')) console.log('preview ready');
 ```

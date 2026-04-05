@@ -6,28 +6,6 @@
 
 # Class: PowerLogger
 
-PowerLogger
-
-Centralized debug logging and lightweight in-memory counters used for
-runtime instrumentation and tests. Instances manage a numeric debug
-verbosity level (0-3) which gates which console methods are invoked.
-
-Debug levels:
-- 0: disabled
-- 1: errors only
-- 2: errors and warnings
-- 3: info and verbose logs
-
-Example:
-```javascript
-import { PowerLogger } from './powerLogger.js'
-const logger = new PowerLogger(2)
-logger.warn('Something notable')
-logger.incrementCounter('my-event')
-```
-
- PowerLogger
-
 ## Constructors
 
 ### Constructor

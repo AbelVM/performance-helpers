@@ -15,7 +15,8 @@ describe('PowerSlidingWindow + PowerPool integration', () => {
       }
     }
 
-    const pool = new PowerPool(MockUnderlying, { size: 1 });
+    // ensure a single eager worker so postMessage calls target the same underlying
+    const pool = new PowerPool(MockUnderlying, { size: 1, minSize: 1, lazy: false });
     const limiter = new PowerSlidingWindow({ capacity: 2, windowMs: 1000 });
 
     const pending = [];

@@ -9,3 +9,7 @@
 ## Classes
 
 - [PowerLogger](classes/PowerLogger.md)
+
+## Interfaces
+
+- [PowerLoggerOptions](interfaces/PowerLoggerOptions.md)

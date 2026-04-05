@@ -6,7 +6,7 @@ describe('PowerPool auto-transfer behavior', () => {
     class MockUnderlying {
       constructor() {
         this.onmessage = null;
-        this.postMessage = vi.fn((msg, transfer) => {
+        this.postMessage = vi.fn((msg) => {
           // echo back after a tick to simulate worker reply
           setTimeout(() => {
             if (this.onmessage) this.onmessage({ data: msg });

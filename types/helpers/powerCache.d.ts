@@ -22,6 +22,19 @@ export function simpleArgsKey(...args: any[]): string;
  * @property {CacheNode|null} next
  */
 /**
+ * @typedef {Object} PowerCacheOptions
+ * @property {number} [maxEntries]
+ * @property {number} [maxWeight]
+ * @property {function(*):number} [weightFn]
+ * @property {number} [defaultTTL]
+ * @property {number} [maxPoolSize]
+ * @property {boolean} [rejectOversized]
+ * @property {function(*, *, string):void} [onEvict]
+ * @property {function(*, *):void} [onExpire]
+ * @property {number} [initialPoolSize]
+ * @property {number} [maxCleanupPerTick]
+ */
+/**
  * @example
  * // Create a cache with caps and a simple weight function
  * const cache = new PowerCache({
@@ -149,6 +162,7 @@ export class PowerCache {
      * @private
      * @param {CacheNode} node
      * @param {number} now - Current timestamp (ms) used for comparisons
+     * @param {boolean} [countMiss=false] - When true, increment the `misses` counter for user-facing lookups.
      */
     private _removeExpiredNode;
     /**
@@ -511,4 +525,16 @@ export type CacheNode = {
     expiresAt: number;
     prev: CacheNode | null;
     next: CacheNode | null;
+};
+export type PowerCacheOptions = {
+    maxEntries?: number | undefined;
+    maxWeight?: number | undefined;
+    weightFn?: ((arg0: any) => number) | undefined;
+    defaultTTL?: number | undefined;
+    maxPoolSize?: number | undefined;
+    rejectOversized?: boolean | undefined;
+    onEvict?: ((arg0: any, arg1: any, arg2: string) => void) | undefined;
+    onExpire?: ((arg0: any, arg1: any) => void) | undefined;
+    initialPoolSize?: number | undefined;
+    maxCleanupPerTick?: number | undefined;
 };

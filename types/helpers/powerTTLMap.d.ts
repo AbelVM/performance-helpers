@@ -7,9 +7,15 @@ export class PowerTTLMap {
     /**
      * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
      */
-    constructor(defaultTTL?: number);
+    /**
+     * @typedef {Object} PowerTTLMapOptions
+     * @property {(key:any,value:any)=>void} [onExpire]
+     */
+    constructor(defaultTTL?: number, options?: {});
     _defaultTTL: number;
+    _onExpire: any;
     _map: Map<any, any>;
+    _expirations: Map<any, any>;
     /**
      * Set a key with optional TTL (ms).
      * @param {any} key
@@ -29,7 +35,8 @@ export class PowerTTLMap {
      * @param {{value:any,expiresAt:number}|undefined} entry - Stored entry or undefined
      * @returns {boolean} true when the entry is missing or expired (and removed)
      */
-    private _checkExpire;
+    private _expireKey;
+    _checkExpire(key: any, entry: any): boolean;
     /**
      * Get a value, returning `undefined` when missing or expired.
      * @param {any} key
