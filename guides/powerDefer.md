@@ -4,7 +4,17 @@ A minimal deferred-promise primitive. Useful for coordination patterns where a p
 
 ## Constructor
 
-`new PowerDefer()` — returns an object with the properties `promise`, `resolve(value)`, `reject(err)`, and `settled` (boolean).
+| option | type | default | description |
+|---|---:|---:|---|
+| `new PowerDefer()` | — | — | Returns an object with the properties `promise`, `resolve(value)`, `reject(err)`, and `settled` (boolean). |
+
+## API
+| property | type | description |
+|---|---:|---|
+| `promise` | `Promise<any>` | The promise that will be settled by `resolve` / `reject`. |
+| `resolve(value: any)` | `Function` | Resolve the associated promise. No-op if already settled. |
+| `reject(err: any)` | `Function` | Reject the associated promise. No-op if already settled. |
+| `settled` | `boolean` | `true` when `resolve` or `reject` has been called. |
 
 ## Example
 
@@ -15,10 +25,3 @@ const d = new PowerDefer();
 setTimeout(() => d.resolve('ready'), 100);
 await d.promise; // 'ready'
 ```
-
-## API
-
-- `promise: Promise<any>` — the promise that will be settled by `resolve`/`reject`.
-- `resolve(value: any): void` — resolve the promise (no-op if already settled).
-- `reject(err: any): void` — reject the promise (no-op if already settled).
-- `settled: boolean` — `true` if `resolve` or `reject` has been called.

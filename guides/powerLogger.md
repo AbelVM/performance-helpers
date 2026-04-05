@@ -1,8 +1,8 @@
-# Debug helper and lightweight counters
+# PowerLogger
 
 Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests. `PowerLogger` centralizes verbosity control and provides convenience helpers that accept lazy argument functions.
 
-## PowerLogger
+## Constructor
 
 | option | type | default | description |
 |---|---:|---:|---|
@@ -12,14 +12,14 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 | `formatter` | `(payload) => any` | `null` | Optional function to transform the structured payload before emission. May return an object (serialized) or a string (emitted directly). |
 | `output` | `(payload) => any` | `null` | Optional transport function; when provided the logger will call this instead of writing to `console.*`. Receives the structured payload or the formatter's returned value. |
 
-### Logging levels
+## Logging levels
 
 - `0` — disabled
 - `1` — errors only
 - `2` — errors and warnings
 - `3` — info and verbose logs
 
-### API
+## API
 
 | method | params | returns | description |
 |---|---|---|---|   
@@ -37,7 +37,7 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 | `getDebugCounters()` | — | `Record<string,number>` | Snapshot of internal counters. |
 | `resetDebugCounters()` | — | `void` | Reset all counters. |
 
-### Example
+## Example
 
 ```javascript
 const logger = new PowerLogger(2)
@@ -45,7 +45,7 @@ logger.warn('This is a warning')
 logger.incrementCounter('cache-miss')
 ```
 
-#### Formatter example
+### Formatter example
 
 You can customize the JSON payload shape by passing a `formatter` function in `options`. The formatter may return an object (which will be JSON.stringified) or a string which will be emitted as-is. Example:
 
@@ -73,7 +73,7 @@ const sLogger = new PowerLogger(3, {
 sLogger.log('boot')
 ```
 
-### Recommendations
+## Recommendations
 
 - Use `PowerLogger` as a small, opt-in instrumentation helper in development and tests. Keep debug-levels low in production.
 - Pass lazy functions to debug methods when computing the string is expensive; they will only be evaluated when the message will actually be emitted.

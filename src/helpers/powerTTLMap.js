@@ -28,10 +28,14 @@ export class PowerTTLMap {
 
   /**
    * Internal: remove entry if expired; returns true if removed or missing.
+   *
+   * This helper centralizes expiry checks for `get`, `has`, and iteration
+   * paths. When an entry is expired it is removed from the underlying map.
+   *
    * @private
-   * @param {any} key
-   * @param {{value:any,expiresAt:number}|undefined} entry
-   * @returns {boolean}
+   * @param {any} key - Map key to check
+   * @param {{value:any,expiresAt:number}|undefined} entry - Stored entry or undefined
+   * @returns {boolean} true when the entry is missing or expired (and removed)
    */
   _checkExpire(key, entry) {
     if (!entry) return true;

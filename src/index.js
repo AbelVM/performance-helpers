@@ -1,4 +1,4 @@
-// This file is just the entry point for the package. 
+// This file is just the entry point for the package.
 export { o2b, o2u8, u82o, b2o } from './helpers/powerBuffer.js';
 export { PowerCache, PowerMemoizer } from './helpers/powerCache.js';
 export { PowerPool } from './helpers/powerPool.js';

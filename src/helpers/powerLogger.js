@@ -1,25 +1,4 @@
-/**
- * Centralized debug helper for the performance-helpers library.
- *
- * Provides a runtime gate for console messages and an internal
- * counter store useful for lightweight instrumentation in tests.
- * Call `setDebugLevel(level)` during initialization to control verbosity.
- *
- * Debug levels:
- *  - 0: disabled
- *  - 1: errors only
- *  - 2: errors and warnings
- *  - 3: all messages (info/log)
- *
- * Usage example:
- * ```javascript
- * import { PowerLogger } from './powerLogger.js'
- * const logger = new PowerLogger(2)
- * logger.warn('something notable')
- * ```
- *
- *
- */
+import { formatErrorObj, normalizeError } from '../utils/errors.js';
 
 /**
  * PowerLogger
@@ -181,7 +160,17 @@ export class PowerLogger {
    */
   error(...args) {
     try {
-      this._emit(1, 'error', 'error', args);
+      const formatted = args.map((a) => {
+        try {
+          if (a && a.error) return formatErrorObj(a);
+          if (a instanceof Error || (a && typeof a === 'object'))
+            return formatErrorObj(normalizeError(a));
+        } catch (e) {
+          /* ignore formatting failures */
+        }
+        return a;
+      });
+      this._emit(1, 'error', 'error', formatted);
     } catch (e) {}
   }
 

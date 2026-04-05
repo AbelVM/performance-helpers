@@ -34,8 +34,13 @@ export class PowerThrottle {
 
   /**
    * Internal: advance tokens based on elapsed time.
+   * This method computes the number of tokens to add based on the elapsed
+   * milliseconds since the last refill and the configured `refillRate`.
+   * It accumulates fractional tokens between invocations to preserve precision.
+   *
    * @private
-   * @param {number} now - current timestamp (ms)
+   * @param {number} now - current timestamp in milliseconds
+   * @returns {void}
    */
   _refill(now) {
     if (this.refillRate <= 0) return;
@@ -62,7 +67,7 @@ export class PowerThrottle {
     this._refill(now);
     if (this.tokens >= want) {
       this.tokens -= want;
-      
+
       return true;
     }
     return false;

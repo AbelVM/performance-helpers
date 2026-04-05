@@ -16,11 +16,7 @@
 import { o2u8, u82o } from './powerBuffer.js';
 import { nowMs } from '../utils/now.js';
 import { PowerQueue } from './powerQueue.js';
-
-// High-resolution now in milliseconds, mapped to epoch time.
-// Use performance.timeOrigin+performance.now() when available, or derive an
-// epoch offset for hrtime to keep timestamps comparable with Date.now().
-// `nowMs` imported from src/helpers/now.js
+import { PowerLogger } from './powerLogger.js';
 
 /**
  * @typedef {Object} WorkerObj
@@ -38,7 +34,7 @@ import { PowerQueue } from './powerQueue.js';
  * @example
  * import MinionWorker from './worker.js?worker&inline'
  * const pool = new PowerPool(MinionWorker, { size: 4, idleTimeout: 30000 });
- * pool.onmessage = (e) => { console.log(e.data); };
+ * pool.onmessage = (e) => { logger.log(e.data); };
  * pool.postMessage({ payload: {} });
  */
 export class PowerPool {
@@ -89,9 +85,9 @@ export class PowerPool {
     this._terminatedWorkerTaskCountsTotal = 0;
     this._terminatedWorkerTaskCountsCount = 0;
 
-      /** @type {WorkerObj[]} */
-      this.workers = [];
-      this.queue = new PowerQueue();
+    /** @type {WorkerObj[]} */
+    this.workers = [];
+    this.queue = new PowerQueue();
     this._listeners = {
       message: new Set(),
       error: new Set(),
@@ -110,6 +106,10 @@ export class PowerPool {
     this._activeTasks = 0;
     /** whether the pool is considered idle (no active tasks and empty queue) */
     this._isIdle = true;
+
+    // Create a per-instance logger. Allow callers to override via options.debugLevel (default 1).
+    const dbg = options && typeof options.debugLevel === 'number' ? options.debugLevel : 1;
+    this._logger = new PowerLogger(dbg, { name: 'powerPool' });
 
     const initial = Math.min(Math.max(size, this.minSize), this.maxSize);
     for (let i = 0; i < initial; i++) this._addWorkerInstance();
@@ -201,14 +201,14 @@ export class PowerPool {
         try {
           this._onresize(ev);
         } catch (err) {
-          console.error('Pool onresize handler error', err);
+          this._logger.error(err, 'Pool onresize handler error');
         }
       }
       for (const cb of this._listeners.resize) {
         try {
           cb(ev);
         } catch (err) {
-          console.error('pool resize listener error', err);
+          this._logger.error(err, 'pool resize listener error');
         }
       }
     }
@@ -219,8 +219,15 @@ export class PowerPool {
 
   /**
    * Create a new worker instance using the configured source.
+   *
+   * This helper normalizes the configured `workerSource` which may be a
+   * callable factory (constructor) or a string path. When a string path is
+   * provided it attempts to resolve a `baseUrl` at runtime in a bundler-safe
+   * manner and constructs a `Worker` accordingly. Throws when `workerSource`
+   * is neither a function nor a string.
+   *
    * @private
-   * @returns {Worker|any}
+   * @returns {Worker|any} The underlying worker instance or factory result.
    */
   _createWorkerInstance() {
     if (typeof this._workerSource === 'function') return new this._workerSource();
@@ -261,9 +268,16 @@ export class PowerPool {
 
   /**
    * Add and wire a new worker instance into the pool.
+   *
+   * This helper wraps the underlying worker instance with a small adapter
+   * that encodes outgoing plain-object messages to transferable `Uint8Array`
+   * when possible and decodes incoming binary messages back to objects.
+   * It also wires cross-platform event handlers (`message`, `error`,
+   * `messageerror`) and returns the `WorkerObj` metadata entry used by the pool.
+   *
    * @private
-   * @param {number} id
-   * @returns {WorkerObj}
+   * @param {number} [id] - Optional explicit id for the worker entry.
+   * @returns {WorkerObj} The newly created worker entry.
    */
   _addWorkerInstance(id) {
     if (id == null) id = this._nextWorkerId++;
@@ -302,7 +316,7 @@ export class PowerPool {
           else underlying.postMessage(msg);
         } catch (err) {
           // surface the error to caller environment (console for now)
-          console.error('Failed to postMessage to underlying worker', err);
+          this._logger.error(err, 'Failed to postMessage to underlying worker');
           throw err;
         }
       },
@@ -428,7 +442,7 @@ export class PowerPool {
           workerObj.tasks++;
           this._activeTasks++;
         } catch (err) {
-          console.error('Failed to dispatch queued message to worker', err);
+          this._logger.error(err, 'Failed to dispatch queued message to worker');
         }
       }
 
@@ -436,14 +450,14 @@ export class PowerPool {
         try {
           this._onmessage(e);
         } catch (err) {
-          console.error('Pool onmessage handler error', err);
+          this._logger.error(err, 'Pool onmessage handler error');
         }
       }
       for (const cb of this._listeners.message) {
         try {
           cb(e);
         } catch (err) {
-          console.error('pool listener error', err);
+          this._logger.error(err, 'pool listener error');
         }
       }
 
@@ -452,6 +466,14 @@ export class PowerPool {
     };
 
     // forward underlying events, decoding binary payloads to JS objects
+    /**
+     * Handle a raw message event from the underlying Worker and decode
+     * binary payloads back to JS values before forwarding to the wrapper
+     * `worker.onmessage` handler.
+     *
+     * @private
+     * @param {MessageEvent|any} e - The raw event or message payload.
+     */
     const _handleMessage = (e) => {
       // support both browser-like MessageEvent (with .data) and Node 'message' callbacks (data passed directly)
       let data = e && e.data !== undefined ? e.data : e;
@@ -468,59 +490,109 @@ export class PowerPool {
         try {
           worker.onmessage(ev);
         } catch (err) {
-          console.error('worker wrapper onmessage error', err);
+          this._logger.error(err, 'worker wrapper onmessage error');
         }
       }
     };
 
+    /**
+     * Handle an error event from the underlying Worker and forward it to
+     * the wrapper `worker.onerror` and pool-level error listeners.
+     *
+     * @private
+     * @param {any} e - The error event or value.
+     */
     const _handleError = (e) => {
       if (typeof worker.onerror === 'function') {
         try {
           worker.onerror(e);
         } catch (err) {
-          console.error('worker wrapper onerror error', err);
+          this._logger.error(err, 'worker wrapper onerror error');
         }
       }
       for (const cb of this._listeners.error) {
         try {
           cb(e);
         } catch (err) {
-          console.error('pool error listener error', err);
+          this._logger.error(err, 'pool error listener error');
         }
       }
     };
 
+    /**
+     * Handle a `messageerror` event from the underlying Worker and forward
+     * it to the wrapper `worker.onmessageerror` and pool-level listeners.
+     *
+     * @private
+     * @param {any} e - The messageerror event or value.
+     */
     const _handleMessageError = (e) => {
       if (typeof worker.onmessageerror === 'function') {
         try {
           worker.onmessageerror(e);
         } catch (err) {
-          console.error('worker wrapper onmessageerror error', err);
+          this._logger.error(err, 'worker wrapper onmessageerror error');
         }
       }
       for (const cb of this._listeners.messageerror) {
         try {
           cb(e);
         } catch (err) {
-          console.error('pool messageerror listener error', err);
+          this._logger.error(err, 'pool messageerror listener error');
         }
       }
     };
 
     // Attach handlers in a cross-platform way (Worker in browsers and Node.js worker_threads)
     if (typeof underlying.addEventListener === 'function') {
-      try { underlying.addEventListener('message', _handleMessage); } catch (e) { /* ignore */ }
-      try { underlying.addEventListener('error', _handleError); } catch (e) { /* ignore */ }
-      try { underlying.addEventListener('messageerror', _handleMessageError); } catch (e) { /* ignore */ }
+      try {
+        underlying.addEventListener('message', _handleMessage);
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        underlying.addEventListener('error', _handleError);
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        underlying.addEventListener('messageerror', _handleMessageError);
+      } catch (e) {
+        /* ignore */
+      }
     } else if (typeof underlying.on === 'function') {
-      try { underlying.on('message', _handleMessage); } catch (e) { /* ignore */ }
-      try { underlying.on('error', _handleError); } catch (e) { /* ignore */ }
-      try { underlying.on('messageerror', _handleMessageError); } catch (e) { /* ignore */ }
+      try {
+        underlying.on('message', _handleMessage);
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        underlying.on('error', _handleError);
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        underlying.on('messageerror', _handleMessageError);
+      } catch (e) {
+        /* ignore */
+      }
     } else {
       // last-resort assignments
-      try { underlying.onmessage = _handleMessage; } catch (e) { /* ignore */ }
-      try { underlying.onerror = _handleError; } catch (e) { /* ignore */ }
-      try { underlying.onmessageerror = _handleMessageError; } catch (e) { /* ignore */ }
+      try {
+        underlying.onmessage = _handleMessage;
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        underlying.onerror = _handleError;
+      } catch (e) {
+        /* ignore */
+      }
+      try {
+        underlying.onmessageerror = _handleMessageError;
+      } catch (e) {
+        /* ignore */
+      }
     }
 
     return workerObj;
@@ -528,6 +600,11 @@ export class PowerPool {
 
   /**
    * Return the least-loaded worker (smallest `tasks` count).
+   *
+   * When multiple workers share the same `tasks` count prefer the one with
+   * the lower EWMA latency (`latencyEwma`). Returns `null` when no workers
+   * are available.
+   *
    * @private
    * @returns {WorkerObj|null}
    */
@@ -554,7 +631,10 @@ export class PowerPool {
    * (up to `maxSize`), or queue the task if configured.
    *
    * @param {*} message - The message to post to a worker.
-   * @param {Transferable[]=} transfer - Optional transfer list.
+   * @param {Transferable[]=} transfer - Optional transfer list. If omitted and
+   * a plain JS object is supplied, the pool will internally encode the object
+   * to a transferable `Uint8Array` (via `o2u8`) and pass its `ArrayBuffer` as
+   * the transfer list to avoid structured-clone copies.
    * @returns {boolean} True if the message was accepted (dispatched or queued).
    */
   postMessage(message, transfer, options) {
@@ -563,7 +643,10 @@ export class PowerPool {
     // support explicit per-worker targeting via `options.workerId`
     const targetWorkerId = options && options.workerId != null ? options.workerId : null;
     // prefer an existing idle/least-loaded worker
-    const least = targetWorkerId != null ? this.workers.find((w) => w.id === targetWorkerId) : this._findLeastLoadedWorker();
+    const least =
+      targetWorkerId != null
+        ? this.workers.find((w) => w.id === targetWorkerId)
+        : this._findLeastLoadedWorker();
 
     // support awaiting a response: options.awaitResponse or explicit options.correlationId
     const wantResponse = Boolean(
@@ -574,7 +657,10 @@ export class PowerPool {
     if (wantResponse) {
       // Bound the correlation id to 32 bits to avoid unbounded integer growth
       // in extremely long-lived pools. Use unsigned 32-bit wrap-around.
-      correlationId = options.correlationId != null ? options.correlationId : String((this._nextCorrelationId++ ) >>> 0);
+      correlationId =
+        options.correlationId != null
+          ? options.correlationId
+          : String(this._nextCorrelationId++ >>> 0);
       // only plain-object messages can be augmented with correlationId
       const isPlainObject =
         message !== null &&
@@ -602,11 +688,45 @@ export class PowerPool {
       });
     }
 
+    // Helper: prepare message and transfer when caller omitted transfer.
+    /**
+     * Prepare a message and optional transfer list for posting to a worker.
+     * If `tr` (transfer) is omitted and `msg` is a plain object this function
+     * will attempt to encode the object into a transferable `Uint8Array`
+     * using `o2u8` and return `{ message: Uint8Array, transfer: [ArrayBuffer] }`.
+     * On failure it falls back to the original message and transfer list.
+     *
+     * @private
+     * @param {*} msg - Message to prepare.
+     * @param {Transferable[]=|undefined} tr - Optional transfer list.
+     * @returns {{message:*,transfer:Transferable[]|undefined}}
+     */
+    const _prepareForTransfer = (msg, tr) => {
+      if (tr) return { message: msg, transfer: tr };
+      const isPlainObject =
+        msg !== null &&
+        typeof msg === 'object' &&
+        !ArrayBuffer.isView(msg) &&
+        !(msg instanceof ArrayBuffer);
+      if (isPlainObject) {
+        try {
+          const u8 = o2u8(msg);
+          return { message: u8, transfer: [u8.buffer] };
+        } catch (err) {
+          // encoding failed; fall back to original message without transfer
+          return { message: msg, transfer: tr };
+        }
+      }
+      return { message: msg, transfer: tr };
+    };
+
     if (least && least.tasks < this._maxTasksPerWorker) {
       try {
         const startTime = nowMs();
-        if (transfer) least.worker.postMessage(message, transfer);
-        else least.worker.postMessage(message);
+        const prepared = _prepareForTransfer(message, transfer);
+        if (prepared.transfer && prepared.transfer.length)
+          least.worker.postMessage(prepared.message, prepared.transfer);
+        else least.worker.postMessage(prepared.message);
         // record start time for latency tracking and increment task count
         if (Array.isArray(least._startTimes)) least._startTimes.push(startTime);
         least.tasks++;
@@ -628,10 +748,10 @@ export class PowerPool {
               /* ignore */
             }
           }
-          console.error('Failed to postMessage to worker', err);
+          this._logger.error(err, 'Failed to postMessage to worker');
           return pendingPromise;
         }
-        console.error('Failed to postMessage to worker', err);
+        this._logger.error(err, 'Failed to postMessage to worker');
         return false;
       }
     }
@@ -661,8 +781,10 @@ export class PowerPool {
       const obj = this._addWorkerInstance();
       try {
         const startTime = nowMs();
-        if (transfer) obj.worker.postMessage(message, transfer);
-        else obj.worker.postMessage(message);
+        const prepared = _prepareForTransfer(message, transfer);
+        if (prepared.transfer && prepared.transfer.length)
+          obj.worker.postMessage(prepared.message, prepared.transfer);
+        else obj.worker.postMessage(prepared.message);
         if (Array.isArray(obj._startTimes)) obj._startTimes.push(startTime);
         obj.tasks++;
         this._activeTasks++;
@@ -683,17 +805,18 @@ export class PowerPool {
               /* ignore */
             }
           }
-          console.error('Failed to postMessage to new worker', err);
+          this._logger.error(err, 'Failed to postMessage to new worker');
           return pendingPromise;
         }
-        console.error('Failed to postMessage to new worker', err);
+        this._logger.error(err, 'Failed to postMessage to new worker');
         return false;
       }
     }
 
     // pool full and all workers at capacity (or targeted worker busy/missing)
     if (this.taskQueueEnabled) {
-      this.queue.push({ message, transfer });
+      const prepared = _prepareForTransfer(message, transfer);
+      this.queue.push({ message: prepared.message, transfer: prepared.transfer });
       // queued task means pool not idle (but not an active dispatched task)
       this._updateIdleState();
       return wantResponse ? pendingPromise : true;
@@ -705,10 +828,12 @@ export class PowerPool {
     // advance and wrap to avoid unbounded integer growth
     this._nextIndex = (this._nextIndex + 1) % this.workers.length;
     const fallback = this.workers[idx];
-      try {
-        const startTime = nowMs();
-      if (transfer) fallback.worker.postMessage(message, transfer);
-      else fallback.worker.postMessage(message);
+    try {
+      const startTime = nowMs();
+      const prepared = _prepareForTransfer(message, transfer);
+      if (prepared.transfer && prepared.transfer.length)
+        fallback.worker.postMessage(prepared.message, prepared.transfer);
+      else fallback.worker.postMessage(prepared.message);
       if (Array.isArray(fallback._startTimes)) fallback._startTimes.push(startTime);
       fallback.tasks++;
       this._activeTasks++;
@@ -728,10 +853,10 @@ export class PowerPool {
             /* ignore */
           }
         }
-        console.error('Failed to postMessage to fallback worker', err);
+        this._logger.error(err, 'Failed to postMessage to fallback worker');
         return pendingPromise;
       }
-      console.error('Failed to postMessage to fallback worker', err);
+      this._logger.error(err, 'Failed to postMessage to fallback worker');
       return false;
     }
   }
@@ -739,7 +864,10 @@ export class PowerPool {
   /**
    * Broadcasts a message to all workers in the pool.
    * @param {*} message
-   * @param {Transferable[]=} transfer
+   * @param {Transferable[]=} transfer - Optional transfer list. If omitted and a
+   * plain JS object is supplied, the pool will attempt to encode the object for
+   * each worker into a transferable `Uint8Array` (via `o2u8`) so each worker
+   * receives an independent transferable buffer to avoid structured-clone copies.
    * @returns {void}
    */
   broadcast(message, transfer) {
@@ -748,18 +876,358 @@ export class PowerPool {
     const now = nowMs();
     for (const w of this.workers) {
       try {
-        if (transfer) w.worker.postMessage(message, transfer);
-        else w.worker.postMessage(message);
+        let msg = message;
+        let tr = transfer;
+        if (!tr) {
+          const isPlainObject =
+            message !== null &&
+            typeof message === 'object' &&
+            !ArrayBuffer.isView(message) &&
+            !(message instanceof ArrayBuffer);
+          if (isPlainObject) {
+            try {
+              // Each worker needs its own transferable buffer; encode per-worker.
+              const u8 = o2u8(message);
+              msg = u8;
+              tr = [u8.buffer];
+            } catch (err) {
+              // fall back to original message if encoding fails
+              msg = message;
+              tr = undefined;
+            }
+          }
+        }
+        if (tr && tr.length) w.worker.postMessage(msg, tr);
+        else w.worker.postMessage(msg);
         // record start time for latency tracking (use same timestamp for all records in this iteration)
         if (Array.isArray(w._startTimes)) w._startTimes.push(now);
         w.tasks++;
         this._activeTasks++;
         w.lastActive = now;
       } catch (err) {
-        console.error('broadcast error', err);
+        this._logger.error(err, 'broadcast error');
       }
     }
     this._updateIdleState();
+  }
+
+  /**
+   * Stop all pending queued tasks and immediately post a message to the pool.
+   * This clears the internal task queue first (cancelling pending tasks),
+   * updates the pool idle state, then forwards the provided message using
+   * `postMessage` so the message is dispatched to a live worker immediately
+   * (or enqueued if no worker can accept it).
+   *
+   * @param {*} message - The message to post after clearing pending tasks.
+   * @param {Transferable[]=} transfer - Optional transfer list. When omitted
+   * and a plain object is supplied, the pool will attempt to encode the
+   * object to a transferable `Uint8Array` for efficient transfer.
+   * @param {Object=} options - Optional options forwarded to `postMessage`.
+   * @returns {boolean|Promise<any>} The same return value as `postMessage`.
+   */
+  stopThePress(message, transfer, options) {
+    // Respect caller option `recreateWorkers` (default true). Remove it
+    // from forwarded options so it doesn't reach `postMessage`.
+    const recreate =
+      options && typeof options.recreateWorkers !== 'undefined'
+        ? Boolean(options.recreateWorkers)
+        : true;
+    const fwdOptions =
+      options && typeof options === 'object' ? Object.assign({}, options) : undefined;
+    if (fwdOptions) delete fwdOptions.recreateWorkers;
+    // 1) clear queued tasks
+    try {
+      if (this.queue && typeof this.queue.clear === 'function') this.queue.clear();
+    } catch (err) {
+      this._logger.error(err, 'stopThePress: failed to clear queue');
+    }
+
+    // 2) reject any pending Promise responses (they will never arrive)
+    try {
+      for (const [cid, entry] of Array.from(this._pendingResponses.entries())) {
+        try {
+          if (entry.timer) clearTimeout(entry.timer);
+          entry.reject(new Error('stopThePress: cancelled pending response'));
+        } catch (e) {
+          /* ignore */
+        }
+        this._pendingResponses.delete(cid);
+      }
+    } catch (err) {
+      this._logger.error(err, 'stopThePress: failed to cancel pending responses');
+    }
+
+    // 3) terminate currently running workers to stop inflight tasks, and
+    //    collect stats. Optionally recreate replacement workers.
+    const currentCount = this.workers.length;
+    try {
+      for (let i = this.workers.length - 1; i >= 0; i--) {
+        const w = this.workers[i];
+        try {
+          // account completed tasks for terminated worker bookkeeping
+          this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
+          this._terminatedWorkerTaskCountsCount += 1;
+        } catch (e) {
+          /* ignore */
+        }
+        try {
+          w.worker.terminate();
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      // clear the workers array and reset active task counter
+      this.workers.length = 0;
+      this._activeTasks = 0;
+    } catch (err) {
+      this._logger.error(err, 'stopThePress: failed while terminating workers');
+    }
+
+    if (recreate) {
+      // Recreate replacement workers up to previous count (respecting max/min)
+      const desired = Math.max(this.minSize, Math.min(currentCount, this.maxSize));
+      for (let i = 0; i < desired; i++) this._addWorkerInstance();
+    }
+
+    // re-evaluate idle state after cancelling inflight work
+    this._updateIdleState();
+
+    // 4) finally forward the provided message using normal dispatch
+    return this.postMessage(message, transfer, fwdOptions);
+  }
+
+  /**
+   * Post a batch of messages to the pool.
+   * Each entry is an object: `{ message, transfer? }`.
+   * Returns an array with the same length as `items` where each element is
+   * either a boolean (accepted) or a Promise (when `options.awaitResponse` is used).
+   * @param {{message:*,transfer?:Transferable[]}[]} items
+   * @param {Object=} options - Optional options forwarded to each `postMessage` call.
+   * @returns {(boolean|Promise<any>)[]}
+   */
+  postMessageBatch(items, options) {
+    if (!Array.isArray(items))
+      throw new Error('postMessageBatch expects an array of {message, transfer?}');
+
+    // If the caller expects per-item responses (awaitResponse or explicit correlationId),
+    // defer to the single-item `postMessage` implementation so correlation ids and
+    // pending Promises are handled exactly the same way for each item.
+    const wantsResponse = Boolean(
+      options && (options.awaitResponse || options.correlationId != null)
+    );
+    if (wantsResponse) {
+      const results = new Array(items.length);
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i] || {};
+        results[i] = this.postMessage(it.message, it.transfer, options);
+      }
+      return results;
+    }
+
+    // Optimized path for fire-and-forget batches (no per-item Promise handling):
+    // - prepare transferable buffers once per item (avoid repeated structured-clone attempts)
+    // - attempt direct dispatch to available workers
+    // - collect any prepared items that must be queued and push them into the queue
+    const results = new Array(items.length);
+    const queuedPrepared = [];
+    const targetWorkerId = options && options.workerId != null ? options.workerId : null;
+
+    const prepare = (msg, tr) => {
+      if (tr) return { message: msg, transfer: tr };
+      const isPlainObject =
+        msg !== null &&
+        typeof msg === 'object' &&
+        !ArrayBuffer.isView(msg) &&
+        !(msg instanceof ArrayBuffer);
+      if (isPlainObject) {
+        try {
+          const u8 = o2u8(msg);
+          return { message: u8, transfer: [u8.buffer] };
+        } catch (err) {
+          return { message: msg, transfer: tr };
+        }
+      }
+      return { message: msg, transfer: tr };
+    };
+
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i] || {};
+      const prepared = prepare(it.message, it.transfer);
+
+      // try to find a suitable worker
+      const least =
+        targetWorkerId != null
+          ? this.workers.find((w) => w.id === targetWorkerId)
+          : this._findLeastLoadedWorker();
+      let dispatched = false;
+
+      if (least && least.tasks < this._maxTasksPerWorker) {
+        try {
+          const startTime = nowMs();
+          if (prepared.transfer && prepared.transfer.length)
+            least.worker.postMessage(prepared.message, prepared.transfer);
+          else least.worker.postMessage(prepared.message);
+          if (Array.isArray(least._startTimes)) least._startTimes.push(startTime);
+          least.tasks++;
+          this._activeTasks++;
+          least.lastActive = startTime;
+          this._updateIdleState();
+          results[i] = true;
+          dispatched = true;
+        } catch (err) {
+          results[i] = false;
+          dispatched = true;
+        }
+      }
+
+      if (!dispatched) {
+        // If we can grow the pool (and no specific workerId was requested), create a new worker and use it
+        if (targetWorkerId == null && this.workers.length < this.maxSize) {
+          try {
+            const obj = this._addWorkerInstance();
+            const startTime = nowMs();
+            if (prepared.transfer && prepared.transfer.length)
+              obj.worker.postMessage(prepared.message, prepared.transfer);
+            else obj.worker.postMessage(prepared.message);
+            if (Array.isArray(obj._startTimes)) obj._startTimes.push(startTime);
+            obj.tasks++;
+            this._activeTasks++;
+            obj.lastActive = startTime;
+            this._updateIdleState();
+            results[i] = true;
+            dispatched = true;
+          } catch (err) {
+            results[i] = false;
+            dispatched = true;
+          }
+        }
+      }
+
+      if (!dispatched) {
+        // Pool is saturated or targeted worker unavailable: collect for queueing or fallback
+        if (this.taskQueueEnabled) {
+          queuedPrepared.push({ message: prepared.message, transfer: prepared.transfer });
+          results[i] = true;
+        } else {
+          // fallback round-robin
+          if (!this.workers.length) {
+            results[i] = false;
+          } else {
+            const idx = this._nextIndex % this.workers.length;
+            this._nextIndex = (this._nextIndex + 1) % this.workers.length;
+            const fallback = this.workers[idx];
+            try {
+              const startTime = nowMs();
+              if (prepared.transfer && prepared.transfer.length)
+                fallback.worker.postMessage(prepared.message, prepared.transfer);
+              else fallback.worker.postMessage(prepared.message);
+              if (Array.isArray(fallback._startTimes)) fallback._startTimes.push(startTime);
+              fallback.tasks++;
+              this._activeTasks++;
+              fallback.lastActive = startTime;
+              this._updateIdleState();
+              results[i] = true;
+            } catch (err) {
+              results[i] = false;
+              this._logger.error(err, 'Failed to postMessage to fallback worker');
+            }
+          }
+        }
+      }
+    }
+
+    // Push queued items into the queue using batch enqueue for efficiency
+    if (queuedPrepared.length) {
+      try {
+        // queue stores plain objects `{message,transfer}` so we can pass the array directly
+        this.queue.pushMany(queuedPrepared);
+        this._updateIdleState();
+      } catch (err) {
+        this._logger.error(err, 'postMessageBatch: failed to enqueue prepared items');
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Stop the press and then post a batch of messages.
+   *
+   * Clears the internal task queue and terminates inflight workers (optionally recreating them),
+   * rejects pending response Promises, then forwards the provided batch to `postMessageBatch`.
+   *
+   * This method mirrors the semantics of `stopThePress` for single messages but
+   * operates on a batch. Use it when you need to atomically cancel pending work
+   * and then seed the pool with a new set of tasks.
+   *
+   * @param {{message:*,transfer?:Transferable[]}[]} items - Array of items to send after clearing the pool.
+   * @param {Object=} options - Optional options forwarded to `postMessageBatch`.
+   *   Recognized options include:
+   *     - `recreateWorkers` (boolean, default: true) — whether to recreate replacement workers after termination.
+   *     - `awaitResponse` (boolean) — if true, returned slots will be Promises as in `postMessageBatch`.
+   *     - `workerId` (number) — target a specific worker during dispatch attempts.
+   * @returns {(boolean|Promise<any>)[]} Array with per-item results: `true|false` or `Promise` when awaiting responses.
+   */
+  stopThePressBatch(items, options) {
+    // mirror stopThePress semantics for clearing/terminating, but work on a batch
+    const recreate =
+      options && typeof options.recreateWorkers !== 'undefined'
+        ? Boolean(options.recreateWorkers)
+        : true;
+    const fwdOptions =
+      options && typeof options === 'object' ? Object.assign({}, options) : undefined;
+    if (fwdOptions) delete fwdOptions.recreateWorkers;
+
+    try {
+      if (this.queue && typeof this.queue.clear === 'function') this.queue.clear();
+    } catch (err) {
+      this._logger.error(err, 'stopThePressBatch: failed to clear queue');
+    }
+
+    try {
+      for (const [cid, entry] of Array.from(this._pendingResponses.entries())) {
+        try {
+          if (entry.timer) clearTimeout(entry.timer);
+          entry.reject(new Error('stopThePressBatch: cancelled pending response'));
+        } catch (e) {
+          /* ignore */
+        }
+        this._pendingResponses.delete(cid);
+      }
+    } catch (err) {
+      this._logger.error(err, 'stopThePressBatch: failed to cancel pending responses');
+    }
+
+    const currentCount = this.workers.length;
+    try {
+      for (let i = this.workers.length - 1; i >= 0; i--) {
+        const w = this.workers[i];
+        try {
+          this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
+          this._terminatedWorkerTaskCountsCount += 1;
+        } catch (e) {
+          /* ignore */
+        }
+        try {
+          w.worker.terminate();
+        } catch (e) {
+          /* ignore */
+        }
+      }
+      this.workers.length = 0;
+      this._activeTasks = 0;
+    } catch (err) {
+      this._logger.error(err, 'stopThePressBatch: failed while terminating workers');
+    }
+
+    if (recreate) {
+      const desired = Math.max(this.minSize, Math.min(currentCount, this.maxSize));
+      for (let i = 0; i < desired; i++) this._addWorkerInstance();
+    }
+
+    this._updateIdleState();
+
+    return this.postMessageBatch(items, fwdOptions);
   }
 
   /**
@@ -800,7 +1268,13 @@ export class PowerPool {
   /**
    * Internal: terminate workers that have been idle longer than `idleTimeout`.
    * Keeps at least `minSize` workers alive.
+   *
+   * This routine scans workers from newest to oldest and terminates those
+   * which have had no tasks for longer than `idleTimeout`, updating
+   * termination statistics used by `getStats()`.
+   *
    * @private
+   * @returns {void}
    */
   _reapIdleWorkers() {
     if (this.idleTimeout <= 0) return;
@@ -842,15 +1316,8 @@ export class PowerPool {
    * - The event `data.type` is `'pool:idle'` and can be used to distinguish it
    *   from normal worker messages.
    *
-   * Example:
-   * ```javascript
-   * pool.addEventListener('idle', (e) => {
-   *   // e.data.type === 'pool:idle'
-   *   console.log('Pool idle, stats=', e.data.stats);
-   * });
-   * ```
-   *
    * @private
+   * @returns {void}
    */
   _emitIdle() {
     const ev = { data: { type: 'pool:idle', stats: this.getStats() } };
@@ -859,35 +1326,41 @@ export class PowerPool {
       try {
         this._onmessage(ev);
       } catch (err) {
-        console.error('Pool onmessage handler error', err);
+        this._logger.error(err, 'Pool onmessage handler error');
       }
     }
     if (this._onidle) {
       try {
         this._onidle(ev);
       } catch (err) {
-        console.error('Pool onidle handler error', err);
+        this._logger.error(err, 'Pool onidle handler error');
       }
     }
     for (const cb of this._listeners.message) {
       try {
         cb(ev);
       } catch (err) {
-        console.error('pool listener error', err);
+        this._logger.error(err, 'pool listener error');
       }
     }
     for (const cb of this._listeners.idle) {
       try {
         cb(ev);
       } catch (err) {
-        console.error('pool idle listener error', err);
+        this._logger.error(err, 'pool idle listener error');
       }
     }
   }
 
   /**
    * Check current state and emit idle event if transitioning to idle.
+   *
+   * This function examines active task counts and queue length to detect a
+   * transition from non-idle to idle and will call `_emitIdle()` exactly once
+   * on such transitions.
+   *
    * @private
+   * @returns {void}
    */
   _updateIdleState() {
     const queueEmpty = this.queue.length === 0;
@@ -976,7 +1449,8 @@ export class PowerPool {
     for (const w of this.workers) aliveCompletedTotal += w.completedTasks || 0;
     const aliveCount = this.workers.length || 0;
     const combinedCount = terminatedCount + aliveCount;
-    const avgTasksPerWorkerUntilTermination = combinedCount > 0 ? (terminatedTotal + aliveCompletedTotal) / combinedCount : 0;
+    const avgTasksPerWorkerUntilTermination =
+      combinedCount > 0 ? (terminatedTotal + aliveCompletedTotal) / combinedCount : 0;
 
     // time-per-task statistics (Welford streaming stats provide O(1) memory)
     let min = 0,
@@ -1052,7 +1526,7 @@ export class PowerPool {
         try {
           cb(ev);
         } catch (err) {
-          console.error('pool idle listener error', err);
+          this._logger.error(err, 'pool idle listener error');
         }
       }
     }
@@ -1118,7 +1592,7 @@ export class PowerPool {
         try {
           cb(ev);
         } catch (err) {
-          console.error('Pool onidle handler error', err);
+          this._logger.error(err, 'Pool onidle handler error');
         }
       }
     }

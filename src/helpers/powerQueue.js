@@ -88,7 +88,13 @@ export class PowerQueue {
 
   /**
    * Internal: double internal buffer capacity and reindex elements.
+   *
+   * This private helper allocates a new backing array with double the
+   * previous capacity, copies items in logical order starting from `this._head`,
+   * and resets internal indices so the queue remains contiguous.
+   *
    * @private
+   * @returns {void}
    */
   _grow() {
     const old = this._buffer;
@@ -104,5 +110,61 @@ export class PowerQueue {
     this._mask = newCap - 1;
     this._head = 0;
     this._tail = this._size & this._mask;
+  }
+
+  /**
+   * Enqueue multiple items in one call. Optimized to resize buffer once and
+   * copy items in contiguous blocks when possible.
+   * @param {Array<any>} items
+   * @returns {number} New queue length after all pushes.
+   */
+  pushMany(items) {
+    if (!Array.isArray(items) || items.length === 0) return this._size;
+    const need = this._size + items.length;
+    // grow until we have capacity for all items
+    while (this._capacity < need) this._grow();
+
+    // fast path: if tail has enough room contiguously
+    const firstBlock = Math.min(items.length, this._capacity - this._tail);
+    for (let i = 0; i < firstBlock; i++) {
+      this._buffer[this._tail + i] = items[i];
+    }
+    this._tail = (this._tail + firstBlock) & this._mask;
+
+    // remaining items (wrap-around)
+    let idx = firstBlock;
+    while (idx < items.length) {
+      const block = Math.min(items.length - idx, this._capacity - this._tail);
+      for (let j = 0; j < block; j++) {
+        this._buffer[this._tail + j] = items[idx + j];
+      }
+      this._tail = (this._tail + block) & this._mask;
+      idx += block;
+    }
+
+    this._size = need;
+    return this._size;
+  }
+
+  /**
+   * Prepend multiple items to the head of the queue.
+   * The first element of `items` will become the next value returned by `shift()`.
+   * @param {Array<any>} items
+   * @returns {number} New queue length after all unshifts.
+   */
+  unshiftMany(items) {
+    if (!Array.isArray(items) || items.length === 0) return this._size;
+    const need = this._size + items.length;
+    // grow until we have capacity for all items
+    while (this._capacity < need) this._grow();
+
+    // compute new head index where items[0] will be placed
+    let start = (this._head - items.length) & this._mask;
+    for (let i = 0; i < items.length; i++) {
+      this._buffer[(start + i) & this._mask] = items[i];
+    }
+    this._head = start;
+    this._size = need;
+    return this._size;
   }
 }

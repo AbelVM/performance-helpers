@@ -23,6 +23,7 @@
   "author": "Abel Vázquez Montoro",
   "type": "module",
   "main": "src/index.js",
+  "types": "types/index.d.ts",
   "exports": {
     ".": {
       "import": "./src/index.js",
@@ -42,7 +43,8 @@
     "bench": "node bench/run.js",
     "bench:pool": "node bench/run.js pool",
     "bench:cache": "node bench/run.js cache",
-    "prepare": "npm run build && npm run test && npm run docs"
+    "types:generate": "tsc --project tsconfig.json --emitDeclarationOnly --declaration --allowJs --outDir types --declarationMap false",
+    "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs"
   },
   "engines": {
     "node": ">=16"
@@ -57,6 +59,7 @@
     "terser": "^5.46.1",
     "typedoc": "^0.28.18",
     "typedoc-plugin-markdown": "^4.11.0",
+    "typescript": "^5.4.2",
     "vite": "^8.0.3",
     "vitest": "^4.1.2"
   }

@@ -7,21 +7,6 @@
  * @property {CacheNode|null} prev
  * @property {CacheNode|null} next
  */
-/**
- * PowerCache
- *
- * A memory-efficient LRU cache with these features:
- * - TTL (time-to-live) per entry
- * - Weighted eviction (`maxWeight`) and entry-count eviction (`maxEntries`)
- * - Reusable node pool to reduce allocation / GC churn
- * - Incremental, chunked cleanup with a persistent cursor to resume scans for very large caches
- * - Optional rejection of oversized entries and callbacks for evict/expire/delete events
- *
- * Use `onEvict` and `onExpire` to observe removals. The cache exposes iterators
- * and runtime controls (`resize`, `startCleanup`, `stopCleanup`).
- *
- *
- */
 
 /**
  * @example
@@ -47,7 +32,7 @@
  * cache.startCleanup({ interval: 10000, maxCleanupPerTick: 200 });
  *
  * // Inspect stats
- * console.log(cache.stats());
+ * logger.log(cache.stats());
  *
  * @class PowerCache
  */
@@ -120,6 +105,11 @@ export class PowerCache {
 
   /**
    * Allocate a pool node or create a new one.
+   *
+   * This helper either reuses a node from the internal `pool` or creates a
+   * fresh node object. The returned node is initialized with the provided
+   * key/value/weight/expiresAt and has its `prev`/`next` pointers nulled.
+   *
    * @private
    * @param {*} key
    * @param {*} value
@@ -147,6 +137,11 @@ export class PowerCache {
 
   /**
    * Reset and return a node to the pool for reuse.
+   *
+   * This helper clears the node fields and returns it to the node pool when
+   * the pool has capacity. It is called for evicted or deleted nodes to
+   * reduce allocation churn.
+   *
    * @private
    * @param {CacheNode} node
    * @returns {void}
@@ -163,13 +158,19 @@ export class PowerCache {
 
   /**
    * Remove a node that has expired.
-   * Performs map deletion, linked-list unlink, invokes `onExpire`, frees node,
-   * and updates bookkeeping counters (`misses` and `expirations`).
+   *
+   * Performs map deletion, linked-list unlink, invokes `onExpire`, returns the
+   * node to the pool, and updates bookkeeping counters (`misses` and
+   * `expirations`). This helper is called from several expiration paths and
+   * centralizes the necessary cleanup steps.
+   *
    * @private
    * @param {CacheNode} node
-   * @param {number} now
+   * @param {number} now - Current timestamp (ms) used for comparisons
    */
   _removeExpiredNode(node, now) {
+    // Only remove when the node is actually expired according to `now`.
+    if (!node || !node.expiresAt || node.expiresAt > now) return false;
     const k = node.key;
     const v = node.value;
     const next = node.next;
@@ -184,12 +185,16 @@ export class PowerCache {
     this._freeNode(node);
     this.misses++;
     this.expirations++;
+    return true;
   }
 
   /**
-   * Append a node to the tail (most-recently used).
+   * Append a node to the tail (mark it most-recently used).
+   * This updates the linked-list pointers appropriately and is used when
+   * inserting new nodes or promoting a node to MRU.
+   *
    * @private
-   * @param {CacheNode} node
+   * @param {CacheNode} node - Node to append at the tail.
    * @returns {void}
    */
   _append(node) {
@@ -204,9 +209,13 @@ export class PowerCache {
   }
 
   /**
-   * Remove a node from the linked list.
+   * Remove a node from the linked list without freeing it. The node's
+   * `prev`/`next` references are updated on neighbors and the node's links
+   * are nulled. Does not modify `this.map` or bookkeeping counters; callers
+   * are responsible for those actions.
+   *
    * @private
-   * @param {CacheNode} node
+   * @param {CacheNode} node - Node to unlink from the list.
    * @returns {void}
    */
   _remove(node) {
@@ -221,8 +230,11 @@ export class PowerCache {
 
   /**
    * Move an existing node to the tail (mark as most-recently used).
+   * Implemented as an unlink followed by an append. No-op when node is
+   * already the tail.
+   *
    * @private
-   * @param {CacheNode} node
+   * @param {CacheNode} node - Node to promote to MRU position.
    * @returns {void}
    */
   _moveToTail(node) {
@@ -232,7 +244,11 @@ export class PowerCache {
   }
 
   /**
-   * Evict nodes until both entry and weight limits are satisfied.
+   * Evict nodes from the head (least-recently used) until the cache
+   * satisfies both `maxEntries` and `maxWeight` constraints. For each
+   * evicted node `onEvict` is invoked if provided and the node is returned
+   * to the node pool via `_freeNode`.
+   *
    * @private
    * @returns {void}
    */
@@ -369,9 +385,9 @@ export class PowerCache {
    * is stored directly) or a function. If the function returns a Promise,
    * the Promise is returned and the resolved value is stored when it settles.
    *
-  * Note: this method does not deduplicate concurrent async factories —
-  * for async factories prefer `getOrSetAsync` or use
-  * `PowerMemoizer` for inflight deduplication.
+   * Note: this method does not deduplicate concurrent async factories —
+   * for async factories prefer `getOrSetAsync` or use
+   * `PowerMemoizer` for inflight deduplication.
    *
    * @param {*} key
    * @param {Function|*} factory - Function that produces the value or a direct value.

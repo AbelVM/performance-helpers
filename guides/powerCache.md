@@ -4,7 +4,6 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 ## PowerCache
 
-
 | option | type | default | description |
 |---|---:|---:|---|
 | `maxEntries` | `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded. |

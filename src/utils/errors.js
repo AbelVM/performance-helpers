@@ -1,0 +1,45 @@
+// Small helper to normalize/format per-item error objects used by helpers
+/**
+ * Normalize various error shapes into a canonical error object used
+ * across helpers.
+ *
+ * If `err` is falsy or not an object a minimal error object is returned
+ * with the provided `defaultCode` and the stringified value as the
+ * `message` when available.
+ *
+ * @param {any} err - The incoming error value (Error instance, object, or any).
+ * @param {string} [defaultCode='ERR_ITEM'] - Fallback error code when none present.
+ * @returns {{error: true, code: string, message: string|undefined, stack: string|undefined}}
+ */
+export function normalizeError(err, defaultCode = 'ERR_ITEM') {
+  if (!err || typeof err !== 'object') {
+    return {
+      error: true,
+      code: defaultCode,
+      message: err ? String(err) : undefined,
+      stack: undefined,
+    };
+  }
+  return {
+    error: true,
+    code: err.code || defaultCode,
+    message: err.message,
+    stack: err.stack,
+  };
+}
+
+/**
+ * Convert a normalized error object into a compact human-readable string.
+ * If the value is not a normalized error it will be stringified.
+ *
+ * Examples:
+ * - `{ error: true, code: 'ERR_X', message: 'oops' }` -> `"ERR_X: oops"`
+ * - any other value -> `String(value)`
+ *
+ * @param {any} errObj - A normalized error object (or any value).
+ * @returns {string} Human readable error string.
+ */
+export function formatErrorObj(errObj) {
+  if (!errObj || !errObj.error) return String(errObj);
+  return `${errObj.code || 'ERR'}: ${errObj.message || ''}`;
+}

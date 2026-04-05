@@ -6,15 +6,27 @@
 
 Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a small worker pool wrapper, a tiny runtime debug logger, and much more:
 
+**Caching**
+
 - [PowerCache: Caching (LRU + TTL + weight) and memoizing](guides/powerCache.md). An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an optional reusable node pool.
-- [PowerLogging: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
+- [PowerTTLMap: Map with per-key TTL](guides/powerTTLMap.md). Lightweight `Map`-like store where keys expire lazily on access.
+
+**Parallelizing**
+
 - [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances.
-- [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
+- [PowerChunking: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`.
 - [PowerSlidingWindow: Sliding-window limiter](guides/powerSlidingWindow.md). A simple rolling-window limiter for quota-style rate limiting.
 - [PowerQueue: O(1) ring-buffer queue](guides/powerQueue.md). A resizable, high-performance queue intended for use in `PowerPool` and other high-throughput scenarios.
+
+**Logging**
+
+- [PowerLogging: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
+
+**Utils**
+
+- [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
 - [PowerDefer: Deferred promise primitive](guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
-- [PowerTTLMap: Map with per-key TTL](guides/powerTTLMap.md). Lightweight `Map`-like store where keys expire lazily on access.
 
 ## Quick start
 
@@ -63,7 +75,19 @@ npm run docs
 Importing from the package entry (or directly from `src/helpers/*` during development):
 
 ```javascript
-import { PowerCache, PowerMemoizer, PowerPool, PowerLogger, PowerThrottle, PowerSlidingWindow, PowerQueue, PowerDefer, PowerTTLMap, o2u8, u82o } from 'performance-helpers';
+import {
+  PowerCache,
+  PowerMemoizer,
+  PowerPool,
+  PowerLogger,
+  PowerThrottle,
+  PowerSlidingWindow,
+  PowerQueue,
+  PowerDefer,
+  PowerTTLMap,
+  o2u8,
+  u82o,
+} from 'performance-helpers';
 ```
 
 ## CDN usage
@@ -103,7 +127,6 @@ UMD example (script tag):
   console.log(cache.get('a'));
 </script>
 ```
-
 
 ## License
 
