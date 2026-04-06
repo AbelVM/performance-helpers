@@ -1,4 +1,9 @@
 /**
+ * Typed micro event bus.
+ * Lightweight pub/sub for intra-process coordination.
+ * Subscriber errors are swallowed to avoid breaking emitters.
+ */
+/**
  * @typedef {Object} PowerEventBusOptions
  * @property {number} [maxListeners]
  * @property {boolean} [weak]
@@ -11,20 +16,18 @@ export class PowerEventBus {
         maxListeners?: number;
         weak?: boolean;
     } | undefined);
-    /** @type {Map<string, Set<any>>} */
-    _listeners: Map<string, Set<any>>;
-    _liveCounts: Map<any, any>;
+    _listeners: Map<any, any>;
     _maxListeners: number;
     _weak: boolean;
     _fr: any;
-    _onceMap: WeakMap<object, any> | undefined;
+    _finalizationRefs: WeakMap<object, any>;
+    _ensureFinalizationRegistry(): any;
     /**
      * Cleanup dead weak refs from internal listener sets.
      * Useful in tests or environments where FinalizationRegistry/GC is unavailable.
      */
     cleanup(): void;
-    _decrementLiveCount(event: any): void;
-    _removeListenerEntry(event: any, set: any, entry: any): boolean;
+    _getBucket(event: any): PowerSubscriberSet | null;
     /**
      * Subscribe to an event.
      * @param {string} event
@@ -84,3 +87,4 @@ export type PowerEventBusOptions = {
     maxListeners?: number | undefined;
     weak?: boolean | undefined;
 };
+import { PowerSubscriberSet } from './powerSubscriberSet.js';

@@ -1,15 +1,3 @@
-/**
- * PowerLatch — a simple counting barrier.
- * Resolves waiters when the internal count reaches zero.
- *
- * @example
- * const latch = new PowerLatch(3);
- * // from three independent async paths:
- * latch.countDown();
- * latch.countDown();
- * latch.countDown();
- * await latch.wait(); // resolves when count reaches 0
- */
 export class PowerLatch {
     /**
      * Create a latch that waits for a single signal.
@@ -25,10 +13,9 @@ export class PowerLatch {
      */
     constructor(count?: number, options?: {});
     _count: number;
-    /** @type {Array<{resolve:Function,reject:Function, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
+    /** @type {Array<{defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
     _waiters: Array<{
-        resolve: Function;
-        reject: Function;
+        defer: PowerDefer;
         timer?: any;
         signalHandler?: Function;
         signal?: AbortSignal;
@@ -82,6 +69,7 @@ export class PowerLatch {
      * @returns {boolean}
      */
     get done(): boolean;
+    _removeWaiter(waiter: any): any;
     _resolveAll(): void;
     _rejectAll(err: any): void;
     /**
@@ -91,3 +79,4 @@ export class PowerLatch {
     abort(reason?: any): void;
 }
 export default PowerLatch;
+import { PowerDefer } from './powerDefer.js';

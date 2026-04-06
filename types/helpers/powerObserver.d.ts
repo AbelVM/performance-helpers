@@ -1,18 +1,3 @@
-/**
- * Lightweight reactive value store.
- * Subscribers are called synchronously when the value changes.
- *
- * Example:
- * const obs = new PowerObserver(42);
- * obs.subscribe((next, prev) => console.log(next, prev));
- * obs.value = 99;
- */
-/**
- * @typedef {Object} PowerObserverOptions
- * @property {function} [map]
- * @property {boolean} [distinct]
- * @property {boolean|'microtask'|'macrotask'} [async]
- */
 export class PowerObserver {
     /**
      * Create a new PowerObserver.
@@ -21,15 +6,14 @@ export class PowerObserver {
      */
     constructor(initial: any, options?: PowerObserverOptions);
     _value: any;
-    /** @type {Set<Function>} */
-    _subs: Set<Function>;
+    _subs: PowerSubscriberSet;
     _map: Function | null;
     _distinct: boolean;
     _scheduleMode: string;
     _pending: boolean;
     _pendingPrev: any;
     _pendingNext: any;
-    _pendingTimer: number | null;
+    _scheduler: PowerScheduler;
     /** Set value and schedule notification according to `async` option */
     set value(v: any);
     /** Current value */
@@ -60,3 +44,5 @@ export type PowerObserverOptions = {
     distinct?: boolean | undefined;
     async?: boolean | "microtask" | "macrotask" | undefined;
 };
+import { PowerSubscriberSet } from './powerSubscriberSet.js';
+import { PowerScheduler } from './powerScheduler.js';

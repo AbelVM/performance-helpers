@@ -17,6 +17,51 @@ describe('PowerRateLimit extra branches', () => {
     expect(r.tryConsume(1)).toBe(false);
   });
 
+  it('available() returns the minimum available across child limiters', () => {
+    const a = { available: () => 5, tryConsume: vi.fn(() => true) };
+    const b = { available: () => 2, tryConsume: vi.fn(() => true) };
+    const r = new PowerRateLimit([a, b]);
+    expect(r.available()).toBe(2);
+  });
+
+  it('available() returns 0 when any child limiter lacks available()', () => {
+    const a = { available: () => 5, tryConsume: vi.fn(() => true) };
+    const b = { tryConsume: vi.fn(() => true) };
+    const r = new PowerRateLimit([a, b]);
+    expect(r.available()).toBe(0);
+  });
+
+  it('reserve and release work across atomic limiters', () => {
+    const l1 = { reserve: vi.fn((n) => ({ n })), release: vi.fn() };
+    const l2 = { tryConsume: vi.fn(() => true), rollback: vi.fn() };
+    const r = new PowerRateLimit([l1, l2], { atomic: true });
+    const token = r.reserve(1);
+    expect(token).toEqual({ n: 1 });
+    expect(l1.reserve).toHaveBeenCalledWith(1);
+    r.release(token);
+    expect(l1.release).toHaveBeenCalledWith(token);
+    expect(l2.rollback).toHaveBeenCalledWith(1);
+  });
+
+  it('rollback aliases release', () => {
+    const l1 = { reserve: vi.fn((n) => ({ n })), release: vi.fn() };
+    const l2 = { tryConsume: vi.fn(() => true), rollback: vi.fn() };
+    const r = new PowerRateLimit([l1, l2], { atomic: true });
+    const token = r.reserve(1);
+    expect(token).not.toBeNull();
+    r.rollback(token);
+    expect(l1.release).toHaveBeenCalledWith(token);
+    expect(l2.rollback).toHaveBeenCalledWith(1);
+  });
+
+  it('reserve returns null when atomic reservation cannot be guaranteed', () => {
+    const a = { reserve: vi.fn((n) => ({ n })), release: vi.fn() };
+    const b = { tryConsume: vi.fn(() => false), rollback: vi.fn() };
+    const r = new PowerRateLimit([a, b], { atomic: true });
+    expect(r.reserve(1)).toBeNull();
+    expect(a.release).toHaveBeenCalled();
+  });
+
   it('atomic consume returns false when a limiter lacks undo capability', () => {
     const a = { available: () => 10, tryConsume: vi.fn(() => true) };
     // b lacks available and any undo primitives

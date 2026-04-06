@@ -1,15 +1,3 @@
-/**
- * PowerBatch — microtask-coalescing dispatcher.
- * Collects items added within the same microtask and dispatches them
- * to the provided `handler(items[])`. Useful to batch synchronous
- * work (DB writes, network calls) with minimal latency.
- *
- * @example
- * const batch = new PowerBatch((items) => bulkWrite(items), { maxSize: 100 });
- * batch.add(itemA);
- * batch.add(itemB);
- * // items are coalesced and handler called once in the next microtask
- */
 export class PowerBatch {
     /**
      * @typedef {Object} PowerBatchOptions
@@ -26,7 +14,6 @@ export class PowerBatch {
     _handler: Function;
     _maxSize: number;
     _queue: any[];
-    _scheduled: boolean;
     _pending: {
         promise: Promise<any>;
         resolve: undefined;
@@ -36,16 +23,15 @@ export class PowerBatch {
         resolve: undefined;
         reject: undefined;
     } | null;
-    _scheduling: string;
+    _scheduler: PowerScheduler;
     /**
      * Internal scheduler abstraction to allow microtask or macrotask scheduling.
      * @private
      */
-    private _schedule;
     /**
      * Add an item to the current batch. Returns a Promise that resolves
      * when the batch containing this item has been processed. For non-flushed
-     * additions this will be resolved after the microtask run; if adding the
+     * additions this will be resolved after the scheduled run; if adding the
      * item hits `maxSize` the returned promise resolves when the handler completes.
      * @param {any} item
      * @returns {Promise<void>}
@@ -74,3 +60,4 @@ export class PowerBatch {
     clear(): void;
 }
 export default PowerBatch;
+import { PowerScheduler } from './powerScheduler.js';

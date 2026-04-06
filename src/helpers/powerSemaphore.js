@@ -13,41 +13,40 @@
  *   release();
  * }
  */
+import { PowerPermitGate } from './powerPermitGate.js';
+
 export class PowerSemaphore {
   /**
    * Create a semaphore.
    * @param {number} [limit=1] Maximum number of concurrent permits.
    */
   constructor(limit = 1) {
-    this._limit = Math.max(1, Math.floor(Number(limit) || 1));
-    this._active = 0;
-    /** @type {Array<(release:Function)=>void>} */
-    this._queue = [];
+    this._gate = new PowerPermitGate({ capacity: limit, initialTokens: limit });
   }
 
   /** Maximum concurrent holders. */
   get limit() {
-    return this._limit;
+    return this._gate.capacity;
   }
 
   /** Currently acquired permits. */
   get active() {
-    return this._active;
+    return this._gate.active;
   }
 
   /** Number of callers waiting for a permit. */
   get pending() {
-    return this._queue.length;
+    return this._gate.pending;
   }
 
   /** Number of permits still available. */
   get available() {
-    return this._limit - this._active;
+    return this._gate.available;
   }
 
   /** True when the semaphore is fully acquired. */
   get isLocked() {
-    return this._active >= this._limit;
+    return this._gate.available === 0;
   }
 
   /**
@@ -56,10 +55,7 @@ export class PowerSemaphore {
    * @returns {Promise<Function>} Promise resolving to the release callback.
    */
   acquire() {
-    if (this._active < this._limit) return Promise.resolve(this._grant());
-    return new Promise((resolve) => {
-      this._queue.push(resolve);
-    });
+    return this._gate.acquire();
   }
 
   /**
@@ -67,8 +63,7 @@ export class PowerSemaphore {
    * @returns {Function|null} Release callback when acquired, otherwise `null`.
    */
   tryAcquire() {
-    if (this._active < this._limit) return this._grant();
-    return null;
+    return this._gate.tryAcquire();
   }
 
   /**
@@ -88,23 +83,11 @@ export class PowerSemaphore {
   }
 
   /**
-   * Internal helper that increments active permits and returns a release callback.
-   * @returns {Function} Release callback.
-   * @private
+   * Reset the semaphore and reject any queued waiters.
+   * @returns {void}
    */
-  _grant() {
-    this._active += 1;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      if (this._queue.length > 0) {
-        const next = this._queue.shift();
-        next(this._grant());
-      } else {
-        this._active -= 1;
-      }
-    };
+  reset() {
+    this._gate.reset({ available: this._gate.capacity });
   }
 }
 

@@ -4,7 +4,7 @@
  * Use `PowerBulkhead` to execute tasks in partitioned concurrency lanes so a
  * heavy or noisy partition cannot starve other partitions.
  */
-import { PowerQueue } from './powerQueue.js';
+import { PowerPermitGate } from './powerPermitGate.js';
 
 export class PowerBulkhead {
   /**
@@ -28,10 +28,8 @@ export class PowerBulkhead {
     this._partitioner = typeof partitioner === 'function' ? partitioner : null;
     this._nextPartition = 0;
     this._buckets = Array.from({ length: this._partitions }, () => ({
-      active: 0,
-      queue: new PowerQueue(16),
+      gate: new PowerPermitGate({ capacity: this._maxConcurrency, queueCapacity: Infinity }),
     }));
-    this._pending = 0;
     this._drainWaiters = [];
   }
 
@@ -47,12 +45,12 @@ export class PowerBulkhead {
 
   /** Total number of currently queued tasks. */
   get pending() {
-    return this._pending;
+    return this._buckets.reduce((sum, bucket) => sum + bucket.gate.pending, 0);
   }
 
   /** Total number of running tasks across all partitions. */
   get active() {
-    return this._buckets.reduce((sum, bucket) => sum + bucket.active, 0);
+    return this._buckets.reduce((sum, bucket) => sum + bucket.gate.active, 0);
   }
 
   /** Maximum number of tasks that may wait in the queue. */
@@ -62,7 +60,7 @@ export class PowerBulkhead {
 
   /** True when the bulkhead queue is saturated. */
   get isFull() {
-    return this._pending >= this._queueCapacity;
+    return this.pending >= this._queueCapacity;
   }
 
   /**
@@ -79,18 +77,21 @@ export class PowerBulkhead {
 
     const partition = this._choosePartition(options.partitionKey);
     const bucket = this._buckets[partition];
-
-    if (bucket.active < this._maxConcurrency) {
-      return this._execute(task, partition);
-    }
-
-    if (this._pending >= this._queueCapacity) {
+    if (this.pending >= this._queueCapacity && bucket.gate.available === 0) {
       return Promise.reject(new Error('PowerBulkhead queue is full'));
     }
 
-    return new Promise((resolve, reject) => {
-      bucket.queue.push({ task, resolve, reject, partition });
-      this._pending += 1;
+    const permit = bucket.gate.acquire();
+    const result = permit.then((release) => {
+      return Promise.resolve()
+        .then(() => task())
+        .finally(() => release());
+    });
+
+    return result.finally(() => {
+      if (this.active === 0 && this.pending === 0) {
+        this._drainWaiters.splice(0, this._drainWaiters.length).forEach((resolve) => resolve());
+      }
     });
   }
 
@@ -107,10 +108,10 @@ export class PowerBulkhead {
     }
     const partition = this._choosePartition(options.partitionKey);
     const bucket = this._buckets[partition];
-    if (bucket.active < this._maxConcurrency) {
-      return this._execute(task, partition);
-    }
-    return null;
+    const release = bucket.gate.tryAcquire();
+    if (!release) return null;
+    const result = Promise.resolve().then(() => task());
+    return result.finally(() => release());
   }
 
   /**
@@ -145,41 +146,6 @@ export class PowerBulkhead {
       hash = (hash << 5) + hash + value.charCodeAt(i);
     }
     return hash >>> 0;
-  }
-
-  _execute(taskOrFn, partition) {
-    const task = typeof taskOrFn === 'function' ? taskOrFn : taskOrFn.task;
-    const bucket = this._buckets[partition];
-    bucket.active += 1;
-
-    const promise = Promise.resolve().then(() => task());
-    const cleanup = () => {
-      bucket.active -= 1;
-      if (bucket.queue.length > 0) {
-        const next = bucket.queue.shift();
-        if (next) {
-          this._pending -= 1;
-          this._execute(next.task, next.partition).then(next.resolve).catch(next.reject);
-          return;
-        }
-      }
-      if (this.active === 0 && this._pending === 0) {
-        this._drainWaiters.splice(0, this._drainWaiters.length).forEach((resolve) => resolve());
-      }
-    };
-
-    const wrapped = promise.then(
-      (value) => {
-        cleanup();
-        return value;
-      },
-      (err) => {
-        cleanup();
-        throw err;
-      }
-    );
-
-    return wrapped;
   }
 }
 

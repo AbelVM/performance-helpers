@@ -13,6 +13,9 @@
  * @property {boolean} [distinct]
  * @property {boolean|'microtask'|'macrotask'} [async]
  */
+import { PowerScheduler } from './powerScheduler.js';
+import { PowerSubscriberSet } from './powerSubscriberSet.js';
+
 export class PowerObserver {
   /**
    * Create a new PowerObserver.
@@ -21,8 +24,7 @@ export class PowerObserver {
    */
   constructor(initial, options = {}) {
     this._value = initial;
-    /** @type {Set<Function>} */
-    this._subs = new Set();
+    this._subs = new PowerSubscriberSet();
     this._map = typeof options.map === 'function' ? options.map : null;
     this._distinct = !!options.distinct;
 
@@ -38,7 +40,9 @@ export class PowerObserver {
     this._pending = false;
     this._pendingPrev = undefined;
     this._pendingNext = undefined;
-    this._pendingTimer = null; // for macrotask
+    this._scheduler = new PowerScheduler(() => this._flushPending(), {
+      scheduling: this._scheduleMode === 'macrotask' ? 'macrotask' : 'microtask',
+    });
   }
 
   /** Current value */
@@ -59,7 +63,7 @@ export class PowerObserver {
 
     if (this._scheduleMode === 'sync') {
       // deliver immediately
-      const subs = Array.from(this._subs);
+      const subs = this._subs.values();
       for (const s of subs) {
         try {
           s(mappedNext, mappedPrev);
@@ -70,17 +74,11 @@ export class PowerObserver {
       return;
     }
 
-    // schedule delivery (microtask or macrotask)
     if (!this._pending) {
       this._pending = true;
       this._pendingPrev = mappedPrev;
       this._pendingNext = mappedNext;
-      if (this._scheduleMode === 'microtask') {
-        queueMicrotask(() => this._flushPending());
-      } else {
-        // macrotask via setTimeout
-        this._pendingTimer = setTimeout(() => this._flushPending(), 0);
-      }
+      this._scheduler.schedule();
     } else {
       // already scheduled: update next value, keep original prev
       this._pendingNext = mappedNext;
@@ -94,9 +92,7 @@ export class PowerObserver {
    * @param {(next:any, prev:any)=>void} fn
    */
   subscribe(fn) {
-    if (typeof fn !== 'function') throw new TypeError('subscriber must be a function');
-    this._subs.add(fn);
-    return () => this._subs.delete(fn);
+    return this._subs.add(fn);
   }
 
   /** Remove all subscribers */
@@ -120,11 +116,7 @@ export class PowerObserver {
    * Flush any pending notification immediately. Useful for tests or shutdown.
    */
   flush() {
-    if (this._pendingTimer) {
-      clearTimeout(this._pendingTimer);
-      this._pendingTimer = null;
-    }
-    if (this._pending) this._flushPending();
+    this._scheduler.flush();
   }
 
   /** Alias for flush() */
@@ -140,7 +132,7 @@ export class PowerObserver {
     const next = this._pendingNext;
     this._pendingPrev = undefined;
     this._pendingNext = undefined;
-    const subs = Array.from(this._subs);
+    const subs = this._subs.values();
     for (const s of subs) {
       try {
         s(next, prev);

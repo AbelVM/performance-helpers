@@ -140,6 +140,84 @@ export class PowerRateLimit {
     return true;
   }
 
+  /**
+   * Return the minimum available tokens across all limiters.
+   * If any limiter does not expose `available()`, this returns `0`.
+   * @returns {number}
+   */
+  available() {
+    if (this.limiters.length === 0) return Infinity;
+    let min = Infinity;
+    for (const l of this.limiters) {
+      if (typeof l.available !== 'function') return 0;
+      try {
+        const value = l.available();
+        min = Math.min(min, Number(value) || 0);
+      } catch (e) {
+        return 0;
+      }
+    }
+    return min === Infinity ? 0 : min;
+  }
+
+  /**
+   * Reserve `n` tokens across all limiters and return a token to undo later.
+   * Returns `null` when reservation fails.
+   * @param {number} [n=1]
+   * @returns {object|null}
+   */
+  reserve(n = 1) {
+    const want = Math.max(0, Math.floor(+n) || 0);
+    if (want === 0) return { n: 0 };
+    if (!this.tryConsume(want, { atomic: true })) return null;
+    return { n: want };
+  }
+
+  /**
+   * Release a prior reservation token or numeric count back to the limiters.
+   * @param {object|number} tokenOrN
+   */
+  release(tokenOrN) {
+    const n =
+      tokenOrN == null
+        ? 0
+        : typeof tokenOrN === 'object'
+          ? Number(tokenOrN.n) || 0
+          : Math.max(0, Math.floor(+tokenOrN) || 0);
+    if (n === 0) return;
+
+    for (const l of this.limiters) {
+      if (typeof l.release === 'function') {
+        try {
+          l.release(tokenOrN);
+          continue;
+        } catch (e) {
+          // fallback to other undo paths
+        }
+      }
+      if (typeof l.rollback === 'function') {
+        try {
+          l.rollback(n);
+          continue;
+        } catch (e) {
+          /* swallow */
+        }
+      }
+      if (typeof l.addTokens === 'function') {
+        try {
+          l.addTokens(n);
+          continue;
+        } catch (e) {
+          /* swallow */
+        }
+      }
+    }
+  }
+
+  rollback(nOrToken) {
+    return this.release(nOrToken);
+  }
+
   async _undoCommit(entry, want) {
     const { l, method, token } = entry;
     try {

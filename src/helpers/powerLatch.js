@@ -10,6 +10,8 @@
  * latch.countDown();
  * await latch.wait(); // resolves when count reaches 0
  */
+import { PowerDefer } from './powerDefer.js';
+
 export class PowerLatch {
   /**
    * @typedef {Object} PowerLatchOptions
@@ -20,7 +22,7 @@ export class PowerLatch {
    */
   constructor(count = 1, options = {}) {
     this._count = Math.max(0, Number(count) || 0);
-    /** @type {Array<{resolve:Function,reject:Function, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
+    /** @type {Array<{defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
     this._waiters = [];
     this._aborted = false;
     this._abortReason = null;
@@ -88,32 +90,30 @@ export class PowerLatch {
       signal = opts.signal || null;
     }
 
-    return new Promise((resolve, reject) => {
-      const waiter = { resolve, reject, timer: null, signalHandler: null, signal };
-      // register timeout
-      if (typeof timeout === 'number' && timeout > 0) {
-        waiter.timer = setTimeout(() => {
-          // remove waiter
-          const idx = this._waiters.indexOf(waiter);
-          if (idx !== -1) this._waiters.splice(idx, 1);
-          reject(Object.assign(new Error('Timeout'), { code: 'ETIMEOUT' }));
-        }, timeout);
-      }
+    const defer = new PowerDefer();
+    const waiter = { defer, timer: null, signalHandler: null, signal };
 
-      // register abort signal
-      if (signal && typeof signal.addEventListener === 'function') {
-        const onAbort = () => {
-          if (waiter.timer) clearTimeout(waiter.timer);
-          const idx = this._waiters.indexOf(waiter);
-          if (idx !== -1) this._waiters.splice(idx, 1);
-          reject(signal.reason || Object.assign(new Error('Aborted'), { code: 'EABORT' }));
-        };
-        waiter.signalHandler = onAbort;
-        signal.addEventListener('abort', onAbort, { once: true });
-      }
+    // register timeout
+    if (typeof timeout === 'number' && timeout > 0) {
+      waiter.timer = setTimeout(() => {
+        this._removeWaiter(waiter);
+        defer.reject(Object.assign(new Error('Timeout'), { code: 'ETIMEOUT' }));
+      }, timeout);
+    }
 
-      this._waiters.push(waiter);
-    });
+    // register abort signal
+    if (signal && typeof signal.addEventListener === 'function') {
+      const onAbort = () => {
+        if (waiter.timer) clearTimeout(waiter.timer);
+        this._removeWaiter(waiter);
+        defer.reject(signal.reason || Object.assign(new Error('Aborted'), { code: 'EABORT' }));
+      };
+      waiter.signalHandler = onAbort;
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+
+    this._waiters.push(waiter);
+    return defer.promise;
   }
 
   /**
@@ -145,6 +145,23 @@ export class PowerLatch {
     return this._count === 0;
   }
 
+  _removeWaiter(waiter) {
+    const idx = this._waiters.indexOf(waiter);
+    if (idx !== -1) this._waiters.splice(idx, 1);
+    if (
+      waiter.signalHandler &&
+      waiter.signal &&
+      typeof waiter.signal.removeEventListener === 'function'
+    ) {
+      try {
+        waiter.signal.removeEventListener('abort', waiter.signalHandler);
+      } catch (e) {
+        /* swallow */
+      }
+    }
+    return waiter;
+  }
+
   _resolveAll() {
     const waiters = this._waiters;
     this._waiters = [];
@@ -154,9 +171,11 @@ export class PowerLatch {
         if (w.signalHandler && w.signal && typeof w.signal.removeEventListener === 'function') {
           try {
             w.signal.removeEventListener('abort', w.signalHandler);
-          } catch (e) {}
+          } catch (e) {
+            /* swallow */
+          }
         }
-        w.resolve();
+        w.defer.resolve();
       } catch (e) {
         /* swallow */
       }
@@ -172,9 +191,11 @@ export class PowerLatch {
         if (w.signalHandler && w.signal && typeof w.signal.removeEventListener === 'function') {
           try {
             w.signal.removeEventListener('abort', w.signalHandler);
-          } catch (e) {}
+          } catch (e) {
+            /* swallow */
+          }
         }
-        w.reject(err);
+        w.defer.reject(err);
       } catch (e) {
         /* swallow */
       }

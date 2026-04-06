@@ -40,6 +40,10 @@ export class PowerRateLimit {
      * @returns {boolean}
      */
     tryConsume(n?: number, options?: {}): boolean;
+    available(): number;
+    reserve(n?: number): object | null;
+    release(tokenOrN: object | number): void;
+    rollback(nOrToken: any): void;
     _undoCommit(entry: any, want: any): Promise<any>;
     /**
      * Reset all underlying limiters where supported.

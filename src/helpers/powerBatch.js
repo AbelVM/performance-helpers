@@ -10,6 +10,8 @@
  * batch.add(itemB);
  * // items are coalesced and handler called once in the next microtask
  */
+import { PowerScheduler } from './powerScheduler.js';
+
 export class PowerBatch {
   /**
    * @typedef {Object} PowerBatchOptions
@@ -26,27 +28,20 @@ export class PowerBatch {
     this._handler = handler;
     this._maxSize = Number(maxSize) || Infinity;
     this._queue = [];
-    this._scheduled = false;
     this._pending = null; // { promise, resolve, reject }
-    this._scheduling = scheduling === 'macrotask' ? 'macrotask' : 'microtask';
+    this._scheduler = new PowerScheduler(() => this._runBatch(), {
+      scheduling: scheduling === 'macrotask' ? 'macrotask' : 'microtask',
+    });
   }
 
   /**
    * Internal scheduler abstraction to allow microtask or macrotask scheduling.
    * @private
    */
-  _schedule(fn) {
-    if (this._scheduling === 'macrotask') {
-      setTimeout(fn, 0);
-    } else {
-      queueMicrotask(fn);
-    }
-  }
-
   /**
    * Add an item to the current batch. Returns a Promise that resolves
    * when the batch containing this item has been processed. For non-flushed
-   * additions this will be resolved after the microtask run; if adding the
+   * additions this will be resolved after the scheduled run; if adding the
    * item hits `maxSize` the returned promise resolves when the handler completes.
    * @param {any} item
    * @returns {Promise<void>}
@@ -62,19 +57,14 @@ export class PowerBatch {
       this._pending = { promise: p, resolve, reject };
     }
     if (this._queue.length >= this._maxSize) {
-      // if a microtask was previously scheduled, cancel the scheduled flag
-      this._scheduled = false;
-      // run batch immediately to honor maxSize flush semantics
-      // capture promise before running as _runBatch may resolve it synchronously
       const prom = this._pending.promise;
+      this._scheduler.cancel();
       this._runBatch();
       return prom;
     }
 
-    if (!this._scheduled) {
-      this._scheduled = true;
-      // schedule on configured queue to coalesce synchronous adds
-      this._schedule(() => this._runBatch());
+    if (!this._scheduler.scheduled) {
+      this._scheduler.schedule();
     }
     return this._pending.promise;
   }
@@ -85,7 +75,7 @@ export class PowerBatch {
    * @returns {Promise<void>}
    */
   flush() {
-    if (this._queue.length === 0 && !this._scheduled) return Promise.resolve();
+    if (this._queue.length === 0 && !this._scheduler.scheduled) return Promise.resolve();
     if (!this._pending) {
       let resolve, reject;
       const p = new Promise((r, rej) => {
@@ -94,10 +84,8 @@ export class PowerBatch {
       });
       this._pending = { promise: p, resolve, reject };
     }
-    if (!this._scheduled) {
-      this._scheduled = true;
-      // schedule on configured queue to coalesce synchronous adds
-      this._schedule(() => this._runBatch());
+    if (!this._scheduler.scheduled) {
+      this._scheduler.schedule();
     }
     return this._pending.promise;
   }
@@ -107,7 +95,6 @@ export class PowerBatch {
    * @private
    */
   async _runBatch() {
-    this._scheduled = false;
     const items = this._queue;
     if (items.length === 0) {
       if (this._pending) {
@@ -148,7 +135,7 @@ export class PowerBatch {
       this._pending.resolve();
       this._pending = null;
     }
-    this._scheduled = false;
+    this._scheduler.cancel();
   }
 }
 

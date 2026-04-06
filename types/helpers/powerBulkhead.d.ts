@@ -18,10 +18,8 @@ export class PowerBulkhead {
     _partitioner: Function | null;
     _nextPartition: number;
     _buckets: {
-        active: number;
-        queue: PowerQueue;
+        gate: PowerPermitGate;
     }[];
-    _pending: number;
     _drainWaiters: any[];
     /** Number of partitions used for workload isolation. */
     get partitions(): number;
@@ -62,7 +60,6 @@ export class PowerBulkhead {
     drain(): Promise<void>;
     _choosePartition(key: any): number;
     _hashKey(value: any): number;
-    _execute(taskOrFn: any, partition: any): Promise<any>;
 }
 export default PowerBulkhead;
-import { PowerQueue } from './powerQueue.js';
+import { PowerPermitGate } from './powerPermitGate.js';

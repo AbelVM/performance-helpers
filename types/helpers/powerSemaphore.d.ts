@@ -1,28 +1,10 @@
-/**
- * Lightweight async concurrency gate for IO-heavy fanout.
- *
- * Use `PowerSemaphore` to limit concurrent async work without blocking the
- * event loop.
- *
- * @example
- * const gate = new PowerSemaphore(3);
- * const release = await gate.acquire();
- * try {
- *   await doWork();
- * } finally {
- *   release();
- * }
- */
 export class PowerSemaphore {
     /**
      * Create a semaphore.
      * @param {number} [limit=1] Maximum number of concurrent permits.
      */
     constructor(limit?: number);
-    _limit: number;
-    _active: number;
-    /** @type {Array<(release:Function)=>void>} */
-    _queue: Array<(release: Function) => void>;
+    _gate: PowerPermitGate;
     /** Maximum concurrent holders. */
     get limit(): number;
     /** Currently acquired permits. */
@@ -53,10 +35,10 @@ export class PowerSemaphore {
      */
     run<T>(fn: () => Promise<T> | T): Promise<T>;
     /**
-     * Internal helper that increments active permits and returns a release callback.
-     * @returns {Function} Release callback.
-     * @private
+     * Reset the semaphore and reject any queued waiters.
+     * @returns {void}
      */
-    private _grant;
+    reset(): void;
 }
 export default PowerSemaphore;
+import { PowerPermitGate } from './powerPermitGate.js';
