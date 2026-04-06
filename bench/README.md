@@ -35,7 +35,7 @@ Tips and notes
 
 - Start with small values during iteration: `BENCH_TASKS=2 BENCH_ITERS=10000` to validate changes quickly
 - Use `BENCH_POOL_TIMEOUT=0` when you expect long runs and don't want the harness to fall back to the plain `worker_threads` implementation
-- The harness writes human-readable results to `bench/results.md` and writes a machine-readable copy to `results.sjon` at the repository root; the markdown contains a link to that file
+- The harness writes human-readable results to `bench/results.md` and writes a machine-readable copy to `results.json` at the repository root; the markdown contains a link to that file
 
 Example quick smoke run
 

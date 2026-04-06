@@ -17,7 +17,6 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerChunker: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerCircuit: Circuit breaker](guides/powerCircuit.md). Small circuit breaker to protect external services from cascading failures.
 - [PowerRetry: Retry with backoff](guides/powerRetry.md). Helper for retrying flaky async operations with configurable backoff and jitter.
-- [PowerRetry: Retry with backoff](guides/powerRetry.md). Helper for retrying flaky async operations with configurable backoff and jitter.
 - [PowerBatch: Microtask coalescing dispatcher](guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
 - [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.
@@ -28,7 +27,7 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 
 ## Logging
 
-- [PowerLogging: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
+- [PowerLogger: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
 
 ## Utils
 
