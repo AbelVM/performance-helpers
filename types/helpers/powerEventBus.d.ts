@@ -55,11 +55,13 @@ export class PowerEventBus {
     emit(event: string, payload?: any): boolean;
     /**
      * Emit an event to all subscribers and await async listeners.
-     * Supports bounded concurrency through the `concurrency` option.
+     * Supports bounded concurrency so long listener lists can be processed in
+     * batches without flooding the event loop.
      * Errors thrown or rejected by listeners are swallowed.
      * @param {string} event
      * @param {any} [payload]
-     * @param {{concurrency?: number}=} [options]
+     * @param {Object} [options]
+     * @param {number} [options.concurrency=Infinity]
      * @returns {Promise<boolean>}
      */
     emitAsync(event: string, payload?: any, { concurrency }?: {

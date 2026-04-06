@@ -468,7 +468,11 @@ export class PowerCache {
    * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
    * @returns {*|Promise<*>}
    */
-  getOrSet(key, factory, { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}) {
+  getOrSet(
+    key,
+    factory,
+    { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
+  ) {
     const node = this.map.get(key);
     const now = Date.now();
     if (node) {
@@ -620,7 +624,11 @@ export class PowerCache {
    * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
    * @returns {Promise<*>}
    */
-  getOrSetAsync(key, asyncFactory, { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}) {
+  getOrSetAsync(
+    key,
+    asyncFactory,
+    { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
+  ) {
     if (typeof asyncFactory !== 'function') {
       // treat non-function as direct value
       return Promise.resolve(this.getOrSet(key, asyncFactory, { ttl, weight }));

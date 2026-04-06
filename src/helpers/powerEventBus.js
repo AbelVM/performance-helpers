@@ -325,9 +325,10 @@ export class PowerEventBus {
     const listeners = this.listeners(event);
     if (listeners.length === 0) return false;
 
-    const normalizeConcurrency = Number.isFinite(+concurrency) && +concurrency > 0
-      ? Math.max(1, Math.floor(+concurrency))
-      : Infinity;
+    const normalizeConcurrency =
+      Number.isFinite(+concurrency) && +concurrency > 0
+        ? Math.max(1, Math.floor(+concurrency))
+        : Infinity;
 
     const invoke = async (fn) => {
       try {

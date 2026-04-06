@@ -341,11 +341,13 @@ export class PowerCache {
      * @param {Object} [options]
      * @param {number} [options.ttl]
      * @param {number} [options.weight]
+     * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
      * @returns {Promise<*>}
      */
     getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate }?: {
         ttl?: number | undefined;
         weight?: number | undefined;
+        staleWhileRevalidate?: boolean | undefined;
     }): Promise<any>;
     /**
      * Check membership without affecting recency and verify the stored value is deep-equal

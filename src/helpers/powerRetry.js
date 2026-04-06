@@ -76,7 +76,13 @@ export class PowerRetry {
             return await Promise.race([
               attemptPromise,
               new Promise((_, rej) => {
-                timer = setTimeout(() => rej(new Error('Attempt timed out')), attemptTimeout);
+                timer = setTimeout(() => {
+                  const err = new Error('Attempt timed out');
+                  err.code = 'ETIMEOUT';
+                  err.attempts = attempt;
+                  err.attemptTimeout = attemptTimeout;
+                  rej(err);
+                }, attemptTimeout);
               }),
             ]);
           } finally {
