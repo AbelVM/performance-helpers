@@ -34,6 +34,71 @@ describe('PowerPool.batch APIs', () => {
     }
   });
 
+  it('postMessageBatch with awaitResponse and correlationIdFactory returns promises for all items', async () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 0);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+
+    const pool = new PowerPool(MockUnderlying, {
+      minSize: 1,
+      lazy: false,
+      size: 1,
+      idleTimeout: 1000,
+    });
+    try {
+      const batch = [{ message: { a: 1 } }, { message: { a: 2 } }];
+      const results = pool.postMessageBatch(batch, {
+        awaitResponse: true,
+        correlationIdFactory: (index) => `id-${index}`,
+      });
+      expect(Array.isArray(results)).toBe(true);
+      expect(results.length).toBe(2);
+      expect(results[0]).toBeInstanceOf(Promise);
+      expect(results[1]).toBeInstanceOf(Promise);
+      const resolved = await Promise.all(results);
+      expect(resolved[0]).toHaveProperty('correlationId', 'id-0');
+      expect(resolved[1]).toHaveProperty('correlationId', 'id-1');
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('postMessageBatch rejects multi-item fixed correlationId usage', () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn();
+        this.terminate = vi.fn();
+      }
+    }
+
+    const pool = new PowerPool(MockUnderlying, {
+      minSize: 1,
+      lazy: false,
+      size: 1,
+      idleTimeout: 1000,
+    });
+    try {
+      const batch = [{ message: { a: 1 } }, { message: { a: 2 } }];
+      expect(() =>
+        pool.postMessageBatch(batch, {
+          awaitResponse: true,
+          correlationId: 'fixed-id',
+        })
+      ).toThrow(/fixed correlationId/);
+    } finally {
+      pool.terminate();
+    }
+  });
+
   it('stopThePressBatch rejects pending response Promises and forwards batch', async () => {
     class SlowUnderlying {
       constructor() {

@@ -38,6 +38,34 @@ describe('PowerBatch', () => {
     expect(calls[0]).toEqual([42]);
   });
 
+  it('add returns a promise that resolves after the handler completes', async () => {
+    const calls = [];
+    const handler = async (items) => {
+      await new Promise((r) => setTimeout(r, 10));
+      calls.push(items.slice());
+    };
+    const b = new PowerBatch(handler);
+    const promise = b.add('x');
+    expect(promise).toBeInstanceOf(Promise);
+    await promise;
+    expect(calls).toEqual([['x']]);
+  });
+
+  it('add resolves after async handler completion when maxSize triggers immediate flush', async () => {
+    const calls = [];
+    const handler = async (items) => {
+      await new Promise((r) => setTimeout(r, 10));
+      calls.push(items.slice());
+    };
+    const b = new PowerBatch(handler, { maxSize: 2 });
+    const promise = b.add('a');
+    const promise2 = b.add('b');
+    expect(promise).toBeInstanceOf(Promise);
+    expect(promise2).toBeInstanceOf(Promise);
+    await Promise.all([promise, promise2]);
+    expect(calls).toEqual([['a', 'b']]);
+  });
+
   it('accepts scheduling option (macrotask) and preserves basic behavior', async () => {
     const calls = [];
     const handler = (items) => calls.push(items.slice());

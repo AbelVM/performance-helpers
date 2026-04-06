@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PowerCache } from '../src/helpers/powerCache.js';
 
 describe('PowerCache getOrSet APIs', () => {
@@ -59,5 +59,52 @@ describe('PowerCache getOrSet APIs', () => {
     const v = await c.getOrSetAsync('x', okFactory);
     expect(v).toBe('now');
     expect(c.get('x')).toBe('now');
+  });
+
+  it('getOrSet staleWhileRevalidate returns stale value and refreshes in background', async () => {
+    const c = new PowerCache({ defaultTTL: 1 });
+    c.set('a', 1, { ttl: 1 });
+    await new Promise((r) => setTimeout(r, 5));
+
+    let resolveRefresh;
+    const refreshFactory = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        })
+    );
+
+    const stale = c.getOrSet('a', refreshFactory, {
+      staleWhileRevalidate: true,
+      ttl: 10000,
+    });
+
+    expect(stale).toBe(1);
+    expect(c._inflightPromises.has('a')).toBe(true);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(refreshFactory).toHaveBeenCalledTimes(1);
+
+    resolveRefresh(2);
+    await c._inflightPromises.get('a');
+
+    expect(c.get('a')).toBe(2);
+  });
+
+  it('getOrSetAsync staleWhileRevalidate returns stale value and refreshes in background', async () => {
+    const c = new PowerCache({ defaultTTL: 1 });
+    c.set('x', 'old', { ttl: 1 });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const asyncFactory = vi.fn(() => Promise.resolve('fresh'));
+    const result = await c.getOrSetAsync('x', asyncFactory, {
+      staleWhileRevalidate: true,
+      ttl: 10000,
+    });
+
+    expect(result).toBe('old');
+    expect(asyncFactory).toHaveBeenCalledTimes(1);
+    await c._inflightPromises.get('x');
+    expect(c.get('x')).toBe('fresh');
   });
 });

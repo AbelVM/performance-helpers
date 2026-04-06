@@ -53,16 +53,15 @@ export class PowerBatch {
    */
   add(item) {
     this._queue.push(item);
+    if (!this._pending) {
+      let resolve, reject;
+      const p = new Promise((r, rej) => {
+        resolve = r;
+        reject = rej;
+      });
+      this._pending = { promise: p, resolve, reject };
+    }
     if (this._queue.length >= this._maxSize) {
-      // create pending promise if caller awaits completion
-      if (!this._pending) {
-        let resolve, reject;
-        const p = new Promise((r, rej) => {
-          resolve = r;
-          reject = rej;
-        });
-        this._pending = { promise: p, resolve, reject };
-      }
       // if a microtask was previously scheduled, cancel the scheduled flag
       this._scheduled = false;
       // run batch immediately to honor maxSize flush semantics
@@ -77,8 +76,7 @@ export class PowerBatch {
       // schedule on configured queue to coalesce synchronous adds
       this._schedule(() => this._runBatch());
     }
-    // For regular adds we don't return a promise (do not await handler).
-    return Promise.resolve();
+    return this._pending.promise;
   }
 
   /**

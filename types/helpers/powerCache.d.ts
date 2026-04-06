@@ -181,6 +181,22 @@ export class PowerCache {
      */
     private _removeExpiredNode;
     /**
+     * Start a background refresh for an expired entry.
+     *
+     * If a refresh is already in flight for the key, this helper does nothing.
+     * The refreshed value is written back to cache when the factory resolves.
+     * Errors are swallowed so the stale value remains available.
+     *
+     * @private
+     * @param {*} key
+     * @param {Function} factory
+     * @param {Object} [options]
+     * @param {number} [options.ttl]
+     * @param {number} [options.weight]
+     * @returns {void}
+     */
+    private _refreshStaleEntry;
+    /**
      * Append a node to the tail (mark it most-recently used).
      * This updates the linked-list pointers appropriately and is used when
      * inserting new nodes or promoting a node to MRU.
@@ -277,11 +293,13 @@ export class PowerCache {
      * @param {Object} [options]
      * @param {number} [options.ttl]
      * @param {number} [options.weight]
+     * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
      * @returns {*|Promise<*>}
      */
-    getOrSet(key: any, factory: Function | any, { ttl, weight }?: {
+    getOrSet(key: any, factory: Function | any, { ttl, weight, staleWhileRevalidate }?: {
         ttl?: number | undefined;
         weight?: number | undefined;
+        staleWhileRevalidate?: boolean | undefined;
     }): any | Promise<any>;
     /**
      * Bulk set multiple entries. Accepts an iterable/array of [key, value] pairs.
@@ -325,7 +343,7 @@ export class PowerCache {
      * @param {number} [options.weight]
      * @returns {Promise<*>}
      */
-    getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight }?: {
+    getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate }?: {
         ttl?: number | undefined;
         weight?: number | undefined;
     }): Promise<any>;

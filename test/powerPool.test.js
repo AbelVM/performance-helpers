@@ -17,6 +17,12 @@ describe('PowerPool (mocked worker)', () => {
         });
         this.terminate = vi.fn();
       }
+      addEventListener(type, cb) {
+        if (type === 'message') this.onmessage = cb;
+        if (type === 'error') this.onerror = cb;
+        if (type === 'messageerror') this.onmessageerror = cb;
+      }
+      removeEventListener() {}
     }
 
     const pool = new PowerPool(MockUnderlying, { size: 1, idleTimeout: 1000 });
@@ -47,6 +53,29 @@ describe('PowerPool (mocked worker)', () => {
         // the callArg should be a Uint8Array when posting an object
         expect(callArg).toBeInstanceOf(Uint8Array);
       }
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('supports arrow-function worker factories', () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn();
+        this.terminate = vi.fn();
+      }
+      addEventListener(type, cb) {
+        if (type === 'message') this.onmessage = cb;
+      }
+      removeEventListener() {}
+    }
+
+    const pool = new PowerPool(() => new MockUnderlying(), { size: 1, idleTimeout: 1000 });
+    try {
+      expect(pool.workers.length).toBeGreaterThanOrEqual(1);
+      pool.postMessage({ x: 42 });
+      expect(pool.workers[0].tasks).toBeGreaterThanOrEqual(1);
     } finally {
       pool.terminate();
     }
@@ -151,6 +180,163 @@ describe('PowerPool (mocked worker)', () => {
       // wait for both messages to be processed
       await new Promise((res) => setTimeout(res, 100));
       expect(received.length).toBeGreaterThanOrEqual(2);
+      expect(pool.queue.length).toBe(0);
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('drops the newest queued task when queuePolicy is drop-newest', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+      queuePolicy: 'drop-newest',
+      lazy: false,
+    });
+    try {
+      const received = [];
+      pool.onmessage = (e) => {
+        if (e && e.data && typeof e.data.n === 'number') received.push(e.data);
+      };
+
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      expect(pool.postMessage({ n: 2 })).toBe(true);
+      expect(pool.postMessage({ n: 3 })).toBe(false);
+
+      await new Promise((res) => setTimeout(res, 120));
+      expect(received).toEqual([{ n: 1 }, { n: 2 }]);
+      expect(pool.queue.length).toBe(0);
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('drops the oldest queued task when queuePolicy is drop-oldest', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+      queuePolicy: 'drop-oldest',
+      lazy: false,
+    });
+    try {
+      const received = [];
+      pool.onmessage = (e) => {
+        if (e && e.data && typeof e.data.n === 'number') received.push(e.data);
+      };
+
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      expect(pool.postMessage({ n: 2 })).toBe(true);
+      expect(pool.postMessage({ n: 3 })).toBe(true);
+
+      await new Promise((res) => setTimeout(res, 120));
+      expect(received).toEqual([{ n: 1 }, { n: 3 }]);
+      expect(pool.queue.length).toBe(0);
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('rejects queued tasks when queuePolicy is reject', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+      queuePolicy: 'reject',
+      lazy: false,
+    });
+    try {
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      const rejected = pool.postMessage({ n: 2 }, undefined, { awaitResponse: true, timeout: 100 });
+      await expect(rejected).rejects.toThrow(/queue policy/);
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('pauses queued dispatch until resumed', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+    });
+    try {
+      const received = [];
+      pool.onmessage = (e) => {
+        if (e && e.data && typeof e.data.n === 'number') received.push(e.data);
+      };
+      pool.pauseQueue();
+      expect(pool.queuePaused).toBe(true);
+
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      expect(pool.postMessage({ n: 2 })).toBe(true);
+      expect(pool.queue.length).toBe(1);
+
+      await new Promise((res) => setTimeout(res, 80));
+      expect(received).toEqual([{ n: 1 }]);
+      expect(pool.queue.length).toBe(1);
+
+      pool.resumeQueue();
+      expect(pool.queuePaused).toBe(false);
+      await new Promise((res) => setTimeout(res, 80));
+      expect(received).toEqual([{ n: 1 }, { n: 2 }]);
       expect(pool.queue.length).toBe(0);
     } finally {
       pool.terminate();

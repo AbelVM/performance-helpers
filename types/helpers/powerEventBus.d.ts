@@ -23,6 +23,8 @@ export class PowerEventBus {
      * Useful in tests or environments where FinalizationRegistry/GC is unavailable.
      */
     cleanup(): void;
+    _decrementLiveCount(event: any): void;
+    _removeListenerEntry(event: any, set: any, entry: any): boolean;
     /**
      * Subscribe to an event.
      * @param {string} event
@@ -51,6 +53,18 @@ export class PowerEventBus {
      * @returns {boolean}
      */
     emit(event: string, payload?: any): boolean;
+    /**
+     * Emit an event to all subscribers and await async listeners.
+     * Supports bounded concurrency through the `concurrency` option.
+     * Errors thrown or rejected by listeners are swallowed.
+     * @param {string} event
+     * @param {any} [payload]
+     * @param {{concurrency?: number}=} [options]
+     * @returns {Promise<boolean>}
+     */
+    emitAsync(event: string, payload?: any, { concurrency }?: {
+        concurrency?: number | undefined;
+    }): Promise<boolean>;
     /**
      * Return array of listeners for an event (copy).
      * @param {string} event

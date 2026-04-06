@@ -126,7 +126,7 @@ export class PowerTTLMap {
   touch(key, ttl) {
     const entry = this._map.get(key);
     if (!entry) return false;
-    if (entry.expiresAt && Date.now() > entry.expiresAt) {
+    if (entry.expiresAt && nowMs() > entry.expiresAt) {
       this._expireKey(key, entry);
       return false;
     }
@@ -163,7 +163,7 @@ export class PowerTTLMap {
    * @returns {IterableIterator<[any, any]>}
    */
   *entries() {
-    const now = Date.now();
+    const now = nowMs();
     for (const [k, entry] of this._map) {
       if (entry.expiresAt && now > entry.expiresAt) {
         this._expireKey(k, entry);

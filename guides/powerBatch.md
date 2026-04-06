@@ -17,7 +17,10 @@ Useful for coalescing DB writes, network calls, or other I/O that benefits from 
 
 ## API
 
-- `add(item)` — Add an item to the current batch. In normal usage `add()` returns a resolved `Promise<void>` (fire-and-forget) to avoid forcing callers to await handler completion; however if adding the item causes the batch to immediately flush (for example, when `maxSize` is reached) `add()` will return the same `Promise` returned by `flush()` and resolve/reject with the handler outcome. Use `flush()` explicitly when you always need a guaranteed handler-completion promise.
+- `add(item)` — Add an item to the current batch. `add()` always returns a `Promise<void>` that resolves when the batch containing the item has been processed.
+  - When the item is added without immediately flushing the batch, the Promise resolves after the scheduled microtask/macrotask run completes and the handler finishes.
+  - When the item causes the batch to reach `maxSize`, the batch flushes immediately and `add()` resolves or rejects only after the handler has completed processing that batch.
+  - In practice this means `add()` can be treated as fire-and-forget for normal batching, while still providing a completion promise when needed.
 
 - `flush()` — Returns a `Promise<void>` that forces an immediate flush of the current queued items and resolves once the handler has completed processing the flushed batch.
 

@@ -38,6 +38,7 @@ export class PowerPoolShutdownError extends Error {
  * @property {number} [debugLevel]
  * @property {number} [listenerMaxListeners]
  * @property {boolean} [weakListeners]
+ * @property {number} [queueHighThreshold] - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
  */
 /**
  * Manager for a pool of web workers.
@@ -62,6 +63,7 @@ export class PowerPool {
      * @param {number} [options.maxTasksPerWorker=Infinity] - Soft capacity per worker before considering it busy.
      * @param {number} [options.idleTimeout=60000] - Milliseconds after which idle workers (beyond `minSize`) will be terminated.
      * @param {boolean} [options.taskQueue=true] - Whether to queue tasks when all workers are busy.
+     * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
      * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
      */
     constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined);
@@ -72,6 +74,7 @@ export class PowerPool {
     maxSize: number;
     idleTimeout: number;
     taskQueueEnabled: boolean;
+    _queuePolicy: any;
     _createdAt: number;
     _totalWorkersCreated: number;
     _totalTasksCompleted: number;
@@ -102,6 +105,8 @@ export class PowerPool {
     workers: WorkerObj[];
     queue: PowerQueue;
     _bus: PowerEventBus;
+    _queueHighThreshold: number;
+    _queueHighCrossed: boolean;
     _onmessage: Function | null;
     _onerror: Function | null;
     _onidle: Function | null;
@@ -113,9 +118,9 @@ export class PowerPool {
     /** whether the pool is considered idle (no active tasks and empty queue) */
     _isIdle: boolean;
     _logger: PowerLogger;
-    _reaperInterval: number;
     _pendingResponses: Map<any, any>;
     _underlyingToWorkerObj: Map<any, any>;
+    _reaperInterval: number;
     _encodeCache: Map<any, any>;
     _encodeCacheLimit: number;
     _encodeCacheByteLimit: number;
@@ -209,6 +214,7 @@ export class PowerPool {
      * @returns {Worker|any} The underlying worker instance or factory result.
      */
     private _createWorkerInstance;
+    _deleteWorkerUnderlyingMapping(workerObj: any): void;
     /**
      * Add and wire a new worker instance into the pool.
      *
@@ -461,6 +467,29 @@ export class PowerPool {
      * @type {Function|null}
      */
     get onidle(): Function | null;
+    /**
+     * Pause dequeueing from the internal task queue.
+     * Queued tasks remain in the queue until `resumeQueue()` is called.
+     * This is useful for controlled backpressure when downstream consumers
+     * are temporarily unable to accept more work.
+     */
+    pauseQueue(): void;
+    _queuePaused: boolean | undefined;
+    /**
+     * Resume dequeueing from the internal task queue and attempt to dispatch
+     * waiting tasks to available workers.
+     */
+    resumeQueue(): void;
+    /**
+     * Whether queued dispatch is currently paused.
+     * @returns {boolean}
+     */
+    get queuePaused(): boolean;
+    /**
+     * Dispatch queued tasks to available workers when the queue is not paused.
+     * @private
+     */
+    private _dispatchQueuedTasks;
 }
 export type WorkerObj = {
     /**
@@ -535,6 +564,10 @@ export type PowerPoolOptions = {
     debugLevel?: number | undefined;
     listenerMaxListeners?: number | undefined;
     weakListeners?: boolean | undefined;
+    /**
+     * - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
+     */
+    queueHighThreshold?: number | undefined;
 };
 import { PowerQueue } from './powerQueue.js';
 import { PowerEventBus } from './powerEventBus.js';

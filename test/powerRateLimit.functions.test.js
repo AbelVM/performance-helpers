@@ -3,7 +3,12 @@ import PowerRateLimit from '../src/helpers/powerRateLimit.js';
 
 describe('PowerRateLimit functions and undo paths', () => {
   it('returns false when available() throws', () => {
-    const bad = { available: () => { throw new Error('boom'); }, tryConsume: () => true };
+    const bad = {
+      available: () => {
+        throw new Error('boom');
+      },
+      tryConsume: () => true,
+    };
     const r = new PowerRateLimit([bad]);
     expect(r.tryConsume(1)).toBe(false);
   });
@@ -16,7 +21,12 @@ describe('PowerRateLimit functions and undo paths', () => {
 
   it('rollback calls release when a reserve later throws', () => {
     const l1 = { reserve: (n) => ({ tok: true }), release: vi.fn() };
-    const l2 = { reserve: () => { throw new Error('reserve fail'); }, release: vi.fn() };
+    const l2 = {
+      reserve: () => {
+        throw new Error('reserve fail');
+      },
+      release: vi.fn(),
+    };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
     expect(r.tryConsume(1)).toBe(false);
     expect(l1.release).toHaveBeenCalled();
@@ -31,8 +41,20 @@ describe('PowerRateLimit functions and undo paths', () => {
   });
 
   it('undo swallows errors from release/rollback', () => {
-    const l1 = { reserve: () => ({ tok: true }), release: () => { throw new Error('boom release'); } };
-    const l2 = { tryConsume: () => { throw new Error('boom try'); }, rollback: () => { throw new Error('boom rollback'); } };
+    const l1 = {
+      reserve: () => ({ tok: true }),
+      release: () => {
+        throw new Error('boom release');
+      },
+    };
+    const l2 = {
+      tryConsume: () => {
+        throw new Error('boom try');
+      },
+      rollback: () => {
+        throw new Error('boom rollback');
+      },
+    };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
     // should return false and not throw despite undo errors
     expect(r.tryConsume(1)).toBe(false);
@@ -62,7 +84,7 @@ describe('PowerRateLimit functions and undo paths', () => {
     // first limiter reserves successfully
     const l1 = { reserve: (n) => ({ t: true }), release: vi.fn() };
     // second limiter lacks reserve and tryConsume but has addTokens (pre-check passes)
-    const l2 = { addTokens: (n) => {}, /* no tryConsume or reserve */ };
+    const l2 = { addTokens: (n) => {} /* no tryConsume or reserve */ };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
     expect(() => r.tryConsume(1)).toThrow(TypeError);
     // ensure rollback attempted for l1

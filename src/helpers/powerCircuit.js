@@ -22,6 +22,7 @@
  * @property {import("./powerEventBus.js").PowerEventBus} [eventBus]
  */
 import { PowerEventBus } from './powerEventBus.js';
+import { nowMs } from '../utils/now.js';
 
 export class PowerCircuit {
   constructor(options = {}) {
@@ -44,7 +45,7 @@ export class PowerCircuit {
     const prev = this._state;
     if (prev === newState) return;
     this._state = newState;
-    if (newState === 'open') this._openedAt = Date.now();
+    if (newState === 'open') this._openedAt = nowMs();
     else this._openedAt = null;
     // only keep trial flag true when in half-open; otherwise clear it
     if (newState !== 'half-open') this._trialInFlight = false;
@@ -68,7 +69,7 @@ export class PowerCircuit {
   get state() {
     // If open and timeout elapsed, expose as 'half-open' logically
     if (this._state === 'open' && this._openedAt != null) {
-      if (Date.now() - this._openedAt >= this._timeout) return 'half-open';
+      if (nowMs() - this._openedAt >= this._timeout) return 'half-open';
     }
     return this._state;
   }
@@ -82,7 +83,7 @@ export class PowerCircuit {
 
     // short-circuit when open and timeout not elapsed
     if (this._state === 'open') {
-      if (Date.now() - this._openedAt < this._timeout) {
+      if (nowMs() - this._openedAt < this._timeout) {
         const err = new Error('CircuitOpen');
         err.code = 'ECIRCUITOPEN';
         throw err;

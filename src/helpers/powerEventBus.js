@@ -31,17 +31,7 @@ export class PowerEventBus {
           const { event, ref } = token;
           const s = this._listeners.get(event);
           if (!s) return;
-          const removed = s.delete(ref);
-          if (removed) {
-            const prev = this._liveCounts.get(event) || 0;
-            const next = Math.max(0, prev - 1);
-            if (next === 0) this._liveCounts.delete(event);
-            else this._liveCounts.set(event, next);
-          }
-          if (s.size === 0) {
-            this._listeners.delete(event);
-            this._liveCounts.delete(event);
-          }
+          this._removeListenerEntry(event, s, ref);
         } catch (e) {
           /* ignore finalizer errors */
         }
@@ -61,14 +51,32 @@ export class PowerEventBus {
   cleanup() {
     if (!this._weak) return;
     for (const [event, set] of this._listeners) {
-      for (const entry of Array.from(set)) {
+      for (const entry of set) {
         if (entry && typeof entry.deref === 'function') {
           const v = entry.deref();
-          if (!v) set.delete(entry);
+          if (!v) this._removeListenerEntry(event, set, entry);
         }
       }
       if (set.size === 0) this._listeners.delete(event);
     }
+  }
+
+  _decrementLiveCount(event) {
+    const prev = this._liveCounts.get(event) || 0;
+    const next = Math.max(0, prev - 1);
+    if (next === 0) this._liveCounts.delete(event);
+    else this._liveCounts.set(event, next);
+  }
+
+  _removeListenerEntry(event, set, entry) {
+    const removed = set.delete(entry);
+    if (!removed) return false;
+    this._decrementLiveCount(event);
+    if (set.size === 0) {
+      this._listeners.delete(event);
+      this._liveCounts.delete(event);
+    }
+    return true;
   }
 
   /**
@@ -91,13 +99,7 @@ export class PowerEventBus {
       // remove dead refs and reconcile count lazily
       for (const entry of s) {
         const fn2 = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
-        if (!fn2) {
-          s.delete(entry);
-          const prev = this._liveCounts.get(event) || 0;
-          const next = Math.max(0, prev - 1);
-          if (next === 0) this._liveCounts.delete(event);
-          else this._liveCounts.set(event, next);
-        }
+        if (!fn2) this._removeListenerEntry(event, s, entry);
       }
     }
 
@@ -202,12 +204,12 @@ export class PowerEventBus {
           const wrapped = mset.get(event);
           if (wrapped) {
             if (this._weak) {
-              for (const entry of Array.from(s)) {
+              for (const entry of s) {
                 const val = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
-                if (val === wrapped) s.delete(entry);
+                if (val === wrapped) this._removeListenerEntry(event, s, entry);
               }
             } else {
-              s.delete(wrapped);
+              this._removeListenerEntry(event, s, wrapped);
             }
             mset.delete(event);
             if (mset.size === 0) {
@@ -225,12 +227,12 @@ export class PowerEventBus {
             const wrapped = m.get(event);
             if (wrapped) {
               if (this._weak) {
-                for (const entry of Array.from(s)) {
+                for (const entry of s) {
                   const val = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
-                  if (val === wrapped) s.delete(entry);
+                  if (val === wrapped) this._removeListenerEntry(event, s, entry);
                 }
               } else {
-                s.delete(wrapped);
+                this._removeListenerEntry(event, s, wrapped);
               }
               m.delete(event);
               if (m.size === 0) this._onceMap.delete(fn);
@@ -244,12 +246,12 @@ export class PowerEventBus {
           const wrapped = m.get(event);
           if (wrapped) {
             if (this._weak) {
-              for (const entry of Array.from(s)) {
+              for (const entry of s) {
                 const val = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
-                if (val === wrapped) s.delete(entry);
+                if (val === wrapped) this._removeListenerEntry(event, s, entry);
               }
             } else {
-              s.delete(wrapped);
+              this._removeListenerEntry(event, s, wrapped);
             }
             m.delete(event);
             if (m.size === 0) this._onceMap.delete(fn);
@@ -258,12 +260,12 @@ export class PowerEventBus {
       }
     }
     if (this._weak) {
-      for (const entry of Array.from(s)) {
+      for (const entry of s) {
         const val = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
-        if (val === fn) s.delete(entry);
+        if (val === fn) this._removeListenerEntry(event, s, entry);
       }
     } else {
-      s.delete(fn);
+      this._removeListenerEntry(event, s, fn);
     }
     // If `fn` was a wrapped function, remove its original->wrapped bookkeeping
     try {
@@ -278,7 +280,6 @@ export class PowerEventBus {
     } catch (err) {
       // ignore
     }
-    if (s.size === 0) this._listeners.delete(event);
   }
 
   /**
@@ -291,13 +292,12 @@ export class PowerEventBus {
   emit(event, payload) {
     const s = this._listeners.get(event);
     if (!s || s.size === 0) return false;
-    // snapshot to allow mutation during iteration
-    for (const entry of Array.from(s)) {
+    for (const entry of s) {
       let fn = entry;
       if (this._weak && entry && typeof entry.deref === 'function') fn = entry.deref();
       if (!fn) {
         // dead weak ref; cleanup
-        s.delete(entry);
+        this._removeListenerEntry(event, s, entry);
         continue;
       }
       try {
@@ -311,6 +311,51 @@ export class PowerEventBus {
   }
 
   /**
+   * Emit an event to all subscribers and await async listeners.
+   * Supports bounded concurrency so long listener lists can be processed in
+   * batches without flooding the event loop.
+   * Errors thrown or rejected by listeners are swallowed.
+   * @param {string} event
+   * @param {any} [payload]
+   * @param {Object} [options]
+   * @param {number} [options.concurrency=Infinity]
+   * @returns {Promise<boolean>}
+   */
+  async emitAsync(event, payload, { concurrency = Infinity } = {}) {
+    const listeners = this.listeners(event);
+    if (listeners.length === 0) return false;
+
+    const normalizeConcurrency = Number.isFinite(+concurrency) && +concurrency > 0
+      ? Math.max(1, Math.floor(+concurrency))
+      : Infinity;
+
+    const invoke = async (fn) => {
+      try {
+        await fn(payload);
+      } catch (e) {
+        // swallow subscriber errors
+      }
+    };
+
+    if (!Number.isFinite(normalizeConcurrency) || normalizeConcurrency >= listeners.length) {
+      await Promise.all(listeners.map(invoke));
+      return true;
+    }
+
+    let nextIndex = 0;
+    const workers = Array.from({ length: normalizeConcurrency }, async () => {
+      while (nextIndex < listeners.length) {
+        const fn = listeners[nextIndex++];
+        if (!fn) continue;
+        await invoke(fn);
+      }
+    });
+
+    await Promise.all(workers);
+    return true;
+  }
+
+  /**
    * Return array of listeners for an event (copy).
    * @param {string} event
    * @returns {Function[]}
@@ -319,12 +364,11 @@ export class PowerEventBus {
     const s = this._listeners.get(event);
     if (!s) return [];
     const out = [];
-    for (const entry of Array.from(s)) {
+    for (const entry of s) {
       const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
       if (fn) out.push(fn);
-      else s.delete(entry);
+      else this._removeListenerEntry(event, s, entry);
     }
-    if (s.size === 0) this._listeners.delete(event);
     return out;
   }
 
@@ -333,8 +377,13 @@ export class PowerEventBus {
    * @param {string} [event]
    */
   clear(event) {
-    if (event === undefined) this._listeners.clear();
-    else this._listeners.delete(event);
+    if (event === undefined) {
+      this._listeners.clear();
+      this._liveCounts.clear();
+      return;
+    }
+    this._listeners.delete(event);
+    this._liveCounts.delete(event);
   }
 }
 

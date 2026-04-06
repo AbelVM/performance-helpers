@@ -40,9 +40,20 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `stopCleanup()` — Stop the periodic cleanup loop and clear internal timers.
 
-- `getOrSet(key, factory, { ttl, weight })` — Atomically read-or-compute a value. If `factory` is a function its result (or resolved Promise) is stored and returned. Use for synchronous or promise-returning factories when inflight deduplication is not required.
+- `getOrSet(key, factory, { ttl, weight, staleWhileRevalidate })` — Atomically read-or-compute a value. If `factory` is a function its result (or resolved Promise) is stored and returned. When `staleWhileRevalidate` is enabled, an expired value can be returned immediately while refresh happens in the background.
 
-- `getOrSetAsync(key, asyncFactory, { ttl, weight })` — Async read-or-compute with inflight deduplication: concurrent callers share the same in-flight Promise and the resolved value is cached when settled.
+- `getOrSetAsync(key, asyncFactory, { ttl, weight, staleWhileRevalidate })` — Async read-or-compute with inflight deduplication: concurrent callers share the same in-flight Promise and the resolved value is cached when settled. With `staleWhileRevalidate: true`, an expired cached value is returned immediately and the async factory refreshes the cache behind the scenes.
+
+  ```javascript
+  const cache = new PowerCache({ defaultTTL: 1000 });
+  cache.set('user:1', { name: 'Alice' }, { ttl: 1000 });
+
+  // After the entry expires, staleWhileRevalidate returns the old value immediately
+  // and refreshes the cache in the background.
+  const stale = cache.getOrSet('user:1', () => fetchUser(1), {
+    staleWhileRevalidate: true,
+  });
+  ```
 
 - `resize({ maxEntries, maxWeight })` — Change cache caps and trigger eviction as needed.
 

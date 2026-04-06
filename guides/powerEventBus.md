@@ -19,6 +19,8 @@ Typed micro event bus for intra-process pub/sub. Useful for wiring multiple help
 
 - `emit(evt, payload)` — Emit an event with an optional `payload`; returns `true` if at least one listener was invoked. Errors thrown by listeners are swallowed to avoid propagation.
 
+- `emitAsync(evt, payload, { concurrency = Infinity })` — Emit an event and await async listeners. The optional `concurrency` parameter limits how many listeners run in parallel, making listener pipelines easier to manage.
+
 - `listeners(evt)` — Return a shallow copy array of listeners for debugging or metrics.
 
 - `clear(evt?)` — Remove listeners for a specific `evt`, or all listeners when `evt` is omitted.

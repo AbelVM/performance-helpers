@@ -43,4 +43,32 @@ describe('PowerEventBus', () => {
     expect(Array.isArray(L)).toBe(true);
     expect(L.length).toBe(1);
   });
+
+  it('emitAsync supports async listeners and bounded concurrency', async () => {
+    const bus = new PowerEventBus();
+    const active = [];
+    let maxActive = 0;
+
+    for (let i = 0; i < 5; i += 1) {
+      bus.on('x', async () => {
+        active.push(i);
+        maxActive = Math.max(maxActive, active.length);
+        await new Promise((r) => setTimeout(r, 10));
+        active.pop();
+      });
+    }
+
+    const ok = await bus.emitAsync('x', null, { concurrency: 2 });
+    expect(ok).toBe(true);
+    expect(maxActive).toBe(2);
+  });
+
+  it('emitAsync swallows async listener errors', async () => {
+    const bus = new PowerEventBus();
+    bus.on('e', async () => {
+      throw new Error('boom');
+    });
+    const ok = await bus.emitAsync('e', 1);
+    expect(ok).toBe(true);
+  });
 });

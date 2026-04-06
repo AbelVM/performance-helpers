@@ -14,6 +14,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 | `options.maxTasksPerWorker` | `number` | `Infinity` | Soft capacity per worker before it is considered busy. |
 | `options.idleTimeout` | `number` | `60000` | Milliseconds after which idle workers (beyond `minSize`) are terminated. |
 | `options.taskQueue` | `boolean` | `true` | Whether to queue tasks when pool is saturated. |
+| `options.queuePolicy` | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` | `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below. |
 | `options.lazy` | `boolean` | `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost. |
 | `options.listenerMaxListeners` / `options.maxListeners` | `number` | `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit. |
 | `options.weakListeners` | `boolean` | `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests). |
@@ -21,7 +22,14 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
 ## API
 
-- `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool will attempt to encode them into `Uint8Array` transferables (via `o2u8`) automatically unless an explicit `transfer` list is supplied. Pass `options.workerId` to route the message to a specific worker id; targeting a missing or saturated worker will fail (returns `false` or a rejected Promise).
+- `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool will attempt to encode them into `Uint8Array` transferables (via `o2u8`) automatically unless an explicit `transfer` list is supplied.
+
+  - Pass `options.workerId` to route the message to a specific worker id; targeting a missing or saturated worker will fail (returns `false` or a rejected Promise).
+  - When `options.taskQueue` is enabled, `options.queuePolicy` controls overload behavior:
+    - `'enqueue'` (default) queues all overflow tasks.
+    - `'drop-oldest'` drops the oldest queued task when new work arrives.
+    - `'drop-newest'` drops the newest incoming task when there is already queued backlog.
+    - `'reject'` rejects new overflow tasks immediately instead of queueing.
 
 	- Note: `options.awaitResponse` requires the outgoing `message` to be a plain-object (not a TypedArray/ArrayBuffer). The implementation augments the object with a `correlationId` and will throw if a non-plain-object is supplied when `awaitResponse` is requested.
 	- `options.workerId` may be a `number` or `string` (the pool coerces ids to strings internally for correlation handling).
@@ -34,6 +42,13 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
 - `postMessageBatch(items, options)` — Enqueue or dispatch a batch of messages in a single call. `items` is an array of `{ message, transfer? }`. Returns an array of per-item results (booleans or Promises when `awaitResponse` is requested). Use this to amortize queue push overhead for many items.
 
+  - When `options.awaitResponse` is enabled, each batch item is handled through the same internal `postMessage()` path as a single-item request. That means the batch preserves correlation behavior and returns Promises for response-waiting entries.
+  - For stable per-item identity in response mode, pass `options.correlationIdFactory(index, item)` to generate a unique `correlationId` for each batch entry.
+  - A fixed `options.correlationId` may only be used when the batch contains a single item. For multiple items the API throws because the pool cannot safely reuse one identifier for many pending responses.
+  - Specifying `options.workerId` targets the batch to a single worker. Targeted batch dispatch is fail-fast: a missing or busy worker will not queue the batch item, and the corresponding return value is `false`.
+  - When `options.taskQueue` is enabled, `options.queuePolicy` also applies to batch enqueue behavior in the fire-and-forget path.
+  - The return array always matches `items.length`.
+
 - `prepareBuffer(obj, { clone = true })` — Prepare a single transferable `Uint8Array` for `obj`. When `clone` is `true` returns a clone safe to transfer; when `clone` is `false` returns a cached internal buffer that must not be transferred. Useful to pre-encode hot payloads.
 
 - `prepareBuffers(items, { clone = true })` — Prepare an array of normalized `{ message, transfer }` entries for use with `postMessageBatch`. Each returned entry is ready to be dispatched or queued and avoids per-item encoding overhead at send time.
@@ -41,6 +56,10 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 - `stopThePressBatch(items, options)` — Atomically clear the queue, terminate (and optionally recreate) inflight workers, reject pending awaitResponse promises, then forward the provided batch. Returns per-item results like `postMessageBatch`. Useful for emergency replacement of queued work with a new batch.
 
 - `stopThePress(message, transfer, options)` — Clear the internal queue, terminate running workers (rejecting pending response Promises), and send the provided `message` through the same dispatch semantics as `postMessage`. By default the pool will recreate replacement workers; pass `options.recreateWorkers = false` to keep the pool reduced.
+
+- `pauseQueue()` / `resumeQueue()` — Temporarily pause and resume dispatching tasks from the internal queue. Use `pauseQueue()` when downstream consumers are overloaded or a transient outage occurs; queued tasks are retained and resumed later.
+
+- `queuePaused` — Read-only boolean property indicating whether queued dispatch is currently paused.
 
 - `addWorker()` / `removeWorker()` — Programmatically create or terminate a single worker from the pool.
 
@@ -188,6 +207,15 @@ try {
 // Fire-and-forget batch (optimized path)
 const batch = [{ message: { task: 1 } }, { message: { task: 2 } }];
 const results = pool.postMessageBatch(batch);
+
+const responseBatch = pool.postMessageBatch(batch, {
+  awaitResponse: true,
+  correlationIdFactory: (index, item) => `job-${item.message.a}-${index}`,
+});
+const responses = await Promise.all(responseBatch);
+responses.forEach((resp, index) => {
+  console.log('job', index, 'correlationId', resp.correlationId);
+});
 // results: [ true, true ] — dispatched or queued
 
 // Await per-item responses (each entry returns a Promise)

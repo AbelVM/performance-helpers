@@ -1,4 +1,5 @@
 import { formatErrorObj, normalizeError } from '../utils/errors.js';
+import { nowMs } from '../utils/now.js';
 
 /**
  * PowerLogger
@@ -110,7 +111,7 @@ export class PowerLogger {
 
     // Build a structured payload that output() handlers can use.
     const msg = opts.msgArray ? resolved : resolved.length === 1 ? resolved[0] : resolved;
-    let payload = { level: levelLabel, msg, ts: Date.now() };
+    let payload = { level: levelLabel, msg, ts: nowMs() };
     if (this.name) payload.name = this.name;
 
     // Allow the optional formatter to transform the payload first.

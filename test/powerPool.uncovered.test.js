@@ -339,4 +339,69 @@ describe('PowerPool uncovered branches', () => {
     pool.postMessageBatch([{ message: 't' }], { workerId: 'worker-1' });
     expect(pm).toHaveBeenCalled();
   });
+
+  it('postMessageBatch with a fixed correlationId and multiple items throws', () => {
+    function Stub() {}
+    const pool = new PowerPool(Stub, { minSize: 0, lazy: true, maxSize: 1 });
+    pool._logger = { error: vi.fn(), log: () => {} };
+    expect(() =>
+      pool.postMessageBatch([{ message: { hello: 'a' } }, { message: { hello: 'b' } }], {
+        awaitResponse: true,
+        correlationId: 'shared-id',
+      })
+    ).toThrow(
+      'postMessageBatch cannot use a fixed correlationId for multiple items; provide options.correlationIdFactory or omit correlationId'
+    );
+  });
+
+  it('prepareBuffers supports raw ArrayBuffer transfer optimization', () => {
+    function Stub() {}
+    const pool = new PowerPool(Stub, { minSize: 0, lazy: true });
+    const buffer = new ArrayBuffer(16);
+    const result = pool.prepareBuffers([buffer]);
+    expect(result).toEqual([{ message: buffer, transfer: [buffer] }]);
+  });
+
+  it('prepareBuffers supports typed array transfer optimization', () => {
+    function Stub() {}
+    const pool = new PowerPool(Stub, { minSize: 0, lazy: true });
+    const view = new Uint8Array(new ArrayBuffer(16));
+    const result = pool.prepareBuffers([view]);
+    expect(result).toEqual([{ message: view, transfer: [view.buffer] }]);
+  });
+
+  it('prepareBuffers supports DataView transfer optimization', () => {
+    function Stub() {}
+    const pool = new PowerPool(Stub, { minSize: 0, lazy: true });
+    const buffer = new ArrayBuffer(16);
+    const view = new DataView(buffer);
+    const result = pool.prepareBuffers([view]);
+    expect(result).toEqual([{ message: view, transfer: [buffer] }]);
+  });
+
+  it('postMessageBatch with unknown targeted worker fails immediately', () => {
+    function Stub() {}
+    const pool = new PowerPool(Stub, { minSize: 0, lazy: true, maxSize: 1 });
+    pool._logger = { error: vi.fn(), log: () => {} };
+    const res = pool.postMessageBatch([{ message: 't' }], { workerId: 'missing' });
+    expect(res).toEqual([false]);
+  });
+
+  it('postMessageBatch with a busy targeted worker fails instead of queueing', () => {
+    function Stub() {}
+    const pool = new PowerPool(Stub, {
+      minSize: 0,
+      lazy: true,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      taskQueueEnabled: true,
+    });
+    pool._logger = { error: vi.fn(), log: () => {} };
+    const w = pool.addWorker();
+    w.id = 'worker-1';
+    w.tasks = 1;
+    const res = pool.postMessageBatch([{ message: 't' }], { workerId: 'worker-1' });
+    expect(res).toEqual([false]);
+    expect(pool.queue.length).toBe(0);
+  });
 });

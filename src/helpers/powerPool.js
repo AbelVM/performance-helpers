@@ -152,6 +152,7 @@ export class PowerPool {
    * @param {number} [options.maxTasksPerWorker=Infinity] - Soft capacity per worker before considering it busy.
    * @param {number} [options.idleTimeout=60000] - Milliseconds after which idle workers (beyond `minSize`) will be terminated.
    * @param {boolean} [options.taskQueue=true] - Whether to queue tasks when all workers are busy.
+   * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
    * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
    */
   constructor(workerSource, options = {}) {
@@ -164,6 +165,7 @@ export class PowerPool {
       maxTasksPerWorker = Infinity,
       idleTimeout = 60_000,
       taskQueue = true,
+      queuePolicy = 'enqueue',
       lazy = true,
     } = options;
 
@@ -174,6 +176,9 @@ export class PowerPool {
     this.maxSize = Math.max(this.minSize, maxSize);
     this.idleTimeout = Math.max(0, idleTimeout);
     this.taskQueueEnabled = Boolean(taskQueue);
+    this._queuePolicy = ['enqueue', 'drop-oldest', 'drop-newest', 'reject'].includes(queuePolicy)
+      ? queuePolicy
+      : 'enqueue';
 
     // performance tracking
     this._createdAt = nowMs(); // pool creation timestamp (ms)
@@ -222,6 +227,10 @@ export class PowerPool {
     // Create a per-instance logger. Allow callers to override via options.debugLevel (default 1).
     const dbg = options && typeof options.debugLevel === 'number' ? options.debugLevel : 1;
     this._logger = new PowerLogger(dbg, { name: 'powerPool' });
+    // correlation map for Promise-style postMessage responses
+    this._pendingResponses = new Map(); // correlationId -> { resolve, reject, timer }
+    // map underlying worker -> WorkerObj for shared handler dispatch
+    this._underlyingToWorkerObj = new Map();
 
     // When `lazy` is truthy only create `minSize` workers now and allow the
     // pool to grow on demand when tasks are posted. Default is `true`.
@@ -235,10 +244,6 @@ export class PowerPool {
       () => this._reapIdleWorkers(),
       Math.max(1000, Math.floor(this.idleTimeout / 2))
     );
-    // correlation map for Promise-style postMessage responses
-    this._pendingResponses = new Map(); // correlationId -> { resolve, reject, timer }
-    // map underlying worker -> WorkerObj for shared handler dispatch
-    this._underlyingToWorkerObj = new Map();
     // no Node `crypto` import: prefer Web Crypto APIs where available
     // small LRU-like cache for encoded messages (keyed by JSON string)
     // stores recent serialized messages to avoid re-encoding identical messages
@@ -548,9 +553,10 @@ export class PowerPool {
           continue;
         }
       }
-      // TypedArray or ArrayBuffer view -> make transferable
-      if (msg instanceof Uint8Array || ArrayBuffer.isView(msg)) {
-        out[i] = { message: msg, transfer: [msg.buffer] };
+      // ArrayBuffer or ArrayBuffer view -> make transferable in one normalized fast path.
+      if (msg instanceof ArrayBuffer || ArrayBuffer.isView(msg)) {
+        const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
+        out[i] = { message: msg, transfer: [transferTarget] };
         continue;
       }
       // fallback: keep as-is
@@ -650,6 +656,7 @@ export class PowerPool {
         } catch (e) {
           /* ignore */
         }
+        this._deleteWorkerUnderlyingMapping(w);
         this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
         this._terminatedWorkerTaskCountsCount += 1;
         terminatedIds.push(w.id);
@@ -709,7 +716,27 @@ export class PowerPool {
    * @returns {Worker|any} The underlying worker instance or factory result.
    */
   _createWorkerInstance() {
-    if (typeof this._workerSource === 'function') return new this._workerSource();
+    if (typeof this._workerSource === 'function') {
+      const source = this._workerSource;
+      if (source.prototype === undefined) {
+        // Arrow functions and bound functions are not constructable.
+        return source();
+      }
+      try {
+        return new source();
+      } catch (err) {
+        const msg = String(err && err.message);
+        if (
+          err instanceof TypeError &&
+          /not a constructor|cannot be invoked without\s*'new'|Class constructor|not constructable/i.test(
+            msg
+          )
+        ) {
+          return source();
+        }
+        throw err;
+      }
+    }
     if (typeof this._workerSource === 'string') {
       // Resolve a base URL without referencing `import.meta` statically
       // (some build targets like UMD don't support `import.meta`). Use a
@@ -743,6 +770,15 @@ export class PowerPool {
       return new Worker(this._workerSource, this._workerOptions);
     }
     throw new Error('Invalid workerSource: expected Worker factory or relative path string');
+  }
+
+  _deleteWorkerUnderlyingMapping(workerObj) {
+    try {
+      const u = workerObj && workerObj.worker && workerObj.worker._underlying;
+      if (u && this._underlyingToWorkerObj) this._underlyingToWorkerObj.delete(u);
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   /**
@@ -866,8 +902,12 @@ export class PowerPool {
         this._debugLog && this._debugLog(err, 'worker.onmessage: latency tracking outer');
       }
 
-      // dispatch queued task if any
-      if (this.queue.length > 0 && workerObj.tasks < this._maxTasksPerWorker) {
+      // dispatch queued task if any, unless queue dispatch is paused for backpressure control
+      if (
+        !this._queuePaused &&
+        this.queue.length > 0 &&
+        workerObj.tasks < this._maxTasksPerWorker
+      ) {
         const item = this.queue.shift();
         try {
           const startTime = nowMs();
@@ -1315,7 +1355,39 @@ export class PowerPool {
     // pool full and all workers at capacity (or targeted worker busy/missing)
     if (this.taskQueueEnabled) {
       const prepared = this._prepareForTransfer(message, transfer, options);
-      this.queue.push({ message: prepared.message, transfer: prepared.transfer });
+      const policy = this._queuePolicy;
+      if (policy === 'reject') {
+        if (wantResponse && correlationId) {
+          this._cleanupPendingResponse(correlationId, {
+            rejectWith: new Error('postMessage rejected by queue policy'),
+          });
+          return pendingPromise;
+        }
+        return false;
+      }
+      if (policy === 'drop-newest' && this.queue.length > 0) {
+        if (wantResponse && correlationId) {
+          this._cleanupPendingResponse(correlationId, {
+            rejectWith: new Error('postMessage rejected by queue policy'),
+          });
+          return pendingPromise;
+        }
+        return false;
+      }
+      if (policy === 'drop-oldest' && this.queue.length > 0) {
+        const dropped = this.queue.shift();
+        if (dropped && dropped.correlationId != null) {
+          this._cleanupPendingResponse(dropped.correlationId, {
+            rejectWith: new Error('postMessage queued task dropped by policy'),
+          });
+        }
+      }
+      const queuedItem = {
+        message: prepared.message,
+        transfer: prepared.transfer,
+      };
+      if (wantResponse && correlationId) queuedItem.correlationId = correlationId;
+      this.queue.push(queuedItem);
       // emit queue high-watermark event when threshold crossed
       try {
         if (
@@ -1572,6 +1644,7 @@ export class PowerPool {
         } catch (e) {
           /* ignore */
         }
+        this._deleteWorkerUnderlyingMapping(w);
       }
       // clear the workers array and reset active task counter
       this.workers.length = 0;
@@ -1648,11 +1721,24 @@ export class PowerPool {
     const wantsResponse = Boolean(
       options && (options.awaitResponse || options.correlationId != null)
     );
+    const correlationIdFactory =
+      options && typeof options.correlationIdFactory === 'function'
+        ? options.correlationIdFactory
+        : null;
     if (wantsResponse) {
+      if (options && options.correlationId != null && items.length > 1 && !correlationIdFactory) {
+        throw new Error(
+          'postMessageBatch cannot use a fixed correlationId for multiple items; provide options.correlationIdFactory or omit correlationId'
+        );
+      }
       const results = new Array(items.length);
       for (let i = 0; i < items.length; i++) {
         const it = items[i] || {};
-        results[i] = this.postMessage(it.message, it.transfer, options);
+        const perItemOptions = Object.assign({}, options);
+        if (correlationIdFactory) {
+          perItemOptions.correlationId = String(correlationIdFactory(i, it));
+        }
+        results[i] = this.postMessage(it.message, it.transfer, perItemOptions);
       }
       return results;
     }
@@ -1669,8 +1755,12 @@ export class PowerPool {
 
     // Hoist selection and idle updates to reduce O(N * workers) work
     let chosen = null;
-    if (targetWorkerId != null) chosen = this.workers.find((w) => w.id === targetWorkerId);
-    else chosen = this._findLeastLoadedWorker();
+    if (targetWorkerId != null) {
+      chosen = this.workers.find((w) => w.id === targetWorkerId);
+      if (!chosen) return items.map(() => false);
+    } else {
+      chosen = this._findLeastLoadedWorker();
+    }
     let idleStateDirty = false;
 
     for (let i = 0; i < items.length; i++) {
@@ -1734,10 +1824,24 @@ export class PowerPool {
       }
 
       if (!dispatched) {
-        // Pool is saturated or targeted worker unavailable: collect for queueing or fallback
+        if (targetWorkerId != null) {
+          // targeted worker semantics are fail-fast when busy or missing
+          results[i] = false;
+          continue;
+        }
+
+        // Pool is saturated: collect for queueing or fallback
         if (this.taskQueueEnabled) {
-          queuedPrepared.push({ message: prepared.message, transfer: prepared.transfer });
-          results[i] = true;
+          const policy = this._queuePolicy;
+          if (policy === 'reject' || (policy === 'drop-newest' && this.queue.length > 0)) {
+            results[i] = false;
+          } else {
+            if (policy === 'drop-oldest' && this.queue.length > 0) {
+              this.queue.shift();
+            }
+            queuedPrepared.push({ message: prepared.message, transfer: prepared.transfer });
+            results[i] = true;
+          }
         } else {
           // fallback round-robin
           if (!this.workers.length) {
@@ -1844,6 +1948,7 @@ export class PowerPool {
         } catch (e) {
           /* ignore */
         }
+        this._deleteWorkerUnderlyingMapping(w);
       }
       this.workers.length = 0;
       this._activeTasks = 0;
@@ -1920,6 +2025,7 @@ export class PowerPool {
       } catch (err) {
         /* ignore */
       }
+      this._deleteWorkerUnderlyingMapping(w);
       this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
       this._terminatedWorkerTaskCountsCount += 1;
     }
@@ -1959,12 +2065,6 @@ export class PowerPool {
         // element and popping. This keeps removal O(1) and avoids shifting
         // the remaining array entries.
         const lastIndex = this.workers.length - 1;
-        if (i === lastIndex) {
-          this.workers.pop();
-        } else {
-          // Move last into position i and pop the tail.
-          this.workers[i] = this.workers.pop();
-        }
         if (i === lastIndex) {
           this.workers.pop();
         } else {
@@ -2049,12 +2149,7 @@ export class PowerPool {
                 } catch (e) {
                   this._debugLog && this._debugLog(e, 'autoScale: terminate worker');
                 }
-                try {
-                  const u = w.worker && w.worker._underlying;
-                  if (u && this._underlyingToWorkerObj) this._underlyingToWorkerObj.delete(u);
-                } catch (e) {
-                  /* ignore */
-                }
+                this._deleteWorkerUnderlyingMapping(w);
               }
             }
             this._lastAutoScaleAt = now;
@@ -2350,5 +2445,69 @@ export class PowerPool {
         }
       }
     }
+  }
+
+  /**
+   * Pause dequeueing from the internal task queue.
+   * Queued tasks remain in the queue until `resumeQueue()` is called.
+   * This is useful for controlled backpressure when downstream consumers
+   * are temporarily unable to accept more work.
+   */
+  pauseQueue() {
+    this._queuePaused = true;
+  }
+
+  /**
+   * Resume dequeueing from the internal task queue and attempt to dispatch
+   * waiting tasks to available workers.
+   */
+  resumeQueue() {
+    if (!this._queuePaused) return;
+    this._queuePaused = false;
+    this._dispatchQueuedTasks();
+  }
+
+  /**
+   * Whether queued dispatch is currently paused.
+   * @returns {boolean}
+   */
+  get queuePaused() {
+    return this._queuePaused;
+  }
+
+  /**
+   * Dispatch queued tasks to available workers when the queue is not paused.
+   * @private
+   */
+  _dispatchQueuedTasks() {
+    if (this._queuePaused || !this.taskQueueEnabled || this.queue.length === 0) return;
+    const now = nowMs();
+    let dispatched = false;
+
+    for (const workerObj of this.workers) {
+      while (this.queue.length > 0 && workerObj.tasks < this._maxTasksPerWorker) {
+        const item = this.queue.shift();
+        try {
+          if (item.transfer && item.transfer.length)
+            workerObj.worker.postMessage(item.message, item.transfer);
+          else workerObj.worker.postMessage(item.message);
+          if (workerObj._startTimes && typeof workerObj._startTimes.push === 'function')
+            workerObj._startTimes.push(now);
+          workerObj.tasks++;
+          this._activeTasks++;
+          workerObj.lastActive = now;
+          dispatched = true;
+        } catch (err) {
+          this._debugLog && this._debugLog(err, 'dispatch queued message to worker failed');
+          this._logger.error(err, 'Failed to dispatch queued message to worker');
+          break;
+        }
+      }
+    }
+
+    if (this._queueHighCrossed && this.queue.length <= this._queueHighThreshold) {
+      this._queueHighCrossed = false;
+    }
+    if (dispatched) this._updateIdleState();
   }
 }

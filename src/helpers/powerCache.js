@@ -209,6 +209,45 @@ export class PowerCache {
   }
 
   /**
+   * Start a background refresh for an expired entry.
+   *
+   * If a refresh is already in flight for the key, this helper does nothing.
+   * The refreshed value is written back to cache when the factory resolves.
+   * Errors are swallowed so the stale value remains available.
+   *
+   * @private
+   * @param {*} key
+   * @param {Function} factory
+   * @param {Object} [options]
+   * @param {number} [options.ttl]
+   * @param {number} [options.weight]
+   * @returns {void}
+   */
+  _refreshStaleEntry(key, factory, { ttl = undefined, weight = undefined } = {}) {
+    if (this._inflightPromises.has(key)) return;
+    let p;
+    try {
+      p = Promise.resolve().then(() => factory());
+    } catch (err) {
+      return;
+    }
+    const tracked = p.then(
+      (value) => {
+        try {
+          this.set(key, value, { ttl, weight });
+        } catch (err) {}
+        this._inflightPromises.delete(key);
+        return value;
+      },
+      (err) => {
+        this._inflightPromises.delete(key);
+        return undefined;
+      }
+    );
+    this._inflightPromises.set(key, tracked);
+  }
+
+  /**
    * Append a node to the tail (mark it most-recently used).
    * This updates the linked-list pointers appropriately and is used when
    * inserting new nodes or promoting a node to MRU.
@@ -426,13 +465,21 @@ export class PowerCache {
    * @param {Object} [options]
    * @param {number} [options.ttl]
    * @param {number} [options.weight]
+   * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
    * @returns {*|Promise<*>}
    */
-  getOrSet(key, factory, { ttl = undefined, weight = undefined } = {}) {
+  getOrSet(key, factory, { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}) {
     const node = this.map.get(key);
     const now = Date.now();
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
+        if (staleWhileRevalidate && typeof factory === 'function') {
+          // Serve stale value while refreshing in the background.
+          this._moveToTail(node);
+          this.hits++;
+          this._refreshStaleEntry(key, factory, { ttl, weight });
+          return node.value;
+        }
         // expired: remove and count as a miss, then fall through to compute
         this._removeExpiredNode(node, now, true);
       } else {
@@ -570,9 +617,10 @@ export class PowerCache {
    * @param {Object} [options]
    * @param {number} [options.ttl]
    * @param {number} [options.weight]
+   * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
    * @returns {Promise<*>}
    */
-  getOrSetAsync(key, asyncFactory, { ttl = undefined, weight = undefined } = {}) {
+  getOrSetAsync(key, asyncFactory, { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}) {
     if (typeof asyncFactory !== 'function') {
       // treat non-function as direct value
       return Promise.resolve(this.getOrSet(key, asyncFactory, { ttl, weight }));
@@ -582,6 +630,12 @@ export class PowerCache {
     const node = this.map.get(key);
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
+        if (staleWhileRevalidate) {
+          this._moveToTail(node);
+          this.hits++;
+          this._refreshStaleEntry(key, asyncFactory, { ttl, weight });
+          return Promise.resolve(node.value);
+        }
         // expired: remove and proceed to compute
         this._removeExpiredNode(node, now);
       } else {

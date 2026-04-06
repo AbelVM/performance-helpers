@@ -4,7 +4,7 @@
 
 ![logo](assets/logo.png)
 
-Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a small worker pool wrapper, a tiny runtime debug logger, and much more:
+Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a fully-featured worker pool wrapper, a tiny runtime debug logger, and much more:
 
 ## Caching
 
