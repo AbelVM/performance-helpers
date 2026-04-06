@@ -1,8 +1,3 @@
-/**
- * Lightweight Map-like store where each key has an optional TTL (milliseconds).
- * Entries expire lazily on access or iteration. Suitable when LRU/weighting
- * is unnecessary and a simple time-to-live map is desired.
- */
 export class PowerTTLMap {
     /**
      * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).

@@ -13,6 +13,7 @@ Useful for coalescing DB writes, network calls, or other I/O that benefits from 
 | Option | Type | Default | Description |
 |---|---:|---:|---|
 | `maxSize` | `number` | `Infinity` | When the queue reaches `maxSize`, the batch flushes immediately. |
+| `scheduling` | `'microtask'\|'macrotask'` | `'microtask'` | Choose whether the batch dispatch is scheduled on the microtask queue (`queueMicrotask`) or macrotask queue (`setTimeout(…,0)`). Default is `'microtask'` to match low-latency coalescing semantics.
 
 ## API
 
@@ -50,3 +51,29 @@ for (const ev of incomingEvents()) {
 // on shutdown flush remaining work
 await writer.flush();
 ```
+
+## Caveat: awaiting between `add()` calls
+
+When using the default microtask scheduling (`scheduling: 'microtask'`), `PowerBatch` coalesces synchronous `add()` calls within the same microtask. If you `await` an `add()` (or otherwise yield to the event loop) between calls, the batch will be flushed before the subsequent `add()` — resulting in multiple handler invocations.
+
+Example:
+
+```javascript
+const calls = [];
+const b = new PowerBatch((items) => calls.push(items.slice()));
+
+// These two calls are synchronous and will be coalesced into one batch:
+b.add(1);
+b.add(2);
+
+// Awaiting here yields to the microtask queue, so the batch runs before the next add.
+await b.add(3);
+
+// This call runs in the next microtask and starts a new batch.
+b.add(4);
+
+await b.flush();
+// calls -> [[1,2,3], [4]] when using 'microtask' scheduling
+```
+
+If you need the older macrotask semantics (or want awaiting not to flush early), construct with `{ scheduling: 'macrotask' }`.

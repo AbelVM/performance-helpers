@@ -1,4 +1,14 @@
 /**
+ * Exported helper that allows callers to reuse a `seen` WeakMap for
+ * repeated deep-equality checks to avoid allocating a new WeakMap/WeakSet
+ * structure on every call.
+ * @param {*} a
+ * @param {*} b
+ * @param {WeakMap} [seen]
+ * @returns {boolean}
+ */
+export function deepEqualWithSeen(a: any, b: any, seen?: WeakMap<any, any>): boolean;
+/**
  * A small, fast key resolver for common cases where arguments are simple scalars.
  * - Fast path for primitive scalar args (string, number, boolean, null, undefined).
  * - Joins scalar args with `|` and prefixes type codes to avoid collisions.
@@ -33,6 +43,7 @@ export function simpleArgsKey(...args: any[]): string;
  * @property {function(*, *):void} [onExpire]
  * @property {number} [initialPoolSize]
  * @property {number} [maxCleanupPerTick]
+ * @property {boolean} [eagerCleanupOnRead]
  */
 /**
  * @example
@@ -63,6 +74,7 @@ export function simpleArgsKey(...args: any[]): string;
  * @class PowerCache
  */
 export class PowerCache {
+    [x: number]: () => void;
     /**
      * Create a PowerCache.
      * @param {Object} [options]
@@ -76,8 +88,9 @@ export class PowerCache {
      * @param {function(*, *):void} [options.onExpire] Callback invoked when an item expires. Called as `(key, value)`.
      * @param {number} [options.initialPoolSize=0] Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
      * @param {number} [options.maxCleanupPerTick=100] Default max nodes scanned per cleanup tick when running `startCleanup()`.
+     * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, }?: {
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, }?: {
         maxEntries?: number | undefined;
         maxWeight?: number | undefined;
         weightFn?: ((arg0: any) => number) | undefined;
@@ -88,6 +101,7 @@ export class PowerCache {
         onExpire?: ((arg0: any, arg1: any) => void) | undefined;
         initialPoolSize?: number | undefined;
         maxCleanupPerTick?: number | undefined;
+        eagerCleanupOnRead?: boolean | undefined;
     });
     maxEntries: number;
     maxWeight: number;
@@ -98,6 +112,7 @@ export class PowerCache {
     onEvict: ((arg0: any, arg1: any, arg2: string) => void) | null;
     onExpire: ((arg0: any, arg1: any) => void) | null;
     maxCleanupPerTick: number;
+    eagerCleanupOnRead: boolean;
     map: Map<any, any>;
     head: CacheNode | null;
     tail: CacheNode | null;
@@ -328,9 +343,24 @@ export class PowerCache {
      * @param {*} value
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
+     * @param {WeakMap} [options.seen] Optional reusable `seen` WeakMap for callers that
+     *        perform many deep-equality checks and want to avoid per-call allocations.
      * @returns {boolean}
      */
-    hasEqual(key: any, value: any, { ignoreExpiry }?: {
+    hasEqual(key: any, value: any, { ignoreExpiry, seen }?: {
+        ignoreExpiry?: boolean | undefined;
+        seen?: WeakMap<any, any> | undefined;
+    }): boolean;
+    /**
+     * Variant accepting an explicit `seen` WeakMap for reuse across many checks.
+     * @param {*} key
+     * @param {*} value
+     * @param {WeakMap} seen
+     * @param {Object} [options]
+     * @param {boolean} [options.ignoreExpiry=false]
+     * @returns {boolean}
+     */
+    hasEqualWithSeen(key: any, value: any, seen: WeakMap<any, any>, { ignoreExpiry }?: {
         ignoreExpiry?: boolean | undefined;
     }): boolean;
     /**
@@ -376,6 +406,12 @@ export class PowerCache {
      * @returns {void}
      */
     stopCleanup(): void;
+    /**
+     * Prototype tick used by the cleanup timer loop. Separated to avoid
+     * allocating a per-call closure inside `startCleanup()`.
+     * @private
+     */
+    private _cleanupTick;
     /**
      * Current number of entries in cache.
      * @returns {number}
@@ -518,6 +554,61 @@ export class PowerMemoizer {
      */
     stats(): Object;
 }
+/**
+ * PowerTimedCache
+ *
+ * A thin convenience wrapper around `PowerCache` for the common pure-TTL
+ * use-case. It constructs an internal `PowerCache` with the provided `ttl`
+ * used as the cache `defaultTTL` and automatically starts the periodic
+ * cleanup loop. The wrapper delegates common cache methods to the
+ * underlying `PowerCache` instance.
+ *
+ * @example
+ * const timed = new PowerTimedCache(60000, { maxEntries: 100, interval: 10000 });
+ * timed.set('k', 1);
+ * // entries will be automatically expired by the background cleaner
+ *
+ * @class PowerTimedCache
+ */
+export class PowerTimedCache {
+    [x: number]: () => void;
+    /**
+     * @param {number} ttl - Default TTL in milliseconds for entries.
+     * @param {Object} [options]
+     * @param {number} [options.maxEntries] - Forwarded to `PowerCache`.
+     * @param {number} [options.interval] - Cleanup interval (ms) for automatic cleanup.
+     * @param {number} [options.maxCleanupPerTick] - Max nodes scanned per cleanup tick.
+     * @param {Object} [options.cacheOptions] - Additional options forwarded to `PowerCache`.
+     */
+    constructor(ttl: number, { maxEntries, interval, maxCleanupPerTick, cacheOptions }?: {
+        maxEntries?: number | undefined;
+        interval?: number | undefined;
+        maxCleanupPerTick?: number | undefined;
+        cacheOptions?: Object | undefined;
+    });
+    cache: PowerCache;
+    get(key: any): any;
+    set(key: any, value: any, options: any): false | PowerCache;
+    has(key: any, options: any): boolean;
+    delete(key: any): boolean;
+    clear(): void;
+    stats(): {
+        size: number;
+        weight: number;
+        hits: number;
+        misses: number;
+        evictions: number;
+        rejected: number;
+        poolSize: number;
+    };
+    startCleanup(intervalOrOptions: any): void;
+    stopCleanup(): void;
+    get size(): number;
+    get hitRate(): number;
+    entries(order: any): IterableIterator<[any, any]>;
+    keys(order: any): Generator<any, void, unknown>;
+    values(order: any): Generator<any, void, unknown>;
+}
 export type CacheNode = {
     key: any;
     value: any;
@@ -537,4 +628,5 @@ export type PowerCacheOptions = {
     onExpire?: ((arg0: any, arg1: any) => void) | undefined;
     initialPoolSize?: number | undefined;
     maxCleanupPerTick?: number | undefined;
+    eagerCleanupOnRead?: boolean | undefined;
 };

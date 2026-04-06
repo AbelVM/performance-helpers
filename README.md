@@ -20,7 +20,8 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerRetry: Retry with backoff](guides/powerRetry.md). Helper for retrying flaky async operations with configurable backoff and jitter.
 - [PowerBatch: Microtask coalescing dispatcher](guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
-- [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`.
+- [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.
+- [PowerRateLimit: Compose multiple limiters](guides/powerRateLimit.md). Combine `PowerThrottle`, `PowerSlidingWindow` and others; supports an `atomic` option to attempt atomic consumes across composed limiters.
 - [PowerSlidingWindow: Sliding-window limiter](guides/powerSlidingWindow.md). A simple rolling-window limiter for quota-style rate limiting.
 - [PowerQueue: O(1) ring-buffer queue](guides/powerQueue.md). A resizable, high-performance queue intended for use in `PowerPool` and other high-throughput scenarios.
 - [PowerEventBus: Typed micro event bus](guides/powerEventBus.md). Lightweight pub/sub for intra-process coordination between helpers.
@@ -34,6 +35,8 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
 - [PowerDefer: Deferred promise primitive](guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
 - [PowerObserver: Lightweight reactive value](guides/powerObserver.md). Tiny observable primitive for synchronous subscriptions to a single value.
+- [Now utilities: high-resolution timers and measure helpers](guides/now.md) — `nowMs()`, `measureSync()`, `measureAsync()` and timing best-practices.
+- [Errors utilities: recommended error shapes and patterns](guides/errors.md) — guidance for attaching `duration`, `correlationId` and structured diagnostics to errors and responses.
 
 ## Quick start
 
@@ -83,18 +86,30 @@ Importing from the package entry (or directly from `src/helpers/*` during develo
 
 ```javascript
 import {
+  o2b,
+  o2u8,
+  u82o,
+  b2o,
   PowerCache,
   PowerMemoizer,
+  PowerTimedCache,
   PowerPool,
   PowerLogger,
   PowerThrottle,
   PowerSlidingWindow,
+  PowerRateLimit,
   PowerQueue,
   PowerDefer,
   PowerTTLMap,
+  nowMs,
+  measureSync,
+  measureAsync,
+  PowerCircuit,
+  PowerRetry,
+  PowerBatch,
+  PowerLatch,
   PowerObserver,
-  o2u8,
-  u82o,
+  PowerEventBus,
 } from 'performance-helpers';
 ```
 

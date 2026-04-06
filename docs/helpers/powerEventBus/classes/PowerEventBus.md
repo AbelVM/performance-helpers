@@ -36,9 +36,21 @@
 
 ***
 
+### \_liveCounts
+
+> **\_liveCounts**: `Map`\<`any`, `any`\>
+
+***
+
 ### \_maxListeners
 
 > **\_maxListeners**: `number`
+
+***
+
+### \_onceMap
+
+> **\_onceMap**: `WeakMap`\<`object`, `any`\> \| `undefined`
 
 ***
 

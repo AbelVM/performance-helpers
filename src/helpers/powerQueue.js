@@ -91,6 +91,69 @@ export class PowerQueue {
   }
 
   /**
+   * Iterator (non-destructive) yielding items in FIFO order.
+   * Allows `for...of` and spread (`[...queue]`) without consuming the queue.
+   */
+  *[Symbol.iterator]() {
+    let i = this._head;
+    for (let n = 0; n < this._size; n++) {
+      yield this._buffer[(i + n) & this._mask];
+    }
+  }
+
+  /**
+   * Return an iterator of values (alias of the default iterator).
+   * @returns {Iterator<any>}
+   */
+  values() {
+    return this[Symbol.iterator]();
+  }
+
+  /**
+   * Return an iterator of keys (zero-based indexes from the head).
+   * @returns {Iterator<number>}
+   */
+  *keys() {
+    for (let n = 0; n < this._size; n++) yield n;
+  }
+
+  /**
+   * Non-destructive entries iterator that yields [index, value] pairs where
+   * index is the zero-based position in the queue (0 is the head).
+   * @returns {Iterator<[number, any]>}
+   */
+  *entries() {
+    for (let n = 0; n < this._size; n++) {
+      yield [n, this._buffer[(this._head + n) & this._mask]];
+    }
+  }
+
+  /**
+   * Consuming drain iterator: yields items in FIFO order and removes them
+   * from the queue as they are iterated.
+   * Useful for streaming/processing and emptying the queue without manual loops.
+   * @returns {Iterator<any>}
+   */
+  *drain() {
+    while (this._size > 0) {
+      yield this.shift();
+    }
+  }
+
+  /**
+   * Return a shallow array snapshot of the queue contents in FIFO order.
+   * This is a convenience helper that does not consume the queue.
+   * @returns {Array<any>}
+   */
+  toArray() {
+    const out = new Array(this._size);
+    for (let i = 0; i < this._size; i++) {
+      out[i] = this._buffer[(this._head + i) & this._mask];
+    }
+    return out;
+  }
+
+  /**
    * Internal: double internal buffer capacity and reindex elements.
    *
    * This private helper allocates a new backing array with double the

@@ -104,6 +104,45 @@ Current available tokens (performs a refill before reporting).
 
 ***
 
+### release()
+
+> **release**(`tokenOrN`): `void`
+
+Release a prior reservation token or add tokens back.
+Accepts either a token returned from `reserve()` or a numeric value.
+
+#### Parameters
+
+##### tokenOrN
+
+`number` \| `object`
+
+#### Returns
+
+`void`
+
+***
+
+### reserve()
+
+> **reserve**(`n?`): `object` \| `null`
+
+Reserve `n` tokens without committing them permanently. Returns a token
+object that can be passed to `release()` to undo the reservation.
+Returns `null` when reservation fails.
+
+#### Parameters
+
+##### n?
+
+`number` = `1`
+
+#### Returns
+
+`object` \| `null`
+
+***
+
 ### reset()
 
 > **reset**(`count?`): `void`
@@ -115,6 +154,22 @@ Reset the bucket to a given token count (or full when omitted).
 ##### count?
 
 `number`
+
+#### Returns
+
+`void`
+
+***
+
+### rollback()
+
+> **rollback**(`nOrToken`): `void`
+
+#### Parameters
+
+##### nOrToken
+
+`any`
 
 #### Returns
 

@@ -64,3 +64,45 @@ export const nowMs = () => {
 };
 
 export default nowMs;
+
+/**
+ * Measure a synchronous function's execution duration.
+ * @param {Function|any} fn A function to call or a value to return.
+ * @returns {{result:any,ms:number,start:number,end:number}}
+ */
+export function measureSync(fn) {
+  const start = nowMs();
+  try {
+    const result = typeof fn === 'function' ? fn() : fn;
+    const end = nowMs();
+    return { result, ms: end - start, start, end };
+  } catch (e) {
+    const end = nowMs();
+    // attach duration to the thrown error for caller diagnostics
+    try {
+      e.durationMs = end - start;
+    } catch (_) {}
+    throw e;
+  }
+}
+
+/**
+ * Measure an async function or promise's execution duration.
+ * @param {Function|Promise|any} fn Async function to call or a promise/value to await.
+ * @returns {Promise<{result:any,ms:number,start:number,end:number}>}
+ */
+export async function measureAsync(fn) {
+  const start = nowMs();
+  try {
+    const value = typeof fn === 'function' ? fn() : fn;
+    const result = await value;
+    const end = nowMs();
+    return { result, ms: end - start, start, end };
+  } catch (e) {
+    const end = nowMs();
+    try {
+      e.durationMs = end - start;
+    } catch (_) {}
+    throw e;
+  }
+}

@@ -18,14 +18,14 @@
  * @typedef {Object} PowerCircuitOptions
  * @property {number} [threshold]
  * @property {number} [timeout]
+ * @property {(state:string,reason?:string)=>void} [onStateChange]
+ * @property {import("./powerEventBus.js").PowerEventBus} [eventBus]
  */
+import { PowerEventBus } from './powerEventBus.js';
+
 export class PowerCircuit {
-  /**
-   * Create a PowerCircuit.
-   * @param {PowerCircuitOptions} [options]
-   */
   constructor(options = {}) {
-    const { threshold = 5, timeout = 30000 } = options;
+    const { threshold = 5, timeout = 30000, onStateChange = null, eventBus = null } = options;
     this._threshold = Number(threshold) || 5;
     this._timeout = Number(timeout) || 30000;
     this._state = 'closed';
@@ -33,6 +33,36 @@ export class PowerCircuit {
     this.lastError = null;
     this._openedAt = null;
     this._trialInFlight = false;
+
+    // optional callback invoked on state transitions: (state, reason)
+    this.onStateChange = typeof onStateChange === 'function' ? onStateChange : null;
+    // optional external event bus to emit `stateChange` events
+    this._bus = eventBus instanceof PowerEventBus ? eventBus : null;
+  }
+
+  _setState(newState, reason) {
+    const prev = this._state;
+    if (prev === newState) return;
+    this._state = newState;
+    if (newState === 'open') this._openedAt = Date.now();
+    else this._openedAt = null;
+    // only keep trial flag true when in half-open; otherwise clear it
+    if (newState !== 'half-open') this._trialInFlight = false;
+
+    // invoke callback if provided
+    try {
+      if (typeof this.onStateChange === 'function') this.onStateChange(newState, reason);
+    } catch (e) {
+      /* swallow user callback errors */
+    }
+    // emit on bus if provided
+    try {
+      if (this._bus && typeof this._bus.emit === 'function') {
+        this._bus.emit('stateChange', { state: newState, reason });
+      }
+    } catch (e) {
+      /* swallow bus errors */
+    }
   }
 
   get state() {
@@ -48,14 +78,6 @@ export class PowerCircuit {
   }
 
   async call(fn) {
-    /**
-     * Execute the provided function under circuit protection.
-     * If the circuit is open the call will be rejected with an error
-     * whose `code` property is `ECIRCUITOPEN`.
-     *
-     * @param {Function} fn - Async function to execute.
-     * @returns {Promise<any>}
-     */
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
 
     // short-circuit when open and timeout not elapsed
@@ -66,7 +88,7 @@ export class PowerCircuit {
         throw err;
       }
       // else allow half-open trial
-      this._state = 'half-open';
+      this._setState('half-open', 'timeoutElapsed');
     }
 
     if (this._state === 'half-open') {
@@ -83,25 +105,20 @@ export class PowerCircuit {
       // success: reset
       this._failures = 0;
       this.lastError = null;
-      this._state = 'closed';
-      this._openedAt = null;
-      this._trialInFlight = false;
+      this._setState('closed', 'success');
       return res;
     } catch (err) {
       this.lastError = err;
       // on failure, if half-open -> open again
       if (this._state === 'half-open') {
-        this._state = 'open';
-        this._openedAt = Date.now();
+        this._setState('open', 'trialFailed');
         this._failures = 0;
-        this._trialInFlight = false;
         throw err;
       }
       // closed state: increment failures and maybe open
       this._failures++;
       if (this._failures >= this._threshold) {
-        this._state = 'open';
-        this._openedAt = Date.now();
+        this._setState('open', 'thresholdExceeded');
         this._failures = 0;
       }
       throw err;
@@ -110,11 +127,7 @@ export class PowerCircuit {
 
   // force reset to closed
   reset() {
-    /**
-     * Reset the circuit to `closed` and clear counters.
-     * @returns {void}
-     */
-    this._state = 'closed';
+    this._setState('closed', 'reset');
     this._failures = 0;
     this.lastError = null;
     this._openedAt = null;

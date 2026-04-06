@@ -3,6 +3,8 @@
  * Entries expire lazily on access or iteration. Suitable when LRU/weighting
  * is unnecessary and a simple time-to-live map is desired.
  */
+import { nowMs } from '../utils/now.js';
+
 export class PowerTTLMap {
   /**
    * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
@@ -30,7 +32,7 @@ export class PowerTTLMap {
   set(key, value, ttl) {
     const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
     // add a small slack (+1ms) to account for timer scheduling jitter
-    const expiresAt = ms > 0 ? Date.now() + ms + 1 : 0;
+    const expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
     this._map.set(key, { value, expiresAt });
     if (expiresAt) this._expirations.set(key, expiresAt);
     else this._expirations.delete(key);
@@ -68,7 +70,7 @@ export class PowerTTLMap {
 
   _checkExpire(key, entry) {
     if (!entry) return true;
-    if (entry.expiresAt && Date.now() > entry.expiresAt) {
+    if (entry.expiresAt && nowMs() > entry.expiresAt) {
       this._expireKey(key, entry);
       return true;
     }
@@ -130,7 +132,7 @@ export class PowerTTLMap {
     }
     const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
     // add a small slack (+1ms) to account for timer scheduling jitter
-    entry.expiresAt = ms > 0 ? Date.now() + ms + 1 : 0;
+    entry.expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
     if (entry.expiresAt) this._expirations.set(key, entry.expiresAt);
     else this._expirations.delete(key);
     return true;
@@ -146,7 +148,7 @@ export class PowerTTLMap {
     // entries on every `.size` access.
     if (!this._map.size) return 0;
     if (!this._expirations.size) return this._map.size;
-    const now = Date.now();
+    const now = nowMs();
     for (const [k, exp] of this._expirations) {
       if (exp && now > exp) {
         const entry = this._map.get(k);

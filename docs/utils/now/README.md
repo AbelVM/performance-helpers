@@ -8,6 +8,8 @@
 
 ## Functions
 
+- [measureAsync](functions/measureAsync.md)
+- [measureSync](functions/measureSync.md)
 - [nowMs](functions/nowMs.md)
 
 ## References

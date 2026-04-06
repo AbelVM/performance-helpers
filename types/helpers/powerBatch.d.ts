@@ -31,7 +31,17 @@ export class PowerBatch {
         promise: Promise<any>;
         resolve: undefined;
         reject: undefined;
+    } | {
+        promise: Promise<any>;
+        resolve: undefined;
+        reject: undefined;
     } | null;
+    _scheduling: string;
+    /**
+     * Internal scheduler abstraction to allow microtask or macrotask scheduling.
+     * @private
+     */
+    private _schedule;
     /**
      * Add an item to the current batch. Returns a Promise that resolves
      * when the batch containing this item has been processed. For non-flushed

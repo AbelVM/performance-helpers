@@ -1,9 +1,4 @@
 /**
- * Typed micro event bus.
- * Lightweight pub/sub for intra-process coordination.
- * Subscriber errors are swallowed to avoid breaking emitters.
- */
-/**
  * @typedef {Object} PowerEventBusOptions
  * @property {number} [maxListeners]
  * @property {boolean} [weak]
@@ -18,9 +13,11 @@ export class PowerEventBus {
     } | undefined);
     /** @type {Map<string, Set<any>>} */
     _listeners: Map<string, Set<any>>;
+    _liveCounts: Map<any, any>;
     _maxListeners: number;
     _weak: boolean;
     _fr: any;
+    _onceMap: WeakMap<object, any> | undefined;
     /**
      * Cleanup dead weak refs from internal listener sets.
      * Useful in tests or environments where FinalizationRegistry/GC is unavailable.

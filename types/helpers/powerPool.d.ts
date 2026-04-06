@@ -10,7 +10,7 @@ export class PowerPoolShutdownError extends Error {
  * @property {number} tasks - Number of active tasks currently assigned.
  * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
  * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).
- * @property {number[]} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
+ * @property {number[]|PowerQueue} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
  */
 /**
  * @typedef {Object} PostMessageOptions
@@ -115,8 +115,11 @@ export class PowerPool {
     _logger: PowerLogger;
     _reaperInterval: number;
     _pendingResponses: Map<any, any>;
+    _underlyingToWorkerObj: Map<any, any>;
     _encodeCache: Map<any, any>;
     _encodeCacheLimit: number;
+    _encodeCacheByteLimit: number;
+    _encodeCacheBytes: number;
     _autoScaleBackoffMultiplier: number | undefined;
     /**
      * Log debug information about swallowed errors when debug logging is enabled.
@@ -221,15 +224,6 @@ export class PowerPool {
      */
     private _addWorkerInstance;
     /**
-     * Autoscale tick: simple policy that grows/shrinks by one worker based on
-     * pool-level EWMA latency and queue pressure. Runs only when `autoScale`
-     * is configured on the pool.
-     *
-     * - scale up: when EWMA > targetMs OR queue length exceeds worker count
-     * - scale down: when EWMA < targetMs * 0.5 AND queue is empty
-     */
-    _autoScaleTick: (() => void) | undefined;
-    /**
      * Return the least-loaded worker (smallest `tasks` count).
      *
      * When multiple workers share the same `tasks` count prefer the one with
@@ -240,6 +234,24 @@ export class PowerPool {
      * @returns {WorkerObj|null}
      */
     private _findLeastLoadedWorker;
+    /**
+     * Shared handler for underlying worker 'message' events.
+     * Decodes binary payloads and forwards to the worker wrapper's `onmessage`.
+     * @private
+     */
+    private _handleUnderlyingMessage;
+    /**
+     * Shared handler for underlying worker 'error' events.
+     * Forwards to wrapper `onerror` and pool-level listeners.
+     * @private
+     */
+    private _handleUnderlyingError;
+    /**
+     * Shared handler for underlying worker 'messageerror' events.
+     * Forwards to wrapper `onmessageerror` and pool-level listeners.
+     * @private
+     */
+    private _handleUnderlyingMessageError;
     /**
      * Post a message to a worker in the pool.
      * The pool will try to reuse an idle/least-loaded worker, grow the pool
@@ -351,6 +363,16 @@ export class PowerPool {
      * @returns {void}
      */
     private _reapIdleWorkers;
+    /**
+     * Autoscale tick: simple policy that grows/shrinks by one worker based on
+     * pool-level EWMA latency and queue pressure. Runs only when `autoScale`
+     * is configured on the pool.
+     *
+     * - scale up: when EWMA > targetMs OR queue length exceeds worker count
+     * - scale down: when EWMA < targetMs * 0.5 AND queue is empty
+     * @private
+     */
+    private _autoScaleTick;
     /**
      * Emit the pool-idle synthetic message to `onmessage` and listeners.
      *
@@ -464,7 +486,7 @@ export type WorkerObj = {
     /**
      * - Queue of start timestamps for inflight tasks (ms).
      */
-    _startTimes?: number[] | undefined;
+    _startTimes?: number[] | PowerQueue | undefined;
 };
 export type PostMessageOptions = {
     /**

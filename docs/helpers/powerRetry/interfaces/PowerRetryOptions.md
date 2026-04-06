@@ -8,6 +8,12 @@
 
 ## Properties
 
+### attemptTimeout?
+
+> `optional` **attemptTimeout?**: `number`
+
+***
+
 ### backoff?
 
 > `optional` **backoff?**: `"exponential"` \| `"linear"` \| `"fixed"`

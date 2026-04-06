@@ -36,6 +36,10 @@ logger.log(cache.stats());
 @class PowerCache
 ```
 
+## Indexable
+
+> \[`key`: `number`\]: () => `void`
+
 ## Constructors
 
 ### Constructor
@@ -53,6 +57,12 @@ Create a PowerCache.
 `number` = `60000`
 
 Default TTL (ms) for entries.
+
+###### eagerCleanupOnRead?
+
+`boolean` = `false`
+
+If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
 
 ###### initialPoolSize?
 
@@ -159,6 +169,12 @@ Function to compute weight for a value.
 ### defaultTTL
 
 > **defaultTTL**: `number`
+
+***
+
+### eagerCleanupOnRead
+
+> **eagerCleanupOnRead**: `boolean`
 
 ***
 
@@ -602,6 +618,45 @@ Optimizations:
 `boolean` = `false`
 
 If true, consider expired entries as present.
+
+###### seen?
+
+`WeakMap`\<`any`, `any`\> = `undefined`
+
+Optional reusable `seen` WeakMap for callers that
+       perform many deep-equality checks and want to avoid per-call allocations.
+
+#### Returns
+
+`boolean`
+
+***
+
+### hasEqualWithSeen()
+
+> **hasEqualWithSeen**(`key`, `value`, `seen`, `options?`): `boolean`
+
+Variant accepting an explicit `seen` WeakMap for reuse across many checks.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### value
+
+`any`
+
+##### seen
+
+`WeakMap`\<`any`, `any`\>
+
+##### options?
+
+###### ignoreExpiry?
+
+`boolean` = `false`
 
 #### Returns
 

@@ -42,6 +42,22 @@ export class PowerThrottle {
      */
     addTokens(n: number): void;
     /**
+     * Reserve `n` tokens without committing them permanently. Returns a token
+     * object that can be passed to `release()` to undo the reservation.
+     * Returns `null` when reservation fails.
+     * @param {number} [n=1]
+     * @returns {object|null}
+     */
+    reserve(n?: number): object | null;
+    /**
+     * Release a prior reservation token or add tokens back.
+     * Accepts either a token returned from `reserve()` or a numeric value.
+     * @param {object|number} tokenOrN
+     * @returns {void}
+     */
+    release(tokenOrN: object | number): void;
+    rollback(nOrToken: any): void;
+    /**
      * Current available tokens (performs a refill before reporting).
      * @returns {number}
      */

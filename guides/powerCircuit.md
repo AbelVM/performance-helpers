@@ -25,13 +25,26 @@ Simple circuit breaker primitive to protect external services from cascading fai
 
 - `reset()` — Force the circuit into the `closed` state and clear internal counters/history.
 
+- `onStateChange` (constructor option) — Optional callback `(state, reason?)` invoked whenever the circuit transitions between states. The callback is called with the new state (`'closed'|'open'|'half-open'`) and an optional reason string such as `'thresholdExceeded'`, `'trialFailed'`, `'timeoutElapsed'`, `'success'`, or `'reset'`. User callback errors are swallowed by the circuit to avoid interfering with control flow.
+
+- `eventBus` (constructor option) — Optional instance of `PowerEventBus` to receive `stateChange` events. When provided the circuit will emit `{ state, reason }` objects on the bus under the `'stateChange'` event name.
+
 ## Example
 
 ```javascript
 import { PowerCircuit } from '../src/helpers/powerCircuit.js';
 
 // Real-world example: protect an HTTP fetch to a flaky external API.
-const cb = new PowerCircuit({ threshold: 3, timeout: 5_000 });
+// Provide observability hooks: callback and an optional event bus.
+import { PowerEventBus } from '../src/helpers/powerEventBus.js';
+const bus = new PowerEventBus();
+
+const cb = new PowerCircuit({
+  threshold: 3,
+  timeout: 5_000,
+  onStateChange: (state, reason) => console.log('circuit state ->', state, reason),
+  eventBus: bus,
+});
 
 async function fetchWithCircuit(url, opts) {
   return cb.call(async () => {
@@ -57,4 +70,15 @@ async function doWork() {
     throw err;
   }
 }
+```
+
+## Observability example
+
+You can subscribe to the `PowerEventBus` to centralize state-change handling across multiple circuits or components:
+
+```javascript
+bus.on('stateChange', ({ state, reason }) => {
+  // record metrics, raise alerts, or update UI
+  console.info('circuit-change', state, reason);
+});
 ```

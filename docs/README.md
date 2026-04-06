@@ -18,6 +18,7 @@
 - [helpers/powerObserver](helpers/powerObserver/README.md)
 - [helpers/powerPool](helpers/powerPool/README.md)
 - [helpers/powerQueue](helpers/powerQueue/README.md)
+- [helpers/powerRateLimit](helpers/powerRateLimit/README.md)
 - [helpers/powerRetry](helpers/powerRetry/README.md)
 - [helpers/powerSlidingWindow](helpers/powerSlidingWindow/README.md)
 - [helpers/powerThrottle](helpers/powerThrottle/README.md)

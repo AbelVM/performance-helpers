@@ -49,6 +49,35 @@ export class PowerQueue {
     get capacity(): number;
     get isEmpty(): boolean;
     /**
+     * Return an iterator of values (alias of the default iterator).
+     * @returns {Iterator<any>}
+     */
+    values(): Iterator<any>;
+    /**
+     * Return an iterator of keys (zero-based indexes from the head).
+     * @returns {Iterator<number>}
+     */
+    keys(): Iterator<number>;
+    /**
+     * Non-destructive entries iterator that yields [index, value] pairs where
+     * index is the zero-based position in the queue (0 is the head).
+     * @returns {Iterator<[number, any]>}
+     */
+    entries(): Iterator<[number, any]>;
+    /**
+     * Consuming drain iterator: yields items in FIFO order and removes them
+     * from the queue as they are iterated.
+     * Useful for streaming/processing and emptying the queue without manual loops.
+     * @returns {Iterator<any>}
+     */
+    drain(): Iterator<any>;
+    /**
+     * Return a shallow array snapshot of the queue contents in FIFO order.
+     * This is a convenience helper that does not consume the queue.
+     * @returns {Array<any>}
+     */
+    toArray(): Array<any>;
+    /**
      * Internal: double internal buffer capacity and reindex elements.
      *
      * This private helper allocates a new backing array with double the
@@ -73,4 +102,9 @@ export class PowerQueue {
      * @returns {number} New queue length after all unshifts.
      */
     unshiftMany(items: Array<any>): number;
+    /**
+     * Iterator (non-destructive) yielding items in FIFO order.
+     * Allows `for...of` and spread (`[...queue]`) without consuming the queue.
+     */
+    [Symbol.iterator](): Generator<any, void, unknown>;
 }

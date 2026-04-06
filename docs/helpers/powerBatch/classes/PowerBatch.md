@@ -62,7 +62,7 @@ When reached, flush immediately.
 
 ### \_pending
 
-> **\_pending**: \{ `promise`: `Promise`\<`any`\>; `reject`: `undefined`; `resolve`: `undefined`; \} \| `null`
+> **\_pending**: \{ `promise`: `Promise`\<`any`\>; `reject`: `undefined`; `resolve`: `undefined`; \} \| \{ `promise`: `Promise`\<`any`\>; `reject`: `undefined`; `resolve`: `undefined`; \} \| `null`
 
 ***
 
@@ -75,6 +75,12 @@ When reached, flush immediately.
 ### \_scheduled
 
 > **\_scheduled**: `boolean`
+
+***
+
+### \_scheduling
+
+> **\_scheduling**: `string`
 
 ## Accessors
 

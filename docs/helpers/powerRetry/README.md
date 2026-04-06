@@ -6,16 +6,16 @@
 
 # helpers/powerRetry
 
+## Classes
+
+- [PowerRetry](classes/PowerRetry.md)
+
 ## Interfaces
 
 - [PowerRetryOptions](interfaces/PowerRetryOptions.md)
-
-## Functions
-
-- [PowerRetry](functions/PowerRetry.md)
 
 ## References
 
 ### default
 
-Renames and re-exports [PowerRetry](functions/PowerRetry.md)
+Renames and re-exports [PowerRetry](classes/PowerRetry.md)

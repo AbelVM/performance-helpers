@@ -19,7 +19,7 @@ describe('PowerBatch', () => {
     const calls = [];
     const handler = (items) => calls.push(items.slice());
     const b = new PowerBatch(handler, { maxSize: 2 });
-    await b.add('a');
+    b.add('a');
     await b.add('b'); // this should trigger immediate flush
     expect(calls.length).toBe(1);
     expect(calls[0]).toEqual(['a', 'b']);
@@ -36,5 +36,16 @@ describe('PowerBatch', () => {
     await b.flush();
     expect(calls.length).toBe(1);
     expect(calls[0]).toEqual([42]);
+  });
+
+  it('accepts scheduling option (macrotask) and preserves basic behavior', async () => {
+    const calls = [];
+    const handler = (items) => calls.push(items.slice());
+    const b = new PowerBatch(handler, { scheduling: 'macrotask' });
+    b.add('x');
+    b.add('y');
+    await b.flush();
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toEqual(['x', 'y']);
   });
 });

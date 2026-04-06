@@ -10,7 +10,7 @@
 
 ### \_startTimes?
 
-> `optional` **\_startTimes?**: `number`[]
+> `optional` **\_startTimes?**: `number`[] \| [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
 Queue of start timestamps for inflight tasks (ms).
 

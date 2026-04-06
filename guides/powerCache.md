@@ -16,6 +16,7 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 | `onExpire` | `function(key,value)` | `null` | Callback invoked when an entry expires due to TTL. |
 | `initialPoolSize` | `number` | `0` | Prefill the internal node pool to reduce early allocations. |
 | `maxCleanupPerTick` | `number` | `100` | Max nodes scanned per cleanup tick for `startCleanup()`.
+| `eagerCleanupOnRead` | `boolean` | `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior). |
 
 ### API
 
@@ -23,11 +24,11 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `get(key)` — Retrieve the stored value and mark the entry as recently used. Returns the value or `undefined` when missing or expired.
 
-- `peek(key)` — Read the value without affecting recency; returns `value | undefined`.
+- `peek(key)` — Read the value without affecting recency; returns `value | undefined`. When the cache is constructed with `eagerCleanupOnRead: true`, `peek()` will remove expired entries it encounters.
 
-- `has(key, { ignoreExpiry = false })` — Check whether a key exists and is not expired. When `ignoreExpiry` is true expired entries are considered present.
+- `has(key, { ignoreExpiry = false })` — Check whether a key exists and is not expired. When `ignoreExpiry` is true expired entries are considered present. When `eagerCleanupOnRead: true` the call will remove expired entries seen during the check.
 
-- `hasEqual(key, value, { ignoreExpiry = false })` — Deep-equality compare the stored value against `value` using optimized fast paths for primitives, typed arrays, Maps/Sets, and cyclic-safe comparison. Respects the `ignoreExpiry` option.
+- `hasEqual(key, value, { ignoreExpiry = false, seen })` — Deep-equality compare the stored value against `value` using optimized fast paths for primitives, typed arrays, Maps/Sets, and cyclic-safe comparison. Respects the `ignoreExpiry` option. When performing many comparisons, pass a reusable `WeakMap` as `seen` or use `hasEqualWithSeen(key, value, seen)` to avoid per-call WeakMap allocations.
 
 - `delete(key)` — Remove an entry. Returns `true` when a key was removed.
 
@@ -69,6 +70,23 @@ for (const [k, v] of c) {
 	console.log(k, v); // 'b' then 'a'
 }
 ```
+
+### Opt-in: eager cleanup on read
+
+If you prefer reads to automatically remove expired entries when they are observed, construct the cache with `eagerCleanupOnRead: true`. This makes `peek()` and `has()` remove expired nodes seen during the check instead of leaving them until the periodic cleanup.
+
+```javascript
+import { PowerCache } from '../src/helpers/powerCache.js';
+
+const cache = new PowerCache({ defaultTTL: 1, eagerCleanupOnRead: true });
+cache.set('a', 1, { ttl: 1 });
+// wait for expiry
+await new Promise((r) => setTimeout(r, 5));
+console.log(cache.peek('a')); // undefined; the expired entry is removed
+console.log(cache.has('a', { ignoreExpiry: true })); // false (entry was removed)
+```
+
+Note: The library currently defaults to non-mutating read behavior (expired entries remain until cleanup). Changing the default to `eagerCleanupOnRead: true` would be a breaking change and should be done as part of a major-version bump.
 
 If you need LRU order, use `Array.from(c.entries('LRU'))` or the `entries('LRU')` iterator directly.
 
@@ -155,6 +173,47 @@ await memo(1)
 
 `simpleArgsKey` performs a cheap, deterministic encoding for primitive args
 and falls back to `JSON.stringify` only when it encounters non-scalar values.
+
+## PowerTimedCache
+
+`PowerTimedCache` is a small convenience wrapper around `PowerCache` for the common
+pure-TTL use case. It constructs a `PowerCache` with the provided `ttl` used as
+the cache `defaultTTL` and automatically starts the periodic cleanup loop so
+callers don't have to wire `startCleanup()` manually.
+
+Use it when you only need simple time-based expiration and want a compact
+one-line construction pattern.
+
+Constructor signature
+
+```javascript
+new PowerTimedCache(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions })
+```
+
+| option | type | default | description |
+|---|---:|---:|---|
+| `ttl` | `number` | — | Required. Default TTL (ms) for entries stored in the cache. |
+| `maxEntries` | `number` | `undefined` | Optional: forwarded to the underlying `PowerCache` constructor. |
+| `interval` | `number` | `undefined` | Optional cleanup interval (ms). When provided it is forwarded to `startCleanup()`; otherwise `startCleanup()` uses its own computed default. |
+| `maxCleanupPerTick` | `number` | `undefined` | Optional: when provided forwarded to `startCleanup()` to control nodes scanned per tick. |
+| `cacheOptions` | `Object` | `{}` | Additional options forwarded to `PowerCache` (e.g. `weightFn`, `maxWeight`, `rejectOversized`). |
+
+### Example
+
+```javascript
+import { PowerTimedCache } from '../src/helpers/powerCache.js';
+
+// entries expire after 60s; cleanup runs on the default cadence
+const tc = new PowerTimedCache(60_000, { maxEntries: 1000 });
+
+tc.set('k', 1);
+console.log(tc.get('k'));
+```
+
+### Notes
+
+- `PowerTimedCache` delegates all public `PowerCache` instance methods (for example `get`, `set`, `delete`, `clear`, `entries`, `stats`) to the underlying cache. Use `tc.cache` to access the raw `PowerCache` instance when you need advanced operations.
+- The wrapper exposes synchronous and async disposal hooks (`[Symbol.dispose]` and `[Symbol.asyncDispose]`) which delegate to the underlying cache
 
 ## Recommendations
 

@@ -10,7 +10,7 @@ describe('PowerRetry', () => {
       return 'ok';
     };
 
-    const res = await PowerRetry(fn, { maxAttempts: 4, baseDelay: 1, jitter: false });
+    const res = await PowerRetry.run(fn, { maxAttempts: 4, baseDelay: 1, jitter: false });
     expect(res).toBe('ok');
     expect(calls).toBe(3);
   });
@@ -22,9 +22,9 @@ describe('PowerRetry', () => {
       throw new Error('bad');
     };
 
-    await expect(PowerRetry(fn, { maxAttempts: 2, baseDelay: 1, jitter: false })).rejects.toThrow(
-      'bad'
-    );
+    await expect(
+      PowerRetry.run(fn, { maxAttempts: 2, baseDelay: 1, jitter: false })
+    ).rejects.toThrow('bad');
     expect(calls).toBe(2);
   });
 
@@ -38,7 +38,7 @@ describe('PowerRetry', () => {
     };
 
     await expect(
-      PowerRetry(fn, {
+      PowerRetry.run(fn, {
         maxAttempts: 3,
         baseDelay: 1,
         jitter: false,

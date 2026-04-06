@@ -29,6 +29,16 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 - `pushMany(items)` — Enqueue multiple items in one call. The implementation grows the backing buffer at most once and copies items efficiently; returns the new queue length.
 
 - `unshiftMany(items)` — Prepend multiple items to the head so that `items[0]` becomes the next value returned by `shift()`. Efficient for bulk prepends.
+ 
+- `values()` — Non-destructive iterator of values (alias of the default iterator).
+
+- `keys()` — Non-destructive iterator of zero-based indexes (0 is the head).
+
+- `entries()` — Non-destructive iterator yielding `[index, value]` pairs.
+
+- `drain()` — Consuming generator that yields items in FIFO order and removes them from the queue as iterated.
+
+- `toArray()` — Return a shallow array snapshot of the queue contents in FIFO order (non-destructive).
 
 ## Example
 

@@ -12,19 +12,21 @@
 
 > **new PowerCircuit**(`options?`): `PowerCircuit`
 
-Create a PowerCircuit.
-
 #### Parameters
 
 ##### options?
-
-[`PowerCircuitOptions`](../interfaces/PowerCircuitOptions.md) = `{}`
 
 #### Returns
 
 `PowerCircuit`
 
 ## Properties
+
+### \_bus
+
+> **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md) \| `null`
+
+***
 
 ### \_failures
 
@@ -41,10 +43,6 @@ Create a PowerCircuit.
 ### \_state
 
 > **\_state**: `string`
-
-Reset the circuit to `closed` and clear counters.
-
-#### Returns
 
 ***
 
@@ -69,6 +67,12 @@ Reset the circuit to `closed` and clear counters.
 ### lastError
 
 > **lastError**: `unknown`
+
+***
+
+### onStateChange
+
+> **onStateChange**: `any`
 
 ## Accessors
 
@@ -95,6 +99,26 @@ Reset the circuit to `closed` and clear counters.
 `string`
 
 ## Methods
+
+### \_setState()
+
+> **\_setState**(`newState`, `reason`): `void`
+
+#### Parameters
+
+##### newState
+
+`any`
+
+##### reason
+
+`any`
+
+#### Returns
+
+`void`
+
+***
 
 ### call()
 

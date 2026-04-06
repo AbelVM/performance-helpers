@@ -94,6 +94,9 @@ See [autscale guide](autoscale.md) for more details and examples.
 - `onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive events with `data.type === 'pool:idle'` and `data.stats` containing `{ status, performance }` where `status` is the per-worker snapshot and `performance` is aggregated metrics.
 - `idle` event is fired inmediately at event registration time if the pool is currently idle
 
+- `pool:queue:high` — emitted on the internal event bus when the internal task queue length crosses the configured `options.queueHighThreshold`. Payload: `{ length, threshold }`. Configure `queueHighThreshold` in constructor options to enable this event.
+- `pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
+
 ## Example
 ## Realistic Example — image thumbnail worker
 

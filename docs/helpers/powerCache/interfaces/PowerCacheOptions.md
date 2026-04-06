@@ -14,6 +14,12 @@
 
 ***
 
+### eagerCleanupOnRead?
+
+> `optional` **eagerCleanupOnRead?**: `boolean`
+
+***
+
 ### initialPoolSize?
 
 > `optional` **initialPoolSize?**: `number`

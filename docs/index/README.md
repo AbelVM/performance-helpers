@@ -14,6 +14,24 @@ Re-exports [b2o](../helpers/powerBuffer/functions/b2o.md)
 
 ***
 
+### measureAsync
+
+Re-exports [measureAsync](../utils/now/functions/measureAsync.md)
+
+***
+
+### measureSync
+
+Re-exports [measureSync](../utils/now/functions/measureSync.md)
+
+***
+
+### nowMs
+
+Re-exports [nowMs](../utils/now/functions/nowMs.md)
+
+***
+
 ### o2b
 
 Re-exports [o2b](../helpers/powerBuffer/functions/o2b.md)
@@ -92,9 +110,15 @@ Re-exports [PowerQueue](../helpers/powerQueue/classes/PowerQueue.md)
 
 ***
 
+### PowerRateLimit
+
+Re-exports [PowerRateLimit](../helpers/powerRateLimit/classes/PowerRateLimit.md)
+
+***
+
 ### PowerRetry
 
-Re-exports [PowerRetry](../helpers/powerRetry/functions/PowerRetry.md)
+Re-exports [PowerRetry](../helpers/powerRetry/classes/PowerRetry.md)
 
 ***
 

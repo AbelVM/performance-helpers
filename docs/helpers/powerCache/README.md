@@ -18,4 +18,5 @@
 
 ## Functions
 
+- [deepEqualWithSeen](functions/deepEqualWithSeen.md)
 - [simpleArgsKey](functions/simpleArgsKey.md)

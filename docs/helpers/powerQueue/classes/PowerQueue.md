@@ -112,6 +112,19 @@ Initial capacity (rounded up to power-of-two).
 
 ## Methods
 
+### \[iterator\]()
+
+> **\[iterator\]**(): `Generator`\<`any`, `void`, `unknown`\>
+
+Iterator (non-destructive) yielding items in FIFO order.
+Allows `for...of` and spread (`[...queue]`) without consuming the queue.
+
+#### Returns
+
+`Generator`\<`any`, `void`, `unknown`\>
+
+***
+
 ### clear()
 
 > **clear**(): `void`
@@ -121,6 +134,45 @@ Remove all items from the queue.
 #### Returns
 
 `void`
+
+***
+
+### drain()
+
+> **drain**(): `Iterator`\<`any`, `any`, `any`\>
+
+Consuming drain iterator: yields items in FIFO order and removes them
+from the queue as they are iterated.
+Useful for streaming/processing and emptying the queue without manual loops.
+
+#### Returns
+
+`Iterator`\<`any`, `any`, `any`\>
+
+***
+
+### entries()
+
+> **entries**(): `Iterator`\<\[`number`, `any`\], `any`, `any`\>
+
+Non-destructive entries iterator that yields [index, value] pairs where
+index is the zero-based position in the queue (0 is the head).
+
+#### Returns
+
+`Iterator`\<\[`number`, `any`\], `any`, `any`\>
+
+***
+
+### keys()
+
+> **keys**(): `Iterator`\<`number`, `any`, `any`\>
+
+Return an iterator of keys (zero-based indexes from the head).
+
+#### Returns
+
+`Iterator`\<`number`, `any`, `any`\>
 
 ***
 
@@ -195,6 +247,19 @@ The dequeued item or `undefined` when empty.
 
 ***
 
+### toArray()
+
+> **toArray**(): `any`[]
+
+Return a shallow array snapshot of the queue contents in FIFO order.
+This is a convenience helper that does not consume the queue.
+
+#### Returns
+
+`any`[]
+
+***
+
 ### unshiftMany()
 
 > **unshiftMany**(`items`): `number`
@@ -213,3 +278,15 @@ The first element of `items` will become the next value returned by `shift()`.
 `number`
 
 New queue length after all unshifts.
+
+***
+
+### values()
+
+> **values**(): `Iterator`\<`any`, `any`, `any`\>
+
+Return an iterator of values (alias of the default iterator).
+
+#### Returns
+
+`Iterator`\<`any`, `any`, `any`\>

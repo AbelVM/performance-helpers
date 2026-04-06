@@ -35,9 +35,9 @@
   "scripts": {
     "build": "vite build",
     "test": "vitest run",
-    "lint": "eslint \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\"",
-    "lint:fix": "eslint --fix \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\"",
-    "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"*.md\"",
+    "lint": "eslint \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.js\"",
+    "lint:fix": "eslint --fix \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.js\"",
+    "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.js\" \"*.md\"",
     "test:coverage": "vitest run --coverage --reporter=verbose",
     "docs": "typedoc",
     "bench": "node bench/run.js",

@@ -93,6 +93,45 @@ export class PowerThrottle {
   }
 
   /**
+   * Reserve `n` tokens without committing them permanently. Returns a token
+   * object that can be passed to `release()` to undo the reservation.
+   * Returns `null` when reservation fails.
+   * @param {number} [n=1]
+   * @returns {object|null}
+   */
+  reserve(n = 1) {
+    const want = Math.max(0, Math.floor(+n) || 0);
+    if (want === 0) return { n: 0 };
+    const now = nowMs();
+    this._refill(now);
+    if (this.tokens >= want) {
+      this.tokens -= want;
+      return { n: want };
+    }
+    return null;
+  }
+
+  /**
+   * Release a prior reservation token or add tokens back.
+   * Accepts either a token returned from `reserve()` or a numeric value.
+   * @param {object|number} tokenOrN
+   * @returns {void}
+   */
+  release(tokenOrN) {
+    let n = 0;
+    if (tokenOrN == null) return;
+    if (typeof tokenOrN === 'object') n = Number(tokenOrN.n) || 0;
+    else n = Math.max(0, Math.floor(+tokenOrN) || 0);
+    if (n === 0) return;
+    this.tokens = Math.min(this.capacity, this.tokens + n);
+  }
+
+  // alias for compatibility with undo patterns
+  rollback(nOrToken) {
+    return this.release(nOrToken);
+  }
+
+  /**
    * Current available tokens (performs a refill before reporting).
    * @returns {number}
    */

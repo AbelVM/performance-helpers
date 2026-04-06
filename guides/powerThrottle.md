@@ -21,6 +21,12 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 
 - `reset(count?)` — Reset the token count to `count`. When omitted the bucket is refilled to full `capacity`.
 
+- `reserve(n = 1)` — Reserve `n` tokens without committing them permanently. Returns a token object when successful (useful to later `release()` or `rollback()`), or `null` when reservation fails.
+
+- `release(tokenOrN)` — Release a prior reservation token or numeric token count back into the bucket. Accepts either a token returned from `reserve()` or a numeric value.
+
+- `rollback(nOrToken)` — Alias for `release()` for compatibility with undo patterns.
+
 ## Example
 
 ```javascript
@@ -96,4 +102,19 @@ const drainInterval = setInterval(() => {
 // drain when done
 await pool.drain();
 pool.terminate();
+```
+
+### Reservation example
+
+You can reserve tokens when you need to prepare work that should only consume a token once the work is actually dispatched. This is useful when coordinating with composed limiters that expect an atomic reservation step.
+
+```javascript
+const limiter = new PowerThrottle({ capacity: 2, tokens: 2, refillRate: 0 });
+const token = limiter.reserve(1);
+if (token) {
+  // do preparation work (serialize payload, open resources)
+  // when ready to dispatch:
+  // if something goes wrong before dispatch, release the reservation
+  limiter.release(token);
+}
 ```

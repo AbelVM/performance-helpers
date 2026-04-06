@@ -79,19 +79,6 @@ number of currently active (dispatched) tasks across all workers
 
 ***
 
-### \_autoScaleTick
-
-> **\_autoScaleTick**: (() => `void`) \| `undefined`
-
-Autoscale tick: simple policy that grows/shrinks by one worker based on
-pool-level EWMA latency and queue pressure. Runs only when `autoScale`
-is configured on the pool.
-
-- scale up: when EWMA > targetMs OR queue length exceeds worker count
-- scale down: when EWMA < targetMs * 0.5 AND queue is empty
-
-***
-
 ### \_bus
 
 > **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md)
@@ -107,6 +94,18 @@ is configured on the pool.
 ### \_encodeCache
 
 > **\_encodeCache**: `Map`\<`any`, `any`\>
+
+***
+
+### \_encodeCacheByteLimit
+
+> **\_encodeCacheByteLimit**: `number`
+
+***
+
+### \_encodeCacheBytes
+
+> **\_encodeCacheBytes**: `number`
 
 ***
 
@@ -247,6 +246,12 @@ whether the pool is considered idle (no active tasks and empty queue)
 ### \_totalWorkersCreated
 
 > **\_totalWorkersCreated**: `number`
+
+***
+
+### \_underlyingToWorkerObj
+
+> **\_underlyingToWorkerObj**: `Map`\<`any`, `any`\>
 
 ***
 

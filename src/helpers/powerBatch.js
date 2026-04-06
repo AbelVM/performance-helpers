@@ -22,12 +22,25 @@ export class PowerBatch {
    */
   constructor(handler, options = {}) {
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
-    const { maxSize = Infinity } = options;
+    const { maxSize = Infinity, scheduling = 'microtask' } = options;
     this._handler = handler;
     this._maxSize = Number(maxSize) || Infinity;
     this._queue = [];
     this._scheduled = false;
     this._pending = null; // { promise, resolve, reject }
+    this._scheduling = scheduling === 'macrotask' ? 'macrotask' : 'microtask';
+  }
+
+  /**
+   * Internal scheduler abstraction to allow microtask or macrotask scheduling.
+   * @private
+   */
+  _schedule(fn) {
+    if (this._scheduling === 'macrotask') {
+      setTimeout(fn, 0);
+    } else {
+      queueMicrotask(fn);
+    }
   }
 
   /**
@@ -41,12 +54,28 @@ export class PowerBatch {
   add(item) {
     this._queue.push(item);
     if (this._queue.length >= this._maxSize) {
-      return this.flush();
+      // create pending promise if caller awaits completion
+      if (!this._pending) {
+        let resolve, reject;
+        const p = new Promise((r, rej) => {
+          resolve = r;
+          reject = rej;
+        });
+        this._pending = { promise: p, resolve, reject };
+      }
+      // if a microtask was previously scheduled, cancel the scheduled flag
+      this._scheduled = false;
+      // run batch immediately to honor maxSize flush semantics
+      // capture promise before running as _runBatch may resolve it synchronously
+      const prom = this._pending.promise;
+      this._runBatch();
+      return prom;
     }
 
     if (!this._scheduled) {
       this._scheduled = true;
-      setTimeout(() => this._runBatch(), 0);
+      // schedule on configured queue to coalesce synchronous adds
+      this._schedule(() => this._runBatch());
     }
     // For regular adds we don't return a promise (do not await handler).
     return Promise.resolve();
@@ -69,7 +98,8 @@ export class PowerBatch {
     }
     if (!this._scheduled) {
       this._scheduled = true;
-      setTimeout(() => this._runBatch(), 0);
+      // schedule on configured queue to coalesce synchronous adds
+      this._schedule(() => this._runBatch());
     }
     return this._pending.promise;
   }

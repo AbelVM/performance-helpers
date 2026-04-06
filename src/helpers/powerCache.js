@@ -20,6 +20,7 @@
  * @property {function(*, *):void} [onExpire]
  * @property {number} [initialPoolSize]
  * @property {number} [maxCleanupPerTick]
+ * @property {boolean} [eagerCleanupOnRead]
  */
 
 /**
@@ -64,6 +65,7 @@ export class PowerCache {
    * @param {function(*, *):void} [options.onExpire] Callback invoked when an item expires. Called as `(key, value)`.
    * @param {number} [options.initialPoolSize=0] Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
    * @param {number} [options.maxCleanupPerTick=100] Default max nodes scanned per cleanup tick when running `startCleanup()`.
+   * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
    */
   constructor({
     maxEntries = Infinity,
@@ -76,6 +78,7 @@ export class PowerCache {
     onExpire = null,
     initialPoolSize = 0,
     maxCleanupPerTick = 100,
+    eagerCleanupOnRead = false,
   } = {}) {
     this.maxEntries = maxEntries;
     this.maxWeight = maxWeight;
@@ -88,6 +91,8 @@ export class PowerCache {
     this.maxCleanupPerTick = Number.isFinite(+maxCleanupPerTick)
       ? Math.max(1, +maxCleanupPerTick)
       : 100;
+
+    this.eagerCleanupOnRead = Boolean(eagerCleanupOnRead);
 
     this.map = new Map();
     this.head = null;
@@ -374,7 +379,14 @@ export class PowerCache {
   peek(key) {
     const node = this.map.get(key);
     if (!node) return undefined;
-    if (node.expiresAt && node.expiresAt <= Date.now()) return undefined;
+    const now = Date.now();
+    if (node.expiresAt && node.expiresAt <= now) {
+      if (this.eagerCleanupOnRead) {
+        // Eagerly remove expired node when the cache was configured to do so.
+        this._removeExpiredNode(node, now, false);
+      }
+      return undefined;
+    }
     return node.value;
   }
 
@@ -388,7 +400,12 @@ export class PowerCache {
   has(key, { ignoreExpiry = false } = {}) {
     const node = this.map.get(key);
     if (!node) return false;
-    if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) return false;
+    if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) {
+      if (this.eagerCleanupOnRead) {
+        this._removeExpiredNode(node, Date.now(), false);
+      }
+      return false;
+    }
     return true;
   }
 
@@ -416,13 +433,16 @@ export class PowerCache {
     const now = Date.now();
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
-        // expired: remove and fall through to compute
-        this._removeExpiredNode(node, now);
+        // expired: remove and count as a miss, then fall through to compute
+        this._removeExpiredNode(node, now, true);
       } else {
         this._moveToTail(node);
         this.hits++;
         return node.value;
       }
+    } else {
+      // key absent: count as a miss
+      this.misses++;
     }
 
     // Compute and store
@@ -618,9 +638,11 @@ export class PowerCache {
    * @param {*} value
    * @param {Object} [options]
    * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
+   * @param {WeakMap} [options.seen] Optional reusable `seen` WeakMap for callers that
+   *        perform many deep-equality checks and want to avoid per-call allocations.
    * @returns {boolean}
    */
-  hasEqual(key, value, { ignoreExpiry = false } = {}) {
+  hasEqual(key, value, { ignoreExpiry = false, seen = undefined } = {}) {
     const node = this.map.get(key);
     if (!node) return false;
     if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) return false;
@@ -635,121 +657,22 @@ export class PowerCache {
       return stored === value;
     }
 
-    // Use WeakMap -> WeakSet pair-tracking to handle cyclic structures
-    const seen = new WeakMap();
-    const equal = (a, b) => {
-      if (a === b) return true;
-      if (a == null || b == null) return a === b;
-      const ta = typeof a,
-        tb = typeof b;
-      if (ta !== 'object' || tb !== 'object') return a === b;
+    // Delegate to module-level deep equality helper to avoid allocating a
+    // new closure on every call. The deepEqual helper will handle cycles.
+    return deepEqual(stored, value, seen);
+  }
 
-      // Cycle detection
-      const mapForA = seen.get(a);
-      if (mapForA && mapForA.has(b)) return true;
-      if (!mapForA) seen.set(a, new WeakSet());
-      seen.get(a).add(b);
-
-      // Prototypes must match
-      if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
-
-      // Uint8Array fast-path
-      if (typeof Uint8Array !== 'undefined' && a instanceof Uint8Array) {
-        if (!(b instanceof Uint8Array)) return false;
-        if (a.length !== b.length) return false;
-        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-        return true;
-      }
-
-      // Arrays
-      if (Array.isArray(a)) {
-        if (!Array.isArray(b) || a.length !== b.length) return false;
-        for (let i = 0; i < a.length; i++) if (!equal(a[i], b[i])) return false;
-        return true;
-      }
-
-      // TypedArray / DataView / other ArrayBuffer views
-      if (ArrayBuffer.isView(a)) {
-        if (!ArrayBuffer.isView(b) || a.byteLength !== b.byteLength) return false;
-        const ua = new Uint8Array(a.buffer, a.byteOffset || 0, a.byteLength);
-        const ub = new Uint8Array(b.buffer, b.byteOffset || 0, b.byteLength);
-        for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
-        return true;
-      }
-
-      // ArrayBuffer
-      if (a instanceof ArrayBuffer) {
-        if (!(b instanceof ArrayBuffer) || a.byteLength !== b.byteLength) return false;
-        const ua = new Uint8Array(a),
-          ub = new Uint8Array(b);
-        for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
-        return true;
-      }
-
-      // Date
-      if (a instanceof Date) {
-        if (!(b instanceof Date)) return false;
-        return a.getTime() === b.getTime();
-      }
-
-      // RegExp
-      if (a instanceof RegExp) {
-        if (!(b instanceof RegExp)) return false;
-        return a.toString() === b.toString();
-      }
-
-      // Map
-      if (a instanceof Map) {
-        if (!(b instanceof Map) || a.size !== b.size) return false;
-        for (const [k, v] of a) {
-          if (!b.has(k)) return false;
-          if (!equal(v, b.get(k))) return false;
-        }
-        return true;
-      }
-
-      // Set
-      if (a instanceof Set) {
-        if (!(b instanceof Set) || a.size !== b.size) return false;
-        // Fast path for primitive-only sets
-        let allPrimitive = true;
-        for (const item of a) {
-          if (item !== null && typeof item === 'object') {
-            allPrimitive = false;
-            break;
-          }
-        }
-        if (allPrimitive) {
-          for (const item of a) if (!b.has(item)) return false;
-          return true;
-        }
-        // Fallback O(n^2) deep-match for non-primitive items
-        for (const itemA of a) {
-          let found = false;
-          for (const itemB of b) {
-            if (equal(itemA, itemB)) {
-              found = true;
-              break;
-            }
-          }
-          if (!found) return false;
-        }
-        return true;
-      }
-
-      // Plain objects (including POJOs)
-      const keysA = Object.keys(a);
-      const keysB = Object.keys(b);
-      if (keysA.length !== keysB.length) return false;
-      for (let i = 0; i < keysA.length; i++) {
-        const k = keysA[i];
-        if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-        if (!equal(a[k], b[k])) return false;
-      }
-      return true;
-    };
-
-    return equal(stored, value);
+  /**
+   * Variant accepting an explicit `seen` WeakMap for reuse across many checks.
+   * @param {*} key
+   * @param {*} value
+   * @param {WeakMap} seen
+   * @param {Object} [options]
+   * @param {boolean} [options.ignoreExpiry=false]
+   * @returns {boolean}
+   */
+  hasEqualWithSeen(key, value, seen, { ignoreExpiry = false } = {}) {
+    return this.hasEqual(key, value, { ignoreExpiry, seen });
   }
 
   /**
@@ -867,23 +790,8 @@ export class PowerCache {
     }
     this.stopCleanup();
     this._cleanupParams = { interval, maxCleanupPerTick };
-    const tick = () => {
-      if (this._cleanupTimer == null) return; // stopped
-      if (this._cleanupRunning) {
-        // schedule next run
-        this._cleanupTimer = setTimeout(tick, this._cleanupParams.interval);
-        return;
-      }
-      this._cleanupRunning = true;
-      try {
-        this.cleanupExpiredUpTo(this._cleanupParams.maxCleanupPerTick);
-      } finally {
-        this._cleanupRunning = false;
-      }
-      this._cleanupTimer = setTimeout(tick, this._cleanupParams.interval);
-    };
-    // start loop
-    this._cleanupTimer = setTimeout(tick, interval);
+    // start loop using prototype cleanup tick method
+    this._cleanupTimer = setTimeout(() => this._cleanupTick(), interval);
   }
 
   /**
@@ -897,6 +805,63 @@ export class PowerCache {
     }
     this._cleanupRunning = false;
     this._cleanupParams = null;
+  }
+
+  /**
+   * Synchronous disposal hook (TC39 Explicit Resource Management).
+   * Stops any background cleanup and clears the cache.
+   */
+  [Symbol.dispose]() {
+    try {
+      this.stopCleanup();
+    } catch (e) {
+      /* ignore */
+    }
+    try {
+      this.clear();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Asynchronous disposal hook. Provided for symmetry with `using`/`await using`.
+   * Cache cleanup is synchronous so this simply performs the same actions and
+   * returns a resolved Promise for await compatibility.
+   */
+  async [Symbol.asyncDispose]() {
+    try {
+      this.stopCleanup();
+    } catch (e) {
+      /* ignore */
+    }
+    try {
+      this.clear();
+    } catch (e) {
+      /* ignore */
+    }
+    return;
+  }
+
+  /**
+   * Prototype tick used by the cleanup timer loop. Separated to avoid
+   * allocating a per-call closure inside `startCleanup()`.
+   * @private
+   */
+  _cleanupTick() {
+    if (this._cleanupTimer == null) return; // stopped
+    if (this._cleanupRunning) {
+      // schedule next run
+      this._cleanupTimer = setTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+      return;
+    }
+    this._cleanupRunning = true;
+    try {
+      this.cleanupExpiredUpTo(this._cleanupParams.maxCleanupPerTick);
+    } finally {
+      this._cleanupRunning = false;
+    }
+    this._cleanupTimer = setTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
   }
 
   /**
@@ -977,6 +942,141 @@ export class PowerCache {
   *values(order = 'MRU') {
     for (const [, v] of this.entries(order)) yield v;
   }
+}
+
+/**
+ * Deep equality check for cache values. Extracted to module scope to avoid
+ * allocating a new closure on each call to `hasEqual`.
+ * Uses a WeakMap-of-WeakSet for cycle detection.
+ * @private
+ * @param {*} a
+ * @param {*} b
+ * @param {WeakMap} [seen]
+ * @returns {boolean}
+ */
+function deepEqual(a, b, seen = undefined) {
+  if (a === b) return true;
+  if (a == null || b == null) return a === b;
+  const ta = typeof a,
+    tb = typeof b;
+  if (ta !== 'object' || tb !== 'object') return a === b;
+
+  if (!seen) seen = new WeakMap();
+  let mapForA = seen.get(a);
+  if (mapForA && mapForA.has(b)) return true;
+  if (!mapForA) {
+    mapForA = new WeakSet();
+    seen.set(a, mapForA);
+  }
+  mapForA.add(b);
+
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+
+  // Uint8Array fast-path
+  if (typeof Uint8Array !== 'undefined' && a instanceof Uint8Array) {
+    if (!(b instanceof Uint8Array)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // Arrays
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i], seen)) return false;
+    return true;
+  }
+
+  // TypedArray / DataView / other ArrayBuffer views
+  if (ArrayBuffer.isView(a)) {
+    if (!ArrayBuffer.isView(b) || a.byteLength !== b.byteLength) return false;
+    const ua = new Uint8Array(a.buffer, a.byteOffset || 0, a.byteLength);
+    const ub = new Uint8Array(b.buffer, b.byteOffset || 0, b.byteLength);
+    for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
+    return true;
+  }
+
+  // ArrayBuffer
+  if (a instanceof ArrayBuffer) {
+    if (!(b instanceof ArrayBuffer) || a.byteLength !== b.byteLength) return false;
+    const ua = new Uint8Array(a),
+      ub = new Uint8Array(b);
+    for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
+    return true;
+  }
+
+  // Date
+  if (a instanceof Date) {
+    if (!(b instanceof Date)) return false;
+    return a.getTime() === b.getTime();
+  }
+
+  // RegExp
+  if (a instanceof RegExp) {
+    if (!(b instanceof RegExp)) return false;
+    return a.toString() === b.toString();
+  }
+
+  // Map
+  if (a instanceof Map) {
+    if (!(b instanceof Map) || a.size !== b.size) return false;
+    for (const [k, v] of a) {
+      if (!b.has(k)) return false;
+      if (!deepEqual(v, b.get(k), seen)) return false;
+    }
+    return true;
+  }
+
+  // Set
+  if (a instanceof Set) {
+    if (!(b instanceof Set) || a.size !== b.size) return false;
+    let allPrimitive = true;
+    for (const item of a) {
+      if (item !== null && typeof item === 'object') {
+        allPrimitive = false;
+        break;
+      }
+    }
+    if (allPrimitive) {
+      for (const item of a) if (!b.has(item)) return false;
+      return true;
+    }
+    for (const itemA of a) {
+      let found = false;
+      for (const itemB of b) {
+        if (deepEqual(itemA, itemB, seen)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) return false;
+    }
+    return true;
+  }
+
+  // Plain objects
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (let i = 0; i < keysA.length; i++) {
+    const k = keysA[i];
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual(a[k], b[k], seen)) return false;
+  }
+  return true;
+}
+
+/**
+ * Exported helper that allows callers to reuse a `seen` WeakMap for
+ * repeated deep-equality checks to avoid allocating a new WeakMap/WeakSet
+ * structure on every call.
+ * @param {*} a
+ * @param {*} b
+ * @param {WeakMap} [seen]
+ * @returns {boolean}
+ */
+export function deepEqualWithSeen(a, b, seen) {
+  return deepEqual(a, b, seen);
 }
 
 /**
@@ -1180,6 +1280,96 @@ export class PowerMemoizer {
    */
   stats() {
     return this.cache.stats();
+  }
+}
+
+/**
+ * PowerTimedCache
+ *
+ * A thin convenience wrapper around `PowerCache` for the common pure-TTL
+ * use-case. It constructs an internal `PowerCache` with the provided `ttl`
+ * used as the cache `defaultTTL` and automatically starts the periodic
+ * cleanup loop. The wrapper delegates common cache methods to the
+ * underlying `PowerCache` instance.
+ *
+ * @example
+ * const timed = new PowerTimedCache(60000, { maxEntries: 100, interval: 10000 });
+ * timed.set('k', 1);
+ * // entries will be automatically expired by the background cleaner
+ *
+ * @class PowerTimedCache
+ */
+export class PowerTimedCache {
+  /**
+   * @param {number} ttl - Default TTL in milliseconds for entries.
+   * @param {Object} [options]
+   * @param {number} [options.maxEntries] - Forwarded to `PowerCache`.
+   * @param {number} [options.interval] - Cleanup interval (ms) for automatic cleanup.
+   * @param {number} [options.maxCleanupPerTick] - Max nodes scanned per cleanup tick.
+   * @param {Object} [options.cacheOptions] - Additional options forwarded to `PowerCache`.
+   */
+  constructor(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions = {} } = {}) {
+    if (!Number.isFinite(+ttl) || ttl <= 0) throw new TypeError('ttl must be a positive number');
+    const cfg = Object.assign({}, cacheOptions);
+    if (maxEntries !== undefined) cfg.maxEntries = maxEntries;
+    cfg.defaultTTL = +ttl;
+    this.cache = new PowerCache(cfg);
+    // auto-start cleanup; if caller supplied interval options, forward them
+    if (interval !== undefined || maxCleanupPerTick !== undefined) {
+      this.cache.startCleanup({ interval, maxCleanupPerTick });
+    } else {
+      this.cache.startCleanup();
+    }
+  }
+
+  // Delegate commonly used methods to the underlying PowerCache
+  get(key) {
+    return this.cache.get(key);
+  }
+  set(key, value, options) {
+    return this.cache.set(key, value, options);
+  }
+  has(key, options) {
+    return this.cache.has(key, options);
+  }
+  delete(key) {
+    return this.cache.delete(key);
+  }
+  clear() {
+    return this.cache.clear();
+  }
+  stats() {
+    return this.cache.stats();
+  }
+  startCleanup(intervalOrOptions) {
+    return this.cache.startCleanup(intervalOrOptions);
+  }
+  stopCleanup() {
+    return this.cache.stopCleanup();
+  }
+  get size() {
+    return this.cache.size;
+  }
+  get hitRate() {
+    return this.cache.hitRate;
+  }
+  entries(order) {
+    return this.cache.entries(order);
+  }
+  keys(order) {
+    return this.cache.keys(order);
+  }
+  values(order) {
+    return this.cache.values(order);
+  }
+  [Symbol.dispose]() {
+    if (this.cache && typeof this.cache[Symbol.dispose] === 'function')
+      return this.cache[Symbol.dispose]();
+  }
+  async [Symbol.asyncDispose]() {
+    if (this.cache && typeof this.cache[Symbol.asyncDispose] === 'function')
+      return this.cache[Symbol.asyncDispose]();
+    return;
   }
 }
 

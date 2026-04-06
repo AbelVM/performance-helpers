@@ -85,25 +85,6 @@ export class PowerChunker {
         : Math.max(1, hw);
 
     // Analyze `fn` to estimate complexity when the caller did not provide `fnComplexity`.
-    function analyzeFnComplexity(fnToAnalyze) {
-      // Avoid relying on fragile `fn.toString()` heuristics which can be
-      // incorrect for minified/transpiled code or functions that close over
-      // user data. Use safer, low-cost signals instead:
-      // - Async/generator functions are likely heavier (IO or streaming).
-      // - Functions declaring many parameters often accept callbacks/context.
-      // - Default to 'medium' when unsure.
-      try {
-        const ctorName = fnToAnalyze && fnToAnalyze.constructor && fnToAnalyze.constructor.name;
-        if (ctorName === 'AsyncFunction' || ctorName === 'GeneratorFunction') return 'heavy';
-        // If function declares 3+ formal params, assume at least medium complexity.
-        if (typeof fnToAnalyze.length === 'number' && fnToAnalyze.length >= 3) return 'medium';
-        // Otherwise prefer 'light' for simple unary functions, fall back to 'medium'.
-        return 'light';
-      } catch (e) {
-        return 'medium';
-      }
-    }
-
     const fnComplexity =
       providedFnComplexity == null ? analyzeFnComplexity(fn) : providedFnComplexity;
 
@@ -131,129 +112,9 @@ export class PowerChunker {
     // If total is small, keep chunkSize small
     if (total > 0 && total < chunkSize) chunkSize = total;
 
-    // Create a lightweight inline worker "class" compatible with PowerPool.
-    // Each instance exposes: postMessage(msg, transfer?), addEventListener(), removeEventListener(), terminate(), onmessage, onerror
-    function InlineWorkerFactory() {
-      // this factory is used with `new` in PowerPool._createWorkerInstance
-      const self = this;
-      this.onmessage = null;
-      this.onerror = null;
-      this._alive = true;
-
-      this.postMessage = function (message) {
-        // decode transferable encodings created by the pool wrapper
-        let decoded = message;
-        try {
-          if (message && (message instanceof ArrayBuffer || ArrayBuffer.isView(message))) {
-            decoded = u82o(message);
-          }
-        } catch (e) {
-          // fall back to raw message when decoding fails
-          decoded = message;
-        }
-        const chunk = decoded && decoded.chunk ? decoded.chunk : decoded;
-        // process asynchronously to mimic a real worker
-        setTimeout(async () => {
-          if (!self._alive) return;
-          try {
-            const results = new Array(chunk.length);
-            const pending = [];
-            for (let i = 0; i < chunk.length; i++) {
-              try {
-                const res = fn(chunk[i], i, chunk);
-                if (res && typeof res.then === 'function') {
-                  // async result: capture and resolve later
-                  const idx = i;
-                  pending.push(
-                    res
-                      .then((v) => {
-                        results[idx] = v;
-                      })
-                      .catch((err) => {
-                        results[idx] = {
-                          error: true,
-                          code: (err && err.code) || 'ERR_ITEM',
-                          message: err && err.message,
-                          stack: err && err.stack,
-                        };
-                        if (typeof self.onerror === 'function') {
-                          try {
-                            self.onerror(err);
-                          } catch (ex) {
-                            /* ignore */
-                          }
-                        }
-                      })
-                  );
-                } else {
-                  results[i] = res;
-                }
-              } catch (e) {
-                // swallow per-item errors but surface to onerror if provided
-                results[i] = normalizeError(e, 'ERR_ITEM');
-                if (typeof self.onerror === 'function') {
-                  try {
-                    self.onerror(e);
-                  } catch (ex) {
-                    /* ignore */
-                  }
-                }
-              }
-            }
-
-            if (pending.length) {
-              try {
-                await Promise.all(pending);
-              } catch (e) {
-                // errors for async items are handled per-promise above
-              }
-            }
-
-            if (typeof self.onmessage === 'function') {
-              try {
-                const resp = { processed: chunk.length, results };
-                // mirror correlationId if present on incoming message so the pool can resolve per-item Promises
-                try {
-                  if (decoded && decoded.correlationId != null)
-                    resp.correlationId = decoded.correlationId;
-                } catch (e) {
-                  /* ignore */
-                }
-                self.onmessage({ data: resp });
-              } catch (e) {
-                if (typeof self.onerror === 'function') {
-                  try {
-                    self.onerror(e);
-                  } catch (ex) {
-                    /* ignore */
-                  }
-                }
-              }
-            }
-          } catch (err) {
-            if (typeof self.onerror === 'function') {
-              try {
-                self.onerror(err);
-              } catch (ex) {
-                /* ignore */
-              }
-            }
-          }
-        }, 0);
-      };
-
-      this.addEventListener = function (type, cb) {
-        if (type === 'message') this.onmessage = cb;
-        if (type === 'error') this.onerror = cb;
-      };
-      this.removeEventListener = function (type, cb) {
-        if (type === 'message' && this.onmessage === cb) this.onmessage = null;
-        if (type === 'error' && this.onerror === cb) this.onerror = null;
-      };
-      this.terminate = function () {
-        this._alive = false;
-      };
-    }
+    // Create a lightweight inline worker constructor tuned to `fn`.
+    // Methods are placed on the prototype to avoid per-instance function allocations.
+    const InlineWorkerFactory = makeInlineWorkerConstructor(fn);
 
     // Create a pool using the inline worker factory
     const pool = new PowerPool(InlineWorkerFactory, poolOptions);
@@ -262,46 +123,182 @@ export class PowerChunker {
     // iterables we stream chunk-sized slices and post them one-by-one to avoid
     // materializing the entire iterable.
     if (isArray) {
-      const chunks = [];
-      for (let i = 0; i < total; i += chunkSize) chunks.push(items.slice(i, i + chunkSize));
-      const batchItems = chunks.map((c) => ({ message: { chunk: c } }));
+      const batchItems = [];
+      for (let i = 0; i < total; i += chunkSize) {
+        batchItems.push({ message: { chunk: items.slice(i, i + chunkSize) } });
+      }
       pool.postMessageBatch(batchItems, postOptions);
       return pool;
     }
 
     // Streaming mode: iterate lazily and post each chunk immediately.
-    (function streamIterableIntoPool(it, csize) {
-      try {
-        const iterator = it[Symbol.iterator]();
-        let cur = [];
-        for (let r = iterator.next(); !r.done; r = iterator.next()) {
-          cur.push(r.value);
-          if (cur.length >= csize) {
-            try {
-              pool.postMessage({ chunk: cur });
-            } catch (e) {
-              /* best-effort: continue streaming */
-            }
-            cur = [];
-          }
-        }
-        if (cur.length) {
-          try {
-            pool.postMessage({ chunk: cur });
-          } catch (e) {
-            /* ignore */
-          }
-        }
-      } catch (err) {
-        // streaming failed: surface via logger but return pool regardless
-        try {
-          pool._logger.error(err, 'PowerChunker: failed while streaming iterable');
-        } catch (e) {
-          /* ignore */
-        }
-      }
-    })(iterable, chunkSize);
+    streamIterableIntoPool(pool, iterable, chunkSize);
 
     return pool;
+  }
+}
+
+// Module-level helpers to avoid per-constructor allocations.
+function analyzeFnComplexity(fnToAnalyze) {
+  try {
+    const ctorName = fnToAnalyze && fnToAnalyze.constructor && fnToAnalyze.constructor.name;
+    if (ctorName === 'AsyncFunction' || ctorName === 'GeneratorFunction') return 'heavy';
+    if (typeof fnToAnalyze.length === 'number' && fnToAnalyze.length >= 3) return 'medium';
+    return 'light';
+  } catch (e) {
+    return 'medium';
+  }
+}
+
+function makeInlineWorkerConstructor(fn) {
+  return class InlineWorker {
+    constructor() {
+      this.onmessage = null;
+      this.onerror = null;
+      this._alive = true;
+      this._fn = fn;
+    }
+
+    postMessage(message) {
+      let decoded = message;
+      try {
+        if (message && (message instanceof ArrayBuffer || ArrayBuffer.isView(message))) {
+          decoded = u82o(message);
+        }
+      } catch (e) {
+        decoded = message;
+      }
+      const chunk = decoded && decoded.chunk ? decoded.chunk : decoded;
+      const self = this;
+      setTimeout(async () => {
+        if (!self._alive) return;
+        try {
+          const results = new Array(chunk.length);
+          const pending = [];
+          for (let i = 0; i < chunk.length; i++) {
+            try {
+              const res = self._fn(chunk[i], i, chunk);
+              if (res && typeof res.then === 'function') {
+                const idx = i;
+                pending.push(
+                  res
+                    .then((v) => {
+                      results[idx] = v;
+                    })
+                    .catch((err) => {
+                      results[idx] = {
+                        error: true,
+                        code: (err && err.code) || 'ERR_ITEM',
+                        message: err && err.message,
+                        stack: err && err.stack,
+                      };
+                      if (typeof self.onerror === 'function') {
+                        try {
+                          self.onerror(err);
+                        } catch (ex) {
+                          /* ignore */
+                        }
+                      }
+                    })
+                );
+              } else {
+                results[i] = res;
+              }
+            } catch (e) {
+              results[i] = normalizeError(e, 'ERR_ITEM');
+              if (typeof self.onerror === 'function') {
+                try {
+                  self.onerror(e);
+                } catch (ex) {
+                  /* ignore */
+                }
+              }
+            }
+          }
+
+          if (pending.length) {
+            try {
+              await Promise.all(pending);
+            } catch (e) {
+              // handled per-promise
+            }
+          }
+
+          if (typeof self.onmessage === 'function') {
+            try {
+              const resp = { processed: chunk.length, results };
+              try {
+                if (decoded && decoded.correlationId != null)
+                  resp.correlationId = decoded.correlationId;
+              } catch (e) {
+                /* ignore */
+              }
+              self.onmessage({ data: resp });
+            } catch (e) {
+              if (typeof self.onerror === 'function') {
+                try {
+                  self.onerror(e);
+                } catch (ex) {
+                  /* ignore */
+                }
+              }
+            }
+          }
+        } catch (err) {
+          if (typeof self.onerror === 'function') {
+            try {
+              self.onerror(err);
+            } catch (ex) {
+              /* ignore */
+            }
+          }
+        }
+      }, 0);
+    }
+
+    addEventListener(type, cb) {
+      if (type === 'message') this.onmessage = cb;
+      if (type === 'error') this.onerror = cb;
+    }
+
+    removeEventListener(type, cb) {
+      if (type === 'message' && this.onmessage === cb) this.onmessage = null;
+      if (type === 'error' && this.onerror === cb) this.onerror = null;
+    }
+
+    terminate() {
+      this._alive = false;
+    }
+  };
+}
+
+function streamIterableIntoPool(pool, it, csize) {
+  try {
+    const iterator = it[Symbol.iterator]();
+    let cur = [];
+    for (let r = iterator.next(); !r.done; r = iterator.next()) {
+      cur.push(r.value);
+      if (cur.length >= csize) {
+        try {
+          pool.postMessage({ chunk: cur });
+        } catch (e) {
+          /* best-effort: continue streaming */
+        }
+        cur = [];
+      }
+    }
+    if (cur.length) {
+      try {
+        pool.postMessage({ chunk: cur });
+      } catch (e) {
+        /* ignore */
+      }
+    }
+  } catch (err) {
+    try {
+      pool._logger && pool._logger.error(err, 'PowerChunker: failed while streaming iterable');
+    } catch (e) {
+      /* ignore */
+    }
   }
 }

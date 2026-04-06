@@ -6,10 +6,6 @@
 
 # Class: PowerTTLMap
 
-Lightweight Map-like store where each key has an optional TTL (milliseconds).
-Entries expire lazily on access or iteration. Suitable when LRU/weighting
-is unnecessary and a simple time-to-live map is desired.
-
 ## Constructors
 
 ### Constructor
