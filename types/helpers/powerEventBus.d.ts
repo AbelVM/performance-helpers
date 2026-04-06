@@ -34,7 +34,9 @@ export class PowerEventBus {
      * @param {(payload:any)=>void} fn
      * @returns {() => void} unsubscribe
      */
-    on(event: string, fn: (payload: any) => void): () => void;
+    _registerWeakListener(fn: (payload: any) => void, event: string): () => void;
+    _unregisterWeakListener(fn: any): void;
+    on(event: any, fn: any): () => void;
     /**
      * Subscribe once to an event. Listener is removed after first invocation.
      * @param {string} event

@@ -343,6 +343,52 @@ describe('PowerPool (mocked worker)', () => {
     }
   });
 
+  it('supports pause() / resume() aliases for queue control', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+    });
+    try {
+      const received = [];
+      pool.onmessage = (e) => {
+        if (e && e.data && typeof e.data.n === 'number') received.push(e.data);
+      };
+      pool.pause();
+      expect(pool.queuePaused).toBe(true);
+
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      expect(pool.postMessage({ n: 2 })).toBe(true);
+      expect(pool.queue.length).toBe(1);
+
+      await new Promise((res) => setTimeout(res, 80));
+      expect(received).toEqual([{ n: 1 }]);
+      expect(pool.queue.length).toBe(1);
+
+      pool.resume();
+      expect(pool.queuePaused).toBe(false);
+      await new Promise((res) => setTimeout(res, 80));
+      expect(received).toEqual([{ n: 1 }, { n: 2 }]);
+      expect(pool.queue.length).toBe(0);
+    } finally {
+      pool.terminate();
+    }
+  });
+
   it('emits idle event when transitioning to idle', async () => {
     class MockUnderlying {
       constructor() {
@@ -369,6 +415,70 @@ describe('PowerPool (mocked worker)', () => {
       pool.postMessage({ x: 1 });
       await new Promise((res) => setTimeout(res, 50));
       expect(idleCalled).toBe(true);
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('stopThePress clears lifecycle timers when recreateWorkers is false', () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn();
+        this.terminate = vi.fn();
+      }
+      addEventListener(type, cb) {
+        if (type === 'message') this.onmessage = cb;
+        if (type === 'error') this.onerror = cb;
+        if (type === 'messageerror') this.onmessageerror = cb;
+      }
+      removeEventListener() {}
+    }
+
+    const pool = new PowerPool(MockUnderlying, {
+      size: 1,
+      minSize: 1,
+      idleTimeout: 1000,
+      autoScale: { intervalMs: 100, targetMs: 10, alpha: 0.5 },
+    });
+    try {
+      expect(pool._reaperInterval).not.toBeNull();
+      expect(pool._autoScaleInterval).not.toBeNull();
+      pool.stopThePress({ action: 'flush' }, undefined, { recreateWorkers: false });
+      expect(pool._reaperInterval).toBeNull();
+      expect(pool._autoScaleInterval).toBeNull();
+    } finally {
+      pool.terminate();
+    }
+  });
+
+  it('stopThePressBatch clears lifecycle timers when recreateWorkers is false', () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn();
+        this.terminate = vi.fn();
+      }
+      addEventListener(type, cb) {
+        if (type === 'message') this.onmessage = cb;
+        if (type === 'error') this.onerror = cb;
+        if (type === 'messageerror') this.onmessageerror = cb;
+      }
+      removeEventListener() {}
+    }
+
+    const pool = new PowerPool(MockUnderlying, {
+      size: 1,
+      minSize: 1,
+      idleTimeout: 1000,
+      autoScale: { intervalMs: 100, targetMs: 10, alpha: 0.5 },
+    });
+    try {
+      expect(pool._reaperInterval).not.toBeNull();
+      expect(pool._autoScaleInterval).not.toBeNull();
+      pool.stopThePressBatch([{ message: { action: 'batch' } }], { recreateWorkers: false });
+      expect(pool._reaperInterval).toBeNull();
+      expect(pool._autoScaleInterval).toBeNull();
     } finally {
       pool.terminate();
     }

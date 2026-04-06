@@ -26,17 +26,17 @@ import { nowMs } from '../utils/now.js';
  */
 /**
  * @typedef {Object} PowerLoggerOptions
- * @property {'text'|'json'} [format]
- * @property {string} [name]
- * @property {(payload:Object)=>string|Object|null} [formatter]
- * @property {(payload:Object|string)=>void} [output]
+ * @property {'text'|'json'} [format] - Output mode for console logging and structured payloads.
+ * @property {string} [name] - Optional logger name included in structured payloads.
+ * @property {(payload:Object)=>string|Object|null} [formatter] - Optional formatter for structured payloads. If it returns a string, the string is emitted directly.
+ * @property {(payload:Object|string)=>void} [output] - Optional output transport that receives structured payloads or formatted strings.
  */
 export class PowerLogger {
   /**
    * Create a PowerLogger instance.
    * @param {number} [level=0] Initial debug level (0..3)
    * @param {Object} [options]
-   * @param {'text'|'json'} [options.format='text'] Output format. When 'json', logger emits JSON.stringify({ level, msg, ts }).
+   * @param {'text'|'json'} [options.format='text'] Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format, name }).
    */
   constructor(level = 0, options = {}) {
     this._debugLevel = 0;
@@ -54,11 +54,13 @@ export class PowerLogger {
    * @returns {void}
    */
   setDebugLevel(level) {
-    let n;
-    try {
+    let n = NaN;
+    if (typeof level === 'number') {
+      n = level;
+    } else if (typeof level === 'string' || typeof level === 'boolean') {
       n = Number(level);
-    } catch (e) {
-      n = NaN;
+    } else if (level instanceof Number || level instanceof String || level instanceof Boolean) {
+      n = Number(level.valueOf());
     }
     this._debugLevel = Number.isFinite(n) && n >= 0 ? Math.max(0, Math.min(3, Math.floor(n))) : 0;
   }
@@ -89,16 +91,13 @@ export class PowerLogger {
   }
 
   /**
-   * Internal helper to emit logs with unified JSON/text formatting.
+   * Normalize log arguments by lazily evaluating function values.
    * @private
-   * @param {number} threshold - minimum debug level required to emit
-   * @param {string} consoleMethod - name of console method to call (error, warn, info, log, debug)
-   * @param {string} levelLabel - textual level label for JSON mode
-   * @param {any[]} args - original arguments array
+   * @param {any[]} args
+   * @returns {any[]}
    */
-  _emit(threshold, consoleMethod, levelLabel, args, opts = {}) {
-    if (!this.isDebugLevel(threshold)) return;
-    const resolved = args.map((a) => {
+  _resolveLogArgs(args) {
+    return args.map((a) => {
       if (typeof a === 'function') {
         try {
           return a();
@@ -108,10 +107,23 @@ export class PowerLogger {
       }
       return a;
     });
+  }
+
+  /**
+   * Internal helper to emit logs with unified JSON/text formatting.
+   * @private
+   * @param {number} threshold - minimum debug level required to emit
+   * @param {string} consoleMethod - name of console method to call (error, warn, info, log, debug)
+   * @param {string} levelLabel - textual level label for JSON mode
+   * @param {any[]} args - original arguments array
+   */
+  _emit(threshold, consoleMethod, levelLabel, args, opts = {}) {
+    if (!this.isDebugLevel(threshold)) return;
+    const resolved = this._resolveLogArgs(args);
 
     // Build a structured payload that output() handlers can use.
     const msg = opts.msgArray ? resolved : resolved.length === 1 ? resolved[0] : resolved;
-    let payload = { level: levelLabel, msg, ts: nowMs() };
+    let payload = { level: levelLabel, msg, ts: nowMs(), format: this._format };
     if (this.name) payload.name = this.name;
 
     // Allow the optional formatter to transform the payload first.
@@ -236,7 +248,7 @@ export class PowerLogger {
       this._emit(3, 'log', 'table', args, { msgArray: true });
       return;
     }
-    const resolved = args.map((a) => (typeof a === 'function' ? a() : a));
+    const resolved = this._resolveLogArgs(args);
     if (typeof console.table === 'function') console.table(...resolved);
     else if (typeof console.log === 'function') console.log(...resolved);
   }

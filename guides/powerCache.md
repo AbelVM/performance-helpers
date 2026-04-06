@@ -59,6 +59,8 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `entries(order = 'MRU')` — Iterator yielding `[key, value]` pairs in MRU or LRU order. Useful for debugging or bulk exports.
 
+- `hitRate` (getter) — Convenience fraction `hits / (hits + misses)` (0 when no samples).
+
 - `setMany(entries, { ttl, weight })` — Bulk-insert multiple `[key, value]` pairs; performs a single eviction pass after insertion for efficiency.
 
 - `getMany(keys, { ignoreExpiry = false })` — Bulk get; returns a `Map` of found keys -> values.
@@ -78,8 +80,9 @@ const c = new PowerCache();
 c.set('a', 1);
 c.set('b', 2);
 for (const [k, v] of c) {
-	console.log(k, v); // 'b' then 'a'
+  console.log(k, v); // 'b' then 'a'
 }
+console.log('hit rate', c.hitRate);
 ```
 
 ### Opt-in: eager cleanup on read

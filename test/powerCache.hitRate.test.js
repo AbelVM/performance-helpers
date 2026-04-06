@@ -21,4 +21,15 @@ describe('PowerCache hitRate', () => {
     expect(c.misses).toBe(0);
     expect(c.hitRate).toBe(0);
   });
+
+  it('is iterable via Symbol.iterator in MRU order', () => {
+    const c = new PowerCache();
+    c.set('a', 1);
+    c.set('b', 2);
+    const iterated = Array.from(c);
+    expect(iterated).toEqual([
+      ['b', 2],
+      ['a', 1],
+    ]);
+  });
 });

@@ -118,6 +118,7 @@ import {
   PowerHistogram,
   PowerBackpressure,
   PowerBatch,
+  PowerBulkhead,
   PowerLatch,
   PowerObserver,
   PowerEventBus,

@@ -20,7 +20,7 @@ export class PowerBulkhead {
     _buckets: {
         gate: PowerPermitGate;
     }[];
-    _drainWaiters: any[];
+    _drainWaiters: PowerQueue;
     /** Number of partitions used for workload isolation. */
     get partitions(): number;
     /** Maximum concurrent tasks allowed per partition. */
@@ -63,3 +63,4 @@ export class PowerBulkhead {
 }
 export default PowerBulkhead;
 import { PowerPermitGate } from './powerPermitGate.js';
+import { PowerQueue } from './powerQueue.js';

@@ -44,9 +44,46 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 ```javascript
 import { PowerLogger } from '../src/helpers/powerLogger.js';
 
-const logger = new PowerLogger(2);
-logger.warn('This is a warning');
-logger.incrementCounter('cache-miss');
+const logger = new PowerLogger(3, {
+  format: 'json',
+  name: 'user-service',
+  output(payload) {
+    // Send structured logs to a centralized pipeline.
+    sendToLogPipeline(payload);
+  },
+});
+
+async function handleRequest(req, res) {
+  const traceId = req.headers['x-request-id'] || crypto.randomUUID();
+  const start = Date.now();
+
+  logger.info(() => ({
+    event: 'request.start',
+    traceId,
+    method: req.method,
+    path: req.url,
+  }));
+
+  try {
+    const user = await getUserProfile(req.params.id);
+    logger.incrementCounter('cacheHit');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(user));
+  } catch (error) {
+    logger.error(() => ({
+      event: 'request.error',
+      traceId,
+      error: String(error),
+    }));
+    res.writeHead(500).end('Internal Server Error');
+  } finally {
+    logger.info(() => ({
+      event: 'request.end',
+      traceId,
+      durationMs: Date.now() - start,
+    }));
+  }
+}
 ```
 
 ### Formatter example

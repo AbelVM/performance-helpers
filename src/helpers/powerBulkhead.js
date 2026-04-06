@@ -5,6 +5,7 @@
  * heavy or noisy partition cannot starve other partitions.
  */
 import { PowerPermitGate } from './powerPermitGate.js';
+import { PowerQueue } from './powerQueue.js';
 
 export class PowerBulkhead {
   /**
@@ -30,7 +31,7 @@ export class PowerBulkhead {
     this._buckets = Array.from({ length: this._partitions }, () => ({
       gate: new PowerPermitGate({ capacity: this._maxConcurrency, queueCapacity: Infinity }),
     }));
-    this._drainWaiters = [];
+    this._drainWaiters = new PowerQueue(16);
   }
 
   /** Number of partitions used for workload isolation. */
@@ -90,7 +91,16 @@ export class PowerBulkhead {
 
     return result.finally(() => {
       if (this.active === 0 && this.pending === 0) {
-        this._drainWaiters.splice(0, this._drainWaiters.length).forEach((resolve) => resolve());
+        while (this._drainWaiters.length > 0) {
+          const resolve = this._drainWaiters.shift();
+          if (typeof resolve === 'function') {
+            try {
+              resolve();
+            } catch (e) {
+              /* ignore */
+            }
+          }
+        }
       }
     });
   }
@@ -119,7 +129,7 @@ export class PowerBulkhead {
    * @returns {Promise<void>}
    */
   drain() {
-    if (this.active === 0 && this._pending === 0) {
+    if (this.active === 0 && this.pending === 0) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {

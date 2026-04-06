@@ -31,24 +31,33 @@ Producer-facing backpressure controller with adaptive refill.
 
 ```javascript
 import { PowerBackpressure } from '../src/helpers/powerBackpressure.js';
+import { PowerPool } from '../src/helpers/powerPool.js';
 
+const pool = new PowerPool('./worker.js', { size: 2, maxSize: 4 });
 const backpressure = new PowerBackpressure({
-  capacity: 5,
-  queueCapacity: 50,
+  capacity: 8,
+  queueCapacity: 100,
+  lowWaterMark: 2,
   refillAmount: 2,
-  refillInterval: 50,
+  refillInterval: 100,
 });
 
-async function produce(item) {
+async function publishTask(task) {
   const release = await backpressure.acquire();
   try {
-    await sendToWorker(item);
+    await pool.postMessage(task, undefined, { awaitResponse: true, timeout: 5000 });
   } finally {
     release();
   }
 }
 
-await Promise.all(items.map(produce));
+async function ingestStream(stream) {
+  for await (const event of stream) {
+    publishTask({ op: 'process-event', payload: event }).catch((err) => {
+      console.error('task failed', err);
+    });
+  }
+}
 ```
 
 ## Real-world usage

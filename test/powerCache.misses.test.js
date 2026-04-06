@@ -26,4 +26,27 @@ describe('PowerCache misses accounting', () => {
     expect(val).toBeUndefined();
     expect(c.misses).toBe(before + 1);
   });
+
+  it('counts a miss when getOrSetAsync sees expired entries and recomputes', async () => {
+    const c = new PowerCache({ defaultTTL: 1 });
+    c.set('k', 1, { ttl: 1 });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const before = c.misses;
+    const result = await c.getOrSetAsync('k', async () => 2);
+    expect(result).toBe(2);
+    expect(c.misses).toBe(before + 1);
+  });
+
+  it('counts misses for expired entries in getMany when ignoreExpiry is false', async () => {
+    const c = new PowerCache({ defaultTTL: 1 });
+    c.set('a', 1, { ttl: 1 });
+    c.set('b', 2, { ttl: 1 });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const before = c.misses;
+    const found = c.getMany(['a', 'b'], { ignoreExpiry: false });
+    expect(found.size).toBe(0);
+    expect(c.misses).toBe(before + 2);
+  });
 });

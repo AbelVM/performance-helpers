@@ -16,10 +16,10 @@ export class PowerSlidingWindow {
     /**
      * Remove timestamps older than now - windowMs.
      *
-     * This helper removes stale timestamps from the internal array to keep the
-     * sliding window accurate. It advances the head by counting how many
-     * timestamps are older than the threshold and splices them out in a single
-     * operation to minimize per-call allocations.
+     * This helper removes stale timestamps from the internal ring-buffer queue
+     * to keep the sliding window accurate. It advances the queue head one item
+     * at a time using `PowerQueue.shift()`, which provides O(1) dequeue behavior
+     * under sustained load.
      *
      * @private
      * @param {number} now - current timestamp in milliseconds

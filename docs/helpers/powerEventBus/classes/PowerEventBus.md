@@ -24,6 +24,12 @@
 
 ## Properties
 
+### \_finalizationRefs
+
+> **\_finalizationRefs**: `WeakMap`\<`object`, `any`\>
+
+***
+
 ### \_fr
 
 > **\_fr**: `any`
@@ -32,13 +38,7 @@
 
 ### \_listeners
 
-> **\_listeners**: `Map`\<`string`, `Set`\<`any`\>\>
-
-***
-
-### \_liveCounts
-
-> **\_liveCounts**: `Map`\<`any`, `any`\>
+> **\_listeners**: `Map`\<`any`, `any`\>
 
 ***
 
@@ -48,17 +48,77 @@
 
 ***
 
-### \_onceMap
-
-> **\_onceMap**: `WeakMap`\<`object`, `any`\> \| `undefined`
-
-***
-
 ### \_weak
 
 > **\_weak**: `boolean`
 
 ## Methods
+
+### \_ensureFinalizationRegistry()
+
+> **\_ensureFinalizationRegistry**(): `any`
+
+#### Returns
+
+`any`
+
+***
+
+### \_getBucket()
+
+> **\_getBucket**(`event`): [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
+
+#### Parameters
+
+##### event
+
+`any`
+
+#### Returns
+
+[`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
+
+***
+
+### \_registerWeakListener()
+
+> **\_registerWeakListener**(`fn`, `event`): () => `void`
+
+Subscribe to an event.
+
+#### Parameters
+
+##### fn
+
+(`payload`) => `void`
+
+##### event
+
+`string`
+
+#### Returns
+
+unsubscribe
+
+() => `void`
+
+***
+
+### \_unregisterWeakListener()
+
+> **\_unregisterWeakListener**(`fn`): `void`
+
+#### Parameters
+
+##### fn
+
+`any`
+
+#### Returns
+
+`void`
+
+***
 
 ### cleanup()
 
@@ -114,6 +174,37 @@ Errors thrown by listeners are swallowed.
 
 ***
 
+### emitAsync()
+
+> **emitAsync**(`event`, `payload?`, `options?`): `Promise`\<`boolean`\>
+
+Emit an event to all subscribers and await async listeners.
+Supports bounded concurrency so long listener lists can be processed in
+batches without flooding the event loop.
+Errors thrown or rejected by listeners are swallowed.
+
+#### Parameters
+
+##### event
+
+`string`
+
+##### payload?
+
+`any`
+
+##### options?
+
+###### concurrency?
+
+`number` = `Infinity`
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+***
+
 ### listeners()
 
 > **listeners**(`event`): `Function`[]
@@ -158,21 +249,17 @@ Remove a specific listener for an event.
 
 > **on**(`event`, `fn`): () => `void`
 
-Subscribe to an event.
-
 #### Parameters
 
 ##### event
 
-`string`
+`any`
 
 ##### fn
 
-(`payload`) => `void`
+`any`
 
 #### Returns
-
-unsubscribe
 
 () => `void`
 

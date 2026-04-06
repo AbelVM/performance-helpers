@@ -181,6 +181,16 @@ export class PowerCache {
      */
     private _removeExpiredNode;
     /**
+     * Fetch a node and validate expiry.
+     * @private
+     * @param {*} key
+     * @param {Object} [options]
+     * @param {boolean} [options.ignoreExpiry=false]
+     * @param {boolean} [options.countMiss=false]
+     * @returns {CacheNode|null}
+     */
+    private _fetchValidNode;
+    /**
      * Start a background refresh for an expired entry.
      *
      * If a refresh is already in flight for the key, this helper does nothing.

@@ -30,7 +30,7 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 - `unshiftMany(items)` — Prepend multiple items to the head so that `items[0]` becomes the next value returned by `shift()`. Efficient for bulk prepends.
  
-- `values()` — Non-destructive iterator of values (alias of the default iterator).
+- `values()` — Non-destructive iterator of values (alias of the default iterator, i.e. `[Symbol.iterator]`).
 
 - `keys()` — Non-destructive iterator of zero-based indexes (0 is the head).
 
@@ -45,24 +45,35 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 ```javascript
 import { PowerQueue } from '../src/helpers/powerQueue.js';
 
-const q = new PowerQueue(8);
-q.push(1);
-q.push(2);
-console.log(q.shift()); // 1
-console.log(q.peek()); // 2
-q.clear();
+const q = new PowerQueue(16);
+
+async function processStream(readable) {
+  for await (const chunk of readable) {
+    q.push(chunk);
+    if (q.length >= 32) {
+      await flushQueue();
+    }
+  }
+  await flushQueue();
+}
+
+async function flushQueue() {
+  for (const item of q.drain()) {
+    await writeRecord(item);
+  }
+}
 ```
 
 ### Batch examples
 
 ```javascript
 const q = new PowerQueue(4);
-q.pushMany([1,2,3,4]);
+q.pushMany([1, 2, 3, 4]);
 console.log(q.length); // 4
 
-// Prepend so 'a' will be returned first
-q.unshiftMany(['a','b']);
-console.log(q.shift()); // 'a'
-console.log(q.shift()); // 'b'
-console.log(q.shift()); // 1
+// Prepend so items are processed first-in-first-out when a higher-priority batch arrives.
+q.unshiftMany(['priority-a', 'priority-b']);
+for (const item of q.drain()) {
+  console.log(item);
+}
 ```

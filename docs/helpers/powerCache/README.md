@@ -10,6 +10,7 @@
 
 - [PowerCache](classes/PowerCache.md)
 - [PowerMemoizer](classes/PowerMemoizer.md)
+- [PowerTimedCache](classes/PowerTimedCache.md)
 
 ## Interfaces
 

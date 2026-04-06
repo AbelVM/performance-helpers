@@ -45,6 +45,32 @@ describe('PowerPool auto-transfer behavior', () => {
     }
   });
 
+  it('postMessage with explicit empty transfer array still forwards the encoded buffer', () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn();
+        this.terminate = vi.fn();
+      }
+    }
+
+    const pool = new PowerPool(MockUnderlying, { size: 1, idleTimeout: 1000 });
+    try {
+      const ok = pool.postMessage({ hello: 'world' }, []);
+      expect(ok).toBe(true);
+
+      const underlying = pool.workers[0].worker._underlying || pool.workers[0]._underlying;
+      expect(underlying).toBeTruthy();
+      const call = underlying.postMessage.mock.calls[0];
+      expect(call).toBeTruthy();
+      const [argMsg, argTransfer] = call;
+      expect(argMsg).toBeInstanceOf(Uint8Array);
+      expect(argTransfer).toEqual([argMsg.buffer]);
+    } finally {
+      pool.terminate();
+    }
+  });
+
   it('broadcast without transfer encodes per-worker and provides transferable buffers', () => {
     class MockUnderlying {
       constructor() {

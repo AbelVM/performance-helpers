@@ -12,6 +12,7 @@ describe('PowerLogger output transport', () => {
     expect(payload).toHaveProperty('msg');
     expect(payload).toHaveProperty('ts');
     expect(payload).toHaveProperty('name', 't1');
+    expect(payload).toHaveProperty('format', 'json');
   });
 
   it('formatter can modify payload passed to output', () => {

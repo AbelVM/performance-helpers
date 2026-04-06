@@ -1,4 +1,4 @@
-import { PowerSubscriberSet } from './powerSubscriberSet.js';
+import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
 
 /**
  * Typed micro event bus.
@@ -50,14 +50,7 @@ export class PowerEventBus {
   cleanup() {
     if (!this._weak) return;
     for (const [event, bucket] of this._listeners) {
-      if (bucket && typeof bucket._cleanup === 'function') {
-        bucket._cleanup();
-      } else if (bucket && typeof bucket[Symbol.iterator] === 'function') {
-        for (const entry of bucket) {
-          const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
-          if (!fn) bucket.delete(entry);
-        }
-      }
+      cleanupWeakRefs(bucket);
       if (bucket.size === 0) this._listeners.delete(event);
     }
   }
@@ -89,6 +82,31 @@ export class PowerEventBus {
    * @param {(payload:any)=>void} fn
    * @returns {() => void} unsubscribe
    */
+  _registerWeakListener(fn, event) {
+    const fr = this._ensureFinalizationRegistry();
+    if (!fr || typeof WeakRef === 'undefined') return null;
+    const ref = new WeakRef(fn);
+    try {
+      fr.register(fn, { event, ref }, ref);
+      this._finalizationRefs.set(fn, ref);
+    } catch (e) {
+      /* ignore registration failures */
+      return null;
+    }
+    return ref;
+  }
+
+  _unregisterWeakListener(fn) {
+    if (!this._fr || !this._finalizationRefs.has(fn)) return;
+    const ref = this._finalizationRefs.get(fn);
+    try {
+      this._fr.unregister(ref);
+    } catch (e) {
+      /* ignore */
+    }
+    this._finalizationRefs.delete(fn);
+  }
+
   on(event, fn) {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
     let bucket = this._getBucket(event);
@@ -98,23 +116,11 @@ export class PowerEventBus {
     }
 
     const unsubscribe = bucket.add(fn);
-    const fr = this._ensureFinalizationRegistry();
-    if (fr && typeof WeakRef !== 'undefined') {
-      const ref = new WeakRef(fn);
-      try {
-        fr.register(fn, { event, ref }, ref);
-        this._finalizationRefs.set(fn, ref);
-      } catch (e) {
-        /* ignore registration failures */
-      }
+    const ref = this._registerWeakListener(fn, event);
+    if (ref) {
       return () => {
         unsubscribe();
-        try {
-          fr.unregister(ref);
-        } catch (e) {
-          /* ignore */
-        }
-        this._finalizationRefs.delete(fn);
+        this._unregisterWeakListener(fn);
       };
     }
     return unsubscribe;
@@ -135,23 +141,11 @@ export class PowerEventBus {
     }
 
     const unsubscribe = bucket.addOnce(fn);
-    const fr = this._ensureFinalizationRegistry();
-    if (fr && typeof WeakRef !== 'undefined') {
-      const ref = new WeakRef(fn);
-      try {
-        fr.register(fn, { event, ref }, ref);
-        this._finalizationRefs.set(fn, ref);
-      } catch (e) {
-        /* ignore registration failures */
-      }
+    const ref = this._registerWeakListener(fn, event);
+    if (ref) {
       return () => {
         unsubscribe();
-        try {
-          fr.unregister(ref);
-        } catch (e) {
-          /* ignore */
-        }
-        this._finalizationRefs.delete(fn);
+        this._unregisterWeakListener(fn);
       };
     }
     return unsubscribe;
@@ -166,15 +160,7 @@ export class PowerEventBus {
     const bucket = this._getBucket(event);
     if (!bucket) return;
     bucket.delete(fn);
-    if (this._fr && this._finalizationRefs.has(fn)) {
-      const ref = this._finalizationRefs.get(fn);
-      try {
-        this._fr.unregister(ref);
-      } catch (e) {
-        /* ignore */
-      }
-      this._finalizationRefs.delete(fn);
-    }
+    this._unregisterWeakListener(fn);
     if (bucket.size === 0) this._listeners.delete(event);
   }
 
@@ -190,20 +176,21 @@ export class PowerEventBus {
     if (!bucket || bucket.size === 0) return false;
 
     if (bucket instanceof PowerSubscriberSet) {
-      const listeners = bucket.values();
-      for (const fn of listeners) {
+      let notified = false;
+      bucket.forEach((fn) => {
+        notified = true;
         try {
           fn(payload);
         } catch (e) {
           // swallow subscriber errors
         }
-      }
+      });
       if (bucket.size === 0) this._listeners.delete(event);
-      return listeners.length > 0;
+      return notified;
     }
 
     const hadEntries = bucket.size > 0;
-    for (const entry of Array.from(bucket)) {
+    for (const entry of bucket) {
       const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
       if (!fn) {
         bucket.delete(entry);

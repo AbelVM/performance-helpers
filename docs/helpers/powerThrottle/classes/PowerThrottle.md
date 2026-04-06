@@ -109,7 +109,7 @@ Current available tokens (performs a refill before reporting).
 > **release**(`tokenOrN`): `void`
 
 Release a prior reservation token or add tokens back.
-Accepts either a token returned from `reserve()` or a numeric value.
+Accepts either a token returned from `reserve()` or a numeric count.
 
 #### Parameters
 
@@ -121,15 +121,25 @@ Accepts either a token returned from `reserve()` or a numeric value.
 
 `void`
 
+#### Example
+
+```ts
+const token = throttle.reserve(2);
+if (token) throttle.release(token);
+throttle.release(1); // add one token back directly
+```
+
 ***
 
 ### reserve()
 
-> **reserve**(`n?`): `object` \| `null`
+> **reserve**(`n?`): \{ `n`: `number`; \} \| `null`
 
-Reserve `n` tokens without committing them permanently. Returns a token
-object that can be passed to `release()` to undo the reservation.
-Returns `null` when reservation fails.
+Reserve `n` tokens without committing them permanently. If successful,
+returns a token object such as `{ n: 1 }` that may later be passed to
+`release()` or `rollback()` to return the reserved tokens.
+
+Returns `null` when the reservation fails due to insufficient tokens.
 
 #### Parameters
 
@@ -139,7 +149,17 @@ Returns `null` when reservation fails.
 
 #### Returns
 
-`object` \| `null`
+\{ `n`: `number`; \} \| `null`
+
+#### Example
+
+```ts
+const token = throttle.reserve(1);
+if (token) {
+  // use reserved slot
+  throttle.release(token);
+}
+```
 
 ***
 

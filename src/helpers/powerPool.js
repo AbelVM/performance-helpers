@@ -44,9 +44,30 @@ class WorkerWrapper {
     if (isPlainObject) {
       try {
         const u8 = this._pool._encodeForTransfer(message);
-        const tarr = tr ? Array.from(tr) : [];
-        if (!tarr.includes(u8.buffer)) tarr.push(u8.buffer);
-        tr = tarr;
+        if (!tr || (Array.isArray(tr) && tr.length === 0)) {
+          tr = [u8.buffer];
+        } else {
+          let found = false;
+          if (Array.isArray(tr)) {
+            for (let item of tr) {
+              if (item === u8.buffer) {
+                found = true;
+                break;
+              }
+            }
+            if (!found) tr = [...tr, u8.buffer];
+          } else if (tr.length === 0) {
+            tr = [u8.buffer];
+          } else {
+            const arr = [];
+            for (let item of tr) {
+              arr.push(item);
+              if (item === u8.buffer) found = true;
+            }
+            if (!found) arr.push(u8.buffer);
+            tr = arr;
+          }
+        }
         msg = u8;
       } catch (err) {
         tr = transfer;
@@ -116,15 +137,16 @@ export class PowerPoolShutdownError extends Error {
 
 /**
  * @typedef {Object} PowerPoolOptions
- * @property {number} [size]
- * @property {number} [minSize]
- * @property {number} [maxSize]
+ * @property {number} [size] - Initial number of workers to create when `lazy` is false.
+ * @property {number} [minSize] - Minimum number of workers to keep alive.
+ * @property {number} [maxSize] - Maximum number of workers allowed in the pool. Coerced to be at least `minSize`.
  * @property {Object} [workerOptions] - Options forwarded to the underlying `Worker` constructor when using a string path.
- * @property {number} [maxTasksPerWorker]
- * @property {number} [idleTimeout]
- * @property {boolean} [taskQueue]
- * @property {boolean} [lazy]
- * @property {number} [debugLevel]
+ * @property {number} [maxTasksPerWorker] - Soft capacity per worker used during task dispatch.
+ * @property {number} [idleTimeout] - Milliseconds after which idle workers beyond `minSize` are terminated.
+ * @property {boolean} [taskQueue] - Whether to queue tasks when all workers are busy.
+ * @property {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
+ * @property {boolean} [lazy] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
+ * @property {number} [debugLevel] - Debug verbosity level for internal logging.
  * @property {number} [listenerMaxListeners]
  * @property {boolean} [weakListeners]
  * @property {number} [queueHighThreshold] - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
@@ -143,11 +165,11 @@ export class PowerPool {
   /**
    * Create a PowerPool.
    *
-   * @param {Function|string} workerSource - A Worker constructor/factory (callable) or a relative path string to pass to `new Worker(new URL(path, import.meta.url))`.
+   * @param {Function|string} workerSource - A Worker constructor, a worker factory, or a relative path string. If the provided function is not constructable, it is invoked directly; if a string path is provided, the pool attempts to resolve it via `new URL(path, import.meta.url)` before falling back to a plain `Worker(path)`.
    * @param {PowerPoolOptions=} options
    * @param {number} [options.size] - Initial number of workers to create.
    * @param {number} [options.minSize=1] - Minimum number of workers to keep alive.
-   * @param {number} [options.maxSize] - Maximum number of workers allowed in the pool.
+   * @param {number} [options.maxSize] - Maximum number of workers allowed in the pool. The pool coerces this value to be at least `minSize`.
    * @param {Object} [options.workerOptions] - Options forwarded to the Worker constructor when using a string path.
    * @param {number} [options.maxTasksPerWorker=Infinity] - Soft capacity per worker before considering it busy.
    * @param {number} [options.idleTimeout=60000] - Milliseconds after which idle workers (beyond `minSize`) will be terminated.
@@ -352,20 +374,35 @@ export class PowerPool {
   }
 
   /**
-   * Shutdown the pool: clear timers, reject pending responses, terminate workers,
-   * and clear internal queues. This is a full stop that prevents background
-   * timers from keeping the process alive.
+   * Clear lifecycle timer intervals used by the pool.
+   * @private
    */
-  shutdown() {
-    // clear reaper
+  _clearLifecycleIntervals() {
     try {
       if (this._reaperInterval) {
         clearInterval(this._reaperInterval);
         this._reaperInterval = null;
       }
     } catch (e) {
-      this._debugLog && this._debugLog(e, 'shutdown: clear reaper');
+      /* ignore */
     }
+    try {
+      if (this._autoScaleInterval) {
+        clearInterval(this._autoScaleInterval);
+        this._autoScaleInterval = null;
+      }
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Shutdown the pool: clear timers, reject pending responses, terminate workers,
+   * and clear internal queues. This is a full stop that prevents background
+   * timers from keeping the process alive.
+   */
+  shutdown() {
+    this._clearLifecycleIntervals();
 
     // reject pending responses (centralized to avoid races)
     try {
@@ -421,15 +458,6 @@ export class PowerPool {
     this.workers = [];
     this.queue = new PowerQueue();
     this._activeTasks = 0;
-    // clear autoscale interval if present
-    try {
-      if (this._autoScaleInterval) {
-        clearInterval(this._autoScaleInterval);
-        this._autoScaleInterval = null;
-      }
-    } catch (e) {
-      this._debugLog && this._debugLog(e, 'shutdown: clear autoscale');
-    }
   }
 
   /**
@@ -517,7 +545,7 @@ export class PowerPool {
    */
   prepareBuffers(items, options = {}) {
     if (!Array.isArray(items)) throw new Error('prepareBuffers expects an array');
-    const { clone = true } = options;
+    const { clone = true, zeroCopy = false } = options;
     const out = new Array(items.length);
     for (let i = 0; i < items.length; i++) {
       const it =
@@ -537,14 +565,16 @@ export class PowerPool {
         !ArrayBuffer.isView(msg) &&
         !(msg instanceof ArrayBuffer);
       if (isPlainObject) {
+        if (zeroCopy) {
+          out[i] = { message: msg, transfer: undefined };
+          continue;
+        }
         try {
           const u8 = this._encodeForTransfer(msg);
           if (clone) {
-            // create a single cloned buffer and use it for both message and transfer
             const buf = u8.slice();
             out[i] = { message: buf, transfer: [buf.buffer] };
           } else {
-            // return reference to shared cached buffer but do NOT transfer it
             out[i] = { message: u8, transfer: undefined };
           }
           continue;
@@ -571,22 +601,44 @@ export class PowerPool {
    * @private
    */
   _prepareForTransfer(msg, tr, opts) {
-    if (tr) return { message: msg, transfer: tr };
     const zeroCopy = opts && Boolean(opts.zeroCopy);
     const isPlainObject =
       msg !== null &&
       typeof msg === 'object' &&
       !ArrayBuffer.isView(msg) &&
       !(msg instanceof ArrayBuffer);
-    // If zeroCopy mode is requested, do not encode plain objects here — the
-    // caller is explicitly opting in to supplying already-transferable payloads
-    // (e.g. ArrayBuffer/TypedArray). For plain objects we fall back to encoding
-    // unless `zeroCopy` is truthy, in which case we forward as-is.
     if (isPlainObject) {
       if (zeroCopy) return { message: msg, transfer: tr };
       try {
         const u8 = this._encodeForTransfer(msg);
-        return { message: u8, transfer: [u8.buffer] };
+        const buf = u8.slice();
+        let transferList = tr;
+        if (!transferList || (Array.isArray(transferList) && transferList.length === 0)) {
+          transferList = [buf.buffer];
+        } else if (!Array.isArray(transferList)) {
+          if (transferList.length === 0) {
+            transferList = [buf.buffer];
+          } else {
+            const arr = [];
+            let found = false;
+            for (const item of transferList) {
+              arr.push(item);
+              if (item === buf.buffer) found = true;
+            }
+            if (!found) arr.push(buf.buffer);
+            transferList = arr;
+          }
+        } else {
+          let found = false;
+          for (const item of transferList) {
+            if (item === buf.buffer) {
+              found = true;
+              break;
+            }
+          }
+          if (!found) transferList = [...transferList, buf.buffer];
+        }
+        return { message: buf, transfer: transferList };
       } catch (err) {
         return { message: msg, transfer: tr };
       }
@@ -1653,22 +1705,10 @@ export class PowerPool {
       this._logger.error(err, 'stopThePress: failed while terminating workers');
     }
 
-    // If caller requested not to recreate workers, clear the reaper interval
+    // If caller requested not to recreate workers, clear lifecycle timers
     // to avoid leaving a background timer running and keeping the process alive.
     if (!recreate) {
-      try {
-        if (this._reaperInterval) {
-          clearInterval(this._reaperInterval);
-          this._reaperInterval = null;
-        }
-        // also clear autoscale interval when not recreating workers
-        if (this._autoScaleInterval) {
-          clearInterval(this._autoScaleInterval);
-          this._autoScaleInterval = null;
-        }
-      } catch (e) {
-        /* ignore */
-      }
+      this._clearLifecycleIntervals();
     }
 
     if (recreate) {
@@ -1751,7 +1791,10 @@ export class PowerPool {
     const queuedPrepared = [];
     const targetWorkerId = options && options.workerId != null ? options.workerId : null;
 
-    const prepare = (msg, tr) => this._prepareForTransfer(msg, tr, options);
+    const preparedItems = this.prepareBuffers(items, {
+      clone: true,
+      zeroCopy: options && Boolean(options.zeroCopy),
+    });
 
     // Hoist selection and idle updates to reduce O(N * workers) work
     let chosen = null;
@@ -1765,7 +1808,7 @@ export class PowerPool {
 
     for (let i = 0; i < items.length; i++) {
       const it = items[i] || {};
-      const prepared = prepare(it.message, it.transfer);
+      const prepared = preparedItems[i] || { message: it.message, transfer: it.transfer };
       let dispatched = false;
 
       // If chosen worker is saturated, clear it so we re-select on demand
@@ -1956,22 +1999,10 @@ export class PowerPool {
       this._logger.error(err, 'stopThePressBatch: failed while terminating workers');
     }
 
-    // If caller requested not to recreate workers, clear the reaper interval
+    // If caller requested not to recreate workers, clear lifecycle timers
     // to avoid leaving a background timer running and keeping the process alive.
     if (!recreate) {
-      try {
-        if (this._reaperInterval) {
-          clearInterval(this._reaperInterval);
-          this._reaperInterval = null;
-        }
-        // also clear autoscale interval when not recreating workers
-        if (this._autoScaleInterval) {
-          clearInterval(this._autoScaleInterval);
-          this._autoScaleInterval = null;
-        }
-      } catch (e) {
-        /* ignore */
-      }
+      this._clearLifecycleIntervals();
     }
 
     if (recreate) {
@@ -2271,8 +2302,8 @@ export class PowerPool {
   }
 
   /**
-   * Return stats for debugging.
-   * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object}}
+   * Return stats for debugging and telemetry.
+   * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
    */
   getStats() {
     const status = this.workers.map((w) => ({
@@ -2327,6 +2358,12 @@ export class PowerPool {
         timePerTask: { max, min, average, stddev },
         percentSlowTasks,
       },
+      queueLength: this.queue.length,
+      activeTasks: this._activeTasks,
+      workerCount: this.workers.length,
+      minSize: this.minSize,
+      maxSize: this.maxSize,
+      isIdle: this._activeTasks === 0 && this.queue.length === 0,
     };
   }
 
@@ -2465,6 +2502,20 @@ export class PowerPool {
     if (!this._queuePaused) return;
     this._queuePaused = false;
     this._dispatchQueuedTasks();
+  }
+
+  /**
+   * Alias for `pauseQueue()` to provide a simpler public API.
+   */
+  pause() {
+    return this.pauseQueue();
+  }
+
+  /**
+   * Alias for `resumeQueue()` to provide a simpler public API.
+   */
+  resume() {
+    return this.resumeQueue();
   }
 
   /**

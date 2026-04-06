@@ -97,7 +97,7 @@ export class PowerSubscriberSet {
       this._onceMap.delete(fn);
     }
 
-    for (const entry of Array.from(this._listeners)) {
+    for (const entry of this._listeners) {
       const listener = this._deref(entry);
       if (!listener) {
         this._listeners.delete(entry);
@@ -112,6 +112,18 @@ export class PowerSubscriberSet {
       }
     }
     return false;
+  }
+
+  /** Iterate live listeners in insertion order and invoke a callback. */
+  forEach(fn) {
+    for (const entry of this._listeners) {
+      const listener = this._deref(entry);
+      if (!listener) {
+        this._listeners.delete(entry);
+        continue;
+      }
+      fn(listener);
+    }
   }
 
   /** Clear all listeners. */
@@ -139,7 +151,7 @@ export class PowerSubscriberSet {
   /** Remove dead weak refs from the set. */
   _cleanup() {
     if (!this._weak || typeof WeakRef === 'undefined') return;
-    for (const entry of Array.from(this._listeners)) {
+    for (const entry of this._listeners) {
       if (entry && typeof entry.deref === 'function' && !entry.deref()) {
         this._listeners.delete(entry);
       }
@@ -163,5 +175,35 @@ export class PowerSubscriberSet {
 
   _deref(entry) {
     return entry && typeof entry.deref === 'function' ? entry.deref() : entry;
+  }
+}
+
+/**
+ * Cleanup dead weak refs from a subscriber bucket.
+ * @param {any} bucket
+ */
+export function cleanupWeakRefs(bucket) {
+  if (!bucket) return;
+  if (typeof bucket.cleanup === 'function') {
+    try {
+      bucket.cleanup();
+    } catch (e) {
+      // ignore cleanup failures
+    }
+    return;
+  }
+  if (typeof bucket._cleanup === 'function') {
+    try {
+      bucket._cleanup();
+    } catch (e) {
+      // ignore cleanup failures
+    }
+    return;
+  }
+  if (typeof bucket[Symbol.iterator] === 'function' && typeof bucket.delete === 'function') {
+    for (const entry of bucket) {
+      const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
+      if (!fn) bucket.delete(entry);
+    }
   }
 }

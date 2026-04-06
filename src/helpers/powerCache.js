@@ -209,6 +209,29 @@ export class PowerCache {
   }
 
   /**
+   * Fetch a node and validate expiry.
+   * @private
+   * @param {*} key
+   * @param {Object} [options]
+   * @param {boolean} [options.ignoreExpiry=false]
+   * @param {boolean} [options.countMiss=false]
+   * @returns {CacheNode|null}
+   */
+  _fetchValidNode(key, { ignoreExpiry = false, countMiss = false, allowExpired = false } = {}) {
+    const node = this.map.get(key);
+    if (!node) {
+      if (countMiss) this.misses++;
+      return null;
+    }
+    if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) {
+      if (allowExpired) return node;
+      this._removeExpiredNode(node, Date.now(), countMiss);
+      return null;
+    }
+    return node;
+  }
+
+  /**
    * Start a background refresh for an expired entry.
    *
    * If a refresh is already in flight for the key, this helper does nothing.
@@ -394,16 +417,8 @@ export class PowerCache {
    * @returns {*|undefined} The stored value or `undefined` if missing/expired.
    */
   get(key) {
-    const node = this.map.get(key);
-    if (!node) {
-      this.misses++;
-      return undefined;
-    }
-    const now = Date.now();
-    if (node.expiresAt && node.expiresAt <= now) {
-      this._removeExpiredNode(node, now, true);
-      return undefined;
-    }
+    const node = this._fetchValidNode(key, { countMiss: true });
+    if (!node) return undefined;
     this._moveToTail(node);
     this.hits++;
     return node.value;
@@ -416,17 +431,8 @@ export class PowerCache {
    * @returns {*|undefined}
    */
   peek(key) {
-    const node = this.map.get(key);
-    if (!node) return undefined;
-    const now = Date.now();
-    if (node.expiresAt && node.expiresAt <= now) {
-      if (this.eagerCleanupOnRead) {
-        // Eagerly remove expired node when the cache was configured to do so.
-        this._removeExpiredNode(node, now, false);
-      }
-      return undefined;
-    }
-    return node.value;
+    const node = this._fetchValidNode(key);
+    return node ? node.value : undefined;
   }
 
   /**
@@ -437,15 +443,7 @@ export class PowerCache {
    * @returns {boolean}
    */
   has(key, { ignoreExpiry = false } = {}) {
-    const node = this.map.get(key);
-    if (!node) return false;
-    if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) {
-      if (this.eagerCleanupOnRead) {
-        this._removeExpiredNode(node, Date.now(), false);
-      }
-      return false;
-    }
-    return true;
+    return Boolean(this._fetchValidNode(key, { ignoreExpiry }));
   }
 
   /**
@@ -473,18 +471,20 @@ export class PowerCache {
     factory,
     { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
   ) {
-    const node = this.map.get(key);
     const now = Date.now();
+    const node = this._fetchValidNode(key, {
+      countMiss: false,
+      allowExpired: staleWhileRevalidate,
+    });
+
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
-        if (staleWhileRevalidate && typeof factory === 'function') {
-          // Serve stale value while refreshing in the background.
+        if (typeof factory === 'function') {
           this._moveToTail(node);
           this.hits++;
           this._refreshStaleEntry(key, factory, { ttl, weight });
           return node.value;
         }
-        // expired: remove and count as a miss, then fall through to compute
         this._removeExpiredNode(node, now, true);
       } else {
         this._moveToTail(node);
@@ -492,7 +492,6 @@ export class PowerCache {
         return node.value;
       }
     } else {
-      // key absent: count as a miss
       this.misses++;
     }
 
@@ -572,17 +571,9 @@ export class PowerCache {
    */
   getMany(keys, { ignoreExpiry = false } = {}) {
     const res = new Map();
-    const now = Date.now();
     for (const key of keys) {
-      const node = this.map.get(key);
-      if (!node) {
-        this.misses++;
-        continue;
-      }
-      if (!ignoreExpiry && node.expiresAt && node.expiresAt <= now) {
-        this._removeExpiredNode(node, now);
-        continue;
-      }
+      const node = this._fetchValidNode(key, { ignoreExpiry, countMiss: true });
+      if (!node) continue;
       this._moveToTail(node);
       this.hits++;
       res.set(key, node.value);
@@ -598,13 +589,9 @@ export class PowerCache {
    * @returns {boolean} True if the entry existed (and was not expired), false otherwise.
    */
   touch(key, ttl = undefined) {
-    const node = this.map.get(key);
+    const node = this._fetchValidNode(key);
     if (!node) return false;
     const now = Date.now();
-    if (node.expiresAt && node.expiresAt <= now) {
-      this._removeExpiredNode(node, now);
-      return false;
-    }
     if (ttl !== undefined) {
       node.expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
     }
@@ -644,8 +631,8 @@ export class PowerCache {
           this._refreshStaleEntry(key, asyncFactory, { ttl, weight });
           return Promise.resolve(node.value);
         }
-        // expired: remove and proceed to compute
-        this._removeExpiredNode(node, now);
+        // expired: remove and proceed to compute; count the miss once below.
+        this._removeExpiredNode(node, now, false);
       } else {
         this._moveToTail(node);
         this.hits++;
@@ -705,9 +692,8 @@ export class PowerCache {
    * @returns {boolean}
    */
   hasEqual(key, value, { ignoreExpiry = false, seen = undefined } = {}) {
-    const node = this.map.get(key);
+    const node = this._fetchValidNode(key, { ignoreExpiry });
     if (!node) return false;
-    if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) return false;
     const stored = node.value;
     // Fast reference equality
     if (stored === value) return true;

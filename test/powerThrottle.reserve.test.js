@@ -17,4 +17,10 @@ describe('PowerThrottle reserve/release', () => {
     const token = t.reserve(1);
     expect(token).toBeNull();
   });
+
+  it('release accepts a numeric count as well as a reservation token', () => {
+    const t = new PowerThrottle({ capacity: 2, tokens: 1, refillRate: 0 });
+    t.release(1);
+    expect(t.tokens).toBe(2);
+  });
 });

@@ -1,15 +1,19 @@
 /**
- * PowerBatch — microtask-coalescing dispatcher.
- * Collects items added within the same microtask and dispatches them
- * to the provided `handler(items[])`. Useful to batch synchronous
- * work (DB writes, network calls) with minimal latency.
+ * PowerBatch — scheduler-driven dispatcher.
+ * Collects items added before the next scheduled tick and dispatches them
+ * to the provided `handler(items[])`. Useful to batch synchronous work
+ * (DB writes, network calls) with minimal latency.
+ *
+ * The scheduler defaults to microtask coalescing, but `scheduling: 'macrotask'`
+ * is also supported for environments that require a macrotask boundary.
  *
  * @example
  * const batch = new PowerBatch((items) => bulkWrite(items), { maxSize: 100 });
  * batch.add(itemA);
  * batch.add(itemB);
- * // items are coalesced and handler called once in the next microtask
+ * // items are coalesced and handler called once in the next tick
  */
+import { PowerQueue } from './powerQueue.js';
 import { PowerScheduler } from './powerScheduler.js';
 
 export class PowerBatch {
@@ -21,23 +25,20 @@ export class PowerBatch {
    * @param {Function} handler - Function called with an array of collected items.
    * @param {Object} [options]
    * @param {number} [options.maxSize=Infinity] - When reached, flush immediately.
+   * @param {'microtask'|'macrotask'} [options.scheduling='microtask'] - How the batch is scheduled.
    */
   constructor(handler, options = {}) {
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
     const { maxSize = Infinity, scheduling = 'microtask' } = options;
     this._handler = handler;
     this._maxSize = Number(maxSize) || Infinity;
-    this._queue = [];
+    this._queue = new PowerQueue(16);
     this._pending = null; // { promise, resolve, reject }
     this._scheduler = new PowerScheduler(() => this._runBatch(), {
       scheduling: scheduling === 'macrotask' ? 'macrotask' : 'microtask',
     });
   }
 
-  /**
-   * Internal scheduler abstraction to allow microtask or macrotask scheduling.
-   * @private
-   */
   /**
    * Add an item to the current batch. Returns a Promise that resolves
    * when the batch containing this item has been processed. For non-flushed
@@ -72,6 +73,8 @@ export class PowerBatch {
   /**
    * Force flush the current queue immediately and return a promise
    * that resolves or rejects with the handler outcome.
+   * If the queue is empty and nothing is scheduled, the returned promise
+   * resolves immediately.
    * @returns {Promise<void>}
    */
   flush() {
@@ -95,7 +98,7 @@ export class PowerBatch {
    * @private
    */
   async _runBatch() {
-    const items = this._queue;
+    const items = this._queue.toArray();
     if (items.length === 0) {
       if (this._pending) {
         this._pending.resolve();
@@ -103,7 +106,7 @@ export class PowerBatch {
       }
       return;
     }
-    this._queue = [];
+    this._queue.clear();
     const pending = this._pending;
     // create a fresh pending for subsequent adds during handler execution
     if (pending) this._pending = null;
@@ -127,12 +130,13 @@ export class PowerBatch {
 
   /**
    * Clear queued items without invoking handler.
+   * Any pending promise for the current batch is rejected.
    * @returns {void}
    */
   clear() {
-    this._queue = [];
+    this._queue.clear();
     if (this._pending) {
-      this._pending.resolve();
+      this._pending.reject(new Error('PowerBatch cleared before flush'));
       this._pending = null;
     }
     this._scheduler.cancel();

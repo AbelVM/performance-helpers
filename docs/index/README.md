@@ -44,9 +44,21 @@ Re-exports [o2u8](../helpers/powerBuffer/functions/o2u8.md)
 
 ***
 
+### PowerBackpressure
+
+Re-exports [PowerBackpressure](../helpers/powerBackpressure/classes/PowerBackpressure.md)
+
+***
+
 ### PowerBatch
 
 Re-exports [PowerBatch](../helpers/powerBatch/classes/PowerBatch.md)
+
+***
+
+### PowerBulkhead
+
+Re-exports [PowerBulkhead](../helpers/powerBulkhead/classes/PowerBulkhead.md)
 
 ***
 
@@ -62,6 +74,12 @@ Re-exports [PowerCircuit](../helpers/powerCircuit/classes/PowerCircuit.md)
 
 ***
 
+### PowerDeadline
+
+Re-exports [PowerDeadline](../helpers/powerDeadline/classes/PowerDeadline.md)
+
+***
+
 ### PowerDefer
 
 Re-exports [PowerDefer](../helpers/powerDefer/classes/PowerDefer.md)
@@ -71,6 +89,12 @@ Re-exports [PowerDefer](../helpers/powerDefer/classes/PowerDefer.md)
 ### PowerEventBus
 
 Re-exports [PowerEventBus](../helpers/powerEventBus/classes/PowerEventBus.md)
+
+***
+
+### PowerHistogram
+
+Re-exports [PowerHistogram](../helpers/powerHistogram/classes/PowerHistogram.md)
 
 ***
 
@@ -98,6 +122,12 @@ Re-exports [PowerObserver](../helpers/powerObserver/classes/PowerObserver.md)
 
 ***
 
+### PowerPermitGate
+
+Re-exports [PowerPermitGate](../helpers/powerPermitGate/classes/PowerPermitGate.md)
+
+***
+
 ### PowerPool
 
 Re-exports [PowerPool](../helpers/powerPool/classes/PowerPool.md)
@@ -122,15 +152,39 @@ Re-exports [PowerRetry](../helpers/powerRetry/classes/PowerRetry.md)
 
 ***
 
+### PowerScheduler
+
+Re-exports [PowerScheduler](../helpers/powerScheduler/classes/PowerScheduler.md)
+
+***
+
+### PowerSemaphore
+
+Re-exports [PowerSemaphore](../helpers/powerSemaphore/classes/PowerSemaphore.md)
+
+***
+
 ### PowerSlidingWindow
 
 Re-exports [PowerSlidingWindow](../helpers/powerSlidingWindow/classes/PowerSlidingWindow.md)
 
 ***
 
+### PowerSubscriberSet
+
+Re-exports [PowerSubscriberSet](../helpers/powerSubscriberSet/classes/PowerSubscriberSet.md)
+
+***
+
 ### PowerThrottle
 
 Re-exports [PowerThrottle](../helpers/powerThrottle/classes/PowerThrottle.md)
+
+***
+
+### PowerTimedCache
+
+Re-exports [PowerTimedCache](../helpers/powerCache/classes/PowerTimedCache.md)
 
 ***
 

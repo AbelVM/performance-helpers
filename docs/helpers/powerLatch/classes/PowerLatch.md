@@ -6,20 +6,6 @@
 
 # Class: PowerLatch
 
-PowerLatch — a simple counting barrier.
-Resolves waiters when the internal count reaches zero.
-
-## Example
-
-```ts
-const latch = new PowerLatch(3);
-// from three independent async paths:
-latch.countDown();
-latch.countDown();
-latch.countDown();
-await latch.wait(); // resolves when count reaches 0
-```
-
 ## Constructors
 
 ### Constructor
@@ -70,13 +56,9 @@ initial count required to release the latch
 
 > **\_waiters**: `object`[]
 
-#### reject
+#### defer
 
-> **reject**: `Function`
-
-#### resolve
-
-> **resolve**: `Function`
+> **defer**: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md)
 
 #### signal?
 
@@ -161,6 +143,22 @@ Number of remaining counts.
 #### Returns
 
 `void`
+
+***
+
+### \_removeWaiter()
+
+> **\_removeWaiter**(`waiter`): `any`
+
+#### Parameters
+
+##### waiter
+
+`any`
+
+#### Returns
+
+`any`
 
 ***
 

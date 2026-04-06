@@ -35,7 +35,7 @@ Create a PowerPool.
 
 `string` \| `Function`
 
-A Worker constructor/factory (callable) or a relative path string to pass to `new Worker(new URL(path, import.meta.url))`.
+A Worker constructor, a worker factory, or a relative path string. If the provided function is not constructable, it is invoked directly; if a string path is provided, the pool attempts to resolve it via `new URL(path, import.meta.url)` before falling back to a plain `Worker(path)`.
 
 ##### options?
 
@@ -186,6 +186,30 @@ whether the pool is considered idle (no active tasks and empty queue)
 ### \_pendingResponses
 
 > **\_pendingResponses**: `Map`\<`any`, `any`\>
+
+***
+
+### \_queueHighCrossed
+
+> **\_queueHighCrossed**: `boolean`
+
+***
+
+### \_queueHighThreshold
+
+> **\_queueHighThreshold**: `number`
+
+***
+
+### \_queuePaused
+
+> **\_queuePaused**: `boolean` \| `undefined`
+
+***
+
+### \_queuePolicy
+
+> **\_queuePolicy**: `"enqueue"` \| `"drop-oldest"` \| `"drop-newest"` \| `"reject"`
 
 ***
 
@@ -414,7 +438,37 @@ Receives an event object: `{ data: { type: 'pool:resize', terminated: Array<numb
 
 `void`
 
+***
+
+### queuePaused
+
+#### Get Signature
+
+> **get** **queuePaused**(): `boolean`
+
+Whether queued dispatch is currently paused.
+
+##### Returns
+
+`boolean`
+
 ## Methods
+
+### \_deleteWorkerUnderlyingMapping()
+
+> **\_deleteWorkerUnderlyingMapping**(`workerObj`): `void`
+
+#### Parameters
+
+##### workerObj
+
+`any`
+
+#### Returns
+
+`void`
+
+***
 
 ### addEventListener()
 
@@ -498,19 +552,70 @@ Promise resolving to `getStats()`.
 
 > **getStats**(): `object`
 
-Return stats for debugging.
+Return stats for debugging and telemetry.
 
 #### Returns
 
 `object`
 
+##### activeTasks
+
+> **activeTasks**: `number`
+
+##### isIdle
+
+> **isIdle**: `boolean`
+
+##### maxSize
+
+> **maxSize**: `number`
+
+##### minSize
+
+> **minSize**: `number`
+
 ##### performance
 
 > **performance**: `Object`
 
+##### queueLength
+
+> **queueLength**: `number`
+
 ##### status
 
 > **status**: `object`[]
+
+##### workerCount
+
+> **workerCount**: `number`
+
+***
+
+### pause()
+
+> **pause**(): `void`
+
+Alias for `pauseQueue()` to provide a simpler public API.
+
+#### Returns
+
+`void`
+
+***
+
+### pauseQueue()
+
+> **pauseQueue**(): `void`
+
+Pause dequeueing from the internal task queue.
+Queued tasks remain in the queue until `resumeQueue()` is called.
+This is useful for controlled backpressure when downstream consumers
+are temporarily unable to accept more work.
+
+#### Returns
+
+`void`
 
 ***
 
@@ -682,6 +787,31 @@ the pool may grow up to the new limit when demand increases.
 `number`
 
 New maximum pool size.
+
+#### Returns
+
+`void`
+
+***
+
+### resume()
+
+> **resume**(): `void`
+
+Alias for `resumeQueue()` to provide a simpler public API.
+
+#### Returns
+
+`void`
+
+***
+
+### resumeQueue()
+
+> **resumeQueue**(): `void`
+
+Resume dequeueing from the internal task queue and attempt to dispatch
+waiting tasks to available workers.
 
 #### Returns
 

@@ -6,20 +6,6 @@
 
 # Class: PowerBatch
 
-PowerBatch — microtask-coalescing dispatcher.
-Collects items added within the same microtask and dispatches them
-to the provided `handler(items[])`. Useful to batch synchronous
-work (DB writes, network calls) with minimal latency.
-
-## Example
-
-```ts
-const batch = new PowerBatch((items) => bulkWrite(items), { maxSize: 100 });
-batch.add(itemA);
-batch.add(itemB);
-// items are coalesced and handler called once in the next microtask
-```
-
 ## Constructors
 
 ### Constructor
@@ -41,6 +27,12 @@ Function called with an array of collected items.
 `number`
 
 When reached, flush immediately.
+
+###### scheduling?
+
+`"microtask"` \| `"macrotask"`
+
+How the batch is scheduled.
 
 #### Returns
 
@@ -68,19 +60,13 @@ When reached, flush immediately.
 
 ### \_queue
 
-> **\_queue**: `any`[]
+> **\_queue**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
 ***
 
-### \_scheduled
+### \_scheduler
 
-> **\_scheduled**: `boolean`
-
-***
-
-### \_scheduling
-
-> **\_scheduling**: `string`
+> **\_scheduler**: [`PowerScheduler`](../../powerScheduler/classes/PowerScheduler.md)
 
 ## Accessors
 
@@ -104,7 +90,7 @@ Number of items currently queued (not yet flushed).
 
 Add an item to the current batch. Returns a Promise that resolves
 when the batch containing this item has been processed. For non-flushed
-additions this will be resolved after the microtask run; if adding the
+additions this will be resolved after the scheduled run; if adding the
 item hits `maxSize` the returned promise resolves when the handler completes.
 
 #### Parameters
@@ -124,6 +110,7 @@ item hits `maxSize` the returned promise resolves when the handler completes.
 > **clear**(): `void`
 
 Clear queued items without invoking handler.
+Any pending promise for the current batch is rejected.
 
 #### Returns
 
@@ -137,6 +124,8 @@ Clear queued items without invoking handler.
 
 Force flush the current queue immediately and return a promise
 that resolves or rejects with the handler outcome.
+If the queue is empty and nothing is scheduled, the returned promise
+resolves immediately.
 
 #### Returns
 

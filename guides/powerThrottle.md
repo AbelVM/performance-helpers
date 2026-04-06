@@ -31,37 +31,36 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 
 ```javascript
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
-import { PowerPool } from '../src/index.js';
 
-// Real-world example: pace API calls and buffer pending work with gentle backoff.
 const limiter = new PowerThrottle({ capacity: 5, refillRate: 1 }); // burst 5, 1 token/sec
-const pool = new PowerPool(MyWorker, { size: 2 });
 const pending = [];
 
-function scheduleRequest(payload) {
-  if (limiter.tryConsume()) {
-    pool.postMessage({ task: 'call', payload });
+async function sendEvent(payload) {
+  if (!limiter.tryConsume()) {
+    pending.push(payload);
     return;
   }
-  // push into pending buffer with retry metadata
-  pending.push({ payload, attempts: 0, nextDelay: 200 });
+
+  try {
+    await fetch('https://api.example.com/events', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.error('send failed', error);
+    pending.push(payload);
+  }
 }
 
-// Periodically drain pending with small backoff per-item to avoid bursts
-const drainInterval = setInterval(() => {
-  for (let i = 0; i < pending.length; ) {
-    const item = pending[i];
-    if (!limiter.tryConsume()) break;
-    // dispatch
-    pool.postMessage({ task: 'call', payload: item.payload });
-    pending.splice(i, 1);
+const drainInterval = setInterval(async () => {
+  while (pending.length && limiter.tryConsume()) {
+    const payload = pending.shift();
+    await sendEvent(payload);
   }
-  // if queue still contains items, apply exponential backoff to retry scheduling later
-  for (const it of pending) {
-    it.attempts += 1;
-    it.nextDelay = Math.min(30_000, Math.round(it.nextDelay * 1.5));
+  if (!pending.length) {
+    clearInterval(drainInterval);
   }
-  if (!pending.length) clearInterval(drainInterval);
 }, 250);
 ```
 

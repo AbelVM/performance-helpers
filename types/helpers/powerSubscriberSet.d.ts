@@ -1,3 +1,8 @@
+/**
+ * Cleanup dead weak refs from a subscriber bucket.
+ * @param {any} bucket
+ */
+export function cleanupWeakRefs(bucket: any): void;
 export class PowerSubscriberSet {
     /**
      * @param {Object} [options]
@@ -21,6 +26,8 @@ export class PowerSubscriberSet {
     addOnce(fn: any): () => boolean;
     /** Delete a listener by original function or once-wrapper. */
     delete(fn: any): boolean;
+    /** Iterate live listeners in insertion order and invoke a callback. */
+    forEach(fn: any): void;
     /** Clear all listeners. */
     clear(): void;
     /** Return a safe array copy of live listeners. */

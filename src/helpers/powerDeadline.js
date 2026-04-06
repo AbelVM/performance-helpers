@@ -1,22 +1,23 @@
 import { PowerRetry } from './powerRetry.js';
 
 /**
+ * @typedef {Object} PowerDeadlineOptions
+ * @property {number} [maxAttempts] Maximum attempts (including the initial try).
+ * @property {number} [attemptTimeout] Timeout in milliseconds for each attempt.
+ * @property {number} [totalTimeout] Total deadline in milliseconds for the entire run.
+ * @property {number} [retryDelay] Delay in milliseconds before retrying.
+ * @property {(err:any)=>boolean} [retryIf] Predicate to determine whether to retry after an error.
+ * @property {AbortSignal} [signal] Optional abort signal to cancel the operation.
+ * @property {(attempt:number, err:any, delay:number)=>void} [onRetry] Callback invoked before a retry delay.
+ */
+
+/**
  * Deadline-aware async helper for timeout, retry budget, and abort metadata.
  *
  * Use `PowerDeadline` to wrap async work with per-attempt timeouts, a total
  * deadline for the whole operation, and optional retry/backoff behavior.
  */
 export class PowerDeadline {
-  /**
-   * @typedef {Object} PowerDeadlineOptions
-   * @property {number} [maxAttempts] Maximum attempts (including the initial try).
-   * @property {number} [attemptTimeout] Timeout in milliseconds for each attempt.
-   * @property {number} [totalTimeout] Total deadline in milliseconds for the entire run.
-   * @property {number} [retryDelay] Delay in milliseconds before retrying.
-   * @property {(err:any)=>boolean} [retryIf] Predicate to determine whether to retry after an error.
-   * @property {AbortSignal} [signal] Optional abort signal to cancel the operation.
-   * @property {(attempt:number, err:any, delay:number)=>void} [onRetry] Callback invoked before a retry delay.
-   */
   /**
    * Run a function with deadline semantics.
    * @param {Function} fn Async function to execute.

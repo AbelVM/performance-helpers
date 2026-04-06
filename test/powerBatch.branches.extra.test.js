@@ -35,14 +35,14 @@ describe('PowerBatch branches extra', () => {
     await expect(b.flush()).rejects.toThrow('boom');
   });
 
-  it('clear resolves pending and empties queue', async () => {
+  it('clear rejects pending add promises and empties queue', async () => {
     let called = false;
     const b = new PowerBatch(async () => {
       called = true;
     });
-    // fill then clear before run
-    b.add(1);
+    const promise = b.add(1);
     b.clear();
+    await expect(promise).rejects.toThrow('PowerBatch cleared before flush');
     await new Promise((r) => setTimeout(r, 10));
     expect(called).toBe(false);
     expect(b.size).toBe(0);

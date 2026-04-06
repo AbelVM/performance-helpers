@@ -28,7 +28,7 @@ Initial debug level (0..3)
 
 `"text"` \| `"json"`
 
-Output format. When 'json', logger emits JSON.stringify({ level, msg, ts }).
+Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format, name }).
 
 #### Returns
 
@@ -69,6 +69,8 @@ Output format. When 'json', logger emits JSON.stringify({ level, msg, ts }).
 ### name
 
 > **name**: `any`
+
+Optional logger name included in structured payloads.
 
 ## Methods
 

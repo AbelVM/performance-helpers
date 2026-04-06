@@ -62,21 +62,21 @@ Initial value
 
 ***
 
-### \_pendingTimer
-
-> **\_pendingTimer**: `number` \| `null`
-
-***
-
 ### \_scheduleMode
 
 > **\_scheduleMode**: `string`
 
 ***
 
+### \_scheduler
+
+> **\_scheduler**: [`PowerScheduler`](../../powerScheduler/classes/PowerScheduler.md)
+
+***
+
 ### \_subs
 
-> **\_subs**: `Set`\<`Function`\>
+> **\_subs**: [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md)
 
 ***
 
@@ -181,6 +181,8 @@ Flush any pending notification immediately. Useful for tests or shutdown.
 ### map()
 
 > **map**(`fn`): `void`
+
+Set or replace the mapping function used for notifications
 
 #### Parameters
 

@@ -9,7 +9,22 @@
     "workers",
     "cache",
     "buffer",
-    "logger"
+    "logger",
+    "pool",
+    "batch",
+    "eventbus",
+    "microtask",
+    "macrotask",
+    "scheduler",
+    "utilities",
+    "helpers",
+    "parallel",
+    "concurrency",
+    "throttle",
+    "debounce",
+    "memoize",
+    "lru",
+    "ttl"
   ],
   "homepage": "https://github.com/AbelVM/performance-helpers#readme",
   "bugs": {

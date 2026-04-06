@@ -7,7 +7,14 @@
  *   new PowerThrottle({ capacity: 100, refillRate: 10 }),
  *   new PowerSlidingWindow({ capacity: 1000, windowMs: 60000 }),
  * ]);
- * if (limit.tryConsume()) { /* perform work * / }
+ * if (limit.tryConsume()) {
+ *   // perform work
+ * }
+ *
+ * The composed limiter supports both `tryConsume(n)` and `reserve(n)`/
+ * `release(tokenOrN)` workflows when underlying limiters expose those
+ * methods. When `atomic: true` is configured, it will attempt to preserve
+ * all-or-nothing semantics across the set of limiters.
  */
 
 export class PowerRateLimit {
@@ -163,8 +170,10 @@ export class PowerRateLimit {
   /**
    * Reserve `n` tokens across all limiters and return a token to undo later.
    * Returns `null` when reservation fails.
+   * The returned token is a simple marker object such as `{ n: 1 }`, and it can
+   * be consumed by `release(token)` or `rollback(token)` to restore the limiters.
    * @param {number} [n=1]
-   * @returns {object|null}
+   * @returns {{n:number}|null}
    */
   reserve(n = 1) {
     const want = Math.max(0, Math.floor(+n) || 0);
@@ -175,6 +184,8 @@ export class PowerRateLimit {
 
   /**
    * Release a prior reservation token or numeric count back to the limiters.
+   * This accepts the same token object produced by `reserve()` or a numeric
+   * count to return tokens directly.
    * @param {object|number} tokenOrN
    */
   release(tokenOrN) {

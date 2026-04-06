@@ -14,7 +14,14 @@ const limit = new PowerRateLimit([
   new PowerThrottle({ capacity: 100, refillRate: 10 }),
   new PowerSlidingWindow({ capacity: 1000, windowMs: 60000 }),
 ]);
-if (limit.tryConsume()) { /* perform work * / }
+if (limit.tryConsume()) {
+  // perform work
+}
+
+The composed limiter supports both `tryConsume(n)` and `reserve(n)`/
+`release(tokenOrN)` workflows when underlying limiters expose those
+methods. When `atomic: true` is configured, it will attempt to preserve
+all-or-nothing semantics across the set of limiters.
 
 ## Constructors
 
@@ -81,11 +88,81 @@ When `true` attempt to provide
 
 ***
 
+### available()
+
+> **available**(): `number`
+
+Return the minimum available tokens across all limiters.
+If any limiter does not expose `available()`, this returns `0`.
+
+#### Returns
+
+`number`
+
+***
+
+### release()
+
+> **release**(`tokenOrN`): `void`
+
+Release a prior reservation token or numeric count back to the limiters.
+This accepts the same token object produced by `reserve()` or a numeric
+count to return tokens directly.
+
+#### Parameters
+
+##### tokenOrN
+
+`number` \| `object`
+
+#### Returns
+
+`void`
+
+***
+
+### reserve()
+
+> **reserve**(`n?`): \{ `n`: `number`; \} \| `null`
+
+Reserve `n` tokens across all limiters and return a token to undo later.
+Returns `null` when reservation fails.
+The returned token is a simple marker object such as `{ n: 1 }`, and it can
+be consumed by `release(token)` or `rollback(token)` to restore the limiters.
+
+#### Parameters
+
+##### n?
+
+`number` = `1`
+
+#### Returns
+
+\{ `n`: `number`; \} \| `null`
+
+***
+
 ### reset()
 
 > **reset**(): `void`
 
 Reset all underlying limiters where supported.
+
+#### Returns
+
+`void`
+
+***
+
+### rollback()
+
+> **rollback**(`nOrToken`): `void`
+
+#### Parameters
+
+##### nOrToken
+
+`any`
 
 #### Returns
 

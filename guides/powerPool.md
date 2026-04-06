@@ -34,9 +34,14 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 	- Note: `options.awaitResponse` requires the outgoing `message` to be a plain-object (not a TypedArray/ArrayBuffer). The implementation augments the object with a `correlationId` and will throw if a non-plain-object is supplied when `awaitResponse` is requested.
 	- `options.workerId` may be a `number` or `string` (the pool coerces ids to strings internally for correlation handling).
 
-- `drain()` — Returns a `Promise` that resolves once the pool is idle (internal queue empty and all workers have `tasks === 0`). Resolves with the same snapshot shape as `getStats()` to aid in shutdown reporting.
+### Await-response and targeted worker semantics
 
-- `resize(n)` / `resize({ minSize, maxSize })` — Dynamically alter sizing. Passing a number adjusts `maxSize`; passing an object sets `minSize`/`maxSize` atomically. Shrinking may terminate excess workers (but preserves `minSize`), while growing allows the pool to spawn workers on demand up to `maxSize`. A `resize` event is emitted when workers are added/terminated.
+When `options.awaitResponse` is requested, the pool tracks the outgoing request with a generated or provided `correlationId`. The returned Promise resolves only when a worker replies with a matching response payload. If the response never arrives, the Promise rejects when the optional `timeout` expires, and the internal pending entry is removed.
+
+When `options.workerId` is supplied, the pool routes the message to that worker only. Targeting a missing or currently saturated worker fails immediately rather than silently queuing the request. For `awaitResponse` callers this means the returned Promise rejects with an immediate failure instead of waiting in the queue.
+
+If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises and removes the associated pending state. This ensures there are no leaked Promise entries after worker teardown or pool shutdown.
+
 
 - `broadcast(message, transfer)` — Send `message` to every worker in the pool. Each worker receives either the provided transferable or an independently encoded `Uint8Array` when `transfer` is omitted and a plain object is provided. Broadcasting increments each worker's `tasks` counter.
 
@@ -58,6 +63,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 - `stopThePress(message, transfer, options)` — Clear the internal queue, terminate running workers (rejecting pending response Promises), and send the provided `message` through the same dispatch semantics as `postMessage`. By default the pool will recreate replacement workers; pass `options.recreateWorkers = false` to keep the pool reduced.
 
 - `pauseQueue()` / `resumeQueue()` — Temporarily pause and resume dispatching tasks from the internal queue. Use `pauseQueue()` when downstream consumers are overloaded or a transient outage occurs; queued tasks are retained and resumed later.
+- `pause()` / `resume()` — Ergonomic aliases for `pauseQueue()` and `resumeQueue()`, respectively.
 
 - `queuePaused` — Read-only boolean property indicating whether queued dispatch is currently paused.
 
@@ -166,6 +172,8 @@ async function shutdown() {
 `PowerPool` exposes two related lifecycle APIs:
 
 - `shutdown()` — performs a full stop: clears the internal reaper interval, terminates workers, clears internal queues, and rejects any pending `awaitResponse` Promises with a `PowerPoolShutdownError`. Use this when you need to ensure no background timers remain and that any callers awaiting responses are notified.
+
+- If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises immediately and removes the associated pending state. This avoids leaked promise bookkeeping during worker teardown or replacement.
 
 - `terminate()` — delegates to `shutdown()` for consistent behavior. It is safe to call synchronously when tearing down resources; it will also reject pending Promises and clear timers.
 

@@ -512,6 +512,12 @@ Function that produces the value or a direct value.
 
 ##### options?
 
+###### staleWhileRevalidate?
+
+`boolean` = `false`
+
+If true, return an expired value immediately and refresh the cache in the background.
+
 ###### ttl?
 
 `number` = `undefined`
@@ -547,6 +553,12 @@ Otherwise invokes `asyncFactory` and stores the resolved value in cache.
 Function returning a Promise or value.
 
 ##### options?
+
+###### staleWhileRevalidate?
+
+`boolean` = `false`
+
+If true, return an expired value immediately and refresh the cache in the background.
 
 ###### ttl?
 

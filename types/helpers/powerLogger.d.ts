@@ -23,17 +23,17 @@
  */
 /**
  * @typedef {Object} PowerLoggerOptions
- * @property {'text'|'json'} [format]
- * @property {string} [name]
- * @property {(payload:Object)=>string|Object|null} [formatter]
- * @property {(payload:Object|string)=>void} [output]
+ * @property {'text'|'json'} [format] - Output mode for console logging and structured payloads.
+ * @property {string} [name] - Optional logger name included in structured payloads.
+ * @property {(payload:Object)=>string|Object|null} [formatter] - Optional formatter for structured payloads. If it returns a string, the string is emitted directly.
+ * @property {(payload:Object|string)=>void} [output] - Optional output transport that receives structured payloads or formatted strings.
  */
 export class PowerLogger {
     /**
      * Create a PowerLogger instance.
      * @param {number} [level=0] Initial debug level (0..3)
      * @param {Object} [options]
-     * @param {'text'|'json'} [options.format='text'] Output format. When 'json', logger emits JSON.stringify({ level, msg, ts }).
+     * @param {'text'|'json'} [options.format='text'] Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format, name }).
      */
     constructor(level?: number, options?: {
         format?: "text" | "json" | undefined;
@@ -66,6 +66,13 @@ export class PowerLogger {
      * @returns {boolean}
      */
     isDebug(): boolean;
+    /**
+     * Normalize log arguments by lazily evaluating function values.
+     * @private
+     * @param {any[]} args
+     * @returns {any[]}
+     */
+    private _resolveLogArgs;
     /**
      * Internal helper to emit logs with unified JSON/text formatting.
      * @private
@@ -129,8 +136,20 @@ export class PowerLogger {
     resetDebugCounters(): void;
 }
 export type PowerLoggerOptions = {
+    /**
+     * - Output mode for console logging and structured payloads.
+     */
     format?: "text" | "json" | undefined;
+    /**
+     * - Optional logger name included in structured payloads.
+     */
     name?: string | undefined;
+    /**
+     * - Optional formatter for structured payloads. If it returns a string, the string is emitted directly.
+     */
     formatter?: ((payload: Object) => string | Object | null) | undefined;
+    /**
+     * - Optional output transport that receives structured payloads or formatted strings.
+     */
     output?: ((payload: Object | string) => void) | undefined;
 };

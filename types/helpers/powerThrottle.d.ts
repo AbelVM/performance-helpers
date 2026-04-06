@@ -42,18 +42,32 @@ export class PowerThrottle {
      */
     addTokens(n: number): void;
     /**
-     * Reserve `n` tokens without committing them permanently. Returns a token
-     * object that can be passed to `release()` to undo the reservation.
-     * Returns `null` when reservation fails.
+     * Reserve `n` tokens without committing them permanently. If successful,
+     * returns a token object such as `{ n: 1 }` that may later be passed to
+     * `release()` or `rollback()` to return the reserved tokens.
+     *
+     * Returns `null` when the reservation fails due to insufficient tokens.
      * @param {number} [n=1]
-     * @returns {object|null}
+     * @returns {{n:number}|null}
+     * @example
+     * const token = throttle.reserve(1);
+     * if (token) {
+     *   // use reserved slot
+     *   throttle.release(token);
+     * }
      */
-    reserve(n?: number): object | null;
+    reserve(n?: number): {
+        n: number;
+    } | null;
     /**
      * Release a prior reservation token or add tokens back.
-     * Accepts either a token returned from `reserve()` or a numeric value.
+     * Accepts either a token returned from `reserve()` or a numeric count.
      * @param {object|number} tokenOrN
      * @returns {void}
+     * @example
+     * const token = throttle.reserve(2);
+     * if (token) throttle.release(token);
+     * throttle.release(1); // add one token back directly
      */
     release(tokenOrN: object | number): void;
     rollback(nOrToken: any): void;

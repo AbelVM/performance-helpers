@@ -27,15 +27,16 @@ export class PowerPoolShutdownError extends Error {
  */
 /**
  * @typedef {Object} PowerPoolOptions
- * @property {number} [size]
- * @property {number} [minSize]
- * @property {number} [maxSize]
+ * @property {number} [size] - Initial number of workers to create when `lazy` is false.
+ * @property {number} [minSize] - Minimum number of workers to keep alive.
+ * @property {number} [maxSize] - Maximum number of workers allowed in the pool. Coerced to be at least `minSize`.
  * @property {Object} [workerOptions] - Options forwarded to the underlying `Worker` constructor when using a string path.
- * @property {number} [maxTasksPerWorker]
- * @property {number} [idleTimeout]
- * @property {boolean} [taskQueue]
- * @property {boolean} [lazy]
- * @property {number} [debugLevel]
+ * @property {number} [maxTasksPerWorker] - Soft capacity per worker used during task dispatch.
+ * @property {number} [idleTimeout] - Milliseconds after which idle workers beyond `minSize` are terminated.
+ * @property {boolean} [taskQueue] - Whether to queue tasks when all workers are busy.
+ * @property {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
+ * @property {boolean} [lazy] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
+ * @property {number} [debugLevel] - Debug verbosity level for internal logging.
  * @property {number} [listenerMaxListeners]
  * @property {boolean} [weakListeners]
  * @property {number} [queueHighThreshold] - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
@@ -54,11 +55,11 @@ export class PowerPool {
     /**
      * Create a PowerPool.
      *
-     * @param {Function|string} workerSource - A Worker constructor/factory (callable) or a relative path string to pass to `new Worker(new URL(path, import.meta.url))`.
+     * @param {Function|string} workerSource - A Worker constructor, a worker factory, or a relative path string. If the provided function is not constructable, it is invoked directly; if a string path is provided, the pool attempts to resolve it via `new URL(path, import.meta.url)` before falling back to a plain `Worker(path)`.
      * @param {PowerPoolOptions=} options
      * @param {number} [options.size] - Initial number of workers to create.
      * @param {number} [options.minSize=1] - Minimum number of workers to keep alive.
-     * @param {number} [options.maxSize] - Maximum number of workers allowed in the pool.
+     * @param {number} [options.maxSize] - Maximum number of workers allowed in the pool. The pool coerces this value to be at least `minSize`.
      * @param {Object} [options.workerOptions] - Options forwarded to the Worker constructor when using a string path.
      * @param {number} [options.maxTasksPerWorker=Infinity] - Soft capacity per worker before considering it busy.
      * @param {number} [options.idleTimeout=60000] - Milliseconds after which idle workers (beyond `minSize`) will be terminated.
@@ -74,7 +75,7 @@ export class PowerPool {
     maxSize: number;
     idleTimeout: number;
     taskQueueEnabled: boolean;
-    _queuePolicy: any;
+    _queuePolicy: "enqueue" | "drop-oldest" | "drop-newest" | "reject";
     _createdAt: number;
     _totalWorkersCreated: number;
     _totalTasksCompleted: number;
@@ -133,6 +134,11 @@ export class PowerPool {
     private _debugLog;
     /** Ensure the reaper interval exists; recreate it if missing. @private */
     private _ensureReaper;
+    /**
+     * Clear lifecycle timer intervals used by the pool.
+     * @private
+     */
+    private _clearLifecycleIntervals;
     /**
      * Shutdown the pool: clear timers, reject pending responses, terminate workers,
      * and clear internal queues. This is a full stop that prevents background
@@ -413,8 +419,8 @@ export class PowerPool {
      */
     terminate(): void;
     /**
-     * Return stats for debugging.
-     * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object}}
+     * Return stats for debugging and telemetry.
+     * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
      */
     getStats(): {
         status: {
@@ -423,6 +429,12 @@ export class PowerPool {
             lastActive: number;
         }[];
         performance: Object;
+        queueLength: number;
+        activeTasks: number;
+        workerCount: number;
+        minSize: number;
+        maxSize: number;
+        isIdle: boolean;
     };
     /**
      * Return a Promise that resolves when the pool becomes idle (queue empty and all workers have tasks === 0).
@@ -480,6 +492,14 @@ export class PowerPool {
      * waiting tasks to available workers.
      */
     resumeQueue(): void;
+    /**
+     * Alias for `pauseQueue()` to provide a simpler public API.
+     */
+    pause(): void;
+    /**
+     * Alias for `resumeQueue()` to provide a simpler public API.
+     */
+    resume(): void;
     /**
      * Whether queued dispatch is currently paused.
      * @returns {boolean}
@@ -550,17 +570,45 @@ export type PendingResponseEntry = {
     timer?: number | NodeJS.Timeout | null;
 };
 export type PowerPoolOptions = {
+    /**
+     * - Initial number of workers to create when `lazy` is false.
+     */
     size?: number | undefined;
+    /**
+     * - Minimum number of workers to keep alive.
+     */
     minSize?: number | undefined;
+    /**
+     * - Maximum number of workers allowed in the pool. Coerced to be at least `minSize`.
+     */
     maxSize?: number | undefined;
     /**
      * - Options forwarded to the underlying `Worker` constructor when using a string path.
      */
     workerOptions?: Object | undefined;
+    /**
+     * - Soft capacity per worker used during task dispatch.
+     */
     maxTasksPerWorker?: number | undefined;
+    /**
+     * - Milliseconds after which idle workers beyond `minSize` are terminated.
+     */
     idleTimeout?: number | undefined;
+    /**
+     * - Whether to queue tasks when all workers are busy.
+     */
     taskQueue?: boolean | undefined;
+    /**
+     * - Queue overflow behavior when the pool is saturated.
+     */
+    queuePolicy?: "enqueue" | "drop-oldest" | "drop-newest" | "reject" | undefined;
+    /**
+     * - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
+     */
     lazy?: boolean | undefined;
+    /**
+     * - Debug verbosity level for internal logging.
+     */
     debugLevel?: number | undefined;
     listenerMaxListeners?: number | undefined;
     weakListeners?: boolean | undefined;

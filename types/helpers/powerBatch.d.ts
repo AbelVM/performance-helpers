@@ -7,13 +7,15 @@ export class PowerBatch {
      * @param {Function} handler - Function called with an array of collected items.
      * @param {Object} [options]
      * @param {number} [options.maxSize=Infinity] - When reached, flush immediately.
+     * @param {'microtask'|'macrotask'} [options.scheduling='microtask'] - How the batch is scheduled.
      */
     constructor(handler: Function, options?: {
         maxSize?: number | undefined;
+        scheduling?: "microtask" | "macrotask" | undefined;
     });
     _handler: Function;
     _maxSize: number;
-    _queue: any[];
+    _queue: PowerQueue;
     _pending: {
         promise: Promise<any>;
         resolve: undefined;
@@ -24,10 +26,6 @@ export class PowerBatch {
         reject: undefined;
     } | null;
     _scheduler: PowerScheduler;
-    /**
-     * Internal scheduler abstraction to allow microtask or macrotask scheduling.
-     * @private
-     */
     /**
      * Add an item to the current batch. Returns a Promise that resolves
      * when the batch containing this item has been processed. For non-flushed
@@ -40,6 +38,8 @@ export class PowerBatch {
     /**
      * Force flush the current queue immediately and return a promise
      * that resolves or rejects with the handler outcome.
+     * If the queue is empty and nothing is scheduled, the returned promise
+     * resolves immediately.
      * @returns {Promise<void>}
      */
     flush(): Promise<void>;
@@ -55,9 +55,11 @@ export class PowerBatch {
     get size(): number;
     /**
      * Clear queued items without invoking handler.
+     * Any pending promise for the current batch is rejected.
      * @returns {void}
      */
     clear(): void;
 }
 export default PowerBatch;
+import { PowerQueue } from './powerQueue.js';
 import { PowerScheduler } from './powerScheduler.js';

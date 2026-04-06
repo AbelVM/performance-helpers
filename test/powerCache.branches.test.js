@@ -8,14 +8,24 @@ describe('PowerCache branch coverage', () => {
     // wait for expiry
     await new Promise((r) => setTimeout(r, 5));
     expect(c.peek('a')).toBeUndefined();
-    // expired entry remains present until cleaned; ignoreExpiry should observe it
-    expect(c.has('a', { ignoreExpiry: true })).toBe(true);
+    // peek() now clears observed expired entries, so the expired item is no longer present.
+    expect(c.has('a', { ignoreExpiry: true })).toBe(false);
     expect(c.has('a')).toBe(false);
-    expect(c.delete('a')).toBe(true);
+    expect(c.delete('a')).toBe(false);
     c.set('x', 1);
     c.set('y', 2);
     c.clear();
     expect(c.size).toBe(0);
+  });
+
+  it('clears pooled nodes to avoid retained references', () => {
+    const c = new PowerCache({ maxEntries: 2, maxPoolSize: 2 });
+    c.set('x', { value: 1 });
+    c.set('y', { value: 2 });
+    c.clear();
+    expect(c.size).toBe(0);
+    expect(c.pool.length).toBeGreaterThanOrEqual(1);
+    expect(c.pool.every((node) => node.key === null && node.value === null)).toBe(true);
   });
 
   it('startCleanup accepts number and options object', () => {
