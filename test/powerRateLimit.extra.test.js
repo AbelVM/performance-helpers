@@ -24,6 +24,11 @@ describe('PowerRateLimit extra branches', () => {
     expect(r.available()).toBe(2);
   });
 
+  it('available() returns Infinity when no limiters are configured', () => {
+    const r = new PowerRateLimit([]);
+    expect(r.available()).toBe(Infinity);
+  });
+
   it('available() returns 0 when any child limiter lacks available()', () => {
     const a = { available: () => 5, tryConsume: vi.fn(() => true) };
     const b = { tryConsume: vi.fn(() => true) };
@@ -60,6 +65,55 @@ describe('PowerRateLimit extra branches', () => {
     const r = new PowerRateLimit([a, b], { atomic: true });
     expect(r.reserve(1)).toBeNull();
     expect(a.release).toHaveBeenCalled();
+  });
+
+  it('reserve returns a zero token for non-positive requests and release ignores zero-ish input', () => {
+    const l = { release: vi.fn(), rollback: vi.fn(), addTokens: vi.fn() };
+    const r = new PowerRateLimit([l], { atomic: true });
+
+    expect(r.reserve(0)).toEqual({ n: 0 });
+    r.release(null);
+    r.release({ n: 0 });
+    r.release(0);
+
+    expect(l.release).not.toHaveBeenCalled();
+    expect(l.rollback).not.toHaveBeenCalled();
+    expect(l.addTokens).not.toHaveBeenCalled();
+  });
+
+  it('release falls back to addTokens when release and rollback are unavailable or throw', () => {
+    const limiter = {
+      release: vi.fn(() => {
+        throw new Error('release failed');
+      }),
+      rollback: vi.fn(() => {
+        throw new Error('rollback failed');
+      }),
+      addTokens: vi.fn(),
+    };
+    const r = new PowerRateLimit([limiter]);
+
+    r.release(2);
+
+    expect(limiter.release).toHaveBeenCalled();
+    expect(limiter.rollback).toHaveBeenCalledWith(2);
+    expect(limiter.addTokens).toHaveBeenCalledWith(2);
+  });
+
+  it('reset swallows limiter reset errors and rollback remains a public alias', () => {
+    const limiter = {
+      reset: vi.fn(() => {
+        throw new Error('reset failed');
+      }),
+      rollback: vi.fn(),
+    };
+    const r = new PowerRateLimit([limiter]);
+
+    expect(() => r.reset()).not.toThrow();
+    r.rollback({ n: 3 });
+
+    expect(limiter.reset).toHaveBeenCalled();
+    expect(limiter.rollback).toHaveBeenCalledWith(3);
   });
 
   it('atomic consume returns false when a limiter lacks undo capability', () => {

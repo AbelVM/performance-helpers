@@ -58,4 +58,16 @@ describe('PowerHistogram', () => {
     hist.record(1);
     expect(() => hist.percentile(-5)).toThrow(TypeError);
   });
+
+  it('keeps percentile estimates meaningful when minValue is zero', () => {
+    const hist = new PowerHistogram({ minValue: 0, maxValue: 100, bucketCount: 16 });
+    hist.record(1);
+    hist.record(5);
+    hist.record(20);
+    const nonEmptyBuckets = hist.snapshot().filter((count) => count > 0);
+
+    expect(nonEmptyBuckets.length).toBeGreaterThan(1);
+    expect(hist.percentile(50)).toBeGreaterThan(0);
+    expect(hist.percentile(50)).toBeLessThan(100);
+  });
 });

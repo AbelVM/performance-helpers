@@ -75,7 +75,12 @@ class WorkerWrapper {
       }
     }
     if (!tr && (msg instanceof Uint8Array || ArrayBuffer.isView(msg))) {
-      tr = [msg.buffer];
+      const buffer = msg.buffer;
+      if (buffer && buffer.byteLength > 0) {
+        tr = [buffer];
+      } else {
+        tr = undefined;
+      }
     }
 
     try {
@@ -644,7 +649,16 @@ export class PowerPool {
       }
     }
     if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer) {
-      return { message: msg, transfer: [msg.buffer || msg] };
+      const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
+      if (transferTarget && transferTarget.byteLength === 0) {
+        try {
+          const copy = msg instanceof ArrayBuffer ? msg.slice(0) : new Uint8Array(msg);
+          return { message: copy, transfer: [copy.buffer] };
+        } catch (err) {
+          return { message: msg, transfer: undefined };
+        }
+      }
+      return { message: msg, transfer: [transferTarget] };
     }
     return { message: msg, transfer: tr };
   }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PowerLatch } from '../src/helpers/powerLatch.js';
 
 describe('PowerLatch branches extra', () => {
@@ -47,6 +47,47 @@ describe('PowerLatch branches extra', () => {
     // reset to zero should resolve new waiters
     l.reset(0);
     await expect(l.wait()).resolves.toBeUndefined();
+  });
+
+  it('wait rejects immediately after abort with default abort error and reset restores normal waiting', async () => {
+    const l = new PowerLatch(2);
+    l.abort();
+
+    await expect(l.wait()).rejects.toMatchObject({ code: 'EABORT' });
+
+    l.reset(1);
+    const waiter = l.wait();
+    l.countDown();
+    await expect(waiter).resolves.toBeUndefined();
+  });
+
+  it('removes abort listeners when a waiter resolves normally', async () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    const signal = {
+      aborted: false,
+      reason: undefined,
+      addEventListener,
+      removeEventListener,
+    };
+
+    const l = new PowerLatch(1);
+    const waiter = l.wait({ signal, timeout: 50 });
+    l.countDown();
+    await waiter;
+
+    expect(addEventListener).toHaveBeenCalledWith('abort', expect.any(Function), { once: true });
+    expect(removeEventListener).toHaveBeenCalledWith('abort', expect.any(Function));
+  });
+
+  it('swallows errors from onAbort callbacks', () => {
+    const l = new PowerLatch(1, {
+      onAbort() {
+        throw new Error('abort hook failed');
+      },
+    });
+
+    expect(() => l.abort(new Error('stop'))).not.toThrow();
   });
 });
 

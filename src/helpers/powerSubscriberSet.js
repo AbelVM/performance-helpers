@@ -98,6 +98,13 @@ export class PowerSubscriberSet {
     }
 
     for (const entry of this._listeners) {
+      if (entry === target) {
+        this._listeners.delete(entry);
+        if (this._finalization && typeof entry.deref === 'function') {
+          this._finalization.unregister(entry);
+        }
+        return true;
+      }
       const listener = this._deref(entry);
       if (!listener) {
         this._listeners.delete(entry);

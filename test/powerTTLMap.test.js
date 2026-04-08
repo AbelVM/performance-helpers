@@ -61,4 +61,65 @@ describe('PowerTTLMap', () => {
     void m.size;
     expect(called).toEqual([['o', 'val']]);
   });
+
+  it('touch returns false for missing and expired keys', async () => {
+    const m = new PowerTTLMap(5);
+
+    expect(m.touch('missing')).toBe(false);
+
+    m.set('gone', 1, 5);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    expect(m.touch('gone')).toBe(false);
+    expect(m.has('gone')).toBe(false);
+  });
+
+  it('iterators and forEach skip expired entries and preserve live values', async () => {
+    const m = new PowerTTLMap();
+    m.set('a', 1, 5);
+    m.set('b', 2, 50);
+    m.set('c', 3);
+
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    expect(Array.from(m.entries())).toEqual([
+      ['b', 2],
+      ['c', 3],
+    ]);
+    expect(Array.from(m.keys())).toEqual(['b', 'c']);
+    expect(Array.from(m.values())).toEqual([2, 3]);
+    expect(Array.from(m)).toEqual([
+      ['b', 2],
+      ['c', 3],
+    ]);
+
+    const seen = [];
+    const ctx = { tag: 'ctx' };
+    m.forEach(function (value, key, self) {
+      seen.push([this.tag, key, value, self === m]);
+    }, ctx);
+    expect(seen).toEqual([
+      ['ctx', 'b', 2, true],
+      ['ctx', 'c', 3, true],
+    ]);
+  });
+
+  it('supports non-expiring values and swallows onExpire callback errors', async () => {
+    const m = new PowerTTLMap(0, {
+      onExpire() {
+        throw new Error('expire hook failed');
+      },
+    });
+
+    m.set('persist', 1);
+    expect(m.size).toBe(1);
+    expect(m.get('persist')).toBe(1);
+
+    m.set('temp', 2, 5);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    expect(() => m.get('temp')).not.toThrow();
+    expect(m.get('temp')).toBeUndefined();
+    expect(m.delete('missing')).toBe(false);
+  });
 });

@@ -7,6 +7,7 @@ export { PowerThrottle } from './helpers/powerThrottle.js';
 export { PowerSlidingWindow } from './helpers/powerSlidingWindow.js';
 export { PowerRateLimit } from './helpers/powerRateLimit.js';
 export { PowerQueue } from './helpers/powerQueue.js';
+export { PowerChunker } from './helpers/powerChunking.js';
 export { PowerPermitGate } from './helpers/powerPermitGate.js';
 export { PowerScheduler } from './helpers/powerScheduler.js';
 export { PowerSubscriberSet } from './helpers/powerSubscriberSet.js';

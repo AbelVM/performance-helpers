@@ -28,6 +28,8 @@ export class PowerBulkhead {
     this._queueCapacity = Math.max(0, Math.floor(Number(queueCapacity) || 100));
     this._partitioner = typeof partitioner === 'function' ? partitioner : null;
     this._nextPartition = 0;
+    this._pendingCount = 0;
+    this._activeCount = 0;
     this._buckets = Array.from({ length: this._partitions }, () => ({
       gate: new PowerPermitGate({ capacity: this._maxConcurrency, queueCapacity: Infinity }),
     }));
@@ -46,12 +48,12 @@ export class PowerBulkhead {
 
   /** Total number of currently queued tasks. */
   get pending() {
-    return this._buckets.reduce((sum, bucket) => sum + bucket.gate.pending, 0);
+    return this._pendingCount;
   }
 
   /** Total number of running tasks across all partitions. */
   get active() {
-    return this._buckets.reduce((sum, bucket) => sum + bucket.gate.active, 0);
+    return this._activeCount;
   }
 
   /** Maximum number of tasks that may wait in the queue. */
@@ -78,30 +80,36 @@ export class PowerBulkhead {
 
     const partition = this._choosePartition(options.partitionKey);
     const bucket = this._buckets[partition];
-    if (this.pending >= this._queueCapacity && bucket.gate.available === 0) {
+    const willQueue = bucket.gate.available === 0;
+    if (this.pending >= this._queueCapacity && willQueue) {
       return Promise.reject(new Error('PowerBulkhead queue is full'));
     }
 
+    if (willQueue) this._pendingCount += 1;
+    else this._activeCount += 1;
+
     const permit = bucket.gate.acquire();
     const result = permit.then((release) => {
+      if (willQueue) {
+        this._pendingCount = Math.max(0, this._pendingCount - 1);
+        this._activeCount += 1;
+      }
+
       return Promise.resolve()
         .then(() => task())
-        .finally(() => release());
+        .finally(() => {
+          release();
+          this._activeCount = Math.max(0, this._activeCount - 1);
+          this._resolveDrainWaitersIfIdle();
+        });
+    }, (err) => {
+      if (willQueue) this._pendingCount = Math.max(0, this._pendingCount - 1);
+      this._resolveDrainWaitersIfIdle();
+      throw err;
     });
 
     return result.finally(() => {
-      if (this.active === 0 && this.pending === 0) {
-        while (this._drainWaiters.length > 0) {
-          const resolve = this._drainWaiters.shift();
-          if (typeof resolve === 'function') {
-            try {
-              resolve();
-            } catch (e) {
-              /* ignore */
-            }
-          }
-        }
-      }
+      this._resolveDrainWaitersIfIdle();
     });
   }
 
@@ -120,8 +128,13 @@ export class PowerBulkhead {
     const bucket = this._buckets[partition];
     const release = bucket.gate.tryAcquire();
     if (!release) return null;
+    this._activeCount += 1;
     const result = Promise.resolve().then(() => task());
-    return result.finally(() => release());
+    return result.finally(() => {
+      release();
+      this._activeCount = Math.max(0, this._activeCount - 1);
+      this._resolveDrainWaitersIfIdle();
+    });
   }
 
   /**
@@ -156,6 +169,21 @@ export class PowerBulkhead {
       hash = (hash << 5) + hash + value.charCodeAt(i);
     }
     return hash >>> 0;
+  }
+
+  _resolveDrainWaitersIfIdle() {
+    if (this._activeCount !== 0 || this._pendingCount !== 0) return;
+
+    while (this._drainWaiters.length > 0) {
+      const resolve = this._drainWaiters.shift();
+      if (typeof resolve === 'function') {
+        try {
+          resolve();
+        } catch (e) {
+          /* ignore */
+        }
+      }
+    }
   }
 }
 

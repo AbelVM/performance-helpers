@@ -13,7 +13,7 @@ export class PowerHistogram {
    */
   constructor(options = {}) {
     const { minValue = 1, maxValue = 10000, bucketCount = 128 } = options || {};
-    this._minValue = Math.max(0, Number(minValue) || 1);
+    this._minValue = Number.isFinite(Number(minValue)) ? Math.max(0, Number(minValue)) : 1;
     this._maxValue = Math.max(this._minValue + 1, Number(maxValue) || 10000);
     this._bucketCount = Math.max(4, Math.floor(Number(bucketCount) || 128));
     this._buckets = new Uint32Array(this._bucketCount);
@@ -119,26 +119,37 @@ export class PowerHistogram {
   }
 
   _buildBoundaries() {
+    const boundaryMin =
+      this._minValue > 0
+        ? this._minValue
+        : Math.max(Number.EPSILON, this._maxValue / Math.exp(this._bucketCount - 2));
     this._boundaries = new Float64Array(this._bucketCount - 1);
-    const span = Math.log(this._maxValue / Math.max(this._minValue, Number.EPSILON));
+    const span = Math.log(this._maxValue / boundaryMin);
     const step = span / (this._bucketCount - 2);
-    this._boundaries[0] = this._minValue;
+    this._boundaries[0] = boundaryMin;
     for (let i = 1; i < this._bucketCount - 1; i += 1) {
-      this._boundaries[i] = this._minValue * Math.exp(step * i);
+      this._boundaries[i] = boundaryMin * Math.exp(step * i);
     }
   }
 
   _bucketIndex(value) {
     if (value < this._boundaries[0]) return 0;
-    const lastIndex = this._bucketCount - 2;
-    for (let i = 1; i < this._bucketCount - 1; i += 1) {
-      if (value < this._boundaries[i]) return i;
+
+    let low = 1;
+    let high = this._boundaries.length - 1;
+
+    while (low <= high) {
+      const mid = low + ((high - low) >> 1);
+      if (value < this._boundaries[mid]) high = mid - 1;
+      else low = mid + 1;
     }
+
+    if (low < this._boundaries.length) return low;
     return this._bucketCount - 1;
   }
 
   _estimateBucketValue(index) {
-    if (index === 0) return this._boundaries[0] / 2;
+    if (index === 0) return this._minValue === 0 ? 0 : this._boundaries[0] / 2;
     const lower = this._boundaries[index - 1];
     if (index >= this._bucketCount - 1) {
       return lower * 2;

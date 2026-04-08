@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PowerScheduler } from '../src/helpers/powerScheduler.js';
 
 describe('PowerScheduler', () => {
+  it('throws when constructed without a flush function', () => {
+    expect(() => new PowerScheduler(null)).toThrow(TypeError);
+  });
+
   it('schedules a microtask flush and invokes the callback once', async () => {
     let called = 0;
     const scheduler = new PowerScheduler(() => {
@@ -59,5 +63,30 @@ describe('PowerScheduler', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(called).toBe(1);
     expect(scheduler.scheduled).toBe(false);
+  });
+
+  it('flush and cancel are no-ops when nothing is scheduled', () => {
+    const scheduler = new PowerScheduler(() => {});
+
+    expect(() => scheduler.flush()).not.toThrow();
+    expect(() => scheduler.cancel()).not.toThrow();
+    expect(scheduler.scheduled).toBe(false);
+  });
+
+  it('swallows callback errors and reports them to console.error', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const scheduler = new PowerScheduler(() => {
+        throw new Error('flush failed');
+      });
+
+      scheduler.schedule();
+      await Promise.resolve();
+
+      expect(errorSpy).toHaveBeenCalled();
+      expect(scheduler.scheduled).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

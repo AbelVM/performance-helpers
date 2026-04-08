@@ -66,3 +66,24 @@ bus.once('idle', async () => {
 
 - Errors thrown by listeners are swallowed to avoid breaking the emitter.
 - `listeners(evt)` returns a shallow copy of the listener list and may be used for debugging or metrics.
+
+## Real-world: async listeners with bounded concurrency
+
+```javascript
+import { PowerEventBus } from '../src/helpers/powerEventBus.js';
+
+const bus = new PowerEventBus();
+
+// register several async listeners that perform IO
+bus.on('user:signup', async (user) => {
+	await sendWelcomeEmail(user.email);
+});
+bus.on('user:signup', async (user) => {
+	await indexUserInSearch(user);
+});
+
+// When emitting, await listeners but limit concurrency to avoid resource spikes
+await bus.emitAsync('user:signup', { id: 'u1', email: 'a@b.com' }, { concurrency: 2 });
+```
+
+Use `emitAsync` when you need to await listeners (for ordering, crash-safety, or to limit concurrency). The regular `emit` remains cheaper when you only need fire-and-forget behavior.

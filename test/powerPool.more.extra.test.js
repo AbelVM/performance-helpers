@@ -54,4 +54,46 @@ describe('PowerPool additional shallow branches', () => {
     pool.resize({ minSize: 1, maxSize: 1 });
     expect(pool._logger.error).toHaveBeenCalled();
   });
+
+  it('logs queued dispatch failures when resumed work cannot be posted', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+    });
+
+    try {
+      pool._logger.error = vi.fn();
+      pool.pause();
+
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      expect(pool.postMessage({ n: 2 })).toBe(true);
+      expect(pool.queue.length).toBe(1);
+
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      pool.workers[0].worker.postMessage = vi.fn(() => {
+        throw new Error('queued dispatch failed');
+      });
+
+      expect(() => pool.resume()).not.toThrow();
+      expect(pool._logger.error).toHaveBeenCalled();
+    } finally {
+      pool.terminate();
+    }
+  });
 });

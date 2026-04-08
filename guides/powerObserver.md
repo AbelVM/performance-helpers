@@ -8,7 +8,7 @@ Lightweight reactive value container. Useful for exposing small pieces of state 
 |---|---:|---:|---|
 | `map` | `function` | `undefined` | Optional mapping function applied to values before notifying subscribers. Receives the raw value and returns the mapped value passed to subscribers. |
 | `distinct` | `boolean` | `false` | When `true`, notifications are suppressed when the mapped value is equal to the previous mapped value (uses `Object.is`). |
-| `async` | `boolean \| microtask \| macrotask'` | `'microtask'` | Scheduling strategy for notifications: `'microtask'` (default), `'macrotask'` (uses `setTimeout(...,0)`), or `false`/`sync` for immediate delivery. |
+| `async` | `boolean|'microtask'|'macrotask'` | `'microtask'` | Scheduling strategy for notifications: `'microtask'` (default), `'macrotask'` (uses `setTimeout(...,0)`), or `false`/`sync` for immediate delivery. |
 
 ## API
 
@@ -30,7 +30,6 @@ Lightweight reactive value container. Useful for exposing small pieces of state 
 import { PowerObserver } from '../src/helpers/powerObserver.js';
 
 // Example — live concurrent-requests gauge for a metrics exporter
-import { PowerObserver } from '../src/helpers/powerObserver.js';
 
 // Expose a small reactive gauge that tracks concurrent HTTP requests
 const concurrentRequests = new PowerObserver(0, { async: 'microtask', distinct: true });

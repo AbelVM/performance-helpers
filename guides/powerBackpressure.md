@@ -81,6 +81,28 @@ async function enqueueTask(task) {
 }
 ```
 
+### Try-acquire fallback
+
+When low-latency callers prefer to avoid awaiting a permit, use `tryAcquire()`
+to attempt immediate admission and provide a fallback path (drop, persist, or retry).
+
+```javascript
+function tryPublish(task) {
+  const release = backpressure.tryAcquire();
+  if (!release) {
+    // fallback: persist for later retry, drop, or send to an alternate queue
+    persistTask(task);
+    return false;
+  }
+
+  // fire-and-forget path; ensure release is called when done
+  pool.postMessage(task);
+  // release immediately because we only used the permit to control enqueueing
+  release();
+  return true;
+}
+```
+
 ## Notes
 
 - `PowerBackpressure` is producer-facing; it does not execute tasks itself.

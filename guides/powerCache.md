@@ -112,17 +112,40 @@ import { PowerCache } from '../src/helpers/powerCache.js';
 // Cache user profiles for 30s to avoid repeated HTTP calls
 const cache = new PowerCache({ maxEntries: 5000, defaultTTL: 30_000 });
 
-async function fetchUserProfile(id) {
-	return cache.getOrSetAsync(id, async () => {
-		const res = await fetch(`https://api.example.com/users/${id}`);
-		if (!res.ok) throw new Error('fetch failed');
-		return res.json();
-	}, { ttl: 30_000 });
+// Network-only fetch helper (separate from cache logic for clarity)
+async function fetchUserProfileFromNetwork(id) {
+  const res = await fetch(`https://api.example.com/users/${id}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
-// Usage
-const profile = await fetchUserProfile('alice');
-console.log(profile.name, profile.email);
+// High-level cached accessor using getOrSetAsync (inflight dedupe + caching)
+async function fetchUserProfile(id) {
+  const key = `user:${id}`;
+  return cache.getOrSetAsync(
+    key,
+    () => fetchUserProfileFromNetwork(id),
+    { ttl: 30_000 }
+  );
+}
+
+// Concurrent callers for the same key share the inflight request (deduped)
+const [p1, p2] = await Promise.all([fetchUserProfile('alice'), fetchUserProfile('alice')]);
+
+// Stale-while-revalidate: return expired value immediately and refresh in background
+const profile = await cache.getOrSetAsync('user:alice', () => fetchUserProfileFromNetwork('alice'), {
+  staleWhileRevalidate: true,
+  ttl: 30_000,
+});
+console.log('profile', profile);
+
+// The cache will not store rejected promises; handle network errors explicitly
+try {
+  const bob = await fetchUserProfile('bob');
+  console.log('bob', bob.name);
+} catch (err) {
+  console.error('Failed to load profile', err);
+}
 ```
 
 ## PowerMemoizer

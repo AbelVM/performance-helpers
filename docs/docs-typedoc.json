@@ -982,7 +982,7 @@
 					]
 				},
 				{
-					"id": 1657,
+					"id": 1658,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -1000,7 +1000,7 @@
 				{
 					"title": "References",
 					"children": [
-						1657
+						1658
 					]
 				}
 			]
@@ -1570,7 +1570,7 @@
 					]
 				},
 				{
-					"id": 1658,
+					"id": 1659,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -1588,7 +1588,7 @@
 				{
 					"title": "References",
 					"children": [
-						1658
+						1659
 					]
 				}
 			]
@@ -2959,7 +2959,7 @@
 					]
 				},
 				{
-					"id": 1659,
+					"id": 1660,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -2977,7 +2977,7 @@
 				{
 					"title": "References",
 					"children": [
-						1659
+						1660
 					]
 				}
 			]
@@ -10113,7 +10113,7 @@
 					]
 				},
 				{
-					"id": 1660,
+					"id": 1661,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -10137,7 +10137,7 @@
 				{
 					"title": "References",
 					"children": [
-						1660
+						1661
 					]
 				}
 			]
@@ -10731,7 +10731,7 @@
 					]
 				},
 				{
-					"id": 1661,
+					"id": 1662,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -10755,7 +10755,7 @@
 				{
 					"title": "References",
 					"children": [
-						1661
+						1662
 					]
 				}
 			]
@@ -11111,7 +11111,7 @@
 					]
 				},
 				{
-					"id": 1662,
+					"id": 1663,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -11129,7 +11129,7 @@
 				{
 					"title": "References",
 					"children": [
-						1662
+						1663
 					]
 				}
 			]
@@ -12180,7 +12180,7 @@
 					]
 				},
 				{
-					"id": 1663,
+					"id": 1664,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -12204,7 +12204,7 @@
 				{
 					"title": "References",
 					"children": [
-						1663
+						1664
 					]
 				}
 			]
@@ -13065,7 +13065,7 @@
 					]
 				},
 				{
-					"id": 1664,
+					"id": 1665,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -13083,7 +13083,7 @@
 				{
 					"title": "References",
 					"children": [
-						1664
+						1665
 					]
 				}
 			]
@@ -13890,7 +13890,7 @@
 					]
 				},
 				{
-					"id": 1665,
+					"id": 1666,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -13908,7 +13908,7 @@
 				{
 					"title": "References",
 					"children": [
-						1665
+						1666
 					]
 				}
 			]
@@ -15710,7 +15710,7 @@
 					]
 				},
 				{
-					"id": 1666,
+					"id": 1667,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -15734,7 +15734,7 @@
 				{
 					"title": "References",
 					"children": [
-						1666
+						1667
 					]
 				}
 			]
@@ -22798,7 +22798,7 @@
 					]
 				},
 				{
-					"id": 1667,
+					"id": 1668,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -22816,7 +22816,7 @@
 				{
 					"title": "References",
 					"children": [
-						1667
+						1668
 					]
 				}
 			]
@@ -23329,7 +23329,7 @@
 					]
 				},
 				{
-					"id": 1668,
+					"id": 1669,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -23353,7 +23353,7 @@
 				{
 					"title": "References",
 					"children": [
-						1668
+						1669
 					]
 				}
 			]
@@ -24244,7 +24244,7 @@
 					]
 				},
 				{
-					"id": 1669,
+					"id": 1670,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -24262,7 +24262,7 @@
 				{
 					"title": "References",
 					"children": [
-						1669
+						1670
 					]
 				}
 			]
@@ -26874,7 +26874,7 @@
 					]
 				},
 				{
-					"id": 1670,
+					"id": 1671,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26892,7 +26892,7 @@
 				{
 					"title": "References",
 					"children": [
-						1670
+						1671
 					]
 				}
 			]
@@ -26913,7 +26913,7 @@
 					"target": 98
 				},
 				{
-					"id": 1646,
+					"id": 1647,
 					"name": "measureAsync",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26921,7 +26921,7 @@
 					"target": 1615
 				},
 				{
-					"id": 1645,
+					"id": 1646,
 					"name": "measureSync",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26929,7 +26929,7 @@
 					"target": 1607
 				},
 				{
-					"id": 1644,
+					"id": 1645,
 					"name": "nowMs",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26953,7 +26953,7 @@
 					"target": 89
 				},
 				{
-					"id": 1651,
+					"id": 1652,
 					"name": "PowerBackpressure",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26961,7 +26961,7 @@
 					"target": 3
 				},
 				{
-					"id": 1653,
+					"id": 1654,
 					"name": "PowerBatch",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26969,7 +26969,7 @@
 					"target": 56
 				},
 				{
-					"id": 1652,
+					"id": 1653,
 					"name": "PowerBulkhead",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26985,7 +26985,15 @@
 					"target": 171
 				},
 				{
-					"id": 1647,
+					"id": 1638,
+					"name": "PowerChunker",
+					"variant": "reference",
+					"kind": 4194304,
+					"flags": {},
+					"target": 551
+				},
+				{
+					"id": 1648,
 					"name": "PowerCircuit",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26993,7 +27001,7 @@
 					"target": 564
 				},
 				{
-					"id": 1649,
+					"id": 1650,
 					"name": "PowerDeadline",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27001,7 +27009,7 @@
 					"target": 601
 				},
 				{
-					"id": 1642,
+					"id": 1643,
 					"name": "PowerDefer",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27009,7 +27017,7 @@
 					"target": 631
 				},
 				{
-					"id": 1656,
+					"id": 1657,
 					"name": "PowerEventBus",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27017,7 +27025,7 @@
 					"target": 652
 				},
 				{
-					"id": 1650,
+					"id": 1651,
 					"name": "PowerHistogram",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27025,7 +27033,7 @@
 					"target": 726
 				},
 				{
-					"id": 1654,
+					"id": 1655,
 					"name": "PowerLatch",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27049,7 +27057,7 @@
 					"target": 410
 				},
 				{
-					"id": 1655,
+					"id": 1656,
 					"name": "PowerObserver",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27057,7 +27065,7 @@
 					"target": 894
 				},
 				{
-					"id": 1638,
+					"id": 1639,
 					"name": "PowerPermitGate",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27089,7 +27097,7 @@
 					"target": 1309
 				},
 				{
-					"id": 1648,
+					"id": 1649,
 					"name": "PowerRetry",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27097,7 +27105,7 @@
 					"target": 1343
 				},
 				{
-					"id": 1639,
+					"id": 1640,
 					"name": "PowerScheduler",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27105,7 +27113,7 @@
 					"target": 1375
 				},
 				{
-					"id": 1641,
+					"id": 1642,
 					"name": "PowerSemaphore",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27121,7 +27129,7 @@
 					"target": 1425
 				},
 				{
-					"id": 1640,
+					"id": 1641,
 					"name": "PowerSubscriberSet",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27145,7 +27153,7 @@
 					"target": 459
 				},
 				{
-					"id": 1643,
+					"id": 1644,
 					"name": "PowerTTLMap",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27166,36 +27174,37 @@
 					"title": "References",
 					"children": [
 						1628,
+						1647,
 						1646,
 						1645,
-						1644,
 						1625,
 						1626,
-						1651,
-						1653,
 						1652,
-						1629,
-						1647,
-						1649,
-						1642,
-						1656,
-						1650,
 						1654,
+						1653,
+						1629,
+						1638,
+						1648,
+						1650,
+						1643,
+						1657,
+						1651,
+						1655,
 						1633,
 						1630,
-						1655,
-						1638,
+						1656,
+						1639,
 						1632,
 						1637,
 						1636,
-						1648,
-						1639,
-						1641,
-						1635,
+						1649,
 						1640,
+						1642,
+						1635,
+						1641,
 						1634,
 						1631,
-						1643,
+						1644,
 						1627
 					]
 				}
@@ -27808,7 +27817,7 @@
 					]
 				},
 				{
-					"id": 1671,
+					"id": 1672,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27828,7 +27837,7 @@
 				{
 					"title": "References",
 					"children": [
-						1671
+						1672
 					]
 				}
 			]
@@ -35344,169 +35353,174 @@
 		"1638": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerPermitGate"
+			"qualifiedName": "PowerChunker"
 		},
 		"1639": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerScheduler"
+			"qualifiedName": "PowerPermitGate"
 		},
 		"1640": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSubscriberSet"
+			"qualifiedName": "PowerScheduler"
 		},
 		"1641": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSemaphore"
+			"qualifiedName": "PowerSubscriberSet"
 		},
 		"1642": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerDefer"
+			"qualifiedName": "PowerSemaphore"
 		},
 		"1643": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerTTLMap"
+			"qualifiedName": "PowerDefer"
 		},
 		"1644": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "nowMs"
+			"qualifiedName": "PowerTTLMap"
 		},
 		"1645": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "measureSync"
+			"qualifiedName": "nowMs"
 		},
 		"1646": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "measureAsync"
+			"qualifiedName": "measureSync"
 		},
 		"1647": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerCircuit"
+			"qualifiedName": "measureAsync"
 		},
 		"1648": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRetry"
+			"qualifiedName": "PowerCircuit"
 		},
 		"1649": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerDeadline"
+			"qualifiedName": "PowerRetry"
 		},
 		"1650": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerHistogram"
+			"qualifiedName": "PowerDeadline"
 		},
 		"1651": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBackpressure"
+			"qualifiedName": "PowerHistogram"
 		},
 		"1652": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBulkhead"
+			"qualifiedName": "PowerBackpressure"
 		},
 		"1653": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBatch"
+			"qualifiedName": "PowerBulkhead"
 		},
 		"1654": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerLatch"
+			"qualifiedName": "PowerBatch"
 		},
 		"1655": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerObserver"
+			"qualifiedName": "PowerLatch"
 		},
 		"1656": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerEventBus"
+			"qualifiedName": "PowerObserver"
 		},
 		"1657": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerEventBus"
+		},
+		"1658": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBackpressure.js",
 			"qualifiedName": "default"
 		},
-		"1658": {
+		"1659": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBatch.js",
 			"qualifiedName": "default"
 		},
-		"1659": {
+		"1660": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBulkhead.js",
 			"qualifiedName": "default"
 		},
-		"1660": {
+		"1661": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerCircuit.js",
 			"qualifiedName": "default"
 		},
-		"1661": {
+		"1662": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerDeadline.js",
 			"qualifiedName": "default"
 		},
-		"1662": {
+		"1663": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerDefer.js",
 			"qualifiedName": "default"
 		},
-		"1663": {
+		"1664": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerEventBus.js",
 			"qualifiedName": "default"
 		},
-		"1664": {
+		"1665": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerHistogram.js",
 			"qualifiedName": "default"
 		},
-		"1665": {
+		"1666": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerLatch.js",
 			"qualifiedName": "default"
 		},
-		"1666": {
+		"1667": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerObserver.js",
 			"qualifiedName": "default"
 		},
-		"1667": {
+		"1668": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRateLimit.js",
 			"qualifiedName": "default"
 		},
-		"1668": {
+		"1669": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRetry.js",
 			"qualifiedName": "default"
 		},
-		"1669": {
+		"1670": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSemaphore.js",
 			"qualifiedName": "default"
 		},
-		"1670": {
+		"1671": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerTTLMap.js",
 			"qualifiedName": "default"
 		},
-		"1671": {
+		"1672": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/now.js",
 			"qualifiedName": "default"

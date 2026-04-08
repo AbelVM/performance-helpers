@@ -78,4 +78,21 @@ describe('PowerLogger branch coverage', () => {
       console.warn = origWarn;
     }
   });
+
+  it('setDebugLevel coerces boxed primitives and incrementCounter ignores empty names when disabled', () => {
+    const Ctor = getCtor(PowerLoggerModule);
+    const logger = new Ctor(0);
+
+    logger.setDebugLevel(new String('3'));
+    expect(logger.getDebugLevel()).toBe(3);
+
+    logger.setDebugLevel(new Boolean(false));
+    expect(logger.getDebugLevel()).toBe(0);
+
+    logger.incrementCounter('ignored');
+    logger.setDebugLevel(3);
+    logger.incrementCounter('');
+    logger.incrementCounter(null);
+    expect(logger.getDebugCounters()).toEqual({});
+  });
 });

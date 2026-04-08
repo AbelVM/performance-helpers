@@ -30,6 +30,25 @@ describe('PowerCircuit observability', () => {
     expect(closed).toBeTruthy();
   });
 
+  it('swallows errors thrown by onStateChange and event bus observers', async () => {
+    const bus = new PowerEventBus();
+    bus.on('stateChange', () => {
+      throw new Error('bus observer failed');
+    });
+
+    const cb = new PowerCircuit({
+      threshold: 1,
+      timeout: 10,
+      eventBus: bus,
+      onStateChange() {
+        throw new Error('callback failed');
+      },
+    });
+
+    await expect(cb.call(() => Promise.reject(new Error('fail')))).rejects.toThrow('fail');
+    expect(cb.state).toBe('open');
+  });
+
   it('emits stateChange on provided PowerEventBus', async () => {
     const bus = new PowerEventBus();
     const events = [];

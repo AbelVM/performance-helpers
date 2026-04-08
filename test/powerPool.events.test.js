@@ -60,6 +60,34 @@ test('emits pool:queue:high when queue crosses threshold', async () => {
   expect(payload.threshold).toBe(0);
 });
 
+test('re-emits pool:queue:high after the queue drains below the threshold', async () => {
+  const pool = new PowerPool(makeUnderlyingFactory(20), {
+    minSize: 1,
+    maxSize: 1,
+    maxTasksPerWorker: 1,
+    taskQueue: true,
+    lazy: false,
+    queueHighThreshold: 0,
+  });
+
+  const events = [];
+  pool._bus.on('pool:queue:high', (payload) => {
+    events.push(payload);
+  });
+
+  pool.postMessage({ round: 1, item: 1 });
+  pool.postMessage({ round: 1, item: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  pool.postMessage({ round: 2, item: 1 });
+  pool.postMessage({ round: 2, item: 2 });
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  expect(events.length).toBeGreaterThanOrEqual(2);
+  expect(events[0].threshold).toBe(0);
+  expect(events[1].threshold).toBe(0);
+});
+
 test('emits pool:scale when adding and removing workers', async () => {
   const pool = new PowerPool(makeUnderlyingFactory(200), {
     size: 1,

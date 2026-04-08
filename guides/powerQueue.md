@@ -77,3 +77,36 @@ for (const item of q.drain()) {
   console.log(item);
 }
 ```
+
+## Real-world Example — buffering for worker dispatch
+
+```javascript
+import { PowerQueue } from '../src/helpers/powerQueue.js';
+import { PowerPool } from '../src/helpers/powerPool.js';
+
+// Use PowerQueue as a lightweight buffer before dispatching to a worker pool
+const q = new PowerQueue(64);
+const pool = new PowerPool('./worker.js', { size: 2, maxSize: 4 });
+
+// Efficiently enqueue many items
+q.pushMany(itemsArray);
+
+// Drain and dispatch with simple error handling
+async function flushQueue() {
+  for (const item of q.drain()) {
+    try {
+      // fire-and-forget; pool will queue or dispatch according to its policy
+      pool.postMessage(item);
+    } catch (err) {
+      console.error('dispatch failed, requeuing or persisting', err);
+      // requeue or persist for later retry
+      q.push(item);
+    }
+  }
+}
+
+// Use periodically or on demand
+setInterval(() => {
+  if (!q.isEmpty) flushQueue();
+}, 250);
+```

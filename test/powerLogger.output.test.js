@@ -32,4 +32,50 @@ describe('PowerLogger output transport', () => {
     expect(payload).toHaveProperty('t');
     expect(payload).toHaveProperty('nm', 't2');
   });
+
+  it('swallows output transport errors', () => {
+    const logger = new PowerLogger(3, {
+      format: 'json',
+      output() {
+        throw new Error('transport failed');
+      },
+    });
+
+    expect(() => logger.info('safe')).not.toThrow();
+  });
+
+  it('falls back to the original payload when formatter throws', () => {
+    const out = vi.fn();
+    const logger = new PowerLogger(3, {
+      format: 'json',
+      name: 'fallback',
+      output: out,
+      formatter() {
+        throw new Error('formatter failed');
+      },
+    });
+
+    logger.warn('hello');
+
+    expect(out).toHaveBeenCalled();
+    expect(out.mock.calls[0][0]).toMatchObject({
+      level: 'warn',
+      msg: 'hello',
+      format: 'json',
+      name: 'fallback',
+    });
+  });
+
+  it('passes formatter strings directly to output transports', () => {
+    const out = vi.fn();
+    const logger = new PowerLogger(3, {
+      format: 'json',
+      output: out,
+      formatter: (payload) => `${payload.level}:${payload.msg}`,
+    });
+
+    logger.info('transport-string');
+
+    expect(out).toHaveBeenCalledWith('info:transport-string');
+  });
 });

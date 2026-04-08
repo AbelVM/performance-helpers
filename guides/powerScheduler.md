@@ -8,7 +8,7 @@ Use `PowerScheduler` when you need a shared `schedule()`, `flush()`, and `cancel
 
 | option | type | default | description |
 |---|---:|---|---|
-| `scheduling` | `'microtask' \'|'macrotask'` | `'microtask'` | Scheduling mode used to defer the flush callback. `microtask` uses `queueMicrotask`, and `macrotask` uses `setTimeout(fn, 0)`. |
+| `scheduling` | `'microtask'|'macrotask'` | `'microtask'` | Scheduling mode used to defer the flush callback. `microtask` uses `queueMicrotask`, and `macrotask` uses `setTimeout(fn, 0)`. |
 
 ## API
 

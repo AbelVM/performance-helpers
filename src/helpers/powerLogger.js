@@ -1,6 +1,24 @@
 import { formatErrorObj, normalizeError } from '../utils/errors.js';
 import { nowMs } from '../utils/now.js';
 
+const getConsole = () => {
+  if (typeof globalThis !== 'undefined' && globalThis && globalThis.console) {
+    return globalThis.console;
+  }
+  if (typeof self !== 'undefined' && self && self.console) {
+    return self.console;
+  }
+  if (typeof window !== 'undefined' && window && window.console) {
+    return window.console;
+  }
+  if (typeof global !== 'undefined' && global && global.console) {
+    return global.console;
+  }
+  return null;
+};
+
+const ROOT_CONSOLE = getConsole();
+
 /**
  * PowerLogger
  *
@@ -141,9 +159,9 @@ export class PowerLogger {
               } catch (e) {}
               return;
             }
-            // No output transport: write string directly to console.
-            if (console && typeof console[consoleMethod] === 'function') {
-              console[consoleMethod](formatted);
+            // No output transport: write string directly to the root console.
+            if (ROOT_CONSOLE && typeof ROOT_CONSOLE[consoleMethod] === 'function') {
+              ROOT_CONSOLE[consoleMethod](formatted);
             }
             return;
           }
@@ -168,17 +186,17 @@ export class PowerLogger {
     }
 
     // Fall back to console methods when no output transport is provided.
-    if (!console || typeof console[consoleMethod] !== 'function') return;
+    if (!ROOT_CONSOLE || typeof ROOT_CONSOLE[consoleMethod] !== 'function') return;
     if (this._format === 'json') {
       try {
         const out = typeof payload === 'string' ? payload : JSON.stringify(payload);
-        console[consoleMethod](out);
+        ROOT_CONSOLE[consoleMethod](out);
       } catch (e) {
         // fallback: attempt plain console with resolved args
-        console[consoleMethod](...(Array.isArray(resolved) ? resolved : [resolved]));
+        ROOT_CONSOLE[consoleMethod](...(Array.isArray(resolved) ? resolved : [resolved]));
       }
     } else {
-      console[consoleMethod](...resolved);
+      ROOT_CONSOLE[consoleMethod](...resolved);
     }
   }
 
@@ -242,15 +260,15 @@ export class PowerLogger {
    * In JSON mode emits `{ level: 'table', msg: args, ts }` where `msg` is an array of arguments.
    */
   table(...args) {
-    if (!this.isDebugLevel(3) || !console) return;
+    if (!this.isDebugLevel(3) || !ROOT_CONSOLE) return;
     // For JSON mode reuse the _emit helper but force the message to be an array
     if (this._format === 'json') {
       this._emit(3, 'log', 'table', args, { msgArray: true });
       return;
     }
     const resolved = this._resolveLogArgs(args);
-    if (typeof console.table === 'function') console.table(...resolved);
-    else if (typeof console.log === 'function') console.log(...resolved);
+    if (typeof ROOT_CONSOLE.table === 'function') ROOT_CONSOLE.table(...resolved);
+    else if (typeof ROOT_CONSOLE.log === 'function') ROOT_CONSOLE.log(...resolved);
   }
 
   /**

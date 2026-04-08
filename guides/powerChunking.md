@@ -69,6 +69,48 @@ console.log('Results:', results.length, 'Errors:', errors.length);
 pool.terminate();
 ```
 
+## Real-world Example — bulk CSV processing
+
+```javascript
+import { PowerChunker } from '../src/helpers/powerChunking.js';
+
+// `readCsvRows` is a user helper that yields/returns many parsed rows.
+const rows = await readCsvRows('large-export.csv');
+
+// transform each row into the shape your backend expects
+async function transformRow(row) {
+  // validate/normalize fields, enrich, etc.
+  return { id: row.id, ts: Date.parse(row.time), payload: row.data };
+}
+
+// Create a chunker tuned for bulk DB writes. Use chunkSize to control
+// batch sizes sent to the worker-like handlers; chunker will post each
+// chunk as a single task to an internal pool which processes items and
+// emits a per-chunk `message` with `results`.
+const pool = new PowerChunker(rows, transformRow, {
+  poolOptions: { size: 4 },
+  chunkSize: 500,
+  postOptions: { awaitResponse: false }
+});
+
+const errors = [];
+pool.onmessage = (e) => {
+  const data = e && e.data;
+  if (!data || !Array.isArray(data.results)) return;
+  for (const r of data.results) {
+    if (r && r.error) errors.push(r);
+    else {
+      // collect or stream to a DB bulk-inserter here
+    }
+  }
+};
+
+// Wait until all work finishes, then perform any final bulk write or cleanup
+await pool.drain();
+if (errors.length) console.error('Some rows failed', errors.length);
+pool.terminate();
+```
+
 ## Notes
 
 - This helper creates inline worker-like instances that execute `fn` in a

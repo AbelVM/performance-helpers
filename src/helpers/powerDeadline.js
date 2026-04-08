@@ -53,7 +53,10 @@ export class PowerDeadline {
     const createAbortPromise = () => {
       if (!signal) return null;
       if (signal.aborted) {
-        return Promise.reject(createAbortError(signal.reason, startedAt, deadlineMs));
+        return {
+          promise: Promise.reject(createAbortError(signal.reason, startedAt, deadlineMs)),
+          cleanup: null,
+        };
       }
       let cleanup = null;
       const promise = new Promise((_, reject) => {

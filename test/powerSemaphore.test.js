@@ -73,4 +73,36 @@ describe('PowerSemaphore', () => {
     release();
     expect(sem.isLocked).toBe(false);
   });
+
+  it('run releases the permit when the callback throws', async () => {
+    const sem = new PowerSemaphore(1);
+
+    await expect(
+      sem.run(async () => {
+        throw new Error('boom');
+      })
+    ).rejects.toThrow('boom');
+
+    expect(sem.active).toBe(0);
+    expect(sem.available).toBe(1);
+    expect(sem.isLocked).toBe(false);
+  });
+
+  it('reset rejects queued waiters and restores availability', async () => {
+    const sem = new PowerSemaphore(1);
+    const release = await sem.acquire();
+    const pending = sem.acquire();
+
+    expect(sem.pending).toBe(1);
+    sem.reset();
+
+    await expect(pending).rejects.toThrow();
+    expect(sem.pending).toBe(0);
+    expect(sem.available).toBe(sem.limit);
+
+    const nextRelease = sem.tryAcquire();
+    expect(typeof nextRelease).toBe('function');
+    nextRelease();
+    release();
+  });
 });

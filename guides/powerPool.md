@@ -34,15 +34,6 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 	- Note: `options.awaitResponse` requires the outgoing `message` to be a plain-object (not a TypedArray/ArrayBuffer). The implementation augments the object with a `correlationId` and will throw if a non-plain-object is supplied when `awaitResponse` is requested.
 	- `options.workerId` may be a `number` or `string` (the pool coerces ids to strings internally for correlation handling).
 
-### Await-response and targeted worker semantics
-
-When `options.awaitResponse` is requested, the pool tracks the outgoing request with a generated or provided `correlationId`. The returned Promise resolves only when a worker replies with a matching response payload. If the response never arrives, the Promise rejects when the optional `timeout` expires, and the internal pending entry is removed.
-
-When `options.workerId` is supplied, the pool routes the message to that worker only. Targeting a missing or currently saturated worker fails immediately rather than silently queuing the request. For `awaitResponse` callers this means the returned Promise rejects with an immediate failure instead of waiting in the queue.
-
-If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises and removes the associated pending state. This ensures there are no leaked Promise entries after worker teardown or pool shutdown.
-
-
 - `broadcast(message, transfer)` — Send `message` to every worker in the pool. Each worker receives either the provided transferable or an independently encoded `Uint8Array` when `transfer` is omitted and a plain object is provided. Broadcasting increments each worker's `tasks` counter.
 
 - `postMessageBatch(items, options)` — Enqueue or dispatch a batch of messages in a single call. `items` is an array of `{ message, transfer? }`. Returns an array of per-item results (booleans or Promises when `awaitResponse` is requested). Use this to amortize queue push overhead for many items.
@@ -76,6 +67,14 @@ If a worker is terminated while it still has pending `awaitResponse` requests, t
 - Disposal hooks: `[Symbol.dispose]()` calls `terminate()` synchronously; `[Symbol.asyncDispose]()` awaits `drain()` then terminates.
 
 - `getStats()` — Return a snapshot `{ status: Array<{id,tasks,lastActive}>, performance: Object }` with per-worker status and aggregated performance metrics (EWMA/time-per-task stats). This is useful for logging and autoscale decisions.
+
+### Await-response and targeted worker semantics
+
+When `options.awaitResponse` is requested, the pool tracks the outgoing request with a generated or provided `correlationId`. The returned Promise resolves only when a worker replies with a matching response payload. If the response never arrives, the Promise rejects when the optional `timeout` expires, and the internal pending entry is removed.
+
+When `options.workerId` is supplied, the pool routes the message to that worker only. Targeting a missing or currently saturated worker fails immediately rather than silently queuing the request. For `awaitResponse` callers this means the returned Promise rejects with an immediate failure instead of waiting in the queue.
+
+If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises and removes the associated pending state. This ensures there are no leaked Promise entries after worker teardown or pool shutdown.
 
 ## Autoscaling
 
@@ -112,15 +111,14 @@ Tuning tips:
 - Use `cooldownMs` (e.g., 3–10s) to avoid repeated add/remove cycles.
 - `hysteresis` values of 0.1–0.3 are typically effective at preventing flapping.
 
-See [autscale guide](autoscale.md) for more details and examples.
+See [autoscale guide](autoscale.md) for more details and examples.
 
 ## Events and handlers
 
-- `onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive events with `data.type === 'pool:idle'` and `data.stats` containing `{ status, performance }` where `status` is the per-worker snapshot and `performance` is aggregated metrics.
-- `idle` event is fired inmediately at event registration time if the pool is currently idle
+`onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive events with `data.type === 'pool:idle'` and `data.stats` containing `{ status, performance }` where `status` is the per-worker snapshot and `performance` is aggregated metrics.
 
-- `pool:queue:high` — emitted on the internal event bus when the internal task queue length crosses the configured `options.queueHighThreshold`. Payload: `{ length, threshold }`. Configure `queueHighThreshold` in constructor options to enable this event.
-- `pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
+`pool:queue:high` — emitted on the internal event bus when the internal task queue length crosses the configured `options.queueHighThreshold`. Payload: `{ length, threshold }`. Configure `queueHighThreshold` in constructor options to enable this event.
+`pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
 
 ## Example
 ## Realistic Example — image thumbnail worker

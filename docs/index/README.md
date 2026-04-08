@@ -68,6 +68,12 @@ Re-exports [PowerCache](../helpers/powerCache/classes/PowerCache.md)
 
 ***
 
+### PowerChunker
+
+Re-exports [PowerChunker](../helpers/powerChunking/classes/PowerChunker.md)
+
+***
+
 ### PowerCircuit
 
 Re-exports [PowerCircuit](../helpers/powerCircuit/classes/PowerCircuit.md)

@@ -44,4 +44,38 @@ describe('PowerLogger JSON output mode', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('falls back to plain console arguments when JSON serialization fails', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      const circular = {};
+      circular.self = circular;
+      const logger = new PowerLogger(3, { format: 'json' });
+
+      logger.log(circular, 'tail');
+
+      expect(logSpy).toHaveBeenCalled();
+      expect(logSpy.mock.calls[0][0]).toBe(circular);
+      expect(logSpy.mock.calls[0][1]).toBe('tail');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('normalizes error-like payloads in error()', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const logger = new PowerLogger(1, { format: 'json' });
+      logger.error({ error: true, code: 'E_TEST', message: 'broken' });
+
+      expect(errSpy).toHaveBeenCalled();
+      const parsed = JSON.parse(errSpy.mock.calls[0][0]);
+      expect(parsed.level).toBe('error');
+      expect(parsed.msg).toBe('E_TEST: broken');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
 });

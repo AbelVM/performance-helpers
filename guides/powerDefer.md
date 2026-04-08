@@ -28,13 +28,11 @@ A minimal deferred-promise primitive. Useful for coordination patterns where a p
 import { PowerDefer } from '../src/helpers/powerDefer.js';
 
 // Example — wait for a worker/bootstrap handshake
-import { PowerDefer } from '../src/helpers/powerDefer.js';
-```
 const ready = new PowerDefer();
 
 // main thread: wait for worker to signal readiness
 worker.onmessage = (e) => {
-	if (e.data && e.data.type === 'ready') ready.resolve(e.data.info);
+  if (e.data && e.data.type === 'ready') ready.resolve(e.data.info);
 };
 
 // worker posts `{ type: 'ready', info: { version: '1.2.3' } }` when initialized

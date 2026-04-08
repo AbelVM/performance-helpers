@@ -20,6 +20,8 @@ export class PowerTTLMap {
     // Track keys that have an expiry to allow faster purging of expired
     // entries without scanning the entire map on each `size` access.
     this._expirations = new Map(); // key -> expiresAt (ms)
+    this._nextExpiryAt = 0;
+    this._nextExpiryDirty = false;
   }
 
   /**
@@ -33,9 +35,11 @@ export class PowerTTLMap {
     const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
     // add a small slack (+1ms) to account for timer scheduling jitter
     const expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
+    const prevExpiry = this._expirations.get(key) || 0;
     this._map.set(key, { value, expiresAt });
     if (expiresAt) this._expirations.set(key, expiresAt);
     else this._expirations.delete(key);
+    this._updateNextExpiryOnWrite(prevExpiry, expiresAt);
     return this;
   }
 
@@ -52,10 +56,12 @@ export class PowerTTLMap {
    */
   _expireKey(key, entry) {
     if (!entry) return;
+    const expiresAt = entry.expiresAt || this._expirations.get(key) || 0;
     try {
       const val = entry.value;
       this._map.delete(key);
       this._expirations.delete(key);
+      if (expiresAt && this._nextExpiryAt === expiresAt) this._nextExpiryDirty = true;
       if (typeof this._onExpire === 'function') {
         try {
           this._onExpire(key, val);
@@ -104,7 +110,9 @@ export class PowerTTLMap {
    * @returns {boolean}
    */
   delete(key) {
+    const expiresAt = this._expirations.get(key) || 0;
     this._expirations.delete(key);
+    if (expiresAt && this._nextExpiryAt === expiresAt) this._nextExpiryDirty = true;
     return this._map.delete(key);
   }
 
@@ -115,6 +123,8 @@ export class PowerTTLMap {
   clear() {
     this._map.clear();
     this._expirations.clear();
+    this._nextExpiryAt = 0;
+    this._nextExpiryDirty = false;
   }
 
   /**
@@ -130,11 +140,13 @@ export class PowerTTLMap {
       this._expireKey(key, entry);
       return false;
     }
+    const prevExpiry = entry.expiresAt || 0;
     const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
     // add a small slack (+1ms) to account for timer scheduling jitter
     entry.expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
     if (entry.expiresAt) this._expirations.set(key, entry.expiresAt);
     else this._expirations.delete(key);
+    this._updateNextExpiryOnWrite(prevExpiry, entry.expiresAt);
     return true;
   }
 
@@ -145,17 +157,41 @@ export class PowerTTLMap {
   get size() {
     // Purge expired entries lazily, but iterate only the subset of keys
     // that have expirations recorded. This avoids scanning non-expiring
-    // entries on every `.size` access.
+    // entries on every `.size` access. When the next known expiry is still
+    // in the future, return immediately without sweeping the expiration index.
     if (!this._map.size) return 0;
     if (!this._expirations.size) return this._map.size;
     const now = nowMs();
+    if (!this._nextExpiryDirty && this._nextExpiryAt && now <= this._nextExpiryAt) {
+      return this._map.size;
+    }
+
+    this._sweepExpirations(now);
+    return this._map.size;
+  }
+
+  _updateNextExpiryOnWrite(prevExpiry, nextExpiry) {
+    if (prevExpiry && this._nextExpiryAt === prevExpiry && prevExpiry !== nextExpiry) {
+      this._nextExpiryDirty = true;
+    }
+
+    if (nextExpiry && (!this._nextExpiryAt || nextExpiry < this._nextExpiryAt)) {
+      this._nextExpiryAt = nextExpiry;
+    }
+  }
+
+  _sweepExpirations(now) {
+    let nextExpiryAt = 0;
     for (const [k, exp] of this._expirations) {
       if (exp && now > exp) {
         const entry = this._map.get(k);
         this._expireKey(k, entry);
+        continue;
       }
+      if (exp && (!nextExpiryAt || exp < nextExpiryAt)) nextExpiryAt = exp;
     }
-    return this._map.size;
+    this._nextExpiryAt = nextExpiryAt;
+    this._nextExpiryDirty = false;
   }
 
   /**

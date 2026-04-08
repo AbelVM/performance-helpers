@@ -59,4 +59,19 @@ describe('PowerLogger table and debug methods', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('falls back to console.log when console.table is unavailable', () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const originalTable = console.table;
+    try {
+      // @ts-ignore
+      console.table = undefined;
+      const logger = new PowerLogger(3);
+      logger.table('fallback-table');
+      expect(logSpy).toHaveBeenCalledWith('fallback-table');
+    } finally {
+      console.table = originalTable;
+      logSpy.mockRestore();
+    }
+  });
 });

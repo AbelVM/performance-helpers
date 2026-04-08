@@ -8,7 +8,7 @@ Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / Arra
 
 Encode a value to a `Uint8Array` (UTF-8 JSON).
 
-- `obj` — Any value to encode. If the vcontinue manual pass file-by-file alue is already a `Uint8Array`/TypedArray/ArrayBuffer it will be returned or converted to a view.
+- `obj` — Any value to encode. If the value is already a `Uint8Array`/TypedArray/ArrayBuffer it will be returned or converted to a view.
 
 Returns: `Uint8Array` — UTF-8 encoded bytes. Throws if no encoder is available in the environment.
 

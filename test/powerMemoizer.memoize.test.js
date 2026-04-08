@@ -2,6 +2,11 @@ import { describe, it, expect } from 'vitest';
 import { PowerMemoizer } from '../src/helpers/powerCache.js';
 
 describe('PowerMemoizer.memoize', () => {
+  it('throws when memoize is called with a non-function', () => {
+    const pm = new PowerMemoizer();
+    expect(() => pm.memoize(null)).toThrow(TypeError);
+  });
+
   it('memoizes sync function via memoize() and attaches helpers', () => {
     let calls = 0;
     const fn = (x) => {
@@ -17,6 +22,15 @@ describe('PowerMemoizer.memoize', () => {
     // helpers
     expect(typeof memo.get).toBe('function');
     expect(memo.get(1)).toBe(2);
+    expect(typeof memo.has).toBe('function');
+    expect(memo.has(1)).toBe(true);
+    expect(typeof memo.delete).toBe('function');
+    expect(memo.delete(1)).toBe(true);
+    expect(memo.has(1)).toBe(false);
+    expect(typeof memo.stats).toBe('function');
+    expect(memo.stats()).toHaveProperty('size');
+    expect(memo.cache).toBe(pm.cache);
+    expect(memo.original).toBe(fn);
     expect(typeof memo.clear).toBe('function');
     memo.clear();
     expect(memo(1)).toBe(2);
@@ -64,5 +78,23 @@ describe('PowerMemoizer.memoize', () => {
     const b = memo2(1);
     expect(b).toEqual({ v: 1 });
     expect(calls2).toBe(2);
+  });
+
+  it('uses constructor default memoize options when per-call ttl/weight are omitted', async () => {
+    let calls = 0;
+    const pm = new PowerMemoizer(undefined, { ttl: 5 });
+    const memo = pm.memoize((value) => {
+      calls += 1;
+      return value;
+    });
+
+    expect(memo('x')).toBe('x');
+    expect(memo('x')).toBe('x');
+    expect(calls).toBe(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(memo('x')).toBe('x');
+    expect(calls).toBe(2);
   });
 });

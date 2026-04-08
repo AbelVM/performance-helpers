@@ -62,6 +62,54 @@ describe('PowerObserver', () => {
     expect(called).toBe(1);
   });
 
+  it('supports sync delivery and swallows subscriber errors', () => {
+    const obs = new PowerObserver(1, { async: false });
+    const seen = [];
+    obs.subscribe(() => {
+      throw new Error('listener failed');
+    });
+    obs.subscribe((next, prev) => {
+      seen.push([prev, next]);
+    });
+
+    obs.value = 2;
+
+    expect(seen).toEqual([[1, 2]]);
+  });
+
+  it('coalesces multiple async writes into the latest next value while preserving the first prev', async () => {
+    const obs = new PowerObserver(1);
+    const seen = [];
+    obs.subscribe((next, prev) => {
+      seen.push([prev, next]);
+    });
+
+    obs.value = 2;
+    obs.value = 3;
+    await Promise.resolve();
+
+    expect(seen).toEqual([[1, 3]]);
+  });
+
+  it('drain aliases flush and map(null) clears the mapping function', async () => {
+    const obs = new PowerObserver(2, { async: 'macrotask', map: (v) => v * 2 });
+    const seen = [];
+    obs.subscribe((next, prev) => {
+      seen.push([prev, next]);
+    });
+
+    obs.map(null);
+    obs.value = 4;
+    obs.drain();
+
+    expect(seen).toEqual([[2, 4]]);
+  });
+
+  it('throws when map is set to a non-function value', () => {
+    const obs = new PowerObserver(1);
+    expect(() => obs.map(123)).toThrow('map must be a function');
+  });
+
   it('supports macrotask scheduling and flush()', async () => {
     const obs = new PowerObserver(1, { async: 'macrotask' });
     let called = 0;

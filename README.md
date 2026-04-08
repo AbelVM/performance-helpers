@@ -75,6 +75,24 @@ Run coverage (v8):
 npm run test:coverage
 ```
 
+## Quality bar
+
+Helpers intended to be Tier 1 in this repository should meet a consistent bar:
+
+- dedicated guide plus README coverage
+- concise JSDoc for public constructor options and methods
+- focused regression tests for edge cases and failure paths
+- repo-wide coverage stays above the Vitest thresholds, and Tier 1 promotion work raises the helper's own file coverage to the same bar
+- no known open correctness bugs in the public contract
+
+Helpers that remain larger or more experimental can stay as advanced helpers, but Tier 1 helpers should be predictable, narrow in scope, and cheap to maintain.
+
+Current classification notes:
+
+- `PowerPool` is an advanced helper by design. It has a broader surface area than the narrow Tier 1 primitives, so coverage and maintenance expectations should be interpreted with that scope in mind.
+- `PowerRateLimit` is treated as a metric outlier for function coverage. Its public behavior and rollback paths are heavily covered; the remaining low function number is not currently considered a release blocker on its own.
+- Promotion work should prioritize public correctness, narrow APIs, and edge-case coverage before chasing residual coverage misses in broad orchestration helpers.
+
 Build (Vite):
 
 ```bash

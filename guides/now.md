@@ -5,8 +5,8 @@ This guide documents the small timing helpers exported by the library (`nowMs`, 
 ## Overview
 
 - `nowMs()` — high-resolution, monotonic timestamp in milliseconds with fractional part when supported. Prefer this over `Date.now()` for sub-millisecond timing and consistent results across platforms.
-- `measureSync(fn)` — runs a synchronous function `fn()` and returns `{ result, duration }` where `duration` is the elapsed time in milliseconds.
-- `measureAsync(fn)` — runs an async function (or a function that returns a Promise) and returns a Promise resolving to `{ result, duration }`. On rejection the thrown error is augmented with a `duration` property indicating how long the call ran.
+- `measureSync(fn)` — runs a synchronous function `fn()` and returns `{ result, ms }` where `ms` is the elapsed time in milliseconds.
+- `measureAsync(fn)` — runs an async function (or a function that returns a Promise) and returns a Promise resolving to `{ result, ms }`. On rejection the thrown error is augmented with a `durationMs` property indicating how long the call ran.
 
 ## Usage
 
@@ -15,11 +15,11 @@ Synchronous timing:
 ```js
 import { nowMs, measureSync } from '../src/utils/now.js';
 
-const { result, duration } = measureSync(() => {
+const { result, ms } = measureSync(() => {
   // work you want to measure
   return doWorkSync();
 });
-console.log('sync duration (ms):', duration);
+console.log('sync duration (ms):', ms);
 ```
 
 Asynchronous timing (recommended for I/O or worker operations):
@@ -27,13 +27,13 @@ Asynchronous timing (recommended for I/O or worker operations):
 ```js
 import { measureAsync } from '../src/utils/now.js';
 
-const { result, duration } = await measureAsync(async () => {
+const { result, ms } = await measureAsync(async () => {
   return await doWorkAsync();
 });
-console.log('async duration (ms):', duration);
+console.log('async duration (ms):', ms);
 ```
 
-When an async measure rejects, `measureAsync` rethrows the original error but attaches a numeric `duration` property (ms) to the error object so callers can reason about partial progress in failure scenarios.
+When an async measure rejects, `measureAsync` rethrows the original error but attaches a numeric `durationMs` property (ms) to the error object so callers can reason about partial progress in failure scenarios.
 
 ## Notes and best practices
 
@@ -51,6 +51,6 @@ try {
     await flakyNetworkCall();
   });
 } catch (err) {
-  console.error('failed after', err.duration, 'ms');
+  console.error('failed after', err.durationMs, 'ms');
 }
 ```

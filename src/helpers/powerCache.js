@@ -223,9 +223,10 @@ export class PowerCache {
       if (countMiss) this.misses++;
       return null;
     }
-    if (!ignoreExpiry && node.expiresAt && node.expiresAt <= Date.now()) {
+      const now = !ignoreExpiry && node.expiresAt ? Date.now() : 0;
+      if (now && node.expiresAt <= now) {
       if (allowExpired) return node;
-      this._removeExpiredNode(node, Date.now(), countMiss);
+        this._removeExpiredNode(node, now, countMiss);
       return null;
     }
     return node;

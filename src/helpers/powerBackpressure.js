@@ -152,7 +152,7 @@ export class PowerBackpressure extends PowerPermitGate {
       const next = this._waiters.shift();
       if (next && typeof next.resolve === 'function') {
         this._available -= 1;
-        next.resolve(this._grant());
+        next.resolve(this._makeRelease());
       }
     }
 

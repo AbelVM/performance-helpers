@@ -19,7 +19,7 @@ throw err;
 
 ## Measuring and attaching durations
 
-Helpers such as `measureAsync()` attach a `duration` property to thrown errors so callers can log or make decisions based on how long the failing operation ran. When catching errors prefer to check `typeof err.duration === 'number'` before trusting the value.
+Helpers such as `measureAsync()` attach a `durationMs` property to thrown errors so callers can log or make decisions based on how long the failing operation ran. When catching errors prefer to check `typeof err.durationMs === 'number'` before trusting the value.
 
 ## Correlation ids and pending responses
 

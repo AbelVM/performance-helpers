@@ -98,15 +98,20 @@ export class PowerBatch {
    * @private
    */
   async _runBatch() {
-    const items = this._queue.toArray();
-    if (items.length === 0) {
+    const size = this._queue.length;
+    if (size === 0) {
       if (this._pending) {
         this._pending.resolve();
         this._pending = null;
       }
       return;
     }
-    this._queue.clear();
+
+    const items = new Array(size);
+    for (let i = 0; i < size; i += 1) {
+      items[i] = this._queue.shift();
+    }
+
     const pending = this._pending;
     // create a fresh pending for subsequent adds during handler execution
     if (pending) this._pending = null;

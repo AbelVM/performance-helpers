@@ -47,4 +47,76 @@ describe('PowerBatch branches extra', () => {
     expect(called).toBe(false);
     expect(b.size).toBe(0);
   });
+
+  it('creates a fresh pending batch for items added while the handler is running', async () => {
+    const calls = [];
+    let releaseFirstBatch;
+    const firstBatchGate = new Promise((resolve) => {
+      releaseFirstBatch = resolve;
+    });
+
+    const b = new PowerBatch(async (items) => {
+      calls.push(items.slice());
+      if (calls.length === 1) {
+        await firstBatchGate;
+      }
+    });
+
+    const first = b.add('a');
+    await Promise.resolve();
+    const second = b.add('b');
+    releaseFirstBatch();
+
+    await Promise.all([first, second]);
+
+    expect(calls).toEqual([['a'], ['b']]);
+  });
+
+  it('normalizes invalid maxSize and scheduling options', async () => {
+    const calls = [];
+    const b = new PowerBatch(
+      async (items) => {
+        calls.push(items.slice());
+      },
+      { maxSize: 0, scheduling: 'invalid' }
+    );
+
+    b.add(1);
+    b.add(2);
+    await b.flush();
+
+    expect(calls).toEqual([[1, 2]]);
+  });
+
+  it('flush re-schedules queued work if a pending batch exists but the scheduler was canceled', async () => {
+    const calls = [];
+    const b = new PowerBatch(async (items) => {
+      calls.push(items.slice());
+    });
+
+    const addPromise = b.add('x');
+    b._scheduler.cancel();
+
+    await b.flush();
+    await addPromise;
+
+    expect(calls).toEqual([['x']]);
+  });
+
+  it('resolves orphaned pending promises on empty internal runs and rethrows handler errors without pending state', async () => {
+    const b = new PowerBatch(async () => {});
+    const pending = b.add('x');
+    b._queue.clear();
+
+    await b._runBatch();
+    await expect(pending).resolves.toBeUndefined();
+    expect(b._pending).toBeNull();
+
+    const b2 = new PowerBatch(async () => {
+      throw new Error('boom');
+    });
+    b2._queue.push('y');
+
+    await expect(b2._runBatch()).rejects.toThrow('boom');
+  });
 });

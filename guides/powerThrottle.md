@@ -117,3 +117,36 @@ if (token) {
   limiter.release(token);
 }
 ```
+
+### Real-world: reserve before expensive serialization
+
+Use `reserve()` when you want to claim capacity before performing expensive
+preparation work (serialization, file reads). If preparation fails, release the
+reservation so the token is not consumed.
+
+```javascript
+const limiter = new PowerThrottle({ capacity: 3, refillRate: 3 });
+
+async function sendLargePayload(payload) {
+  const token = limiter.reserve(1);
+  if (!token) {
+    // no capacity: fallback (persist, retry later)
+    await persistForRetry(payload);
+    return false;
+  }
+
+  try {
+    // expensive synchronous or async serialization
+    const body = await heavySerialize(payload);
+    // dispatch network call (does not consume extra tokens)
+    await fetch('/api/upload', { method: 'POST', body });
+    return true;
+  } catch (err) {
+    // something went wrong during preparation or send
+    throw err;
+  } finally {
+    // always return the reserved token
+    limiter.release(token);
+  }
+}
+```
