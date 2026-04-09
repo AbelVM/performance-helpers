@@ -269,6 +269,14 @@ export class PowerPool {
      */
     private _findLeastLoadedWorker;
     /**
+     * Determine whether a single-worker pool should queue rather than flood the
+     * underlying worker with additional in-flight messages.
+     * @private
+     * @param {WorkerObj|null} least
+     * @param {number|null} targetWorkerId
+     * @returns {boolean}
+     */
+    /**
      * Post a message to a worker in the pool.
      * The pool will try to reuse an idle/least-loaded worker, grow the pool
      * (up to `maxSize`), or queue the task if configured.

@@ -23,14 +23,17 @@ function heavy(iterations) {
 }
 
 parentPort.on('message', (msg) => {
+  // Use high-resolution timing to measure decode and compute durations
+  const decodeStart = process.hrtime.bigint();
   const data = decodeMessage(msg);
+  const decodeDuration = Number(process.hrtime.bigint() - decodeStart) / 1e6;
   // (no-op) worker debug logging removed
   const id = data && (data.id ?? null);
   const iterations = data && (data.iterations ?? 0);
-  const t0 = Date.now();
+  const computeStart = process.hrtime.bigint();
   const res = heavy(iterations);
-  const dt = Date.now() - t0;
-  const resp = { id, result: res, duration: dt };
+  const computeDuration = Number(process.hrtime.bigint() - computeStart) / 1e6;
+  const resp = { id, result: res, duration: computeDuration, decodeDuration };
   if (data && data.correlationId != null) resp.correlationId = data.correlationId;
   parentPort.postMessage(resp);
 });

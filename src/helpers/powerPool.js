@@ -48,11 +48,40 @@ class WorkerWrapper {
   postMessage(message, transfer) {
     let msg = message;
     let tr = transfer;
+    const isTransferable =
+      msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer;
+    if (isTransferable) {
+      if (Array.isArray(tr)) {
+        try {
+          if (tr.length) this._underlying.postMessage(msg, tr);
+          else this._underlying.postMessage(msg);
+          return;
+        } catch (err) {
+          this._logger.error(err, 'Failed to postMessage to underlying worker');
+          throw err;
+        }
+      }
+
+      if (!tr) {
+        const buffer = msg instanceof ArrayBuffer ? msg : msg.buffer;
+        if (buffer?.byteLength > 0) tr = [buffer];
+      }
+
+      try {
+        if (tr?.length) this._underlying.postMessage(msg, tr);
+        else this._underlying.postMessage(msg);
+      } catch (err) {
+        this._logger.error(err, 'Failed to postMessage to underlying worker');
+        throw err;
+      }
+      return;
+    }
+
     const isPlainObject =
-      message !== null &&
-      typeof message === 'object' &&
-      !ArrayBuffer.isView(message) &&
-      !(message instanceof ArrayBuffer);
+      msg !== null &&
+      typeof msg === 'object' &&
+      !ArrayBuffer.isView(msg) &&
+      !(msg instanceof ArrayBuffer);
     if (isPlainObject) {
       try {
         const u8 = this._pool._encodeForTransfer(message);
@@ -71,14 +100,6 @@ class WorkerWrapper {
       } catch (err) {
         tr = transfer;
         msg = message;
-      }
-    }
-    if (!tr && (msg instanceof Uint8Array || ArrayBuffer.isView(msg))) {
-      const buffer = msg.buffer;
-      if (buffer?.byteLength > 0) {
-        tr = [buffer];
-      } else {
-        tr = undefined;
       }
     }
 
@@ -469,7 +490,7 @@ export class PowerPool {
       obj.tasks++;
       this._activeTasks++;
       obj.lastActive = startTime;
-      this._updateIdleState();
+      if (this._isIdle) this._updateIdleState();
       return wantResponse ? pendingPromise : true;
     } catch (err) {
       if (wantResponse && correlationKey) {
@@ -849,6 +870,35 @@ export class PowerPool {
    */
   _prepareForTransfer(msg, tr, opts) {
     const zeroCopy = Boolean(opts?.zeroCopy);
+    if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer) {
+      const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
+      if (!tr) {
+        if (transferTarget?.byteLength === 0) {
+          try {
+            const copy = msg instanceof ArrayBuffer ? msg.slice(0) : new Uint8Array(msg);
+            return { message: copy, transfer: [copy.buffer] };
+          } catch (err) {
+            return { message: msg, transfer: undefined };
+          }
+        }
+        return { message: msg, transfer: [transferTarget] };
+      }
+      if (Array.isArray(tr)) {
+        return { message: msg, transfer: tr };
+      }
+      if (tr.length === 0) {
+        return { message: msg, transfer: [transferTarget] };
+      }
+      const arr = [];
+      let found = false;
+      for (const item of tr) {
+        arr.push(item);
+        if (item === transferTarget) found = true;
+      }
+      if (!found) arr.push(transferTarget);
+      return { message: msg, transfer: arr };
+    }
+
     const isPlainObject =
       msg !== null &&
       typeof msg === 'object' &&
@@ -889,18 +939,6 @@ export class PowerPool {
       } catch (err) {
         return { message: msg, transfer: tr };
       }
-    }
-    if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer) {
-      const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
-      if (transferTarget?.byteLength === 0) {
-        try {
-          const copy = msg instanceof ArrayBuffer ? msg.slice(0) : new Uint8Array(msg);
-          return { message: copy, transfer: [copy.buffer] };
-        } catch (err) {
-          return { message: msg, transfer: undefined };
-        }
-      }
-      return { message: msg, transfer: [transferTarget] };
     }
     return { message: msg, transfer: tr };
   }
@@ -1279,7 +1317,8 @@ export class PowerPool {
           decoded = data;
         }
       }
-      const ev = { data: decoded, originalEvent: e };
+      const ev =
+        e?.data !== undefined && decoded === data ? e : { data: decoded, originalEvent: e };
       if (typeof worker.onmessage === 'function') {
         try {
           worker.onmessage(ev);
@@ -1408,6 +1447,14 @@ export class PowerPool {
   }
 
   /**
+   * Determine whether a single-worker pool should queue rather than flood the
+   * underlying worker with additional in-flight messages.
+   * @private
+   * @param {WorkerObj|null} least
+   * @param {number|null} targetWorkerId
+   * @returns {boolean}
+   */
+  /**
    * Post a message to a worker in the pool.
    * The pool will try to reuse an idle/least-loaded worker, grow the pool
    * (up to `maxSize`), or queue the task if configured.
@@ -1428,11 +1475,15 @@ export class PowerPool {
     const now = nowMs();
     // support explicit per-worker targeting via `options.workerId`
     const targetWorkerId = options?.workerId != null ? options.workerId : null;
+    const singleWorkerDirectFastPath =
+      targetWorkerId == null && this.workers.length === 1 && this._maxTasksPerWorker === Infinity;
     // prefer an existing idle/least-loaded worker
     const least =
       targetWorkerId != null
         ? this.workers.find((w) => w.id === targetWorkerId)
-        : this._findLeastLoadedWorker();
+        : singleWorkerDirectFastPath
+          ? this.workers[0]
+          : this._findLeastLoadedWorker();
 
     // support awaiting a response: options.awaitResponse or explicit options.correlationId
     const wantResponse = Boolean(options?.awaitResponse || options?.correlationId != null);
@@ -1914,9 +1965,43 @@ export class PowerPool {
       zeroCopy: Boolean(options?.zeroCopy),
     });
 
-    // Hoist selection and idle updates to reduce O(N * workers) work
+    // Single-worker opt-in fast path: avoid repeated worker selection and
+    // queueing overhead when there is only one worker and it can accept
+    // unlimited tasks via the native worker queue.
+    if (
+      targetWorkerId == null &&
+      this.workers.length === 1 &&
+      this._maxTasksPerWorker === Infinity
+    ) {
+      const obj = this.workers[0];
+      let idleStateDirty = false;
+      for (let i = 0; i < items.length; i++) {
+        const prepared = preparedItems[i] || {
+          message: items[i]?.message,
+          transfer: items[i]?.transfer,
+        };
+        try {
+          const startTime = nowMs();
+          if (prepared.transfer?.length)
+            obj.worker.postMessage(prepared.message, prepared.transfer);
+          else obj.worker.postMessage(prepared.message);
+          if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
+          obj.tasks++;
+          this._activeTasks++;
+          obj.lastActive = startTime;
+          idleStateDirty = true;
+          results[i] = true;
+        } catch (err) {
+          results[i] = false;
+        }
+      }
+      if (idleStateDirty) this._updateIdleState();
+      return results;
+    }
+
+    const isTargeted = targetWorkerId != null;
     let chosen = null;
-    if (targetWorkerId != null) {
+    if (isTargeted) {
       chosen = this.workers.find((w) => w.id === targetWorkerId);
       if (!chosen) return items.map(() => false);
     } else {
@@ -1932,9 +2017,9 @@ export class PowerPool {
       // If chosen worker is saturated, clear it so we re-select on demand
       if (chosen?.tasks >= this._maxTasksPerWorker) chosen = null;
 
-      // try to use the chosen worker
+      // try to reuse the same worker choice until it becomes saturated
       let least = chosen;
-      if (!least && targetWorkerId == null) least = this._findLeastLoadedWorker();
+      if (!least && !isTargeted) least = this._findLeastLoadedWorker();
 
       if (least?.tasks < this._maxTasksPerWorker) {
         try {

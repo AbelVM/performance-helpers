@@ -186,6 +186,44 @@ describe('PowerPool (mocked worker)', () => {
     }
   });
 
+  it('does not use the internal queue for a single-worker pool with infinite capacity', async () => {
+    class SlowUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn((msg) => {
+          setTimeout(() => {
+            if (this.onmessage) this.onmessage({ data: msg });
+          }, 20);
+        });
+        this.terminate = vi.fn();
+      }
+    }
+    const pool = new PowerPool(SlowUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      idleTimeout: 1000,
+      taskQueue: true,
+      lazy: false,
+    });
+    try {
+      const received = [];
+      pool.onmessage = (e) => {
+        if (e && e.data && typeof e.data.n === 'number') received.push(e.data);
+      };
+
+      expect(pool.postMessage({ n: 1 })).toBe(true);
+      expect(pool.postMessage({ n: 2 })).toBe(true);
+      expect(pool.queue.length).toBe(0);
+
+      await new Promise((res) => setTimeout(res, 100));
+      expect(received.length).toBe(2);
+      expect(pool.queue.length).toBe(0);
+    } finally {
+      pool.terminate();
+    }
+  });
+
   it('drops the newest queued task when queuePolicy is drop-newest', async () => {
     class SlowUnderlying {
       constructor() {

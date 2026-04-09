@@ -85,6 +85,26 @@ async function runWorkerPool(poolSize, tasks, iterations) {
     workerOptions: { type: 'module' },
   });
 
+  // Instrumentation: measure encode/post durations (ms) and collect
+  // per-task decode/compute timings reported back by workers.
+  const instrumentation = {
+    encodeTotalMs: 0,
+    postTotalMs: 0,
+    messagesReceived: 0,
+    decodeTotalMs: 0,
+    computeTotalMs: 0,
+  };
+
+  pool.onmessage = (e) => {
+    const payload = e && e.data ? e.data : e;
+    if (payload && typeof payload === 'object') {
+      if (typeof payload.decodeDuration === 'number')
+        instrumentation.decodeTotalMs += payload.decodeDuration;
+      if (typeof payload.duration === 'number') instrumentation.computeTotalMs += payload.duration;
+      instrumentation.messagesReceived++;
+    }
+  };
+
   // Simplified flow: post all tasks, wait for the pool to become idle (drain),
   // then read `getStats().performance` for detailed timing metrics.
   const t0 = process.hrtime.bigint();
@@ -93,8 +113,13 @@ async function runWorkerPool(poolSize, tasks, iterations) {
     // Encode each payload to a fresh Uint8Array and transfer its buffer
     // to avoid the pool's plain-object encoding path which may reuse
     // internal cached buffers and cause unsupported transfer errors.
+    const encStart = process.hrtime.bigint();
     const payload = o2u8({ iterations });
+    instrumentation.encodeTotalMs += Number(process.hrtime.bigint() - encStart) / 1e6;
+
+    const postStart = process.hrtime.bigint();
     pool.postMessage(payload, [payload.buffer]);
+    instrumentation.postTotalMs += Number(process.hrtime.bigint() - postStart) / 1e6;
   }
 
   // Wait until pool drains (queue empty and workers idle). `drain()` resolves with getStats().
@@ -112,7 +137,7 @@ async function runWorkerPool(poolSize, tasks, iterations) {
         : 0;
 
   pool.terminate();
-  return { totalMs, avgMs, results: null, stats: perf };
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation };
 }
 
 async function runWorkerPoolVariable(poolSize, tasks, iterationsArray) {
@@ -125,11 +150,34 @@ async function runWorkerPoolVariable(poolSize, tasks, iterationsArray) {
     workerOptions: { type: 'module' },
   });
 
+  // Instrumentation like `runWorkerPool`
+  const instrumentation = {
+    encodeTotalMs: 0,
+    postTotalMs: 0,
+    messagesReceived: 0,
+    decodeTotalMs: 0,
+    computeTotalMs: 0,
+  };
+  pool.onmessage = (e) => {
+    const payload = e && e.data ? e.data : e;
+    if (payload && typeof payload === 'object') {
+      if (typeof payload.decodeDuration === 'number')
+        instrumentation.decodeTotalMs += payload.decodeDuration;
+      if (typeof payload.duration === 'number') instrumentation.computeTotalMs += payload.duration;
+      instrumentation.messagesReceived++;
+    }
+  };
+
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
     const iters = Math.max(1, Math.round(iterationsArray[i]));
+    const encStart = process.hrtime.bigint();
     const payload = o2u8({ iterations: iters });
+    instrumentation.encodeTotalMs += Number(process.hrtime.bigint() - encStart) / 1e6;
+
+    const postStart = process.hrtime.bigint();
     pool.postMessage(payload, [payload.buffer]);
+    instrumentation.postTotalMs += Number(process.hrtime.bigint() - postStart) / 1e6;
   }
 
   const statsObj = await pool.drain();
@@ -145,7 +193,80 @@ async function runWorkerPoolVariable(poolSize, tasks, iterationsArray) {
         : 0;
 
   pool.terminate();
-  return { totalMs, avgMs, results: null, stats: perf };
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation };
+}
+
+async function runWorkerThreadBaseline(tasks, iterations) {
+  return new Promise((resolve, reject) => {
+    const worker = new NodeWorker('./bench/worker.js', { type: 'module' });
+    let received = 0;
+    const t0 = process.hrtime.bigint();
+
+    worker.on('message', () => {
+      received += 1;
+      if (received === tasks) {
+        const t1 = process.hrtime.bigint();
+        worker
+          .terminate()
+          .then(() =>
+            resolve({
+              totalMs: Number(t1 - t0) / 1e6,
+              avgMs: tasks ? Number(t1 - t0) / 1e6 / tasks : 0,
+            })
+          )
+          .catch(reject);
+      }
+    });
+
+    worker.on('error', reject);
+    worker.on('exit', (code) => {
+      if (code !== 0 && received !== tasks) {
+        reject(new Error(`worker exited with code ${code}`));
+      }
+    });
+
+    for (let i = 0; i < tasks; i++) {
+      const payload = o2u8({ iterations });
+      worker.postMessage(payload, [payload.buffer]);
+    }
+  });
+}
+
+async function runWorkerThreadBaselineVariable(tasks, iterationsArray) {
+  return new Promise((resolve, reject) => {
+    const worker = new NodeWorker('./bench/worker.js', { type: 'module' });
+    let received = 0;
+    const t0 = process.hrtime.bigint();
+
+    worker.on('message', () => {
+      received += 1;
+      if (received === tasks) {
+        const t1 = process.hrtime.bigint();
+        worker
+          .terminate()
+          .then(() =>
+            resolve({
+              totalMs: Number(t1 - t0) / 1e6,
+              avgMs: tasks ? Number(t1 - t0) / 1e6 / tasks : 0,
+            })
+          )
+          .catch(reject);
+      }
+    });
+
+    worker.on('error', reject);
+    worker.on('exit', (code) => {
+      if (code !== 0 && received !== tasks) {
+        reject(new Error(`worker exited with code ${code}`));
+      }
+    });
+
+    for (let i = 0; i < tasks; i++) {
+      const iters = Math.max(1, Math.round(iterationsArray[i]));
+      const payload = o2u8({ iterations: iters });
+      worker.postMessage(payload, [payload.buffer]);
+    }
+  });
 }
 
 // Note: removed runWorkerPoolSimple fallback — we now rely on PowerPool only.
@@ -206,15 +327,19 @@ function formatMd(report, filename) {
   }
   lines.push('# Benchmark Results');
   lines.push(`\nGenerated: ${report.timestamp}\n`);
-  lines.push('## Configuration');
+  lines.push('## Configuration\n');
   lines.push(`- TASKS: ${report.config.TASKS}`);
   lines.push(`- ITERS: ${report.config.ITERS}`);
   lines.push(`- POOL_SIZES: ${report.config.POOL_SIZES.join(', ')}`);
   // Constant-load benchmark (single-threaded + pool)
-  lines.push('\n## Constant-load benchmark');
+  lines.push('\n## Constant-load benchmark\n');
   if (report.singleThreaded) {
     lines.push(`- Single-threaded total: ${report.singleThreaded.totalMs.toFixed(2)} ms`);
     lines.push(`- Single-threaded avg per task: ${report.singleThreaded.avgMs.toFixed(2)} ms`);
+  }
+  if (report.workerThread) {
+    lines.push(`- Worker-thread total: ${report.workerThread.totalMs.toFixed(2)} ms`);
+    lines.push(`- Worker-thread avg per task: ${report.workerThread.avgMs.toFixed(2)} ms`);
   }
 
   if (report.pool && report.pool.length) {
@@ -280,6 +405,12 @@ function formatMd(report, filename) {
       );
       lines.push(
         `- Single-threaded avg per task: ${report.variable.singleThreaded.avgMs.toFixed(2)} ms`
+      );
+    }
+    if (report.variable.workerThread) {
+      lines.push(`- Worker-thread total: ${report.variable.workerThread.totalMs.toFixed(2)} ms`);
+      lines.push(
+        `- Worker-thread avg per task: ${report.variable.workerThread.avgMs.toFixed(2)} ms`
       );
     }
 
@@ -363,6 +494,7 @@ async function main() {
     timestamp: new Date().toISOString(),
     config: { mode, TASKS, ITERS, POOL_SIZES },
     singleThreaded: null,
+    workerThread: null,
     pool: [],
     cache: null,
   };
@@ -375,6 +507,17 @@ async function main() {
     report.singleThreaded = r;
   }
   if (mode === 'all' || mode === 'pool') {
+    console.log('Running worker-thread baseline benchmark...');
+    try {
+      report.workerThread = await runWorkerThreadBaseline(TASKS, ITERS);
+      console.log(
+        `Worker-thread baseline total ${report.workerThread.totalMs.toFixed(2)}ms avg ${report.workerThread.avgMs.toFixed(2)}ms`
+      );
+    } catch (err) {
+      console.warn('Worker-thread baseline failed:', err && err.message);
+      report.workerThread = { totalMs: 0, avgMs: 0 };
+    }
+
     for (const size of POOL_SIZES) {
       console.log(`Running worker pool benchmark with poolSize=${size}...`);
       let r;
@@ -412,17 +555,28 @@ async function main() {
     // Generate samples centered at 0.5 (so mapping v*2*ITERS produces values around ITERS)
     const samples = randomNormalArray(TASKS, 0.5, 0.15).map((v) => Math.max(0, v) * 2 * ITERS);
     // single-threaded variable load
+    report.variable = report.variable || { singleThreaded: null, workerThread: null, pool: [] };
     try {
       const rVarSingle = await runSingleThreadedVariable(TASKS, samples);
       console.log(
         `Single-threaded (variable) total ${rVarSingle.totalMs.toFixed(2)}ms avg ${rVarSingle.avgMs.toFixed(2)}ms`
       );
-      report.variable = report.variable || { singleThreaded: null, pool: [] };
       report.variable.singleThreaded = rVarSingle;
     } catch (err) {
       console.warn('Single-threaded variable run failed:', err && err.message);
-      report.variable = report.variable || { singleThreaded: null, pool: [] };
       report.variable.singleThreaded = { totalMs: 0, avgMs: 0 };
+    }
+
+    // worker-thread variable baseline
+    try {
+      const rVarWorker = await runWorkerThreadBaselineVariable(TASKS, samples);
+      console.log(
+        `Worker-thread variable baseline total ${rVarWorker.totalMs.toFixed(2)}ms avg ${rVarWorker.avgMs.toFixed(2)}ms`
+      );
+      report.variable.workerThread = rVarWorker;
+    } catch (err) {
+      console.warn('Worker-thread variable baseline failed:', err && err.message);
+      report.variable.workerThread = { totalMs: 0, avgMs: 0 };
     }
 
     // pool variable runs
