@@ -1,6 +1,6 @@
 # Benchmark Results
 
-Generated: 2026-04-09T21:18:25.831Z
+Generated: 2026-04-09T21:25:02.334Z
 
 ## Configuration
 
@@ -10,32 +10,34 @@ Generated: 2026-04-09T21:18:25.831Z
 
 ## Constant-load benchmark
 
-- Single-threaded total: 1537.82 ms
-- Single-threaded avg per task: 1.54 ms
-- Worker-thread total: 2263.14 ms
-- Worker-thread avg per task: 2.26 ms
+- Single-threaded total: 1512.90 ms
+- Single-threaded avg per task: 1.51 ms
+- Worker-thread total: 2292.01 ms
+- Worker-thread avg per task: 2.29 ms
 
 | Pool Size | T Total | T Pool | T Max | T Min | T Avg | T Std | % Slow |
 | ----------: | -----------: | -----------: | -----------: | -----------: | -----------: | -----------: | -----------: |
-| 1 | 2264.70 | 2265.54 | 4.81 | 1.47 | 2.24 | 0.72 | 0.00 |
-| 2 | 808.11 | 809.13 | 3.44 | 1.48 | 1.57 | 0.13 | 0.00 |
-| 4 | 422.33 | 423.41 | 2.84 | 1.49 | 1.58 | 0.09 | 0.00 |
-| 8 | 315.73 | 318.91 | 4.10 | 1.49 | 1.90 | 0.42 | 0.00 |
+| 1 | 2296.65 | 2297.51 | 5.01 | 1.47 | 2.27 | 0.75 | 0.00 |
+| 2 | 803.35 | 805.00 | 3.83 | 1.47 | 1.56 | 0.16 | 0.00 |
+| 4 | 428.96 | 430.90 | 3.64 | 1.49 | 1.59 | 0.17 | 0.00 |
+| 8 | 311.78 | 315.09 | 5.17 | 1.48 | 1.92 | 0.45 | 0.00 |
 
 ## Variable-load benchmark
-- Single-threaded total: 1507.12 ms
-- Single-threaded avg per task: 1.51 ms
-- Worker-thread total: 2231.42 ms
-- Worker-thread avg per task: 2.23 ms
+
+- Single-threaded total: 1552.28 ms
+- Single-threaded avg per task: 1.55 ms
+- Worker-thread total: 2321.68 ms
+- Worker-thread avg per task: 2.32 ms
 
 | Pool Size | T Total | T Pool | T Max | T Min | T Avg | T Std | % Slow |
 | ----------: | -----------: | -----------: | -----------: | -----------: | -----------: | -----------: | -----------: |
-| 1 | 2226.45 | 2226.93 | 5.94 | 0.00 | 2.20 | 1.00 | 0.00 |
-| 2 | 798.87 | 799.65 | 3.82 | 0.00 | 1.55 | 0.49 | 0.00 |
-| 4 | 440.34 | 441.89 | 4.29 | 0.00 | 1.58 | 0.52 | 0.00 |
-| 8 | 309.96 | 313.23 | 5.38 | 0.00 | 1.84 | 0.71 | 0.00 |
+| 1 | 2324.11 | 2324.45 | 6.61 | 0.22 | 2.29 | 1.04 | 0.00 |
+| 2 | 836.36 | 836.98 | 3.75 | 0.10 | 1.61 | 0.50 | 0.00 |
+| 4 | 436.35 | 437.77 | 3.69 | 0.12 | 1.59 | 0.48 | 0.00 |
+| 8 | 337.18 | 339.50 | 4.86 | 0.12 | 1.98 | 0.73 | 0.00 |
 
 ## Cache benchmark
-- Miss total: 2.58 ms
-- Hit total (5 reps): 1.69 ms
+
+- Miss total: 3.65 ms
+- Hit total (5 reps): 1.71 ms
 - Keys tested: 1000

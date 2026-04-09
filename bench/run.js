@@ -467,11 +467,15 @@ function formatMd(report, filename) {
   } else {
     lines.push('- No variable-load results');
   }
-  lines.push('\n## Cache benchmark');
+  lines.push('\n## Cache benchmark\n');
   if (report.cache) {
     lines.push(`- Miss total: ${report.cache.missTotal.toFixed(2)} ms`);
     lines.push(`- Hit total (${report.cache.reps} reps): ${report.cache.hitTotal.toFixed(2)} ms`);
     lines.push(`- Keys tested: ${report.cache.keysCount}`);
+    lines.push('');
+  } else {
+    lines.push('- No cache results');
+    lines.push('');
   }
 
   // write raw JSON file alongside the markdown and add a link to it at the end
@@ -481,10 +485,7 @@ function formatMd(report, filename) {
   } catch (err) {
     console.error('Failed to write JSON results file', err);
   }
-  /*   lines.push(`\n## Raw results data`);
-  lines.push('');
-  lines.push(`[Raw JSON file](${jsonFilename})`);
- */
+
   const md = lines.join('\n');
   writeFileSync(filename, md, 'utf8');
 }
