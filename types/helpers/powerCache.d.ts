@@ -22,57 +22,6 @@ export function deepEqualWithSeen(a: any, b: any, seen?: WeakMap<any, any>): boo
  * Example: `new PowerMemoizer(fn, { keyResolver: simpleArgsKey })`
  */
 export function simpleArgsKey(...args: any[]): string;
-/**
- * @typedef {Object} CacheNode
- * @property {*} key
- * @property {*} value
- * @property {number} weight
- * @property {number} expiresAt
- * @property {CacheNode|null} prev
- * @property {CacheNode|null} next
- */
-/**
- * @typedef {Object} PowerCacheOptions
- * @property {number} [maxEntries]
- * @property {number} [maxWeight]
- * @property {function(*):number} [weightFn]
- * @property {number} [defaultTTL]
- * @property {number} [maxPoolSize]
- * @property {boolean} [rejectOversized]
- * @property {function(*, *, string):void} [onEvict]
- * @property {function(*, *):void} [onExpire]
- * @property {number} [initialPoolSize]
- * @property {number} [maxCleanupPerTick]
- * @property {boolean} [eagerCleanupOnRead]
- */
-/**
- * @example
- * // Create a cache with caps and a simple weight function
- * const cache = new PowerCache({
- *   maxEntries: 100,
- *   maxWeight: 1024 * 1024,
- *   weightFn: (v) => (v && v.byteLength) ? v.byteLength : 1,
- *   defaultTTL: 60_000,
- *   rejectOversized: true
- * });
- *
- * // Insert a value with explicit weight and TTL
- * cache.set('tile:0:0:0', { labels: [] }, { ttl: 5 * 60_000, weight: 1024 });
- *
- * // Retrieve and mark as used
- * const val = cache.get('tile:0:0:0');
- *
- * // Iterate MRU-first
- * for (const [key, value] of cache.entries('MRU')) { ... }
- *
- * // Start periodic cleanup every 10s scanning up to 200 nodes per tick
- * cache.startCleanup({ interval: 10000, maxCleanupPerTick: 200 });
- *
- * // Inspect stats
- * logger.log(cache.stats());
- *
- * @class PowerCache
- */
 export class PowerCache {
     [x: number]: () => void;
     /**
@@ -89,8 +38,9 @@ export class PowerCache {
      * @param {number} [options.initialPoolSize=0] Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
      * @param {number} [options.maxCleanupPerTick=100] Default max nodes scanned per cleanup tick when running `startCleanup()`.
      * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
+    * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, }?: {
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, }?: {
         maxEntries?: number | undefined;
         maxWeight?: number | undefined;
         weightFn?: ((arg0: any) => number) | undefined;
@@ -102,7 +52,7 @@ export class PowerCache {
         initialPoolSize?: number | undefined;
         maxCleanupPerTick?: number | undefined;
         eagerCleanupOnRead?: boolean | undefined;
-    });
+    }, ...args: any[]);
     maxEntries: number;
     maxWeight: number;
     weightFn: (arg0: any) => number;
@@ -113,10 +63,10 @@ export class PowerCache {
     onExpire: ((arg0: any, arg1: any) => void) | null;
     maxCleanupPerTick: number;
     eagerCleanupOnRead: boolean;
-    map: Map<any, any>;
-    head: CacheNode | null;
-    tail: CacheNode | null;
-    pool: {
+    _map: Map<any, any>;
+    _head: CacheNode | null;
+    _tail: CacheNode | null;
+    _pool: {
         key: null;
         value: null;
         weight: number;
@@ -124,12 +74,12 @@ export class PowerCache {
         prev: null;
         next: null;
     }[];
-    currentWeight: number;
-    hits: number;
-    misses: number;
-    evictions: number;
-    rejected: number;
-    expirations: number;
+    _currentWeight: number;
+    _hits: number;
+    _misses: number;
+    _evictions: number;
+    _rejected: number;
+    _expirations: number;
     _cleanupTimer: number | null;
     _cleanupRunning: boolean;
     _cleanupParams: {
@@ -138,7 +88,9 @@ export class PowerCache {
     } | null;
     _cleanupCursor: any;
     _cleanupCursorValid: boolean;
+    _evictionCandidate: any;
     _inflightPromises: Map<any, any>;
+    _defaultAsyncTimeout: number;
     /**
      * Allocate a pool node or create a new one.
      *
@@ -354,7 +306,7 @@ export class PowerCache {
      * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
      * @returns {Promise<*>}
      */
-    getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate }?: {
+    getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate, timeout }?: {
         ttl?: number | undefined;
         weight?: number | undefined;
         staleWhileRevalidate?: boolean | undefined;

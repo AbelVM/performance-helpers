@@ -20,7 +20,7 @@ describe('PowerRateLimit functions and undo paths', () => {
   });
 
   it('rollback calls release when a reserve later throws', () => {
-    const l1 = { reserve: (n) => ({ tok: true }), release: vi.fn() };
+    const l1 = { reserve: () => ({ tok: true }), release: vi.fn() };
     const l2 = {
       reserve: () => {
         throw new Error('reserve fail');
@@ -82,9 +82,9 @@ describe('PowerRateLimit functions and undo paths', () => {
 
   it('throws TypeError and rolls back when atomic fallback limiter missing tryConsume or reserve', () => {
     // first limiter reserves successfully
-    const l1 = { reserve: (n) => ({ t: true }), release: vi.fn() };
+    const l1 = { reserve: () => ({ t: true }), release: vi.fn() };
     // second limiter lacks reserve and tryConsume but has addTokens (pre-check passes)
-    const l2 = { addTokens: (n) => {} /* no tryConsume or reserve */ };
+    const l2 = { addTokens: () => {} /* no tryConsume or reserve */ };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
     expect(() => r.tryConsume(1)).toThrow(TypeError);
     // ensure rollback attempted for l1

@@ -14,7 +14,7 @@ function makeUnderlyingFactory(processMs = 50) {
         const i = listeners[name].indexOf(fn);
         if (i >= 0) listeners[name].splice(i, 1);
       },
-      postMessage(msg, tr) {
+      postMessage() {
         // emulate async work then echo a message event
         setTimeout(() => {
           const ev = { data: { response: 'ok' } };

@@ -126,4 +126,45 @@ describe('PowerPool.batch APIs', () => {
       pool.terminate();
     }
   });
+
+  it('postMessageBatch drop-oldest rejects dropped awaitResponse task and clears pending response entry', async () => {
+    class SilentUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = vi.fn(() => {
+          // never replies
+        });
+        this.terminate = vi.fn();
+      }
+    }
+
+    const pool = new PowerPool(SilentUnderlying, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 0,
+      taskQueue: true,
+      queuePolicy: 'drop-oldest',
+      lazy: false,
+    });
+
+    try {
+      const pending = pool.postMessage({ req: 'old' }, undefined, {
+        awaitResponse: true,
+        timeout: 500,
+      });
+
+      expect(pool.queue.length).toBe(1);
+      expect(pool._pendingResponses.size).toBe(1);
+
+      const batchResults = pool.postMessageBatch([{ message: { req: 'new' } }]);
+      expect(batchResults).toEqual([true]);
+
+      await expect(pending).rejects.toThrow(/queued task dropped by policy/);
+      expect(pool._pendingResponses.size).toBe(0);
+      expect(pool.queue.length).toBe(1);
+    } finally {
+      pool.terminate();
+    }
+  });
 });

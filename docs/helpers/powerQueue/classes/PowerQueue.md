@@ -6,8 +6,12 @@
 
 # Class: PowerQueue
 
+PowerQueue
+
 Lightweight resizable ring-buffer queue with O(1) enqueue/dequeue.
 Designed as a small, dependency-free helper for high-throughput queues.
+
+ PowerQueue
 
 ## Example
 
@@ -82,6 +86,8 @@ Initial capacity (rounded up to power-of-two).
 
 > **get** **capacity**(): `number`
 
+Internal buffer capacity (always a power-of-two).
+
 ##### Returns
 
 `number`
@@ -93,6 +99,8 @@ Initial capacity (rounded up to power-of-two).
 #### Get Signature
 
 > **get** **isEmpty**(): `boolean`
+
+Whether the queue is empty.
 
 ##### Returns
 
@@ -106,6 +114,8 @@ Initial capacity (rounded up to power-of-two).
 
 > **get** **length**(): `number`
 
+Number of items currently queued.
+
 ##### Returns
 
 `number`
@@ -114,14 +124,14 @@ Initial capacity (rounded up to power-of-two).
 
 ### \[iterator\]()
 
-> **\[iterator\]**(): `Generator`\<`any`, `void`, `unknown`\>
+> **\[iterator\]**(): `Iterator`\<`any`, `any`, `any`\>
 
 Iterator (non-destructive) yielding items in FIFO order.
 Allows `for...of` and spread (`[...queue]`) without consuming the queue.
 
 #### Returns
 
-`Generator`\<`any`, `void`, `unknown`\>
+`Iterator`\<`any`, `any`, `any`\>
 
 ***
 

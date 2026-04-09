@@ -39,6 +39,18 @@ describe('PowerLatch branches extra', () => {
     });
   });
 
+  it('wait rejects immediately when provided signal is already aborted', async () => {
+    const l = new PowerLatch(1);
+    const ac = new AbortController();
+    ac.abort(new Error('already aborted'));
+
+    await expect(l.wait({ signal: ac.signal, timeout: 30 })).rejects.toSatisfy((err) => {
+      if (!err) return false;
+      if (err && (err.code === 'EABORT' || /abort/i.test(String(err.message)))) return true;
+      return false;
+    });
+  });
+
   it('reset clears aborted state and resolves when count set to zero', async () => {
     const l = new PowerLatch(1);
     const p = l.wait();

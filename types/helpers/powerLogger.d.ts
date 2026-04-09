@@ -109,12 +109,17 @@ export class PowerLogger {
     log(...args: any[]): void;
     /**
      * Log using `console.debug` when level >= 3 (alias for verbose debug output).
+     * Accepts values or functions (lazy evaluated).
      * Supports JSON mode similar to other methods.
+     * @param {...any} args
+     * @returns {void}
      */
     debug(...args: any[]): void;
     /**
      * Display tabular data. Uses `console.table` when available.
      * In JSON mode emits `{ level: 'table', msg: args, ts }` where `msg` is an array of arguments.
+     * @param {...any} args
+     * @returns {void}
      */
     table(...args: any[]): void;
     /**

@@ -1,0 +1,518 @@
+{
+  "generatedAt": "2026-04-09T16:27:29.928Z",
+  "report": [
+    {
+      "symbol": "PowerBackpressure",
+      "definedIn": "src/helpers/powerBackpressure.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerBackpressure.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerBatch",
+      "definedIn": "src/helpers/powerBatch.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerBatch.branches.extra.test.js",
+        "test/powerBatch.test.js"
+      ]
+    },
+    {
+      "symbol": "o2u8",
+      "definedIn": "src/helpers/powerBuffer.js",
+      "referencedIn": [
+        "bench/run.js",
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerPool.js",
+        "src/index.js",
+        "test/powerBuffer.test.js",
+        "test/powerChunking.branches.extra.test.js",
+        "test/umd.bundle.branches.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "u82o",
+      "definedIn": "src/helpers/powerBuffer.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerChunking.js",
+        "src/helpers/powerPool.js",
+        "src/index.js",
+        "test/powerBuffer.test.js",
+        "test/umd.bundle.branches.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.more-coverage-2.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "o2b",
+      "definedIn": "src/helpers/powerBuffer.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerBuffer.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.hasEqual.more.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "b2o",
+      "definedIn": "src/helpers/powerBuffer.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerBuffer.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerBulkhead",
+      "definedIn": "src/helpers/powerBulkhead.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerBulkhead.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerCache",
+      "definedIn": "src/helpers/powerCache.js",
+      "referencedIn": [
+        "bench/run.js",
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "dist/performance-helpers.js",
+        "scripts/repro_powercache.js",
+        "src/index.js",
+        "test/powerCache.branches.test.js",
+        "test/powerCache.bulk.test.js",
+        "test/powerCache.getorset.test.js",
+        "test/powerCache.hitRate.test.js",
+        "test/powerCache.iterator.test.js",
+        "test/powerCache.misses.test.js",
+        "test/powerCache.more.test.js",
+        "test/powerCache.test.js",
+        "test/powerCache.timeout.test.js",
+        "test/powerCache.touch.test.js",
+        "test/umd.bundle.branches.test.js",
+        "test/umd.bundle.cache-timers.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.hasEqual.more.test.js",
+        "test/umd.bundle.hasEqual.test.js",
+        "test/umd.bundle.more-coverage-2.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerMemoizer",
+      "definedIn": "src/helpers/powerCache.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerMemoizer.memoize.test.js",
+        "test/powerMemoizer.test.js",
+        "test/umd.bundle.exhaustive.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerTimedCache",
+      "definedIn": "src/helpers/powerCache.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerTimedCache.test.js"
+      ]
+    },
+    {
+      "symbol": "deepEqualWithSeen",
+      "definedIn": "src/helpers/powerCache.js",
+      "referencedIn": []
+    },
+    {
+      "symbol": "simpleArgsKey",
+      "definedIn": "src/helpers/powerCache.js",
+      "referencedIn": [
+        "test/powerTimedCache.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerChunker",
+      "definedIn": "src/helpers/powerChunking.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "dist/performance-helpers.js",
+        "src/index.js",
+        "test/powerChunking.branches.extra.test.js",
+        "test/powerChunking.errors.test.js",
+        "test/powerChunking.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerCircuit",
+      "definedIn": "src/helpers/powerCircuit.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerCircuit.observability.test.js",
+        "test/powerCircuit.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerDeadline",
+      "definedIn": "src/helpers/powerDeadline.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerDeadline.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerDefer",
+      "definedIn": "src/helpers/powerDefer.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerLatch.js",
+        "src/index.js",
+        "test/powerDefer.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerEventBus",
+      "definedIn": "src/helpers/powerEventBus.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerCircuit.js",
+        "src/helpers/powerPool.js",
+        "src/index.js",
+        "test/powerCircuit.observability.test.js",
+        "test/powerEventBus.branches.extra.test.js",
+        "test/powerEventBus.extra.test.js",
+        "test/powerEventBus.max.test.js",
+        "test/powerEventBus.more.test.js",
+        "test/powerEventBus.test.js",
+        "test/powerEventBus.uncovered.test.js",
+        "test/powerEventBus.weak.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerHistogram",
+      "definedIn": "src/helpers/powerHistogram.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerHistogram.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerLatch",
+      "definedIn": "src/helpers/powerLatch.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerLatch.branches.extra.test.js",
+        "test/powerLatch.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerLogger",
+      "definedIn": "src/helpers/powerLogger.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerPool.js",
+        "src/index.js",
+        "test/powerLogger.branches.test.js",
+        "test/powerLogger.formatter.name.test.js",
+        "test/powerLogger.json.test.js",
+        "test/powerLogger.output.test.js",
+        "test/powerLogger.table.debug.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.hasEqual.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerObserver",
+      "definedIn": "src/helpers/powerObserver.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerObserver.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerPermitGate",
+      "definedIn": "src/helpers/powerPermitGate.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "dist/performance-helpers.js",
+        "src/helpers/powerBackpressure.js",
+        "src/helpers/powerBulkhead.js",
+        "src/helpers/powerSemaphore.js",
+        "src/index.js",
+        "test/powerPermitGate.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerPoolShutdownError",
+      "definedIn": "src/helpers/powerPool.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "test/powerPool.shutdown.test.js",
+        "test/powerPool.terminateShutdown.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerPool",
+      "definedIn": "src/helpers/powerPool.js",
+      "referencedIn": [
+        "bench/run.js",
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "dist/performance-helpers.js",
+        "src/helpers/powerChunking.js",
+        "src/index.js",
+        "test/powerChunking.branches.extra.test.js",
+        "test/powerPool.autoTransfer.test.js",
+        "test/powerPool.autoscale.extra.test.js",
+        "test/powerPool.autoscale.test.js",
+        "test/powerPool.awaitTimeout.test.js",
+        "test/powerPool.batch.test.js",
+        "test/powerPool.branches.extra2.test.js",
+        "test/powerPool.branches.test.js",
+        "test/powerPool.correlation.test.js",
+        "test/powerPool.correlationId.test.js",
+        "test/powerPool.dispose.test.js",
+        "test/powerPool.drain.test.js",
+        "test/powerPool.events.test.js",
+        "test/powerPool.more.extra.test.js",
+        "test/powerPool.more.test.js",
+        "test/powerPool.postMessage.promise.test.js",
+        "test/powerPool.queueHigh.test.js",
+        "test/powerPool.queueSaturation.test.js",
+        "test/powerPool.resize.overload.test.js",
+        "test/powerPool.resize.test.js",
+        "test/powerPool.shutdown.test.js",
+        "test/powerPool.stats.test.js",
+        "test/powerPool.stopThePress.test.js",
+        "test/powerPool.test.js",
+        "test/powerPool.timers.test.js",
+        "test/powerPool.uncovered.test.js",
+        "test/powerPool.workerId.test.js",
+        "test/powerSlidingWindow.pool.test.js",
+        "test/powerThrottle.pool.test.js",
+        "test/umd.bundle.branches.test.js",
+        "test/umd.bundle.exhaustive.test.js",
+        "test/umd.bundle.pool.test.js",
+        "test/umd.bundle.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerQueue",
+      "definedIn": "src/helpers/powerQueue.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerBatch.js",
+        "src/helpers/powerBulkhead.js",
+        "src/helpers/powerPermitGate.js",
+        "src/helpers/powerPool.js",
+        "src/helpers/powerSlidingWindow.js",
+        "src/index.js",
+        "test/powerQueue.iterators.test.js",
+        "test/powerQueue.saturation.test.js",
+        "test/powerQueue.test.js",
+        "test/powerQueue.unshiftMany.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerRateLimit",
+      "definedIn": "src/helpers/powerRateLimit.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerRateLimit.atomic.test.js",
+        "test/powerRateLimit.extra.test.js",
+        "test/powerRateLimit.functions.test.js",
+        "test/powerRateLimit.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerRetry",
+      "definedIn": "src/helpers/powerRetry.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerDeadline.js",
+        "src/index.js",
+        "test/powerRetry.attemptTimeout.test.js",
+        "test/powerRetry.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerScheduler",
+      "definedIn": "src/helpers/powerScheduler.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "dist/performance-helpers.js",
+        "src/helpers/powerBatch.js",
+        "src/helpers/powerObserver.js",
+        "src/index.js",
+        "test/powerScheduler.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerSemaphore",
+      "definedIn": "src/helpers/powerSemaphore.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerSemaphore.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerSlidingWindow",
+      "definedIn": "src/helpers/powerSlidingWindow.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerRateLimit.js",
+        "src/index.js",
+        "test/powerRateLimit.test.js",
+        "test/powerSlidingWindow.pool.test.js",
+        "test/powerSlidingWindow.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerSubscriberSet",
+      "definedIn": "src/helpers/powerSubscriberSet.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "dist/performance-helpers.js",
+        "src/helpers/powerEventBus.js",
+        "src/helpers/powerObserver.js",
+        "src/index.js",
+        "test/powerSubscriberSet.test.js"
+      ]
+    },
+    {
+      "symbol": "cleanupWeakRefs",
+      "definedIn": "src/helpers/powerSubscriberSet.js",
+      "referencedIn": [
+        "src/helpers/powerEventBus.js",
+        "test/powerSubscriberSet.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerTTLMap",
+      "definedIn": "src/helpers/powerTTLMap.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/index.js",
+        "test/powerTTLMap.test.js"
+      ]
+    },
+    {
+      "symbol": "PowerThrottle",
+      "definedIn": "src/helpers/powerThrottle.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerRateLimit.js",
+        "src/index.js",
+        "test/powerRateLimit.test.js",
+        "test/powerThrottle.pool.test.js",
+        "test/powerThrottle.refill.test.js",
+        "test/powerThrottle.reserve.test.js",
+        "test/powerThrottle.test.js"
+      ]
+    },
+    {
+      "symbol": "nowMs",
+      "definedIn": "src/index.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/helpers/powerCache.js",
+        "src/helpers/powerCircuit.js",
+        "src/helpers/powerLogger.js",
+        "src/helpers/powerPool.js",
+        "src/helpers/powerSlidingWindow.js",
+        "src/helpers/powerTTLMap.js",
+        "src/helpers/powerThrottle.js",
+        "src/utils/now.js",
+        "test/utils.now.extra.test.js",
+        "test/utils.now.more.test.js"
+      ]
+    },
+    {
+      "symbol": "measureSync",
+      "definedIn": "src/index.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/utils/now.js",
+        "test/utils.measure.test.js"
+      ]
+    },
+    {
+      "symbol": "measureAsync",
+      "definedIn": "src/index.js",
+      "referencedIn": [
+        "dist/performance-helpers.cjs.js",
+        "dist/performance-helpers.es.js",
+        "src/utils/now.js",
+        "test/utils.measure.test.js"
+      ]
+    },
+    {
+      "symbol": "normalizeError",
+      "definedIn": "src/utils/errors.js",
+      "referencedIn": [
+        "src/helpers/powerChunking.js",
+        "src/helpers/powerLogger.js",
+        "test/powerErrors.test.js"
+      ]
+    },
+    {
+      "symbol": "formatErrorObj",
+      "definedIn": "src/utils/errors.js",
+      "referencedIn": [
+        "src/helpers/powerLogger.js",
+        "test/powerErrors.test.js"
+      ]
+    }
+  ]
+}

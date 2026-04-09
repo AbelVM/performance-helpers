@@ -6,7 +6,11 @@
 
 # Class: PowerPoolShutdownError
 
-Error used when the pool is shutdown and pending promises are rejected.
+PowerPoolShutdownError
+
+Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
+
+ PowerPoolShutdownError
 
 ## Extends
 

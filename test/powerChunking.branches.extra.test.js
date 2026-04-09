@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { PowerChunker } from '../src/helpers/powerChunking.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { o2u8 } from '../src/helpers/powerBuffer.js';
@@ -64,11 +64,11 @@ describe('PowerChunker branches extra', () => {
     };
 
     try {
-      function* values() {
+      const values = function* () {
         yield 1;
         yield 2;
         yield 3;
-      }
+      };
 
       const seen = [];
       const pool = new PowerChunker(values(), (value) => value + 1, { chunkSize: 1 });
@@ -133,7 +133,9 @@ describe('PowerChunker branches extra', () => {
 
       worker.postMessage({ chunk: [1] });
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(errors.some((err) => /message handler failed/.test(String(err && err.message)))).toBe(true);
+      expect(errors.some((err) => /message handler failed/.test(String(err && err.message)))).toBe(
+        true
+      );
 
       worker.onmessage = (e) => messages.push(e.data);
       worker.postMessage(o2u8(null));

@@ -42,6 +42,8 @@ import { normalizeError } from '../utils/errors.js';
  * @param {'light'|'medium'|'heavy'} [options.fnComplexity] - Hint about `fn` complexity to bias chunking. When omitted the helper
  *   will attempt to analyze `fn`'s source to infer a complexity score ('light'|'medium'|'heavy') and use that
  *   to bias the chunk size. If analysis fails the helper falls back to 'medium'.
+ * @class PowerChunker
+ * @public
  * @returns {PowerPool} The created `PowerPool` instance managing the chunked work.
  *   The constructor returns the `PowerPool` instance; the helper enqueues
  *   chunk tasks internally (via `pool.postMessageBatch`). Listen to
@@ -80,7 +82,7 @@ export class PowerChunker {
 
     const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
     const poolSize =
-      poolOptions && Number.isFinite(poolOptions.size) && poolOptions.size > 0
+      Number.isFinite(poolOptions?.size) && poolOptions?.size > 0
         ? poolOptions.size
         : Math.max(1, hw);
 
@@ -93,7 +95,7 @@ export class PowerChunker {
     // bias by `fnComplexity`. For unknown-length iterables pick a conservative
     // default sized to `poolSize` so we can stream efficiently.
     let chunkSize;
-    if (explicitChunkSize && Number.isFinite(explicitChunkSize) && explicitChunkSize > 0) {
+    if (Number.isFinite(explicitChunkSize) && explicitChunkSize > 0) {
       chunkSize = Math.max(1, Math.floor(explicitChunkSize));
     } else if (total != null) {
       chunkSize = Math.max(1, Math.floor(total / Math.max(1, poolSize * 4)) || 1);
@@ -102,8 +104,7 @@ export class PowerChunker {
       chunkSize = Math.max(1, Math.floor(poolSize));
     }
 
-    const explicitProvided =
-      explicitChunkSize && Number.isFinite(explicitChunkSize) && explicitChunkSize > 0;
+    const explicitProvided = Number.isFinite(explicitChunkSize) && explicitChunkSize > 0;
     if (!explicitProvided) {
       if (fnComplexity === 'light') chunkSize = Math.max(1, Math.floor(chunkSize * 2));
       else if (fnComplexity === 'heavy') chunkSize = Math.max(1, Math.floor(chunkSize / 2));
@@ -123,11 +124,7 @@ export class PowerChunker {
     // iterables we stream chunk-sized slices and post them one-by-one to avoid
     // materializing the entire iterable.
     if (isArray) {
-      const batchItems = [];
-      for (let i = 0; i < total; i += chunkSize) {
-        batchItems.push({ message: { chunk: items.slice(i, i + chunkSize) } });
-      }
-      pool.postMessageBatch(batchItems, postOptions);
+      dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions, poolSize);
       return pool;
     }
 
@@ -141,7 +138,7 @@ export class PowerChunker {
 // Module-level helpers to avoid per-constructor allocations.
 function analyzeFnComplexity(fnToAnalyze) {
   try {
-    const ctorName = fnToAnalyze && fnToAnalyze.constructor && fnToAnalyze.constructor.name;
+    const ctorName = fnToAnalyze?.constructor?.name;
     if (ctorName === 'AsyncFunction' || ctorName === 'GeneratorFunction') return 'heavy';
     if (typeof fnToAnalyze.length === 'number' && fnToAnalyze.length >= 3) return 'medium';
     return 'light';
@@ -168,7 +165,7 @@ function makeInlineWorkerConstructor(fn) {
       } catch (e) {
         decoded = message;
       }
-      const chunk = decoded && decoded.chunk ? decoded.chunk : decoded;
+      const chunk = decoded?.chunk ? decoded.chunk : decoded;
       const self = this;
       setTimeout(async () => {
         if (!self._alive) return;
@@ -178,7 +175,7 @@ function makeInlineWorkerConstructor(fn) {
           for (let i = 0; i < chunk.length; i++) {
             try {
               const res = self._fn(chunk[i], i, chunk);
-              if (res && typeof res.then === 'function') {
+              if (typeof res?.then === 'function') {
                 const idx = i;
                 pending.push(
                   res
@@ -188,9 +185,9 @@ function makeInlineWorkerConstructor(fn) {
                     .catch((err) => {
                       results[idx] = {
                         error: true,
-                        code: (err && err.code) || 'ERR_ITEM',
-                        message: err && err.message,
-                        stack: err && err.stack,
+                        code: err?.code || 'ERR_ITEM',
+                        message: err?.message,
+                        stack: err?.stack,
                       };
                       if (typeof self.onerror === 'function') {
                         try {
@@ -227,12 +224,7 @@ function makeInlineWorkerConstructor(fn) {
           if (typeof self.onmessage === 'function') {
             try {
               const resp = { processed: chunk.length, results };
-              try {
-                if (decoded && decoded.correlationId != null)
-                  resp.correlationId = decoded.correlationId;
-              } catch (e) {
-                /* ignore */
-              }
+              if (decoded?.correlationId != null) resp.correlationId = decoded.correlationId;
               self.onmessage({ data: resp });
             } catch (e) {
               if (typeof self.onerror === 'function') {
@@ -272,7 +264,37 @@ function makeInlineWorkerConstructor(fn) {
   };
 }
 
+function dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions, poolSize) {
+  const totalChunks = Math.ceil(total / chunkSize);
+  if (totalChunks <= 0) return;
+
+  // Keep memory bounded by sending chunk descriptors in windows instead of one huge batch.
+  const windowChunks = Math.max(1, Math.min(totalChunks, Math.max(1, poolSize * 8)));
+
+  for (let chunkStart = 0; chunkStart < totalChunks; chunkStart += windowChunks) {
+    const chunkEnd = Math.min(totalChunks, chunkStart + windowChunks);
+    const batchItems = new Array(chunkEnd - chunkStart);
+
+    for (let chunkIndex = chunkStart; chunkIndex < chunkEnd; chunkIndex++) {
+      const offset = chunkIndex * chunkSize;
+      batchItems[chunkIndex - chunkStart] = {
+        message: { chunk: items.slice(offset, Math.min(total, offset + chunkSize)) },
+      };
+    }
+
+    const dispatchResults = pool.postMessageBatch(batchItems, postOptions);
+    const failedChunks = [];
+    for (let i = 0; i < dispatchResults.length; i++) {
+      if (dispatchResults[i] === false) failedChunks.push(chunkStart + i);
+    }
+    if (failedChunks.length) {
+      notifyChunkDispatchFailure(pool, failedChunks, 'batch');
+    }
+  }
+}
+
 function streamIterableIntoPool(pool, it, csize) {
+  let chunkIndex = 0;
   try {
     const iterator = it[Symbol.iterator]();
     let cur = [];
@@ -280,25 +302,58 @@ function streamIterableIntoPool(pool, it, csize) {
       cur.push(r.value);
       if (cur.length >= csize) {
         try {
-          pool.postMessage({ chunk: cur });
+          const accepted = pool.postMessage({ chunk: cur });
+          if (accepted === false) {
+            notifyChunkDispatchFailure(pool, [chunkIndex], 'stream');
+          }
         } catch (e) {
-          /* best-effort: continue streaming */
+          notifyChunkDispatchFailure(pool, [chunkIndex], 'stream', e);
         }
         cur = [];
+        chunkIndex++;
       }
     }
     if (cur.length) {
       try {
-        pool.postMessage({ chunk: cur });
+        const accepted = pool.postMessage({ chunk: cur });
+        if (accepted === false) {
+          notifyChunkDispatchFailure(pool, [chunkIndex], 'stream');
+        }
       } catch (e) {
-        /* ignore */
+        notifyChunkDispatchFailure(pool, [chunkIndex], 'stream', e);
       }
     }
   } catch (err) {
+    notifyChunkDispatchFailure(pool, [chunkIndex], 'stream-iterate', err);
     try {
-      pool._logger && pool._logger.error(err, 'PowerChunker: failed while streaming iterable');
+      pool?._logger?.error?.(err, 'PowerChunker: failed while streaming iterable');
     } catch (e) {
       /* ignore */
     }
   }
+}
+
+function notifyChunkDispatchFailure(pool, failedChunks, mode, cause) {
+  const err = new Error(`PowerChunker failed to dispatch ${failedChunks.length} chunk(s)`);
+  err.code = 'ECHUNKDISPATCH';
+  err.failedChunks = failedChunks.slice();
+  err.mode = mode;
+  if (cause) err.cause = cause;
+
+  const emit = () => {
+    try {
+      if (typeof pool?.onerror === 'function') pool.onerror(err);
+    } catch (e) {
+      /* ignore */
+    }
+    pool?._bus?.emit?.('error', err);
+    try {
+      pool?._logger?.debug?.(err, 'PowerChunker dispatch failure');
+    } catch (e) {
+      /* ignore */
+    }
+  };
+
+  if (typeof queueMicrotask === 'function') queueMicrotask(emit);
+  else setTimeout(emit, 0);
 }

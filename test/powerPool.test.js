@@ -322,6 +322,7 @@ describe('PowerPool (mocked worker)', () => {
       pool.onmessage = (e) => {
         if (e && e.data && typeof e.data.n === 'number') received.push(e.data);
       };
+      expect(pool.queuePaused).toBe(false);
       pool.pauseQueue();
       expect(pool.queuePaused).toBe(true);
 

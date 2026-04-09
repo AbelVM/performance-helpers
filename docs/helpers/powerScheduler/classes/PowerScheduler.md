@@ -6,10 +6,13 @@
 
 # Class: PowerScheduler
 
-Small scheduler helper for coalescing work into a single microtask or macrotask.
+PowerScheduler
 
-This is useful for helpers that need to batch or debounce notifications while
-preserving a flush API and a simple scheduling mode.
+Small scheduler helper for coalescing work into a single microtask or macrotask.
+Useful for batching or debouncing flushes while providing `schedule()`,
+`flush()` and `cancel()` controls.
+
+ PowerScheduler
 
 ## Constructors
 
@@ -27,6 +30,12 @@ Function called when the scheduled work is flushed.
 
 ##### options?
 
+Scheduling and error handling options.
+
+###### onError?
+
+((`error`) => `void`) \| `null`
+
 ###### scheduling?
 
 `"microtask"` \| `"macrotask"`
@@ -40,6 +49,12 @@ Function called when the scheduled work is flushed.
 ### \_flushFn
 
 > **\_flushFn**: `Function`
+
+***
+
+### \_onError
+
+> **\_onError**: ((`error`) => `void`) \| `null`
 
 ***
 

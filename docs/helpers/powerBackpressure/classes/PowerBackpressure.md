@@ -6,6 +6,13 @@
 
 # Class: PowerBackpressure
 
+PowerBackpressure
+
+Producer-facing backpressure controller built on top of `PowerPermitGate`.
+Provides adaptive refill behavior and FIFO queuing for producers.
+
+ PowerBackpressure
+
 ## Extends
 
 - [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md)

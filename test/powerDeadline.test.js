@@ -86,10 +86,7 @@ describe('PowerDeadline', () => {
     controller.abort('user cancelled');
 
     await expect(
-      PowerDeadline.run(
-        async () => 'never',
-        { signal: controller.signal, totalTimeout: 25 }
-      )
+      PowerDeadline.run(async () => 'never', { signal: controller.signal, totalTimeout: 25 })
     ).rejects.toMatchObject({
       code: 'EABORT',
       reason: 'user cancelled',

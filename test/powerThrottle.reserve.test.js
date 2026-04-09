@@ -23,4 +23,24 @@ describe('PowerThrottle reserve/release', () => {
     t.release(1);
     expect(t.tokens).toBe(2);
   });
+
+  it('rollback is an alias for release', () => {
+    const t = new PowerThrottle({ capacity: 3, tokens: 3, refillRate: 0 });
+    const token = t.reserve(2);
+    expect(token).toEqual({ n: 2 });
+    expect(t.tokens).toBe(1);
+
+    t.rollback(token);
+    expect(t.tokens).toBe(3);
+  });
+
+  it('release and rollback ignore nullish and zero-ish values', () => {
+    const t = new PowerThrottle({ capacity: 2, tokens: 1, refillRate: 0 });
+
+    t.release(null);
+    t.release({ n: 0 });
+    t.rollback(undefined);
+
+    expect(t.tokens).toBe(1);
+  });
 });

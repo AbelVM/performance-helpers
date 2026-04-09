@@ -13,13 +13,15 @@ export class PowerLatch {
      */
     constructor(count?: number, options?: {});
     _count: number;
-    /** @type {Array<{defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
-    _waiters: Array<{
+    /** @type {Map<number, {token:number, defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
+    _waiters: Map<number, {
+        token: number;
         defer: PowerDefer;
         timer?: any;
         signalHandler?: Function;
         signal?: AbortSignal;
     }>;
+    _nextWaiterToken: number;
     _aborted: boolean;
     _abortReason: any;
     _onAbort: any;
@@ -69,7 +71,13 @@ export class PowerLatch {
      * @returns {boolean}
      */
     get done(): boolean;
-    _removeWaiter(waiter: any): any;
+    _removeWaiter(waiterOrToken: any): {
+        token: number;
+        defer: PowerDefer;
+        timer?: any;
+        signalHandler?: Function;
+        signal?: AbortSignal;
+    } | null;
     _resolveAll(): void;
     _rejectAll(err: any): void;
     /**

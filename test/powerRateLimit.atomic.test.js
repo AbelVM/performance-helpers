@@ -12,7 +12,7 @@ describe('PowerRateLimit atomic semantics', () => {
     };
 
     const failingLimiter = {
-      reserve: (n) => null,
+      reserve: () => null,
     };
 
     const pr = new PowerRateLimit([okLimiter, failingLimiter], { atomic: true });

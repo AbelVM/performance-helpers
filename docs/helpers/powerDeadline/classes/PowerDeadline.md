@@ -11,6 +11,8 @@ Deadline-aware async helper for timeout, retry budget, and abort metadata.
 Use `PowerDeadline` to wrap async work with per-attempt timeouts, a total
 deadline for the whole operation, and optional retry/backoff behavior.
 
+ PowerDeadline
+
 ## Constructors
 
 ### Constructor

@@ -5,6 +5,15 @@
  */
 import { nowMs } from '../utils/now.js';
 
+/**
+ * PowerTTLMap
+ *
+ * Lightweight Map-like store where each key has an optional TTL (milliseconds).
+ * Entries expire lazily on access or iteration.
+ *
+ * @class PowerTTLMap
+ * @public
+ */
 export class PowerTTLMap {
   /**
    * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
@@ -15,7 +24,7 @@ export class PowerTTLMap {
    */
   constructor(defaultTTL = 0, options = {}) {
     this._defaultTTL = Number(defaultTTL) || 0; // milliseconds; 0 = no expiry
-    this._onExpire = options && typeof options.onExpire === 'function' ? options.onExpire : null;
+    this._onExpire = typeof options?.onExpire === 'function' ? options.onExpire : null;
     this._map = new Map(); // key -> { value, expiresAt }
     // Track keys that have an expiry to allow faster purging of expired
     // entries without scanning the entire map on each `size` access.

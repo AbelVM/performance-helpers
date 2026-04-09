@@ -6,7 +6,7 @@ describe('PowerPool Node-style messageerror forwarding', () => {
     class NodeStyleUnderlying {
       constructor() {
         this._listeners = Object.create(null);
-        this.postMessage = vi.fn((msg) => {});
+        this.postMessage = vi.fn(() => {});
         this.terminate = vi.fn();
       }
       on(ev, cb) {

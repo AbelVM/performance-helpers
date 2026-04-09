@@ -22,6 +22,7 @@ timed.set('k', 1);
 // entries will be automatically expired by the background cleaner
 
 @class PowerTimedCache
+@public
 ```
 
 ## Indexable

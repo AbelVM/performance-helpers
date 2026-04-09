@@ -9,7 +9,6 @@
 > **b2o**(`buf`): `any`
 
 Decode an ArrayBuffer/TypedArray/Buffer containing JSON UTF-8 to a value.
-This is a small wrapper around `u82o` for the legacy ArrayBuffer API.
 
 ## Parameters
 
@@ -17,16 +16,10 @@ This is a small wrapper around `u82o` for the legacy ArrayBuffer API.
 
 `any`
 
-Buffer-like input containing JSON UTF-8.
+Buffer-like input.
 
 ## Returns
 
 `any`
 
 Parsed value.
-
-## Example
-
-```ts
-const obj = b2o(buf)
-```

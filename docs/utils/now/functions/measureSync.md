@@ -10,17 +10,28 @@
 
 Measure a synchronous function's execution duration.
 
+If `fn` is a function it will be invoked synchronously; otherwise the
+provided value is treated as the result and returned immediately. The
+returned object contains the `result` plus `ms`, `start`, and `end`
+timestamps measured with `nowMs()`.
+
+If the invoked function throws, the thrown error will be augmented with
+a `durationMs` property (elapsed time until the throw) before being
+re-thrown to the caller.
+
 ## Parameters
 
 ### fn
 
 `any`
 
-A function to call or a value to return.
+Function to execute or a direct value.
 
 ## Returns
 
 `object`
+
+The result and timing.
 
 ### end
 
@@ -37,3 +48,7 @@ A function to call or a value to return.
 ### start
 
 > **start**: `number`
+
+## Throws
+
+Re-throws any error thrown by `fn` after attaching `durationMs`.

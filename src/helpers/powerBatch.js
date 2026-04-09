@@ -16,6 +16,15 @@
 import { PowerQueue } from './powerQueue.js';
 import { PowerScheduler } from './powerScheduler.js';
 
+/**
+ * PowerBatch
+ *
+ * Scheduler-driven batching helper that collects items and dispatches them
+ * to a provided handler on a microtask/macrotask boundary.
+ *
+ * @class PowerBatch
+ * @public
+ */
 export class PowerBatch {
   /**
    * @typedef {Object} PowerBatchOptions
@@ -107,9 +116,11 @@ export class PowerBatch {
       return;
     }
 
+    // Pre-size the batch array and drain queue in one pass.
     const items = new Array(size);
-    for (let i = 0; i < size; i += 1) {
-      items[i] = this._queue.shift();
+    let idx = 0;
+    for (const item of this._queue.drain()) {
+      items[idx++] = item;
     }
 
     const pending = this._pending;

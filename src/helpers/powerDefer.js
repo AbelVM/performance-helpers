@@ -10,6 +10,14 @@
  */
 const _deferInternals = new WeakMap();
 
+/**
+ * PowerDefer
+ *
+ * Deferred promise utility exposing `promise`, `resolve` and `reject` helpers.
+ * Useful when needing a promise whose resolution is controlled externally.
+ *
+ * @class PowerDefer
+ */
 export class PowerDefer {
   /**
    * @typedef {Object} PowerDeferOptions
@@ -44,7 +52,7 @@ export class PowerDefer {
    */
   resolve(value) {
     const i = _deferInternals.get(this);
-    if (i && typeof i.resolve === 'function') i.resolve(value);
+    if (typeof i?.resolve === 'function') i.resolve(value);
   }
 
   /**
@@ -54,7 +62,7 @@ export class PowerDefer {
    */
   reject(err) {
     const i = _deferInternals.get(this);
-    if (i && typeof i.reject === 'function') i.reject(err);
+    if (typeof i?.reject === 'function') i.reject(err);
   }
 
   /**

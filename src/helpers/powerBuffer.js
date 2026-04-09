@@ -65,13 +65,25 @@ function getDecoder() {
  * const u8 = o2u8({ hello: 'world' })
  * // use u8.buffer as transferable
  */
+/**
+ * Encode a plain object or buffer-like value to a UTF-8 `Uint8Array`.
+ *
+ * - Returns the input if it's already a `Uint8Array`.
+ * - Returns a zero-copy view for ArrayBuffer/TypedArray inputs.
+ * - Otherwise `JSON.stringify` is encoded as UTF-8.
+ *
+ * @param {*} obj - Value to encode.
+ * @returns {Uint8Array} UTF-8 encoded bytes.
+ * @throws {Error} When no encoder is available.
+ * @public
+ */
 export const o2u8 = (obj) => {
   if (obj instanceof Uint8Array) return obj;
   if (ArrayBuffer.isView(obj)) return new Uint8Array(obj.buffer, obj.byteOffset, obj.byteLength);
   if (obj instanceof ArrayBuffer) return new Uint8Array(obj);
   const str = JSON.stringify(obj);
   const enc = getEncoder();
-  if (enc && typeof enc.encode === 'function') return enc.encode(str);
+  if (typeof enc?.encode === 'function') return enc.encode(str);
   throw new Error('No TextEncoder or Buffer available to encode object');
 };
 
@@ -83,6 +95,14 @@ export const o2u8 = (obj) => {
  * @throws {TypeError} If the input type is not supported.
  * @example
  * const obj = u82o(u8)
+ */
+/**
+ * Decode a UTF-8 encoded binary (ArrayBuffer/TypedArray/Buffer/Uint8Array)
+ * into a JavaScript value by parsing JSON.
+ *
+ * @param {ArrayBuffer|TypedArray|Buffer|Uint8Array} buf - Binary input.
+ * @returns {*} Parsed value.
+ * @throws {TypeError} If the input type is unsupported.
  */
 export const u82o = (buf) => {
   let u8;
@@ -98,7 +118,7 @@ export const u82o = (buf) => {
   else throw new TypeError('Unsupported input to u82o, expected ArrayBuffer/TypedArray/Buffer');
 
   const dec = getDecoder();
-  if (dec && typeof dec.decode === 'function') return JSON.parse(dec.decode(u8));
+  if (typeof dec?.decode === 'function') return JSON.parse(dec.decode(u8));
   if (typeof TextDecoder !== 'undefined') return JSON.parse(new TextDecoder().decode(u8));
   throw new Error('No TextDecoder or Buffer available to decode object');
 };
@@ -111,6 +131,12 @@ export const u82o = (buf) => {
  * @returns {ArrayBuffer}
  * @example
  * const buf = o2b({ a: 1 })
+ */
+/**
+ * Encode a value to an owning `ArrayBuffer` containing JSON UTF-8.
+ *
+ * @param {*} obj - Value to encode.
+ * @returns {ArrayBuffer}
  */
 export const o2b = (obj) => {
   const u8 = o2u8(obj);
@@ -127,5 +153,11 @@ export const o2b = (obj) => {
  * @returns {*} Parsed value.
  * @example
  * const obj = b2o(buf)
+ */
+/**
+ * Decode an ArrayBuffer/TypedArray/Buffer containing JSON UTF-8 to a value.
+ *
+ * @param {ArrayBuffer|TypedArray|Buffer} buf - Buffer-like input.
+ * @returns {*} Parsed value.
  */
 export const b2o = (buf) => u82o(buf);

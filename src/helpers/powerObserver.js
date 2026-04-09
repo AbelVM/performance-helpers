@@ -2,6 +2,9 @@
  * Lightweight reactive value store.
  * Subscribers are called synchronously when the value changes.
  *
+ * @class PowerObserver
+ * @public
+ *
  * Example:
  * const obs = new PowerObserver(42);
  * obs.subscribe((next, prev) => console.log(next, prev));

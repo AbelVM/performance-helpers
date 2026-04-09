@@ -17,6 +17,15 @@
  * all-or-nothing semantics across the set of limiters.
  */
 
+/**
+ * PowerRateLimit
+ *
+ * Compose multiple rate limiters and provide a unified `tryConsume`/`reserve` API.
+ * Returns success only when all underlying limiters allow consumption.
+ *
+ * @class PowerRateLimit
+ * @public
+ */
 export class PowerRateLimit {
   /**
    * @param {Array<Object>} limiters - Array of limiter instances implementing

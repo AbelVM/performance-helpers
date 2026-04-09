@@ -99,4 +99,23 @@ describe('PowerRetry', () => {
     expect(res).toBe('ok');
     expect(calls).toBe(2);
   });
+
+  it('fails fast when maxAttempts is non-positive', async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls += 1;
+      throw new Error('bad-attempts');
+    };
+
+    await expect(
+      PowerRetry.run(fn, { maxAttempts: -3, baseDelay: 1, jitter: false })
+    ).rejects.toThrow('maxAttempts must be a positive finite number');
+    expect(calls).toBe(0);
+  });
+
+  it('fails fast when maxAttempts is not finite', async () => {
+    await expect(PowerRetry.run(async () => 'ok', { maxAttempts: Number.NaN })).rejects.toThrow(
+      'maxAttempts must be a positive finite number'
+    );
+  });
 });

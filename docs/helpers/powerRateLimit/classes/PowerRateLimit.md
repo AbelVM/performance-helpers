@@ -6,22 +6,12 @@
 
 # Class: PowerRateLimit
 
-PowerRateLimit — compose multiple limiters (tryConsume succeeds only when all
-underlying limiters allow consumption).
+PowerRateLimit
 
-Example:
-const limit = new PowerRateLimit([
-  new PowerThrottle({ capacity: 100, refillRate: 10 }),
-  new PowerSlidingWindow({ capacity: 1000, windowMs: 60000 }),
-]);
-if (limit.tryConsume()) {
-  // perform work
-}
+Compose multiple rate limiters and provide a unified `tryConsume`/`reserve` API.
+Returns success only when all underlying limiters allow consumption.
 
-The composed limiter supports both `tryConsume(n)` and `reserve(n)`/
-`release(tokenOrN)` workflows when underlying limiters expose those
-methods. When `atomic: true` is configured, it will attempt to preserve
-all-or-nothing semantics across the set of limiters.
+ PowerRateLimit
 
 ## Constructors
 

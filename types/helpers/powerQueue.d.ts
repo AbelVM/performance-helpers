@@ -45,8 +45,15 @@ export class PowerQueue {
      * @returns {void}
      */
     clear(): void;
-    get length(): number;
+    /**
+     * Internal buffer capacity (always a power-of-two).
+     * @returns {number}
+     */
     get capacity(): number;
+    /**
+     * Whether the queue is empty.
+     * @returns {boolean}
+     */
     get isEmpty(): boolean;
     /**
      * Return an iterator of values (alias of the default iterator).
@@ -96,6 +103,11 @@ export class PowerQueue {
      */
     pushMany(items: Array<any>): number;
     /**
+     * Number of items currently queued.
+     * @returns {number}
+     */
+    get length(): number;
+    /**
      * Prepend multiple items to the head of the queue.
      * The first element of `items` will become the next value returned by `shift()`.
      * @param {Array<any>} items
@@ -105,6 +117,7 @@ export class PowerQueue {
     /**
      * Iterator (non-destructive) yielding items in FIFO order.
      * Allows `for...of` and spread (`[...queue]`) without consuming the queue.
+      * @returns {Iterator<any>}
      */
-    [Symbol.iterator](): Generator<any, void, unknown>;
+    [Symbol.iterator](): Iterator<any>;
 }

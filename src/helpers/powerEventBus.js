@@ -1,9 +1,12 @@
 import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
 
 /**
- * Typed micro event bus.
- * Lightweight pub/sub for intra-process coordination.
- * Subscriber errors are swallowed to avoid breaking emitters.
+ * PowerEventBus
+ *
+ * Typed micro event bus providing lightweight pub/sub for intra-process
+ * coordination. Subscriber errors are swallowed to avoid breaking emitters.
+ *
+ * @class PowerEventBus
  */
 /**
  * @typedef {Object} PowerEventBusOptions
@@ -21,7 +24,10 @@ export class PowerEventBus {
       : 0; // 0 means unlimited
     this._weak = Boolean(options.weak);
     this._fr = null;
+    // fn -> Map<event, Set<WeakRef>>
     this._finalizationRefs = new WeakMap();
+    // event -> Set<WeakRef>
+    this._eventFinalizationRefs = new Map();
   }
 
   _ensureFinalizationRegistry() {
@@ -32,8 +38,16 @@ export class PowerEventBus {
       try {
         const { event, ref } = token;
         const bucket = this._listeners.get(event);
-        if (bucket && typeof bucket.delete === 'function') {
-          bucket.delete(ref.deref ? ref.deref() : ref);
+        const refsByEvent = this._eventFinalizationRefs.get(event);
+        if (refsByEvent && ref) {
+          refsByEvent.delete(ref);
+          if (refsByEvent.size === 0) this._eventFinalizationRefs.delete(event);
+        }
+        if (!bucket) return;
+        cleanupWeakRefs(bucket);
+        if (bucket.size === 0) {
+          this._listeners.delete(event);
+          this._eventFinalizationRefs.delete(event);
         }
       } catch (e) {
         /* ignore finalizer errors */
@@ -46,13 +60,44 @@ export class PowerEventBus {
   /**
    * Cleanup dead weak refs from internal listener sets.
    * Useful in tests or environments where FinalizationRegistry/GC is unavailable.
+   *
+   * @returns {void}
    */
   cleanup() {
     if (!this._weak) return;
     for (const [event, bucket] of this._listeners) {
       cleanupWeakRefs(bucket);
-      if (bucket.size === 0) this._listeners.delete(event);
+      if (bucket.size === 0) {
+        this._clearWeakListenerEvent(event);
+        this._listeners.delete(event);
+      }
     }
+  }
+
+  /**
+   * Subscribe to an event.
+   * @param {string} event - Event name to subscribe to.
+   * @param {(payload:any)=>void} fn - Listener function.
+   * @returns {() => void} unsubscribe
+   * @throws {TypeError} When `fn` is not a function.
+   */
+  on(event, fn) {
+    if (typeof fn !== 'function') throw new TypeError('listener must be a function');
+    let bucket = this._getBucket(event);
+    if (!bucket) {
+      bucket = new PowerSubscriberSet({ maxListeners: this._maxListeners, weak: this._weak });
+      this._listeners.set(event, bucket);
+    }
+
+    const unsubscribe = bucket.add(fn);
+    const ref = this._registerWeakListener(fn, event);
+    if (ref) {
+      return () => {
+        unsubscribe();
+        this._unregisterWeakListener(fn, event);
+      };
+    }
+    return unsubscribe;
   }
 
   _getBucket(event) {
@@ -60,13 +105,13 @@ export class PowerEventBus {
     if (!bucket) return null;
 
     if (bucket instanceof PowerSubscriberSet) return bucket;
-    if (bucket && typeof bucket[Symbol.iterator] === 'function') {
+    if (typeof bucket?.[Symbol.iterator] === 'function') {
       const migrated = new PowerSubscriberSet({
         maxListeners: this._maxListeners,
         weak: this._weak,
       });
       for (const entry of bucket) {
-        const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
+        const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
         if (fn) migrated.add(fn);
       }
       this._listeners.set(event, migrated);
@@ -88,7 +133,24 @@ export class PowerEventBus {
     const ref = new WeakRef(fn);
     try {
       fr.register(fn, { event, ref }, ref);
-      this._finalizationRefs.set(fn, ref);
+      let perFn = this._finalizationRefs.get(fn);
+      if (!perFn) {
+        perFn = new Map();
+        this._finalizationRefs.set(fn, perFn);
+      }
+      let refsForEvent = perFn.get(event);
+      if (!refsForEvent) {
+        refsForEvent = new Set();
+        perFn.set(event, refsForEvent);
+      }
+      refsForEvent.add(ref);
+
+      let refsByEvent = this._eventFinalizationRefs.get(event);
+      if (!refsByEvent) {
+        refsByEvent = new Set();
+        this._eventFinalizationRefs.set(event, refsByEvent);
+      }
+      refsByEvent.add(ref);
     } catch (e) {
       /* ignore registration failures */
       return null;
@@ -96,40 +158,59 @@ export class PowerEventBus {
     return ref;
   }
 
-  _unregisterWeakListener(fn) {
+  _unregisterWeakListener(fn, event) {
     if (!this._fr || !this._finalizationRefs.has(fn)) return;
-    const ref = this._finalizationRefs.get(fn);
-    try {
-      this._fr.unregister(ref);
-    } catch (e) {
-      /* ignore */
+    const perFn = this._finalizationRefs.get(fn);
+    if (!perFn || perFn.size === 0) {
+      this._finalizationRefs.delete(fn);
+      return;
     }
-    this._finalizationRefs.delete(fn);
+
+    const events = event !== undefined ? [event] : Array.from(perFn.keys());
+    for (const ev of events) {
+      const refs = perFn.get(ev);
+      if (!refs || refs.size === 0) {
+        perFn.delete(ev);
+        continue;
+      }
+
+      for (const ref of refs) {
+        try {
+          this._fr.unregister(ref);
+        } catch (e) {
+          /* ignore */
+        }
+        const byEvent = this._eventFinalizationRefs.get(ev);
+        if (byEvent) {
+          byEvent.delete(ref);
+          if (byEvent.size === 0) this._eventFinalizationRefs.delete(ev);
+        }
+      }
+      perFn.delete(ev);
+    }
+
+    if (perFn.size === 0) this._finalizationRefs.delete(fn);
   }
 
-  on(event, fn) {
-    if (typeof fn !== 'function') throw new TypeError('listener must be a function');
-    let bucket = this._getBucket(event);
-    if (!bucket) {
-      bucket = new PowerSubscriberSet({ maxListeners: this._maxListeners, weak: this._weak });
-      this._listeners.set(event, bucket);
+  _clearWeakListenerEvent(event) {
+    if (!this._fr) return;
+    const refs = this._eventFinalizationRefs.get(event);
+    if (!refs) return;
+    for (const ref of refs) {
+      try {
+        this._fr.unregister(ref);
+      } catch (e) {
+        /* ignore */
+      }
     }
-
-    const unsubscribe = bucket.add(fn);
-    const ref = this._registerWeakListener(fn, event);
-    if (ref) {
-      return () => {
-        unsubscribe();
-        this._unregisterWeakListener(fn);
-      };
-    }
-    return unsubscribe;
+    this._eventFinalizationRefs.delete(event);
   }
 
   /**
    * Subscribe once to an event. Listener is removed after first invocation.
    * @param {string} event
    * @param {(payload:any)=>void} fn
+   * @throws {TypeError} When `fn` is not a function.
    * @returns {() => void} unsubscribe
    */
   once(event, fn) {
@@ -145,7 +226,7 @@ export class PowerEventBus {
     if (ref) {
       return () => {
         unsubscribe();
-        this._unregisterWeakListener(fn);
+        this._unregisterWeakListener(fn, event);
       };
     }
     return unsubscribe;
@@ -160,8 +241,11 @@ export class PowerEventBus {
     const bucket = this._getBucket(event);
     if (!bucket) return;
     bucket.delete(fn);
-    this._unregisterWeakListener(fn);
-    if (bucket.size === 0) this._listeners.delete(event);
+    this._unregisterWeakListener(fn, event);
+    if (bucket.size === 0) {
+      this._clearWeakListenerEvent(event);
+      this._listeners.delete(event);
+    }
   }
 
   /**
@@ -185,13 +269,16 @@ export class PowerEventBus {
           // swallow subscriber errors
         }
       });
-      if (bucket.size === 0) this._listeners.delete(event);
+      if (bucket.size === 0) {
+        this._clearWeakListenerEvent(event);
+        this._listeners.delete(event);
+      }
       return notified;
     }
 
     const hadEntries = bucket.size > 0;
     for (const entry of bucket) {
-      const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
+      const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
       if (!fn) {
         bucket.delete(entry);
         continue;
@@ -202,8 +289,32 @@ export class PowerEventBus {
         // swallow subscriber errors
       }
     }
-    if (bucket.size === 0) this._listeners.delete(event);
+    if (bucket.size === 0) {
+      this._clearWeakListenerEvent(event);
+      this._listeners.delete(event);
+    }
     return hadEntries;
+  }
+
+  /**
+   * Iterate live listener functions from a bucket without allocating snapshots.
+   * @private
+   * @param {PowerSubscriberSet|Set<any>} bucket
+   */
+  *_iterBucketListeners(bucket) {
+    if (bucket instanceof PowerSubscriberSet) {
+      yield* bucket;
+      return;
+    }
+
+    for (const entry of bucket) {
+      const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
+      if (!fn) {
+        bucket.delete(entry);
+        continue;
+      }
+      yield fn;
+    }
   }
 
   /**
@@ -218,8 +329,8 @@ export class PowerEventBus {
    * @returns {Promise<boolean>}
    */
   async emitAsync(event, payload, { concurrency = Infinity } = {}) {
-    const listeners = this.listeners(event);
-    if (listeners.length === 0) return false;
+    const bucket = this._listeners.get(event);
+    if (!bucket || bucket.size === 0) return false;
 
     const normalizeConcurrency =
       Number.isFinite(+concurrency) && +concurrency > 0
@@ -234,22 +345,32 @@ export class PowerEventBus {
       }
     };
 
-    if (!Number.isFinite(normalizeConcurrency) || normalizeConcurrency >= listeners.length) {
-      await Promise.all(listeners.map(invoke));
-      return true;
+    const inFlight = new Set();
+    let notified = false;
+
+    for (const fn of this._iterBucketListeners(bucket)) {
+      if (!fn) continue;
+      notified = true;
+      const p = Promise.resolve()
+        .then(() => invoke(fn))
+        .finally(() => {
+          inFlight.delete(p);
+        });
+      inFlight.add(p);
+
+      if (Number.isFinite(normalizeConcurrency) && inFlight.size >= normalizeConcurrency) {
+        await Promise.race(inFlight);
+      }
     }
 
-    let nextIndex = 0;
-    const workers = Array.from({ length: normalizeConcurrency }, async () => {
-      while (nextIndex < listeners.length) {
-        const fn = listeners[nextIndex++];
-        if (!fn) continue;
-        await invoke(fn);
-      }
-    });
+    if (inFlight.size) await Promise.all(inFlight);
 
-    await Promise.all(workers);
-    return true;
+    if (bucket.size === 0) {
+      this._clearWeakListenerEvent(event);
+      this._listeners.delete(event);
+    }
+
+    return notified;
   }
 
   /**
@@ -262,7 +383,7 @@ export class PowerEventBus {
     if (!bucket) return [];
     if (bucket instanceof PowerSubscriberSet) return bucket.values();
     return Array.from(bucket)
-      .map((entry) => (entry && typeof entry.deref === 'function' ? entry.deref() : entry))
+      .map((entry) => (typeof entry?.deref === 'function' ? entry.deref() : entry))
       .filter(Boolean);
   }
 
@@ -272,9 +393,13 @@ export class PowerEventBus {
    */
   clear(event) {
     if (event === undefined) {
+      for (const ev of this._eventFinalizationRefs.keys()) this._clearWeakListenerEvent(ev);
+      this._eventFinalizationRefs.clear();
+      this._finalizationRefs = new WeakMap();
       this._listeners.clear();
       return;
     }
+    this._clearWeakListenerEvent(event);
     this._listeners.delete(event);
   }
 }

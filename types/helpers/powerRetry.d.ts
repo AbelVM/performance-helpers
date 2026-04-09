@@ -1,62 +1,72 @@
 /**
- * Retry helper with configurable backoff and jitter.
- *
- * @param {Function} fn - Async function to execute on each attempt.
- * @param {Object} [options]
- * @param {number} [options.maxAttempts=3] - Maximum attempts (initial try + retries).
- * @param {'exponential'|'linear'|'fixed'} [options.backoff='exponential']
- * @param {number} [options.baseDelay=100] - Base delay in ms for backoff.
- * @param {number} [options.maxDelay=10000] - Max delay in ms.
- * @param {boolean} [options.jitter=true] - Add jitter to delays.
- * @param {Function} [options.retryIf] - Predicate `(err) => boolean` to decide whether to retry. Defaults to always true.
- * @param {Function} [options.onRetry] - Optional callback `(attempt, err, delay) => void` called before next retry.
- * @param {number} [options.attemptTimeout] - Per-attempt timeout in milliseconds. If set, an attempt that
- *   does not finish within this time will be rejected and counted as a failed attempt.
- * @returns {Promise<any>} Resolves or rejects with the underlying function result/error.
- *
- * @example
- * await PowerRetry(() => fetch('/api'), { maxAttempts: 4 });
- */
-/**
  * @typedef {Object} PowerRetryOptions
- * @property {number} [maxAttempts]
- * @property {'exponential'|'linear'|'fixed'} [backoff]
- * @property {number} [baseDelay]
- * @property {number} [maxDelay]
- * @property {boolean} [jitter]
+ * @property {number} [maxAttempts=3] Maximum attempts (initial try + retries). Must be a positive finite number.
+ * @property {'exponential'|'linear'|'fixed'} [backoff='exponential'] Delay strategy between attempts.
+ * @property {number} [baseDelay=100] Base delay in milliseconds.
+ * @property {number} [maxDelay=10000] Maximum delay in milliseconds.
+ * @property {boolean} [jitter=true] Adds jitter to delay calculations.
  * @property {(err:any)=>boolean} [retryIf]
  * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
- * @property {number} [attemptTimeout]
+ * @property {number} [attemptTimeout] Per-attempt timeout in milliseconds.
+ */
+/**
+ * Retry helper with configurable backoff and jitter.
+ *
+ * @example
+ * const retry = new PowerRetry({ maxAttempts: 4, baseDelay: 50 });
+ * const data = await retry.run(() => fetch('/api/data'));
  */
 export class PowerRetry {
-    static run(fn: any, options?: {}): Promise<any>;
+    /**
+     * Execute a function with retry/backoff semantics.
+     * @param {Function} fn Async function to execute.
+     * @param {PowerRetryOptions} [options] Retry behavior overrides for this invocation.
+     * @returns {Promise<any>} Resolves with `fn` result, rejects with final attempt error.
+     * @throws {TypeError} When `fn` is not callable or `maxAttempts` is not a positive finite number.
+     */
+    static run(fn: Function, options?: PowerRetryOptions): Promise<any>;
     /**
      * Run a function with retry/backoff semantics.
-     * @param {Function} fn
-     * @param {Object} options
-     */
-    /**
      * Create a configured retry helper.
-     * @param {Object} options Default options applied to every `run()` invocation.
+     * @param {PowerRetryOptions} [options] Default options applied to every `run()` invocation.
      */
-    constructor(options?: Object);
-    _options: Object;
+    constructor(options?: PowerRetryOptions);
+    _options: PowerRetryOptions;
     /**
      * Instance method that runs `fn` with the configured options merged with
      * any per-call `options` provided.
-     * @param {Function} fn
-     * @param {Object} [options]
+     * @param {Function} fn Async function to execute.
+     * @param {PowerRetryOptions} [options] Per-call retry overrides.
+     * @returns {Promise<any>} Resolves with `fn` result, rejects with final attempt error.
      */
-    run(fn: Function, options?: Object): Promise<any>;
+    run(fn: Function, options?: PowerRetryOptions): Promise<any>;
 }
 export default PowerRetry;
 export type PowerRetryOptions = {
+    /**
+     * Maximum attempts (initial try + retries). Must be a positive finite number.
+     */
     maxAttempts?: number | undefined;
+    /**
+     * Delay strategy between attempts.
+     */
     backoff?: "exponential" | "linear" | "fixed" | undefined;
+    /**
+     * Base delay in milliseconds.
+     */
     baseDelay?: number | undefined;
+    /**
+     * Maximum delay in milliseconds.
+     */
     maxDelay?: number | undefined;
+    /**
+     * Adds jitter to delay calculations.
+     */
     jitter?: boolean | undefined;
     retryIf?: ((err: any) => boolean) | undefined;
     onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;
+    /**
+     * Per-attempt timeout in milliseconds.
+     */
     attemptTimeout?: number | undefined;
 };

@@ -2,6 +2,9 @@
  * PowerLatch — a simple counting barrier.
  * Resolves waiters when the internal count reaches zero.
  *
+ * @class PowerLatch
+ * @public
+ *
  * @example
  * const latch = new PowerLatch(3);
  * // from three independent async paths:
@@ -22,8 +25,9 @@ export class PowerLatch {
    */
   constructor(count = 1, options = {}) {
     this._count = Math.max(0, Number(count) || 0);
-    /** @type {Array<{defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
-    this._waiters = [];
+    /** @type {Map<number, {token:number, defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
+    this._waiters = new Map();
+    this._nextWaiterToken = 1;
     this._aborted = false;
     this._abortReason = null;
     this._onAbort = typeof options.onAbort === 'function' ? options.onAbort : null;
@@ -90,29 +94,35 @@ export class PowerLatch {
       signal = opts.signal || null;
     }
 
+    if (signal?.aborted) {
+      return Promise.reject(
+        signal.reason || Object.assign(new Error('Aborted'), { code: 'EABORT' })
+      );
+    }
+
     const defer = new PowerDefer();
-    const waiter = { defer, timer: null, signalHandler: null, signal };
+    const token = this._nextWaiterToken++;
+    const waiter = { token, defer, timer: null, signalHandler: null, signal };
 
     // register timeout
     if (typeof timeout === 'number' && timeout > 0) {
       waiter.timer = setTimeout(() => {
-        this._removeWaiter(waiter);
+        this._removeWaiter(token);
         defer.reject(Object.assign(new Error('Timeout'), { code: 'ETIMEOUT' }));
       }, timeout);
     }
 
     // register abort signal
-    if (signal && typeof signal.addEventListener === 'function') {
+    if (typeof signal?.addEventListener === 'function') {
       const onAbort = () => {
-        if (waiter.timer) clearTimeout(waiter.timer);
-        this._removeWaiter(waiter);
+        this._removeWaiter(token);
         defer.reject(signal.reason || Object.assign(new Error('Aborted'), { code: 'EABORT' }));
       };
       waiter.signalHandler = onAbort;
       signal.addEventListener('abort', onAbort, { once: true });
     }
 
-    this._waiters.push(waiter);
+    this._waiters.set(token, waiter);
     return defer.promise;
   }
 
@@ -145,14 +155,22 @@ export class PowerLatch {
     return this._count === 0;
   }
 
-  _removeWaiter(waiter) {
-    const idx = this._waiters.indexOf(waiter);
-    if (idx !== -1) this._waiters.splice(idx, 1);
-    if (
-      waiter.signalHandler &&
-      waiter.signal &&
-      typeof waiter.signal.removeEventListener === 'function'
-    ) {
+  _removeWaiter(waiterOrToken) {
+    const token =
+      waiterOrToken && typeof waiterOrToken === 'object' ? waiterOrToken.token : waiterOrToken;
+    const waiter = this._waiters.get(token);
+    if (!waiter) return null;
+
+    this._waiters.delete(token);
+    if (waiter.timer) {
+      try {
+        clearTimeout(waiter.timer);
+      } catch (e) {
+        /* swallow */
+      }
+      waiter.timer = null;
+    }
+    if (waiter.signalHandler && typeof waiter.signal?.removeEventListener === 'function') {
       try {
         waiter.signal.removeEventListener('abort', waiter.signalHandler);
       } catch (e) {
@@ -164,11 +182,11 @@ export class PowerLatch {
 
   _resolveAll() {
     const waiters = this._waiters;
-    this._waiters = [];
-    for (const w of waiters) {
+    this._waiters = new Map();
+    for (const w of waiters.values()) {
       try {
         if (w.timer) clearTimeout(w.timer);
-        if (w.signalHandler && w.signal && typeof w.signal.removeEventListener === 'function') {
+        if (w.signalHandler && typeof w.signal?.removeEventListener === 'function') {
           try {
             w.signal.removeEventListener('abort', w.signalHandler);
           } catch (e) {
@@ -184,11 +202,11 @@ export class PowerLatch {
 
   _rejectAll(err) {
     const waiters = this._waiters;
-    this._waiters = [];
-    for (const w of waiters) {
+    this._waiters = new Map();
+    for (const w of waiters.values()) {
       try {
         if (w.timer) clearTimeout(w.timer);
-        if (w.signalHandler && w.signal && typeof w.signal.removeEventListener === 'function') {
+        if (w.signalHandler && typeof w.signal?.removeEventListener === 'function') {
           try {
             w.signal.removeEventListener('abort', w.signalHandler);
           } catch (e) {

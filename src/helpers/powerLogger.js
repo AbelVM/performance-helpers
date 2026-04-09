@@ -1,23 +1,64 @@
 import { formatErrorObj, normalizeError } from '../utils/errors.js';
 import { nowMs } from '../utils/now.js';
 
+// Reuse common textual level labels from a single frozen object to avoid
+// repeated literal allocations in hot logging paths.
+const LEVEL_LABELS = Object.freeze({
+  error: 'error',
+  warn: 'warn',
+  info: 'info',
+  log: 'log',
+  debug: 'debug',
+  table: 'table',
+});
+
 const getConsole = () => {
-  if (typeof globalThis !== 'undefined' && globalThis && globalThis.console) {
+  if (typeof globalThis !== 'undefined' && globalThis?.console) {
     return globalThis.console;
   }
-  if (typeof self !== 'undefined' && self && self.console) {
+  if (typeof self !== 'undefined' && self?.console) {
     return self.console;
   }
-  if (typeof window !== 'undefined' && window && window.console) {
+  if (typeof window !== 'undefined' && window?.console) {
     return window.console;
   }
-  if (typeof global !== 'undefined' && global && global.console) {
+  if (typeof global !== 'undefined' && global?.console) {
     return global.console;
   }
   return null;
 };
 
 const ROOT_CONSOLE = getConsole();
+
+// Safely serialize an object to JSON for logging. Handles circular
+// references and common non-serializable types (BigInt, Symbol, Function)
+// by providing reasonable string fallbacks. Attempts a fast `JSON.stringify`
+// first and falls back to a replacer-based pass when that fails.
+function safeStringify(obj) {
+  try {
+    return JSON.stringify(obj);
+  } catch (e) {
+    try {
+      const seen = typeof WeakSet === 'function' ? new WeakSet() : new Set();
+      return JSON.stringify(obj, function (k, v) {
+        if (v && typeof v === 'object') {
+          if (seen.has(v)) return '[Circular]';
+          seen.add(v);
+        }
+        if (typeof v === 'function') return `[Function: ${v.name || 'anonymous'}]`;
+        if (typeof v === 'symbol') return String(v);
+        if (typeof v === 'bigint') return v.toString() + 'n';
+        return v;
+      });
+    } catch (e2) {
+      try {
+        return String(obj);
+      } catch (e3) {
+        return '[Unserializable]';
+      }
+    }
+  }
+}
 
 /**
  * PowerLogger
@@ -59,10 +100,10 @@ export class PowerLogger {
   constructor(level = 0, options = {}) {
     this._debugLevel = 0;
     this._counters = Object.create(null);
-    this._format = (options && options.format) || 'text';
-    this.name = (options && options.name) || null;
-    this._formatter = options && typeof options.formatter === 'function' ? options.formatter : null;
-    this._output = options && typeof options.output === 'function' ? options.output : null;
+    this._format = options?.format || 'text';
+    this.name = options?.name || null;
+    this._formatter = typeof options?.formatter === 'function' ? options.formatter : null;
+    this._output = typeof options?.output === 'function' ? options.output : null;
     this.setDebugLevel(level);
   }
 
@@ -160,7 +201,7 @@ export class PowerLogger {
               return;
             }
             // No output transport: write string directly to the root console.
-            if (ROOT_CONSOLE && typeof ROOT_CONSOLE[consoleMethod] === 'function') {
+            if (typeof ROOT_CONSOLE?.[consoleMethod] === 'function') {
               ROOT_CONSOLE[consoleMethod](formatted);
             }
             return;
@@ -186,14 +227,18 @@ export class PowerLogger {
     }
 
     // Fall back to console methods when no output transport is provided.
-    if (!ROOT_CONSOLE || typeof ROOT_CONSOLE[consoleMethod] !== 'function') return;
+    if (typeof ROOT_CONSOLE?.[consoleMethod] !== 'function') return;
     if (this._format === 'json') {
       try {
-        const out = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        const out = typeof payload === 'string' ? payload : safeStringify(payload);
         ROOT_CONSOLE[consoleMethod](out);
       } catch (e) {
         // fallback: attempt plain console with resolved args
-        ROOT_CONSOLE[consoleMethod](...(Array.isArray(resolved) ? resolved : [resolved]));
+        try {
+          ROOT_CONSOLE[consoleMethod](...(Array.isArray(resolved) ? resolved : [resolved]));
+        } catch (e2) {
+          /* swallow logging failures */
+        }
       }
     } else {
       ROOT_CONSOLE[consoleMethod](...resolved);
@@ -209,7 +254,7 @@ export class PowerLogger {
   error(...args) {
     const formatted = args.map((a) => {
       try {
-        if (a && a.error) return formatErrorObj(a);
+        if (a?.error) return formatErrorObj(a);
         if (a instanceof Error || (a && typeof a === 'object'))
           return formatErrorObj(normalizeError(a));
       } catch (e) {
@@ -217,7 +262,7 @@ export class PowerLogger {
       }
       return a;
     });
-    this._emit(1, 'error', 'error', formatted);
+    this._emit(1, 'error', LEVEL_LABELS.error, formatted);
   }
 
   /**
@@ -226,7 +271,7 @@ export class PowerLogger {
    * @returns {void}
    */
   warn(...args) {
-    this._emit(2, 'warn', 'warn', args);
+    this._emit(2, 'warn', LEVEL_LABELS.warn, args);
   }
 
   /**
@@ -235,7 +280,7 @@ export class PowerLogger {
    * @returns {void}
    */
   info(...args) {
-    this._emit(3, 'info', 'info', args);
+    this._emit(3, 'info', LEVEL_LABELS.info, args);
   }
 
   /**
@@ -244,26 +289,31 @@ export class PowerLogger {
    * @returns {void}
    */
   log(...args) {
-    this._emit(3, 'log', 'log', args);
+    this._emit(3, 'log', LEVEL_LABELS.log, args);
   }
 
   /**
    * Log using `console.debug` when level >= 3 (alias for verbose debug output).
+   * Accepts values or functions (lazy evaluated).
    * Supports JSON mode similar to other methods.
+   * @param {...any} args
+   * @returns {void}
    */
   debug(...args) {
-    this._emit(3, 'debug', 'debug', args);
+    this._emit(3, 'debug', LEVEL_LABELS.debug, args);
   }
 
   /**
    * Display tabular data. Uses `console.table` when available.
    * In JSON mode emits `{ level: 'table', msg: args, ts }` where `msg` is an array of arguments.
+   * @param {...any} args
+   * @returns {void}
    */
   table(...args) {
     if (!this.isDebugLevel(3) || !ROOT_CONSOLE) return;
     // For JSON mode reuse the _emit helper but force the message to be an array
     if (this._format === 'json') {
-      this._emit(3, 'log', 'table', args, { msgArray: true });
+      this._emit(3, 'log', LEVEL_LABELS.table, args, { msgArray: true });
       return;
     }
     const resolved = this._resolveLogArgs(args);

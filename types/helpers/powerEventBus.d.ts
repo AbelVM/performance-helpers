@@ -21,12 +21,23 @@ export class PowerEventBus {
     _weak: boolean;
     _fr: any;
     _finalizationRefs: WeakMap<object, any>;
+    _eventFinalizationRefs: Map<any, any>;
     _ensureFinalizationRegistry(): any;
     /**
      * Cleanup dead weak refs from internal listener sets.
      * Useful in tests or environments where FinalizationRegistry/GC is unavailable.
+     *
+     * @returns {void}
      */
     cleanup(): void;
+    /**
+     * Subscribe to an event.
+     * @param {string} event - Event name to subscribe to.
+     * @param {(payload:any)=>void} fn - Listener function.
+     * @returns {() => void} unsubscribe
+     * @throws {TypeError} When `fn` is not a function.
+     */
+    on(event: string, fn: (payload: any) => void): () => void;
     _getBucket(event: any): PowerSubscriberSet | null;
     /**
      * Subscribe to an event.
@@ -35,12 +46,13 @@ export class PowerEventBus {
      * @returns {() => void} unsubscribe
      */
     _registerWeakListener(fn: (payload: any) => void, event: string): () => void;
-    _unregisterWeakListener(fn: any): void;
-    on(event: any, fn: any): () => void;
+    _unregisterWeakListener(fn: any, event: any): void;
+    _clearWeakListenerEvent(event: any): void;
     /**
      * Subscribe once to an event. Listener is removed after first invocation.
      * @param {string} event
      * @param {(payload:any)=>void} fn
+     * @throws {TypeError} When `fn` is not a function.
      * @returns {() => void} unsubscribe
      */
     once(event: string, fn: (payload: any) => void): () => void;
@@ -58,6 +70,12 @@ export class PowerEventBus {
      * @returns {boolean}
      */
     emit(event: string, payload?: any): boolean;
+    /**
+     * Iterate live listener functions from a bucket without allocating snapshots.
+     * @private
+     * @param {PowerSubscriberSet|Set<any>} bucket
+     */
+    private _iterBucketListeners;
     /**
      * Emit an event to all subscribers and await async listeners.
      * Supports bounded concurrency so long listener lists can be processed in

@@ -6,6 +6,14 @@
 
 # Class: PowerPermitGate
 
+PowerPermitGate
+
+Internal helper that manages a finite number of permits and a FIFO waiter queue.
+Provides `acquire()`, `tryAcquire()` and `release()` primitives used by
+semaphore-like helpers.
+
+ PowerPermitGate
+
 ## Extended by
 
 - [`PowerBackpressure`](../../powerBackpressure/classes/PowerBackpressure.md)

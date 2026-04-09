@@ -29,7 +29,7 @@
  * const cache = new PowerCache({
  *   maxEntries: 100,
  *   maxWeight: 1024 * 1024,
- *   weightFn: (v) => (v && v.byteLength) ? v.byteLength : 1,
+ *   weightFn: (v) => (v?.byteLength) ? v.byteLength : 1,
  *   defaultTTL: 60_000,
  *   rejectOversized: true
  * });
@@ -50,6 +50,18 @@
  * logger.log(cache.stats());
  *
  * @class PowerCache
+ * @public
+ */
+import { nowMs } from '../utils/now.js';
+
+/**
+ * PowerCache
+ *
+ * In-memory cache with weight-aware eviction, TTLs and optional cleanup.
+ * Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
+ *
+ * @class PowerCache
+ * @public
  */
 export class PowerCache {
   /**
@@ -66,6 +78,7 @@ export class PowerCache {
    * @param {number} [options.initialPoolSize=0] Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
    * @param {number} [options.maxCleanupPerTick=100] Default max nodes scanned per cleanup tick when running `startCleanup()`.
    * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
+   * @throws {TypeError} When a non-object is provided as the options argument.
    */
   constructor({
     maxEntries = Infinity,
@@ -79,7 +92,13 @@ export class PowerCache {
     initialPoolSize = 0,
     maxCleanupPerTick = 100,
     eagerCleanupOnRead = false,
+    // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
+    defaultAsyncTimeout = 30000,
   } = {}) {
+    // Basic options validation: when an explicit options argument is provided it must be an object
+    if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
+      throw new TypeError('PowerCache options must be an object');
+    }
     this.maxEntries = maxEntries;
     this.maxWeight = maxWeight;
     this.weightFn = weightFn;
@@ -94,32 +113,141 @@ export class PowerCache {
 
     this.eagerCleanupOnRead = Boolean(eagerCleanupOnRead);
 
-    this.map = new Map();
-    this.head = null;
-    this.tail = null;
-    this.pool = [];
+    this._map = new Map();
+    this._head = null;
+    this._tail = null;
+    this._pool = [];
     // prefill pool to reduce runtime allocations if requested
     for (let i = 0; i < Math.min(initialPoolSize || 0, this.maxPoolSize); i++)
-      this.pool.push({ key: null, value: null, weight: 0, expiresAt: 0, prev: null, next: null });
+      this._pool.push({ key: null, value: null, weight: 0, expiresAt: 0, prev: null, next: null });
 
-    this.currentWeight = 0;
-    this.hits = 0;
-    this.misses = 0;
-    this.evictions = 0;
-    this.rejected = 0; // rejected oversized insert attempts
-    this.expirations = 0;
+    this._currentWeight = 0;
+    this._hits = 0;
+    this._misses = 0;
+    this._evictions = 0;
+    this._rejected = 0; // rejected oversized insert attempts
+    this._expirations = 0;
+
+    // Backwards-compatible aliases for external access (keep non-underscore
+    // properties available but prefer internal `_`-prefixed fields).
+    Object.defineProperty(this, 'map', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._map;
+      },
+      set(v) {
+        this._map = v;
+      },
+    });
+    Object.defineProperty(this, 'head', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._head;
+      },
+      set(v) {
+        this._head = v;
+      },
+    });
+    Object.defineProperty(this, 'tail', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._tail;
+      },
+      set(v) {
+        this._tail = v;
+      },
+    });
+    Object.defineProperty(this, 'pool', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._pool;
+      },
+      set(v) {
+        this._pool = v;
+      },
+    });
+    Object.defineProperty(this, 'currentWeight', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._currentWeight;
+      },
+      set(v) {
+        this._currentWeight = v;
+      },
+    });
+    Object.defineProperty(this, 'hits', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._hits;
+      },
+      set(v) {
+        this._hits = v;
+      },
+    });
+    Object.defineProperty(this, 'misses', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._misses;
+      },
+      set(v) {
+        this._misses = v;
+      },
+    });
+    Object.defineProperty(this, 'evictions', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._evictions;
+      },
+      set(v) {
+        this._evictions = v;
+      },
+    });
+    Object.defineProperty(this, 'rejected', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._rejected;
+      },
+      set(v) {
+        this._rejected = v;
+      },
+    });
+    Object.defineProperty(this, 'expirations', {
+      configurable: true,
+      enumerable: false,
+      get() {
+        return this._expirations;
+      },
+      set(v) {
+        this._expirations = v;
+      },
+    });
 
     this._cleanupTimer = null;
     this._cleanupRunning = false;
     this._cleanupParams = null;
     // Cursor used to resume incremental expiration scans to avoid re-scanning the list start
     this._cleanupCursor = null;
-    // Whether the `_cleanupCursor` still points to a live node in `this.map`.
+    // Whether the `_cleanupCursor` still points to a live node in `this._map`.
     // This avoids a Map lookup on every incremental cleanup scan — mutation paths
     // that remove or advance the cursor will update this flag accordingly.
     this._cleanupCursorValid = false;
+    // Eviction candidate pointer to avoid repeated head lookups during large
+    // eviction sweeps. Kept in sync with head mutations.
+    this._evictionCandidate = null;
     // Track in-flight async factories for `getOrSetAsync` to dedupe concurrent callers
     this._inflightPromises = new Map();
+    this._defaultAsyncTimeout = Number.isFinite(Number(defaultAsyncTimeout))
+      ? Math.max(0, Math.floor(Number(defaultAsyncTimeout)))
+      : 30000;
   }
 
   /**
@@ -137,7 +265,7 @@ export class PowerCache {
    * @returns {CacheNode}
    */
   _allocNode(key, value, weight, expiresAt) {
-    const node = this.pool.pop() || {
+    const node = this._pool.pop() || {
       key: null,
       value: null,
       weight: 0,
@@ -172,7 +300,7 @@ export class PowerCache {
     node.expiresAt = 0;
     node.prev = null;
     node.next = null;
-    if (this.pool.length < this.maxPoolSize) this.pool.push(node);
+    if (this._pool.length < this.maxPoolSize) this._pool.push(node);
   }
 
   /**
@@ -190,12 +318,12 @@ export class PowerCache {
    */
   _removeExpiredNode(node, now, countMiss = false) {
     // Only remove when the node is actually expired according to `now`.
-    if (!node || !node.expiresAt || node.expiresAt > now) return false;
+    if (!node.expiresAt || node.expiresAt > now) return false;
     const k = node.key;
     const v = node.value;
     const next = node.next;
-    this.map.delete(k);
-    this.currentWeight -= node.weight || 0;
+    this._map.delete(k);
+    this._currentWeight -= node.weight || 0;
     if (this._cleanupCursor === node) this._cleanupCursor = next;
     this._cleanupCursorValid = Boolean(this._cleanupCursor);
     this._remove(node);
@@ -203,8 +331,8 @@ export class PowerCache {
       if (this.onExpire) this.onExpire(k, v);
     } catch (err) {}
     this._freeNode(node);
-    if (countMiss) this.misses++;
-    this.expirations++;
+    if (countMiss) this._misses++;
+    this._expirations++;
     return true;
   }
 
@@ -218,15 +346,17 @@ export class PowerCache {
    * @returns {CacheNode|null}
    */
   _fetchValidNode(key, { ignoreExpiry = false, countMiss = false, allowExpired = false } = {}) {
-    const node = this.map.get(key);
+    const node = this._map.get(key);
     if (!node) {
-      if (countMiss) this.misses++;
+      if (countMiss) this._misses++;
       return null;
     }
-      const now = !ignoreExpiry && node.expiresAt ? Date.now() : 0;
-      if (now && node.expiresAt <= now) {
+    // Only sample the clock when we need to check expiry to avoid unnecessary
+    // system calls on non-expiry paths.
+    const now = !ignoreExpiry && node.expiresAt ? nowMs() : 0;
+    if (now && node.expiresAt <= now) {
       if (allowExpired) return node;
-        this._removeExpiredNode(node, now, countMiss);
+      this._removeExpiredNode(node, now, countMiss);
       return null;
     }
     return node;
@@ -255,19 +385,17 @@ export class PowerCache {
     } catch (err) {
       return;
     }
-    const tracked = p.then(
-      (value) => {
+    const tracked = p
+      .then((value) => {
         try {
           this.set(key, value, { ttl, weight });
         } catch (err) {}
-        this._inflightPromises.delete(key);
         return value;
-      },
-      (err) => {
+      })
+      .catch(() => undefined)
+      .finally(() => {
         this._inflightPromises.delete(key);
-        return undefined;
-      }
-    );
+      });
     this._inflightPromises.set(key, tracked);
   }
 
@@ -281,14 +409,15 @@ export class PowerCache {
    * @returns {void}
    */
   _append(node) {
-    if (!this.tail) {
-      this.head = this.tail = node;
+    if (!this._tail) {
+      this._head = this._tail = node;
+      this._evictionCandidate = this._head;
       return;
     }
-    node.prev = this.tail;
+    node.prev = this._tail;
     node.next = null;
-    this.tail.next = node;
-    this.tail = node;
+    this._tail.next = node;
+    this._tail = node;
   }
 
   /**
@@ -305,9 +434,11 @@ export class PowerCache {
     const p = node.prev,
       n = node.next;
     if (p) p.next = n;
-    else this.head = n;
+    else this._head = n;
+    // Keep eviction candidate aligned with the head when head changes
+    if (!p) this._evictionCandidate = this._head;
     if (n) n.prev = p;
-    else this.tail = p;
+    else this._tail = p;
     node.prev = node.next = null;
   }
 
@@ -321,7 +452,7 @@ export class PowerCache {
    * @returns {void}
    */
   _moveToTail(node) {
-    if (this.tail === node) return;
+    if (this._tail === node) return;
     this._remove(node);
     this._append(node);
   }
@@ -336,8 +467,10 @@ export class PowerCache {
    * @returns {void}
    */
   _evictIfNeeded() {
-    while (this.map.size > this.maxEntries || this.currentWeight > this.maxWeight) {
-      const node = this.head;
+    // Use the eviction candidate pointer to avoid repeatedly reading `head` in
+    // large eviction sweeps. Keep the candidate in sync with head mutations.
+    while (this._map.size > this.maxEntries || this._currentWeight > this.maxWeight) {
+      const node = this._evictionCandidate || this._head;
       if (!node) break;
       const next = node.next;
       const k = node.key;
@@ -345,15 +478,19 @@ export class PowerCache {
       // Advance cleanup cursor if it pointed to the node we're about to evict
       if (this._cleanupCursor === node) this._cleanupCursor = next;
       this._cleanupCursorValid = Boolean(this._cleanupCursor);
+      // Advance eviction candidate to the next node (new head after removal)
+      this._evictionCandidate = next;
       this._remove(node);
-      this.map.delete(k);
-      this.currentWeight -= node.weight || 0;
-      this.evictions++;
+      this._map.delete(k);
+      this._currentWeight -= node.weight || 0;
+      this._evictions++;
       try {
         if (this.onEvict) this.onEvict(k, v, 'evicted');
       } catch (err) {}
       this._freeNode(node);
     }
+    // Ensure eviction candidate remains aligned with current head after evictions
+    if (!this._evictionCandidate) this._evictionCandidate = this._head;
   }
 
   /**
@@ -387,26 +524,26 @@ export class PowerCache {
     const w = Number.isFinite(+wRaw) ? Math.max(0, +wRaw) : 0;
     // If item is heavier than maxWeight, optionally reject insertion
     if (this.rejectOversized && Number.isFinite(this.maxWeight) && w > this.maxWeight) {
-      this.rejected++;
+      this._rejected++;
       try {
         if (this.onEvict) this.onEvict(key, value, 'rejected-oversized');
       } catch (err) {}
       return false;
     }
 
-    if (this.map.has(key)) {
-      const node = this.map.get(key);
-      this.currentWeight -= node.weight || 0;
+    if (this._map.has(key)) {
+      const node = this._map.get(key);
+      this._currentWeight -= node.weight || 0;
       node.value = value;
       node.weight = w;
       node.expiresAt = expiresAt;
-      this.currentWeight += node.weight || 0;
+      this._currentWeight += node.weight || 0;
       this._moveToTail(node);
     } else {
       const node = this._allocNode(key, value, w, expiresAt);
-      this.map.set(key, node);
+      this._map.set(key, node);
       this._append(node);
-      this.currentWeight += node.weight || 0;
+      this._currentWeight += node.weight || 0;
       this._evictIfNeeded();
     }
     return this;
@@ -421,7 +558,7 @@ export class PowerCache {
     const node = this._fetchValidNode(key, { countMiss: true });
     if (!node) return undefined;
     this._moveToTail(node);
-    this.hits++;
+    this._hits++;
     return node.value;
   }
 
@@ -482,24 +619,24 @@ export class PowerCache {
       if (node.expiresAt && node.expiresAt <= now) {
         if (typeof factory === 'function') {
           this._moveToTail(node);
-          this.hits++;
+          this._hits++;
           this._refreshStaleEntry(key, factory, { ttl, weight });
           return node.value;
         }
         this._removeExpiredNode(node, now, true);
       } else {
         this._moveToTail(node);
-        this.hits++;
+        this._hits++;
         return node.value;
       }
     } else {
-      this.misses++;
+      this._misses++;
     }
 
     // Compute and store
     if (typeof factory === 'function') {
       const res = factory();
-      if (res && typeof res.then === 'function') {
+      if (typeof res?.then === 'function') {
         return res.then((value) => {
           try {
             this.set(key, value, { ttl, weight });
@@ -543,19 +680,19 @@ export class PowerCache {
       }
       const w = Number.isFinite(+wRaw) ? Math.max(0, +wRaw) : 0;
 
-      if (this.map.has(key)) {
-        const node = this.map.get(key);
-        this.currentWeight -= node.weight || 0;
+      if (this._map.has(key)) {
+        const node = this._map.get(key);
+        this._currentWeight -= node.weight || 0;
         node.value = value;
         node.weight = w;
         node.expiresAt = expiresAt;
-        this.currentWeight += node.weight || 0;
+        this._currentWeight += node.weight || 0;
         this._moveToTail(node);
       } else {
         const node = this._allocNode(key, value, w, expiresAt);
-        this.map.set(key, node);
+        this._map.set(key, node);
         this._append(node);
-        this.currentWeight += node.weight || 0;
+        this._currentWeight += node.weight || 0;
       }
     }
     // Perform eviction once after bulk insertions
@@ -576,7 +713,7 @@ export class PowerCache {
       const node = this._fetchValidNode(key, { ignoreExpiry, countMiss: true });
       if (!node) continue;
       this._moveToTail(node);
-      this.hits++;
+      this._hits++;
       res.set(key, node.value);
     }
     return res;
@@ -615,7 +752,7 @@ export class PowerCache {
   getOrSetAsync(
     key,
     asyncFactory,
-    { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
+    { ttl = undefined, weight = undefined, staleWhileRevalidate = false, timeout = undefined } = {}
   ) {
     if (typeof asyncFactory !== 'function') {
       // treat non-function as direct value
@@ -623,12 +760,12 @@ export class PowerCache {
     }
 
     const now = Date.now();
-    const node = this.map.get(key);
+    const node = this._map.get(key);
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
         if (staleWhileRevalidate) {
           this._moveToTail(node);
-          this.hits++;
+          this._hits++;
           this._refreshStaleEntry(key, asyncFactory, { ttl, weight });
           return Promise.resolve(node.value);
         }
@@ -636,7 +773,7 @@ export class PowerCache {
         this._removeExpiredNode(node, now, false);
       } else {
         this._moveToTail(node);
-        this.hits++;
+        this._hits++;
         return Promise.resolve(node.value);
       }
     }
@@ -645,7 +782,7 @@ export class PowerCache {
     if (this._inflightPromises.has(key)) return this._inflightPromises.get(key);
 
     // No cached node and no inflight factory: count as a miss and invoke factory
-    this.misses++;
+    this._misses++;
 
     // Invoke and normalize result to a Promise
     let p;
@@ -655,20 +792,53 @@ export class PowerCache {
       return Promise.reject(err);
     }
 
+    // Determine effective timeout: per-call `timeout` overrides cache default
+    const effectiveTimeout = Number.isFinite(Number(timeout))
+      ? Math.max(0, Math.floor(Number(timeout)))
+      : Number.isFinite(Number(this._defaultAsyncTimeout))
+        ? this._defaultAsyncTimeout
+        : undefined;
+
+    // Wrap with a timeout race when requested
+    let timed = p;
+    if (Number.isFinite(effectiveTimeout) && effectiveTimeout > 0) {
+      let timer = null;
+      timed = new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
+          try {
+            reject(new Error('getOrSetAsync timeout'));
+          } catch (e) {
+            /* ignore */
+          }
+        }, effectiveTimeout);
+        p.then(
+          (v) => {
+            try {
+              clearTimeout(timer);
+            } catch (e) {}
+            resolve(v);
+          },
+          (err) => {
+            try {
+              clearTimeout(timer);
+            } catch (e) {}
+            reject(err);
+          }
+        );
+      });
+    }
+
     // Store in inflight map to dedupe concurrent callers
-    const tracked = p.then(
-      (value) => {
+    const tracked = timed
+      .then((value) => {
         try {
           this.set(key, value, { ttl, weight });
         } catch (err) {}
-        this._inflightPromises.delete(key);
         return value;
-      },
-      (err) => {
+      })
+      .finally(() => {
         this._inflightPromises.delete(key);
-        throw err;
-      }
-    );
+      });
 
     this._inflightPromises.set(key, tracked);
     return tracked;
@@ -730,11 +900,11 @@ export class PowerCache {
    * @returns {boolean} true if the key was removed.
    */
   delete(key) {
-    const node = this.map.get(key);
+    const node = this._map.get(key);
     if (!node) return false;
     const next = node.next;
-    this.map.delete(key);
-    this.currentWeight -= node.weight || 0;
+    this._map.delete(key);
+    this._currentWeight -= node.weight || 0;
     if (this._cleanupCursor === node) this._cleanupCursor = next;
     this._cleanupCursorValid = Boolean(this._cleanupCursor);
     this._remove(node);
@@ -750,16 +920,17 @@ export class PowerCache {
    * @returns {void}
    */
   clear() {
-    for (let node = this.head; node; ) {
+    for (let node = this._head; node; ) {
       const next = node.next;
       this._freeNode(node);
       node = next;
     }
-    this.head = this.tail = null;
-    this.map.clear();
-    this.currentWeight = 0;
+    this._head = this._tail = null;
+    this._map.clear();
+    this._currentWeight = 0;
     this._cleanupCursor = null;
     this._cleanupCursorValid = false;
+    this._evictionCandidate = null;
   }
 
   /**
@@ -785,14 +956,14 @@ export class PowerCache {
     // Resume from the previous cursor when possible to avoid re-scanning from head.
     // `_cleanupCursorValid` is toggled by mutation paths that affect the cursor,
     // avoiding an expensive `Map.get()` on every scan.
-    let node = this._cleanupCursor && this._cleanupCursorValid ? this._cleanupCursor : this.head;
+    let node = this._cleanupCursor && this._cleanupCursorValid ? this._cleanupCursor : this._head;
     while (node && scanned < maxScan) {
       const next = node.next;
       if (node.expiresAt && node.expiresAt <= now) {
         const k = node.key;
         const v = node.value;
-        this.map.delete(k);
-        this.currentWeight -= node.weight || 0;
+        this._map.delete(k);
+        this._currentWeight -= node.weight || 0;
         // advance cursor if it pointed to this node
         if (this._cleanupCursor === node) this._cleanupCursor = next;
         this._cleanupCursorValid = Boolean(this._cleanupCursor);
@@ -801,13 +972,13 @@ export class PowerCache {
           if (this.onExpire) this.onExpire(k, v);
         } catch (err) {}
         this._freeNode(node);
-        this.expirations++;
+        this._expirations++;
       }
       node = next;
       scanned++;
     }
     // resume from where we left off; if we've reached the end, wrap to head
-    this._cleanupCursor = node || this.head;
+    this._cleanupCursor = node || this._head;
     this._cleanupCursorValid = Boolean(this._cleanupCursor);
     return scanned;
   }
@@ -918,7 +1089,7 @@ export class PowerCache {
    * @returns {number}
    */
   get size() {
-    return this.map.size;
+    return this._map.size;
   }
 
   /**
@@ -926,8 +1097,8 @@ export class PowerCache {
    * @returns {number}
    */
   get hitRate() {
-    const total = (this.hits || 0) + (this.misses || 0);
-    return total ? this.hits / total : 0;
+    const total = (this._hits || 0) + (this._misses || 0);
+    return total ? this._hits / total : 0;
   }
 
   /**
@@ -937,13 +1108,13 @@ export class PowerCache {
   stats() {
     return {
       size: this.size,
-      weight: this.currentWeight,
-      hits: this.hits,
-      misses: this.misses,
-      evictions: this.evictions,
-      expirations: this.expirations,
-      rejected: this.rejected,
-      poolSize: this.pool.length,
+      weight: this._currentWeight,
+      hits: this._hits,
+      misses: this._misses,
+      evictions: this._evictions,
+      expirations: this._expirations,
+      rejected: this._rejected,
+      poolSize: this._pool.length,
     };
   }
 
@@ -956,7 +1127,14 @@ export class PowerCache {
   resize({ maxEntries, maxWeight } = {}) {
     if (Number.isFinite(+maxEntries)) this.maxEntries = Math.max(0, +maxEntries);
     if (Number.isFinite(+maxWeight)) this.maxWeight = Math.max(0, +maxWeight);
+    // Mutations that trigger bulk evictions can invalidate the incremental
+    // cleanup cursor used by `cleanupExpiredUpTo`. Reset the cursor so
+    // subsequent incremental scans start from a known-good head node.
     this._evictIfNeeded();
+    this._cleanupCursor = null;
+    this._cleanupCursorValid = false;
+    // Eviction candidate should align with the (possibly new) head.
+    this._evictionCandidate = this.head;
   }
 
   /**
@@ -966,9 +1144,9 @@ export class PowerCache {
    */
   *entries(order = 'MRU') {
     if (order === 'MRU') {
-      for (let node = this.tail; node; node = node.prev) yield [node.key, node.value];
+      for (let node = this._tail; node; node = node.prev) yield [node.key, node.value];
     } else {
-      for (let node = this.head; node; node = node.next) yield [node.key, node.value];
+      for (let node = this._head; node; node = node.next) yield [node.key, node.value];
     }
   }
 
@@ -996,14 +1174,24 @@ export class PowerCache {
 /**
  * Deep equality check for cache values. Extracted to module scope to avoid
  * allocating a new closure on each call to `hasEqual`.
- * Uses a WeakMap-of-WeakSet for cycle detection.
+ * Uses a WeakMap-of-WeakSet for cycle detection and enforces a recursion
+ * depth limit to protect against pathological cyclic structures causing
+ * stack blowups. When the depth limit is exceeded we fall back to reference
+ * equality (i.e. return `a === b`).
  * @private
  * @param {*} a
  * @param {*} b
  * @param {WeakMap} [seen]
+ * @param {number} [depth=0]
  * @returns {boolean}
  */
-function deepEqual(a, b, seen = undefined) {
+function deepEqual(a, b, seen = undefined, depth = 0) {
+  const MAX_DEEP_EQUAL_DEPTH = 100;
+  if (depth > MAX_DEEP_EQUAL_DEPTH) {
+    // Fall back to reference equality when we've recursed too deep.
+    return a === b;
+  }
+
   if (a === b) return true;
   if (a == null || b == null) return a === b;
   const ta = typeof a,
@@ -1012,7 +1200,7 @@ function deepEqual(a, b, seen = undefined) {
 
   if (!seen) seen = new WeakMap();
   let mapForA = seen.get(a);
-  if (mapForA && mapForA.has(b)) return true;
+  if (mapForA?.has(b)) return true;
   if (!mapForA) {
     mapForA = new WeakSet();
     seen.set(a, mapForA);
@@ -1032,7 +1220,7 @@ function deepEqual(a, b, seen = undefined) {
   // Arrays
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i], seen)) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i], seen, depth + 1)) return false;
     return true;
   }
 
@@ -1071,7 +1259,7 @@ function deepEqual(a, b, seen = undefined) {
     if (!(b instanceof Map) || a.size !== b.size) return false;
     for (const [k, v] of a) {
       if (!b.has(k)) return false;
-      if (!deepEqual(v, b.get(k), seen)) return false;
+      if (!deepEqual(v, b.get(k), seen, depth + 1)) return false;
     }
     return true;
   }
@@ -1093,7 +1281,7 @@ function deepEqual(a, b, seen = undefined) {
     for (const itemA of a) {
       let found = false;
       for (const itemB of b) {
-        if (deepEqual(itemA, itemB, seen)) {
+        if (deepEqual(itemA, itemB, seen, depth + 1)) {
           found = true;
           break;
         }
@@ -1110,22 +1298,9 @@ function deepEqual(a, b, seen = undefined) {
   for (let i = 0; i < keysA.length; i++) {
     const k = keysA[i];
     if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-    if (!deepEqual(a[k], b[k], seen)) return false;
+    if (!deepEqual(a[k], b[k], seen, depth + 1)) return false;
   }
   return true;
-}
-
-/**
- * Exported helper that allows callers to reuse a `seen` WeakMap for
- * repeated deep-equality checks to avoid allocating a new WeakMap/WeakSet
- * structure on every call.
- * @param {*} a
- * @param {*} b
- * @param {WeakMap} [seen]
- * @returns {boolean}
- */
-export function deepEqualWithSeen(a, b, seen) {
-  return deepEqual(a, b, seen);
 }
 
 /**
@@ -1143,6 +1318,7 @@ export function deepEqualWithSeen(a, b, seen) {
  * await memoizedFetch(1)
  *
  * @class PowerMemoizer
+ * @public
  */
 export class PowerMemoizer {
   /**
@@ -1226,7 +1402,7 @@ export class PowerMemoizer {
 
       const res = fn(...args);
       // Promise-like
-      if (res && typeof res.then === 'function') {
+      if (typeof res?.then === 'function') {
         const p = res.then(
           (value) => {
             try {
@@ -1347,6 +1523,7 @@ export class PowerMemoizer {
  * // entries will be automatically expired by the background cleaner
  *
  * @class PowerTimedCache
+ * @public
  */
 export class PowerTimedCache {
   /**
@@ -1412,11 +1589,10 @@ export class PowerTimedCache {
     return this.cache.values(order);
   }
   [Symbol.dispose]() {
-    if (this.cache && typeof this.cache[Symbol.dispose] === 'function')
-      return this.cache[Symbol.dispose]();
+    if (typeof this.cache?.[Symbol.dispose] === 'function') return this.cache[Symbol.dispose]();
   }
   async [Symbol.asyncDispose]() {
-    if (this.cache && typeof this.cache[Symbol.asyncDispose] === 'function')
+    if (typeof this.cache?.[Symbol.asyncDispose] === 'function')
       return this.cache[Symbol.asyncDispose]();
     return;
   }
@@ -1434,6 +1610,8 @@ export class PowerTimedCache {
  * `keyResolver` in that case.
  *
  * Example: `new PowerMemoizer(fn, { keyResolver: simpleArgsKey })`
+ *
+ * @public
  */
 export function simpleArgsKey(...args) {
   if (args.length === 0) return '';

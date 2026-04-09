@@ -6,6 +6,13 @@
 
 # Class: PowerDefer
 
+PowerDefer
+
+Deferred promise utility exposing `promise`, `resolve` and `reject` helpers.
+Useful when needing a promise whose resolution is controlled externally.
+
+ PowerDefer
+
 ## Constructors
 
 ### Constructor

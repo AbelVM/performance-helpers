@@ -125,7 +125,7 @@ describe('PowerRateLimit extra branches', () => {
   });
 
   it('reserve + tryConsume commit succeeds and calls reserve', () => {
-    const l1 = { reserve: vi.fn((n) => ({ t: true })), release: vi.fn() };
+    const l1 = { reserve: vi.fn(() => ({ t: true })), release: vi.fn() };
     // provide a noop rollback so pre-check allows atomic path
     const l2 = { tryConsume: vi.fn(() => true), rollback: vi.fn() };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
@@ -135,7 +135,7 @@ describe('PowerRateLimit extra branches', () => {
   });
 
   it('undo is attempted when a later limiter fails', () => {
-    const l1 = { reserve: vi.fn((n) => ({ t: true })), release: vi.fn() };
+    const l1 = { reserve: vi.fn(() => ({ t: true })), release: vi.fn() };
     const l2 = { tryConsume: vi.fn(() => false), rollback: vi.fn() };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
     expect(r.tryConsume(1)).toBe(false);

@@ -64,7 +64,7 @@ pool.onmessage = (e) => {
 // Wait until the pool is idle (all queued and inflight tasks finished)
 await pool.drain();
 // Pretty-print errors using the per-module logger (uncomment the import above in real code)
-// errors.forEach((e) => logger.error(e, 'Chunk processing errors:'));
+// (example: log chunk processing errors if needed)
 console.log('Results:', results.length, 'Errors:', errors.length);
 pool.terminate();
 ```

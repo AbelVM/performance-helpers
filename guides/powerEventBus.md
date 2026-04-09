@@ -59,7 +59,7 @@ bus.once('idle', async () => {
 })();
 
 // later
-// unsub();
+// (call the returned unsubscribe function when appropriate)
 ```
 
 ## Notes

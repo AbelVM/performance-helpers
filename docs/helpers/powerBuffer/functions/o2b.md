@@ -8,8 +8,7 @@
 
 > **o2b**(`obj`): `ArrayBuffer`
 
-Encode a value to an ArrayBuffer containing JSON UTF-8.
-Returns an owning ArrayBuffer (may be a slice of the underlying buffer).
+Encode a value to an owning `ArrayBuffer` containing JSON UTF-8.
 
 ## Parameters
 
@@ -22,9 +21,3 @@ Value to encode.
 ## Returns
 
 `ArrayBuffer`
-
-## Example
-
-```ts
-const buf = o2b({ a: 1 })
-```

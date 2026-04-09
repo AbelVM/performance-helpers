@@ -50,5 +50,5 @@ async function fetchJson(url) {
 }
 
 // Or call the static helper directly for one-off calls
-// await PowerRetry.run(() => fetchJson('/api'), { maxAttempts: 3 });
+// (one-off usage shown above; call the static helper for simple calls)
 ```

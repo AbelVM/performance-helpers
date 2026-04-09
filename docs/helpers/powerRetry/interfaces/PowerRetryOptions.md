@@ -12,11 +12,15 @@
 
 > `optional` **attemptTimeout?**: `number`
 
+Per-attempt timeout in milliseconds.
+
 ***
 
 ### backoff?
 
 > `optional` **backoff?**: `"exponential"` \| `"linear"` \| `"fixed"`
+
+Delay strategy between attempts.
 
 ***
 
@@ -24,11 +28,15 @@
 
 > `optional` **baseDelay?**: `number`
 
+Base delay in milliseconds.
+
 ***
 
 ### jitter?
 
 > `optional` **jitter?**: `boolean`
+
+Adds jitter to delay calculations.
 
 ***
 
@@ -36,11 +44,15 @@
 
 > `optional` **maxAttempts?**: `number`
 
+Maximum attempts (initial try + retries). Must be a positive finite number.
+
 ***
 
 ### maxDelay?
 
 > `optional` **maxDelay?**: `number`
+
+Maximum delay in milliseconds.
 
 ***
 

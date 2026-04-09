@@ -24,14 +24,10 @@ describe('PowerBulkhead', () => {
 
   it('queues tasks when partition concurrency is exceeded and dispatches them in FIFO order', async () => {
     const bulkhead = new PowerBulkhead({ partitions: 1, maxConcurrency: 1, queueCapacity: 10 });
-    let running = false;
-
     const firstTask = bulkhead.run(
       () =>
         new Promise((resolve) => {
-          running = true;
           setTimeout(() => {
-            running = false;
             resolve('first');
           }, 20);
         })

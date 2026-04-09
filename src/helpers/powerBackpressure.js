@@ -7,6 +7,15 @@
  */
 import { PowerPermitGate } from './powerPermitGate.js';
 
+/**
+ * PowerBackpressure
+ *
+ * Producer-facing backpressure controller built on top of `PowerPermitGate`.
+ * Provides adaptive refill behavior and FIFO queuing for producers.
+ *
+ * @class PowerBackpressure
+ * @public
+ */
 export class PowerBackpressure extends PowerPermitGate {
   /**
    * @param {Object} [options]
@@ -150,7 +159,7 @@ export class PowerBackpressure extends PowerPermitGate {
 
     while (this._available > 0 && this.pending > 0) {
       const next = this._waiters.shift();
-      if (next && typeof next.resolve === 'function') {
+      if (typeof next?.resolve === 'function') {
         this._available -= 1;
         next.resolve(this._makeRelease());
       }

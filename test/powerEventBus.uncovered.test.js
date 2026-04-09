@@ -39,4 +39,19 @@ describe('PowerEventBus uncovered branches', () => {
     expect(bus.emit('z', 1)).toBe(true);
     expect(bus.listeners('z')).toEqual([]);
   });
+
+  it('emitAsync iterates legacy Set buckets lazily and cleans dead refs', async () => {
+    const bus = new PowerEventBus({ weak: true });
+    let calls = 0;
+    const live = async () => {
+      calls += 1;
+    };
+    bus._listeners.set('async-z', new Set([{ deref: () => null }, { deref: () => live }]));
+
+    const ok = await bus.emitAsync('async-z', 123, { concurrency: 1 });
+
+    expect(ok).toBe(true);
+    expect(calls).toBe(1);
+    expect(bus.listeners('async-z')).toEqual([live]);
+  });
 });

@@ -11,6 +11,8 @@ export class PowerTTLMap {
     _onExpire: any;
     _map: Map<any, any>;
     _expirations: Map<any, any>;
+    _nextExpiryAt: number;
+    _nextExpiryDirty: boolean;
     /**
      * Set a key with optional TTL (ms).
      * @param {any} key
@@ -67,6 +69,8 @@ export class PowerTTLMap {
      * @returns {number}
      */
     get size(): number;
+    _updateNextExpiryOnWrite(prevExpiry: any, nextExpiry: any): void;
+    _sweepExpirations(now: any): void;
     /**
      * Iterate entries [key, value] skipping expired entries.
      * @returns {IterableIterator<[any, any]>}

@@ -73,7 +73,7 @@ describe('PowerScheduler', () => {
     expect(scheduler.scheduled).toBe(false);
   });
 
-  it('swallows callback errors and reports them to console.error', async () => {
+  it('swallows callback errors by default without logging to console.error', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const scheduler = new PowerScheduler(() => {
@@ -83,10 +83,44 @@ describe('PowerScheduler', () => {
       scheduler.schedule();
       await Promise.resolve();
 
-      expect(errorSpy).toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
       expect(scheduler.scheduled).toBe(false);
     } finally {
       errorSpy.mockRestore();
     }
+  });
+
+  it('calls onError when provided and continues scheduling safely', async () => {
+    const onError = vi.fn();
+    const scheduler = new PowerScheduler(
+      () => {
+        throw new Error('flush failed');
+      },
+      { onError }
+    );
+
+    scheduler.schedule();
+    await Promise.resolve();
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(scheduler.scheduled).toBe(false);
+  });
+
+  it('swallows onError hook failures', async () => {
+    const scheduler = new PowerScheduler(
+      () => {
+        throw new Error('flush failed');
+      },
+      {
+        onError: () => {
+          throw new Error('hook failed');
+        },
+      }
+    );
+
+    scheduler.schedule();
+    await Promise.resolve();
+
+    expect(scheduler.scheduled).toBe(false);
   });
 });

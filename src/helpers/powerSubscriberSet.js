@@ -5,6 +5,15 @@
  */
 const ORIGINAL = Symbol('PowerSubscriberSet.original');
 
+/**
+ * PowerSubscriberSet
+ *
+ * Shared subscriber set helper used by event buses and observable stores.
+ * Supports optional weak references, once-listeners, and max listener counts.
+ *
+ * @class PowerSubscriberSet
+ * @public
+ */
 export class PowerSubscriberSet {
   /**
    * @param {Object} [options]
@@ -37,7 +46,11 @@ export class PowerSubscriberSet {
     return this._listeners.size;
   }
 
-  /** Add a listener and return an unsubscribe function. */
+  /**
+   * Add a listener and return an unsubscribe function.
+   * @param {Function|WeakRef} fn Listener function or WeakRef when `weak` mode is enabled.
+   * @returns {() => boolean} Unsubscribe function that removes the listener.
+   */
   add(fn) {
     if (typeof fn !== 'function') {
       if (!this._weak || !fn || typeof fn.deref !== 'function') {
@@ -62,7 +75,12 @@ export class PowerSubscriberSet {
     return () => this.delete(fn);
   }
 
-  /** Add a once listener and return an unsubscribe function. */
+  /**
+   * Add a once listener and return an unsubscribe function.
+   * The original listener will be removed after the first invocation.
+   * @param {Function} fn Listener function.
+   * @returns {() => boolean} Unsubscribe function.
+   */
   addOnce(fn) {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
     const wrapped = (...args) => {
@@ -88,7 +106,11 @@ export class PowerSubscriberSet {
     return () => this.delete(fn);
   }
 
-  /** Delete a listener by original function or once-wrapper. */
+  /**
+   * Delete a listener by original function or once-wrapper.
+   * @param {Function|WeakRef} fn Original listener function or its WeakRef wrapper.
+   * @returns {boolean} `true` if a listener was removed, otherwise `false`.
+   */
   delete(fn) {
     let target = fn;
     const wrapped = this._onceMap.get(fn);
@@ -121,7 +143,11 @@ export class PowerSubscriberSet {
     return false;
   }
 
-  /** Iterate live listeners in insertion order and invoke a callback. */
+  /**
+   * Iterate live listeners in insertion order and invoke a callback.
+   * @param {(listener: Function) => void} fn Callback invoked for each live listener.
+   * @returns {void}
+   */
   forEach(fn) {
     for (const entry of this._listeners) {
       const listener = this._deref(entry);
@@ -133,13 +159,19 @@ export class PowerSubscriberSet {
     }
   }
 
-  /** Clear all listeners. */
+  /**
+   * Clear all listeners.
+   * @returns {void}
+   */
   clear() {
     this._listeners.clear();
     this._onceMap = new WeakMap();
   }
 
-  /** Return a safe array copy of live listeners. */
+  /**
+   * Return a safe array copy of live listeners.
+   * @returns {Function[]} Array of live listener functions.
+   */
   values() {
     this._cleanup();
     const result = [];
@@ -150,16 +182,26 @@ export class PowerSubscriberSet {
     return result;
   }
 
-  /** Iterate live listeners in insertion order. */
-  [Symbol.iterator]() {
-    return this.values()[Symbol.iterator]();
+  /**
+   * Iterate live listeners in insertion order.
+   * @yields {Function}
+   */
+  *[Symbol.iterator]() {
+    for (const entry of this._listeners) {
+      const fn = this._deref(entry);
+      if (!fn) {
+        this._listeners.delete(entry);
+        continue;
+      }
+      yield fn;
+    }
   }
 
   /** Remove dead weak refs from the set. */
   _cleanup() {
     if (!this._weak || typeof WeakRef === 'undefined') return;
     for (const entry of this._listeners) {
-      if (entry && typeof entry.deref === 'function' && !entry.deref()) {
+      if (typeof entry?.deref === 'function' && !entry.deref()) {
         this._listeners.delete(entry);
       }
     }
@@ -181,12 +223,14 @@ export class PowerSubscriberSet {
   }
 
   _deref(entry) {
-    return entry && typeof entry.deref === 'function' ? entry.deref() : entry;
+    return typeof entry?.deref === 'function' ? entry.deref() : entry;
   }
 }
 
 /**
  * Cleanup dead weak refs from a subscriber bucket.
+ *
+ * @public
  * @param {any} bucket
  */
 export function cleanupWeakRefs(bucket) {
@@ -209,7 +253,7 @@ export function cleanupWeakRefs(bucket) {
   }
   if (typeof bucket[Symbol.iterator] === 'function' && typeof bucket.delete === 'function') {
     for (const entry of bucket) {
-      const fn = entry && typeof entry.deref === 'function' ? entry.deref() : entry;
+      const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
       if (!fn) bucket.delete(entry);
     }
   }

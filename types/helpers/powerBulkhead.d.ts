@@ -17,6 +17,8 @@ export class PowerBulkhead {
     _queueCapacity: number;
     _partitioner: Function | null;
     _nextPartition: number;
+    _pendingCount: number;
+    _activeCount: number;
     _buckets: {
         gate: PowerPermitGate;
     }[];
@@ -60,6 +62,7 @@ export class PowerBulkhead {
     drain(): Promise<void>;
     _choosePartition(key: any): number;
     _hashKey(value: any): number;
+    _resolveDrainWaitersIfIdle(): void;
 }
 export default PowerBulkhead;
 import { PowerPermitGate } from './powerPermitGate.js';

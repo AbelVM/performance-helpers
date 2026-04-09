@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { PowerEventBus } from '../src/helpers/powerEventBus.js';
 
 describe('PowerEventBus additional branches', () => {
@@ -75,5 +75,47 @@ describe('PowerEventBus additional branches', () => {
     unsub();
     expect(FakeFR.last.unregistered).toBeTruthy();
     global.FinalizationRegistry = origFR;
+  });
+
+  it('tracks weak listener registrations per event for the same callback', () => {
+    const origFR = global.FinalizationRegistry;
+    class FakeFR {
+      constructor() {
+        this.registered = [];
+        this.unregistered = [];
+        FakeFR.last = this;
+      }
+      register(fn, token, ref) {
+        this.registered.push({ fn, token, ref });
+      }
+      unregister(ref) {
+        this.unregistered.push(ref);
+      }
+    }
+
+    global.FinalizationRegistry = FakeFR;
+    try {
+      const bus = new PowerEventBus({ weak: true });
+      const fn = () => {};
+
+      const unsubA = bus.on('a', fn);
+      const unsubB = bus.on('b', fn);
+
+      const registry = bus._fr;
+
+      expect(registry.registered.length).toBe(2);
+      expect(registry.registered.map((r) => r.token.event).sort()).toEqual(['a', 'b']);
+
+      unsubA();
+      expect(registry.unregistered.length).toBe(1);
+
+      // listener for event b should remain active
+      expect(bus.emit('b', 1)).toBe(true);
+
+      unsubB();
+      expect(registry.unregistered.length).toBe(2);
+    } finally {
+      global.FinalizationRegistry = origFR;
+    }
   });
 });

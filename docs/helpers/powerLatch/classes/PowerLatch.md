@@ -46,6 +46,12 @@ initial count required to release the latch
 
 ***
 
+### \_nextWaiterToken
+
+> **\_nextWaiterToken**: `number`
+
+***
+
 ### \_onAbort
 
 > **\_onAbort**: `any`
@@ -54,23 +60,7 @@ initial count required to release the latch
 
 ### \_waiters
 
-> **\_waiters**: `object`[]
-
-#### defer
-
-> **defer**: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md)
-
-#### signal?
-
-> `optional` **signal?**: `AbortSignal`
-
-#### signalHandler?
-
-> `optional` **signalHandler?**: `Function`
-
-#### timer?
-
-> `optional` **timer?**: `any`
+> **\_waiters**: `Map`\<`number`, \{ `defer`: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md); `signal?`: `AbortSignal`; `signalHandler?`: `Function`; `timer?`: `any`; `token`: `number`; \}\>
 
 ## Accessors
 
@@ -148,17 +138,17 @@ Number of remaining counts.
 
 ### \_removeWaiter()
 
-> **\_removeWaiter**(`waiter`): `any`
+> **\_removeWaiter**(`waiterOrToken`): \{ `defer`: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md); `signal?`: `AbortSignal`; `signalHandler?`: `Function`; `timer?`: `any`; `token`: `number`; \} \| `null`
 
 #### Parameters
 
-##### waiter
+##### waiterOrToken
 
 `any`
 
 #### Returns
 
-`any`
+\{ `defer`: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md); `signal?`: `AbortSignal`; `signalHandler?`: `Function`; `timer?`: `any`; `token`: `number`; \} \| `null`
 
 ***
 

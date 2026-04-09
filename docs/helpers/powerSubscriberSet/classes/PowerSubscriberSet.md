@@ -6,6 +6,13 @@
 
 # Class: PowerSubscriberSet
 
+PowerSubscriberSet
+
+Shared subscriber set helper used by event buses and observable stores.
+Supports optional weak references, once-listeners, and max listener counts.
+
+ PowerSubscriberSet
+
 ## Constructors
 
 ### Constructor
@@ -120,13 +127,15 @@ Remove dead weak refs from the set.
 
 ### \[iterator\]()
 
-> **\[iterator\]**(): `ArrayIterator`\<`any`\>
+> **\[iterator\]**(): `Generator`\<`any`, `void`, `unknown`\>
 
 Iterate live listeners in insertion order.
 
 #### Returns
 
-`ArrayIterator`\<`any`\>
+`Generator`\<`any`, `void`, `unknown`\>
+
+#### Yields
 
 ***
 
@@ -142,7 +151,11 @@ Add a listener and return an unsubscribe function.
 
 `any`
 
+Listener function or WeakRef when `weak` mode is enabled.
+
 #### Returns
+
+Unsubscribe function that removes the listener.
 
 () => `boolean`
 
@@ -153,14 +166,19 @@ Add a listener and return an unsubscribe function.
 > **addOnce**(`fn`): () => `boolean`
 
 Add a once listener and return an unsubscribe function.
+The original listener will be removed after the first invocation.
 
 #### Parameters
 
 ##### fn
 
-`any`
+`Function`
+
+Listener function.
 
 #### Returns
+
+Unsubscribe function.
 
 () => `boolean`
 
@@ -190,9 +208,13 @@ Delete a listener by original function or once-wrapper.
 
 `any`
 
+Original listener function or its WeakRef wrapper.
+
 #### Returns
 
 `boolean`
+
+`true` if a listener was removed, otherwise `false`.
 
 ***
 
@@ -206,7 +228,9 @@ Iterate live listeners in insertion order and invoke a callback.
 
 ##### fn
 
-`any`
+(`listener`) => `void`
+
+Callback invoked for each live listener.
 
 #### Returns
 
@@ -216,10 +240,12 @@ Iterate live listeners in insertion order and invoke a callback.
 
 ### values()
 
-> **values**(): `any`[]
+> **values**(): `Function`[]
 
 Return a safe array copy of live listeners.
 
 #### Returns
 
-`any`[]
+`Function`[]
+
+Array of live listener functions.

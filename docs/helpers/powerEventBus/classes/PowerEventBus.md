@@ -24,6 +24,12 @@
 
 ## Properties
 
+### \_eventFinalizationRefs
+
+> **\_eventFinalizationRefs**: `Map`\<`any`, `any`\>
+
+***
+
 ### \_finalizationRefs
 
 > **\_finalizationRefs**: `WeakMap`\<`object`, `any`\>
@@ -53,6 +59,22 @@
 > **\_weak**: `boolean`
 
 ## Methods
+
+### \_clearWeakListenerEvent()
+
+> **\_clearWeakListenerEvent**(`event`): `void`
+
+#### Parameters
+
+##### event
+
+`any`
+
+#### Returns
+
+`void`
+
+***
 
 ### \_ensureFinalizationRegistry()
 
@@ -106,11 +128,15 @@ unsubscribe
 
 ### \_unregisterWeakListener()
 
-> **\_unregisterWeakListener**(`fn`): `void`
+> **\_unregisterWeakListener**(`fn`, `event`): `void`
 
 #### Parameters
 
 ##### fn
+
+`any`
+
+##### event
 
 `any`
 
@@ -249,19 +275,31 @@ Remove a specific listener for an event.
 
 > **on**(`event`, `fn`): () => `void`
 
+Subscribe to an event.
+
 #### Parameters
 
 ##### event
 
-`any`
+`string`
+
+Event name to subscribe to.
 
 ##### fn
 
-`any`
+(`payload`) => `void`
+
+Listener function.
 
 #### Returns
 
+unsubscribe
+
 () => `void`
+
+#### Throws
+
+When `fn` is not a function.
 
 ***
 
@@ -286,3 +324,7 @@ Subscribe once to an event. Listener is removed after first invocation.
 unsubscribe
 
 () => `void`
+
+#### Throws
+
+When `fn` is not a function.

@@ -24,6 +24,15 @@
 import { PowerEventBus } from './powerEventBus.js';
 import { nowMs } from '../utils/now.js';
 
+/**
+ * PowerCircuit
+ *
+ * Circuit-breaker primitive that short-circuits calls after repeated failures.
+ * Use for isolating flaky downstream dependencies and to avoid cascading failures.
+ *
+ * @class PowerCircuit
+ * @public
+ */
 export class PowerCircuit {
   constructor(options = {}) {
     const { threshold = 5, timeout = 30000, onStateChange = null, eventBus = null } = options;
@@ -57,12 +66,8 @@ export class PowerCircuit {
       /* swallow user callback errors */
     }
     // emit on bus if provided
-    try {
-      if (this._bus && typeof this._bus.emit === 'function') {
-        this._bus.emit('stateChange', { state: newState, reason });
-      }
-    } catch (e) {
-      /* swallow bus errors */
+    if (typeof this._bus?.emit === 'function') {
+      this._bus.emit('stateChange', { state: newState, reason });
     }
   }
 
@@ -78,6 +83,16 @@ export class PowerCircuit {
     return this._failures;
   }
 
+  /**
+   * Execute a function under circuit-breaker protection.
+   *
+   * If the circuit is `open`, this will throw an error with `code === 'ECIRCUITOPEN'`.
+   * When in `half-open` state a single trial call is allowed.
+   *
+   * @param {Function} fn Async function to execute.
+   * @returns {Promise<any>} Resolves with the function's result.
+   * @throws {Error} If the circuit is open or if `fn` throws/rejects.
+   */
   async call(fn) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
 
@@ -126,6 +141,10 @@ export class PowerCircuit {
     }
   }
 
+  /**
+   * Force the circuit back to the `closed` state and clear failures.
+   * @returns {void}
+   */
   // force reset to closed
   reset() {
     this._setState('closed', 'reset');

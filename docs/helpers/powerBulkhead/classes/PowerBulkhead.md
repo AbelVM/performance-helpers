@@ -6,6 +6,13 @@
 
 # Class: PowerBulkhead
 
+PowerBulkhead
+
+Partitioned executor that isolates noisy workloads into separate
+concurrency partitions to avoid starving critical paths.
+
+ PowerBulkhead
+
 ## Constructors
 
 ### Constructor
@@ -46,6 +53,12 @@ Maximum queued tasks across all partitions.
 
 ## Properties
 
+### \_activeCount
+
+> **\_activeCount**: `number`
+
+***
+
 ### \_buckets
 
 > **\_buckets**: `object`[]
@@ -83,6 +96,12 @@ Maximum queued tasks across all partitions.
 ### \_partitions
 
 > **\_partitions**: `number`
+
+***
+
+### \_pendingCount
+
+> **\_pendingCount**: `number`
 
 ***
 
@@ -205,6 +224,16 @@ Maximum number of tasks that may wait in the queue.
 #### Returns
 
 `number`
+
+***
+
+### \_resolveDrainWaitersIfIdle()
+
+> **\_resolveDrainWaitersIfIdle**(): `void`
+
+#### Returns
+
+`void`
 
 ***
 

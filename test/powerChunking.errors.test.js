@@ -47,4 +47,131 @@ describe('PowerChunking error handling', () => {
 
     pool.terminate();
   });
+
+  it('surfaces batch dispatch failures via pool error listeners', async () => {
+    const pool = new PowerChunker([1, 2, 3], (item) => item, {
+      chunkSize: 1,
+      poolOptions: {
+        size: 1,
+        minSize: 1,
+        maxSize: 1,
+        maxTasksPerWorker: 0,
+        taskQueue: true,
+        queuePolicy: 'reject',
+        lazy: false,
+      },
+    });
+
+    const errors = [];
+    pool.addEventListener('error', (err) => errors.push(err));
+
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(errors.length).to.be.greaterThan(0);
+    expect(errors[0]).to.include({ code: 'ECHUNKDISPATCH', mode: 'batch' });
+
+    pool.terminate();
+  });
+
+  it('reports global failed chunk indexes across array dispatch windows', async () => {
+    const items = Array.from({ length: 20 }, (_, i) => i + 1);
+    const pool = new PowerChunker(items, (item) => item, {
+      chunkSize: 1,
+      poolOptions: {
+        size: 1,
+        minSize: 1,
+        maxSize: 1,
+        maxTasksPerWorker: 0,
+        taskQueue: true,
+        queuePolicy: 'reject',
+        lazy: false,
+      },
+    });
+
+    const errors = [];
+    pool.addEventListener('error', (err) => errors.push(err));
+
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const batchErrors = errors.filter(
+      (err) => err && err.code === 'ECHUNKDISPATCH' && err.mode === 'batch'
+    );
+    expect(batchErrors.length).to.be.greaterThan(0);
+    for (const err of batchErrors) {
+      expect(Array.isArray(err.failedChunks)).to.equal(true);
+      for (const idx of err.failedChunks) {
+        expect(Number.isInteger(idx)).to.equal(true);
+        expect(idx).to.be.at.least(0);
+        expect(idx).to.be.below(items.length);
+      }
+    }
+
+    pool.terminate();
+  });
+
+  it('surfaces stream dispatch failures via pool error listeners', async () => {
+    function* items() {
+      yield 1;
+      yield 2;
+      yield 3;
+    }
+
+    const pool = new PowerChunker(items(), (item) => item, {
+      chunkSize: 1,
+      poolOptions: {
+        size: 1,
+        minSize: 1,
+        maxSize: 1,
+        maxTasksPerWorker: 0,
+        taskQueue: true,
+        queuePolicy: 'reject',
+        lazy: false,
+      },
+    });
+
+    const errors = [];
+    pool.addEventListener('error', (err) => errors.push(err));
+
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      errors.some((err) => err && err.code === 'ECHUNKDISPATCH' && err.mode === 'stream')
+    ).to.equal(true);
+
+    pool.terminate();
+  });
+
+  it('emits stream-iterate errors when the input iterable throws', async () => {
+    function* badItems() {
+      yield 1;
+      throw new Error('iter boom');
+    }
+
+    const pool = new PowerChunker(badItems(), (item) => item, {
+      chunkSize: 1,
+      poolOptions: {
+        size: 1,
+        minSize: 1,
+        maxSize: 1,
+        taskQueue: true,
+        queuePolicy: 'enqueue',
+        lazy: false,
+      },
+    });
+
+    const errors = [];
+    pool.addEventListener('error', (err) => errors.push(err));
+
+    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(
+      errors.some((err) => err && err.code === 'ECHUNKDISPATCH' && err.mode === 'stream-iterate')
+    ).to.equal(true);
+
+    pool.terminate();
+  });
 });

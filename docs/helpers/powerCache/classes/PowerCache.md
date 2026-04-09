@@ -6,35 +6,12 @@
 
 # Class: PowerCache
 
-## Example
+PowerCache
 
-```ts
-// Create a cache with caps and a simple weight function
-const cache = new PowerCache({
-  maxEntries: 100,
-  maxWeight: 1024 * 1024,
-  weightFn: (v) => (v && v.byteLength) ? v.byteLength : 1,
-  defaultTTL: 60_000,
-  rejectOversized: true
-});
+In-memory cache with weight-aware eviction, TTLs and optional cleanup.
+Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
 
-// Insert a value with explicit weight and TTL
-cache.set('tile:0:0:0', { labels: [] }, { ttl: 5 * 60_000, weight: 1024 });
-
-// Retrieve and mark as used
-const val = cache.get('tile:0:0:0');
-
-// Iterate MRU-first
-for (const [key, value] of cache.entries('MRU')) { ... }
-
-// Start periodic cleanup every 10s scanning up to 200 nodes per tick
-cache.startCleanup({ interval: 10000, maxCleanupPerTick: 200 });
-
-// Inspect stats
-logger.log(cache.stats());
-
-@class PowerCache
-```
+ PowerCache
 
 ## Indexable
 
@@ -44,7 +21,7 @@ logger.log(cache.stats());
 
 ### Constructor
 
-> **new PowerCache**(`options?`): `PowerCache`
+> **new PowerCache**(`options?`, ...`args?`): `PowerCache`
 
 Create a PowerCache.
 
@@ -54,73 +31,81 @@ Create a PowerCache.
 
 ###### defaultTTL?
 
-`number` = `60000`
+`number`
 
 Default TTL (ms) for entries.
 
 ###### eagerCleanupOnRead?
 
-`boolean` = `false`
+`boolean`
 
 If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
 
 ###### initialPoolSize?
 
-`number` = `0`
+`number`
 
 Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
 
 ###### maxCleanupPerTick?
 
-`number` = `100`
+`number`
 
 Default max nodes scanned per cleanup tick when running `startCleanup()`.
 
 ###### maxEntries?
 
-`number` = `Infinity`
+`number`
 
 Maximum number of entries.
 
 ###### maxPoolSize?
 
-`number` = `1000`
+`number`
 
 Maximum node pool size for reuse.
 
 ###### maxWeight?
 
-`number` = `Infinity`
+`number`
 
 Maximum total weight across entries.
 
 ###### onEvict?
 
-(`arg0`, `arg1`, `arg2`) => `void` = `null`
+(`arg0`, `arg1`, `arg2`) => `void`
 
 Callback invoked when an item is evicted/deleted/rejected. Called as `(key, value, reason)` where reason is `'evicted'|'deleted'|'rejected-oversized'`.
 
 ###### onExpire?
 
-(`arg0`, `arg1`) => `void` = `null`
+(`arg0`, `arg1`) => `void`
 
 Callback invoked when an item expires. Called as `(key, value)`.
 
 ###### rejectOversized?
 
-`boolean` = `false`
+`boolean`
 
 If true, inserting an item whose weight > `maxWeight` will be rejected.
 
 ###### weightFn?
 
-(`arg0`) => `number` = `...`
+(`arg0`) => `number`
 
 Function to compute weight for a value.
+
+##### args?
+
+...`any`[] = `{}`
 
 #### Returns
 
 `PowerCache`
+
+#### Throws
+
+When a non-object is provided as the options argument.
 
 ## Properties
 
@@ -154,105 +139,69 @@ Function to compute weight for a value.
 
 ***
 
+### \_currentWeight
+
+> **\_currentWeight**: `number`
+
+***
+
+### \_defaultAsyncTimeout
+
+> **\_defaultAsyncTimeout**: `number`
+
+***
+
+### \_evictionCandidate
+
+> **\_evictionCandidate**: `any`
+
+***
+
+### \_evictions
+
+> **\_evictions**: `number`
+
+***
+
+### \_expirations
+
+> **\_expirations**: `number`
+
+***
+
+### \_head
+
+> **\_head**: [`CacheNode`](../interfaces/CacheNode.md) \| `null`
+
+***
+
+### \_hits
+
+> **\_hits**: `number`
+
+***
+
 ### \_inflightPromises
 
 > **\_inflightPromises**: `Map`\<`any`, `any`\>
 
 ***
 
-### currentWeight
+### \_map
 
-> **currentWeight**: `number`
-
-***
-
-### defaultTTL
-
-> **defaultTTL**: `number`
+> **\_map**: `Map`\<`any`, `any`\>
 
 ***
 
-### eagerCleanupOnRead
+### \_misses
 
-> **eagerCleanupOnRead**: `boolean`
-
-***
-
-### evictions
-
-> **evictions**: `number`
+> **\_misses**: `number`
 
 ***
 
-### expirations
+### \_pool
 
-> **expirations**: `number`
-
-***
-
-### head
-
-> **head**: [`CacheNode`](../interfaces/CacheNode.md) \| `null`
-
-***
-
-### hits
-
-> **hits**: `number`
-
-***
-
-### map
-
-> **map**: `Map`\<`any`, `any`\>
-
-***
-
-### maxCleanupPerTick
-
-> **maxCleanupPerTick**: `number`
-
-***
-
-### maxEntries
-
-> **maxEntries**: `number`
-
-***
-
-### maxPoolSize
-
-> **maxPoolSize**: `number`
-
-***
-
-### maxWeight
-
-> **maxWeight**: `number`
-
-***
-
-### misses
-
-> **misses**: `number`
-
-***
-
-### onEvict
-
-> **onEvict**: ((`arg0`, `arg1`, `arg2`) => `void`) \| `null`
-
-***
-
-### onExpire
-
-> **onExpire**: ((`arg0`, `arg1`) => `void`) \| `null`
-
-***
-
-### pool
-
-> **pool**: `object`[]
+> **\_pool**: `object`[]
 
 #### expiresAt
 
@@ -280,21 +229,69 @@ Function to compute weight for a value.
 
 ***
 
-### rejected
+### \_rejected
 
-> **rejected**: `number`
+> **\_rejected**: `number`
+
+***
+
+### \_tail
+
+> **\_tail**: [`CacheNode`](../interfaces/CacheNode.md) \| `null`
+
+***
+
+### defaultTTL
+
+> **defaultTTL**: `number`
+
+***
+
+### eagerCleanupOnRead
+
+> **eagerCleanupOnRead**: `boolean`
+
+***
+
+### maxCleanupPerTick
+
+> **maxCleanupPerTick**: `number`
+
+***
+
+### maxEntries
+
+> **maxEntries**: `number`
+
+***
+
+### maxPoolSize
+
+> **maxPoolSize**: `number`
+
+***
+
+### maxWeight
+
+> **maxWeight**: `number`
+
+***
+
+### onEvict
+
+> **onEvict**: ((`arg0`, `arg1`, `arg2`) => `void`) \| `null`
+
+***
+
+### onExpire
+
+> **onExpire**: ((`arg0`, `arg1`) => `void`) \| `null`
 
 ***
 
 ### rejectOversized
 
 > **rejectOversized**: `boolean`
-
-***
-
-### tail
-
-> **tail**: [`CacheNode`](../interfaces/CacheNode.md) \| `null`
 
 ***
 

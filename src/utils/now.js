@@ -4,7 +4,7 @@
 let _hrtimeEpochOffset = null;
 if (
   typeof process !== 'undefined' &&
-  process.hrtime &&
+  process?.hrtime &&
   typeof process.hrtime.bigint === 'function'
 ) {
   try {
@@ -37,8 +37,8 @@ export const nowMs = () => {
 
   if (
     typeof performance !== 'undefined' &&
-    typeof performance.now === 'function' &&
-    typeof performance.timeOrigin === 'number'
+    typeof performance?.now === 'function' &&
+    typeof performance?.timeOrigin === 'number'
   ) {
     try {
       const perfVal = performance.timeOrigin + performance.now();
@@ -67,8 +67,19 @@ export default nowMs;
 
 /**
  * Measure a synchronous function's execution duration.
- * @param {Function|any} fn A function to call or a value to return.
- * @returns {{result:any,ms:number,start:number,end:number}}
+ *
+ * If `fn` is a function it will be invoked synchronously; otherwise the
+ * provided value is treated as the result and returned immediately. The
+ * returned object contains the `result` plus `ms`, `start`, and `end`
+ * timestamps measured with `nowMs()`.
+ *
+ * If the invoked function throws, the thrown error will be augmented with
+ * a `durationMs` property (elapsed time until the throw) before being
+ * re-thrown to the caller.
+ *
+ * @param {Function|any} fn - Function to execute or a direct value.
+ * @returns {{result:any, ms:number, start:number, end:number}} The result and timing.
+ * @throws {*} Re-throws any error thrown by `fn` after attaching `durationMs`.
  */
 export function measureSync(fn) {
   const start = nowMs();
@@ -88,8 +99,18 @@ export function measureSync(fn) {
 
 /**
  * Measure an async function or promise's execution duration.
- * @param {Function|Promise|any} fn Async function to call or a promise/value to await.
- * @returns {Promise<{result:any,ms:number,start:number,end:number}>}
+ *
+ * If `fn` is a function it will be invoked and its returned Promise/value
+ * awaited; if `fn` is already a Promise or a plain value it will be awaited
+ * directly. Resolves with an object containing `result`, `ms`, `start`, and
+ * `end` timestamps measured with `nowMs()`.
+ *
+ * On rejection the thrown error will be augmented with `durationMs` and
+ * re-thrown to the caller.
+ *
+ * @param {Function|Promise|any} fn - Async function, Promise, or direct value.
+ * @returns {Promise<{result:any, ms:number, start:number, end:number}>} Promise resolving to result and timing.
+ * @throws {*} Re-throws any rejection from `fn` after attaching `durationMs`.
  */
 export async function measureAsync(fn) {
   const start = nowMs();

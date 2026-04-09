@@ -12,7 +12,7 @@ class FakeWorker {
   removeEventListener(name) {
     delete this._handlers[name];
   }
-  postMessage(msg, transfer) {
+  postMessage(msg) {
     // echo back a simple response asynchronously
     setTimeout(() => {
       const h = this._handlers['message'];
@@ -42,7 +42,6 @@ describe('PowerPool timers and id stability', () => {
 
   it('generates monotonic worker ids across remove/add cycles', () => {
     const p = new PowerPool(FakeWorker, { lazy: false, minSize: 1, size: 1 });
-    const beforeIds = p.workers.map((w) => w.id);
     // add and remove
     const added = p.addWorker();
     const addedId = added.id;

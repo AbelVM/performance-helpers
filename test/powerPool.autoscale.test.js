@@ -1,11 +1,72 @@
 import { describe, it, expect } from 'vitest';
 import { PowerPool } from '../src/helpers/powerPool.js';
 
+// Lightweight mock underlying used for the first autoscale test
+class MockUnderlying {
+  constructor() {
+    this.onmessage = null;
+    this.postMessage = () => {};
+    this.terminate = () => {};
+  }
+  addEventListener(type, cb) {
+    if (type === 'message') this.onmessage = cb;
+  }
+  removeEventListener() {}
+}
+
+describe('PowerPool autoscale', () => {
+  it('does not terminate workers with in-flight tasks during scale-down', () => {
+    const pool = new PowerPool(MockUnderlying, {
+      size: 2,
+      minSize: 0,
+      maxSize: 2,
+      lazy: false,
+      maxTasksPerWorker: 1,
+      idleTimeout: 1000,
+    });
+    try {
+      // simulate autoscale config without starting an interval
+      pool._autoScale = {
+        enabled: true,
+        intervalMs: 1000,
+        targetMs: 100,
+        alpha: 0.2,
+        cooldownMs: 100,
+        hysteresis: 0.5,
+        stepUp: 1,
+        stepDown: 2,
+        backoffFactor: 1,
+        backoffMaxMultiplier: 1,
+        backoffResetMs: 10000,
+      };
+      pool._autoScaleBackoffMultiplier = 1;
+
+      // set EWMA low to request scale-down
+      pool._ewmaLatency = 1;
+
+      // mark both workers as busy
+      pool.workers[0].tasks = 1;
+      pool.workers[1].tasks = 1;
+
+      pool._autoScaleTick();
+      // no idle workers -> none removed
+      expect(pool.workers.length).toBe(2);
+
+      // make one worker idle - it should be eligible for removal
+      pool.workers[1].tasks = 0;
+      pool._autoScaleTick();
+      expect(pool.workers.length).toBe(1);
+    } finally {
+      pool.terminate();
+    }
+  });
+});
+
 // Lightweight mock underlying that reports a fixed processing duration
 class MockUnderlyingWithDuration {
   constructor() {
     this.onmessage = null;
-    this.postMessage = (msg) => {
+    this.postMessage = () => {
       // respond on next tick with a reported duration
       setTimeout(() => {
         if (this.onmessage)

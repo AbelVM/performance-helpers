@@ -6,6 +6,13 @@
 
 # Class: PowerBatch
 
+PowerBatch
+
+Scheduler-driven batching helper that collects items and dispatches them
+to a provided handler on a microtask/macrotask boundary.
+
+ PowerBatch
+
 ## Constructors
 
 ### Constructor

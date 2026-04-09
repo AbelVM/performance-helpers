@@ -6,6 +6,13 @@
 
 # Class: PowerCircuit
 
+PowerCircuit
+
+Circuit-breaker primitive that short-circuits calls after repeated failures.
+Use for isolating flaky downstream dependencies and to avoid cascading failures.
+
+ PowerCircuit
+
 ## Constructors
 
 ### Constructor
@@ -124,21 +131,36 @@
 
 > **call**(`fn`): `Promise`\<`any`\>
 
+Execute a function under circuit-breaker protection.
+
+If the circuit is `open`, this will throw an error with `code === 'ECIRCUITOPEN'`.
+When in `half-open` state a single trial call is allowed.
+
 #### Parameters
 
 ##### fn
 
-`any`
+`Function`
+
+Async function to execute.
 
 #### Returns
 
 `Promise`\<`any`\>
+
+Resolves with the function's result.
+
+#### Throws
+
+If the circuit is open or if `fn` throws/rejects.
 
 ***
 
 ### reset()
 
 > **reset**(): `void`
+
+Force the circuit back to the `closed` state and clear failures.
 
 #### Returns
 

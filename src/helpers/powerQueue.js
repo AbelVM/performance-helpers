@@ -1,7 +1,11 @@
 /**
+ * PowerQueue
+ *
  * Lightweight resizable ring-buffer queue with O(1) enqueue/dequeue.
  * Designed as a small, dependency-free helper for high-throughput queues.
  *
+ * @class PowerQueue
+ * @public
  * @example
  * const q = new PowerQueue(8);
  * q.push(1);
@@ -78,14 +82,18 @@ export class PowerQueue {
     this._size = 0;
   }
 
-  get length() {
-    return this._size;
-  }
-
+  /**
+   * Internal buffer capacity (always a power-of-two).
+   * @returns {number}
+   */
   get capacity() {
     return this._capacity;
   }
 
+  /**
+   * Whether the queue is empty.
+   * @returns {boolean}
+   */
   get isEmpty() {
     return this._size === 0;
   }
@@ -93,6 +101,7 @@ export class PowerQueue {
   /**
    * Iterator (non-destructive) yielding items in FIFO order.
    * Allows `for...of` and spread (`[...queue]`) without consuming the queue.
+   * @returns {Iterator<any>}
    */
   *[Symbol.iterator]() {
     let i = this._head;
@@ -210,6 +219,14 @@ export class PowerQueue {
     }
 
     this._size = need;
+    return this._size;
+  }
+
+  /**
+   * Number of items currently queued.
+   * @returns {number}
+   */
+  get length() {
     return this._size;
   }
 

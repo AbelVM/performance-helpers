@@ -27,7 +27,7 @@ describe('PowerRetry attemptTimeout', () => {
   it('treats a timed-out attempt as a failed attempt and succeeds on retry', async () => {
     let call = 0;
     const fn = () =>
-      new Promise((res, rej) => {
+      new Promise((res) => {
         call += 1;
         if (call === 1) {
           // first attempt stalls

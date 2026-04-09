@@ -56,8 +56,15 @@ describe('PowerLogger JSON output mode', () => {
       logger.log(circular, 'tail');
 
       expect(logSpy).toHaveBeenCalled();
-      expect(logSpy.mock.calls[0][0]).toBe(circular);
-      expect(logSpy.mock.calls[0][1]).toBe('tail');
+      // When JSON serialization contains circular references we now
+      // emit a safe JSON string (circulars replaced) instead of passing
+      // original args to the console. Verify the emitted JSON contains
+      // the safe representation and preserves additional args.
+      const out = logSpy.mock.calls[0][0];
+      const parsed = JSON.parse(out);
+      expect(parsed.level).toBe('log');
+      expect(parsed.msg[0]).toEqual({ self: '[Circular]' });
+      expect(parsed.msg[1]).toBe('tail');
     } finally {
       logSpy.mockRestore();
     }

@@ -79,6 +79,7 @@ Optional logger name included in structured payloads.
 > **debug**(...`args`): `void`
 
 Log using `console.debug` when level >= 3 (alias for verbose debug output).
+Accepts values or functions (lazy evaluated).
 Supports JSON mode similar to other methods.
 
 #### Parameters

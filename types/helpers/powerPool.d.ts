@@ -67,7 +67,7 @@ export class PowerPool {
      * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
      * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
      */
-    constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined);
+    constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined, ...args: any[]);
     _workerSource: string | Function;
     _workerOptions: Object;
     _maxTasksPerWorker: number;
@@ -99,7 +99,7 @@ export class PowerPool {
         backoffResetMs: number;
     } | null;
     _autoScaleInterval: number | null;
-    _lastAutoScaleAt: number | null;
+    _lastAutoScaleAt: number;
     _terminatedWorkerTaskCountsTotal: number;
     _terminatedWorkerTaskCountsCount: number;
     /** @type {WorkerObj[]} */
@@ -114,13 +114,17 @@ export class PowerPool {
     _onresize: Function | null;
     _nextIndex: number;
     _nextWorkerId: number;
+    _correlationCounter: number;
     /** number of currently active (dispatched) tasks across all workers */
     _activeTasks: number;
     /** whether the pool is considered idle (no active tasks and empty queue) */
     _isIdle: boolean;
+    /** whether queued dispatch is paused */
+    _queuePaused: boolean;
     _logger: PowerLogger;
     _pendingResponses: Map<any, any>;
     _underlyingToWorkerObj: Map<any, any>;
+    _defaultAwaitResponseTimeout: number;
     _reaperInterval: number;
     _encodeCache: Map<any, any>;
     _encodeCacheLimit: number;
@@ -134,6 +138,30 @@ export class PowerPool {
     private _debugLog;
     /** Ensure the reaper interval exists; recreate it if missing. @private */
     private _ensureReaper;
+    _createPendingResponsePromise(correlationId: any, options: any): {
+        pendingPromise: Promise<any>;
+        correlationKey: any;
+    };
+    /**
+     * Post a prepared message to a specific worker object and update bookkeeping.
+     * Returns the `pendingPromise` when `wantResponse` is true, otherwise `true` on success.
+     * On failure, rejects/cleans up the pending response when applicable and
+     * returns `pendingPromise` (when awaiting) or `false`.
+     * @private
+     */
+    private _postToWorkerObj;
+    /**
+     * Attempt to grow the pool by adding a worker and dispatching the message.
+     * Preserves the same pending-response cleanup semantics as inline logic.
+     * @private
+     */
+    private _tryGrowPool;
+    /**
+     * Enqueue or reject a prepared message according to the configured queue policy.
+     * Returns `pendingPromise`/`true`/`false` to match `postMessage` semantics.
+     * @private
+     */
+    private _enqueueOrReject;
     /**
      * Clear lifecycle timer intervals used by the pool.
      * @private
@@ -217,7 +245,8 @@ export class PowerPool {
      * is neither a function nor a string.
      *
      * @private
-     * @returns {Worker|any} The underlying worker instance or factory result.
+      * @returns {Worker|any} The underlying worker instance or factory result.
+      * @throws {Error} When `workerSource` is invalid or worker construction fails.
      */
     private _createWorkerInstance;
     _deleteWorkerUnderlyingMapping(workerObj: any): void;
@@ -247,24 +276,6 @@ export class PowerPool {
      */
     private _findLeastLoadedWorker;
     /**
-     * Shared handler for underlying worker 'message' events.
-     * Decodes binary payloads and forwards to the worker wrapper's `onmessage`.
-     * @private
-     */
-    private _handleUnderlyingMessage;
-    /**
-     * Shared handler for underlying worker 'error' events.
-     * Forwards to wrapper `onerror` and pool-level listeners.
-     * @private
-     */
-    private _handleUnderlyingError;
-    /**
-     * Shared handler for underlying worker 'messageerror' events.
-     * Forwards to wrapper `onmessageerror` and pool-level listeners.
-     * @private
-     */
-    private _handleUnderlyingMessageError;
-    /**
      * Post a message to a worker in the pool.
      * The pool will try to reuse an idle/least-loaded worker, grow the pool
      * (up to `maxSize`), or queue the task if configured.
@@ -275,7 +286,8 @@ export class PowerPool {
      * to a transferable `Uint8Array` (via `o2u8`) and pass its `ArrayBuffer` as
      * the transfer list to avoid structured-clone copies.
      * @param {PostMessageOptions=} options - Optional flags controlling behavior such as `awaitResponse`, `timeout`, `workerId`, and `zeroCopy`.
-     * @returns {boolean|Promise<any>} When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
+      * @returns {boolean|Promise<any>} When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
+      * @throws {Error} When `options.awaitResponse` is used but the provided `message` is not a plain object.
      */
     postMessage(message: any, transfer?: Transferable[] | undefined, options?: PostMessageOptions | undefined): boolean | Promise<any>;
     /**
@@ -304,6 +316,22 @@ export class PowerPool {
      */
     broadcast(message: any, transfer?: Transferable[] | undefined): void;
     /**
+     * Normalize stop-the-press options and strip internal-only flags.
+     * @private
+     * @param {Object=} options
+     * @returns {{recreate: boolean, fwdOptions: Object|undefined}}
+     */
+    private _normalizeStopThePressOptions;
+    /**
+     * Shared reset routine used by stop-the-press APIs.
+     * Clears queue and pending responses, terminates workers, optionally recreates workers,
+     * and updates idle state.
+     * @private
+     * @param {{recreate:boolean, scope:string}} config
+     * @returns {{currentCount:number, terminatedIds:number[]}}
+     */
+    private _resetPoolForStopThePress;
+    /**
      * Stop all pending queued tasks and immediately post a message to the pool.
      * This clears the internal task queue first (cancelling pending tasks),
      * updates the pool idle state, then forwards the provided message using
@@ -325,7 +353,8 @@ export class PowerPool {
      * either a boolean (accepted) or a Promise (when `options.awaitResponse` is used).
      * @param {{message:*,transfer?:Transferable[]}[]} items
      * @param {Object=} options - Optional options forwarded to each `postMessage` call.
-     * @returns {(boolean|Promise<any>)[]}
+      * @returns {(boolean|Promise<any>)[]}
+      * @throws {Error} When `items` is not an array.
      */
     postMessageBatch(items: {
         message: any;
@@ -486,7 +515,6 @@ export class PowerPool {
      * are temporarily unable to accept more work.
      */
     pauseQueue(): void;
-    _queuePaused: boolean | undefined;
     /**
      * Resume dequeueing from the internal task queue and attempt to dispatch
      * waiting tasks to available workers.

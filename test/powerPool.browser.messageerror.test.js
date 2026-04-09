@@ -6,7 +6,7 @@ describe('PowerPool browser-style addEventListener messageerror forwarding', () 
     class BrowserStyleUnderlying {
       constructor() {
         this._listeners = Object.create(null);
-        this.postMessage = vi.fn((msg) => {});
+        this.postMessage = vi.fn(() => {});
         this.terminate = vi.fn();
       }
       addEventListener(ev, cb) {

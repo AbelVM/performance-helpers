@@ -45,13 +45,17 @@ describe('PowerCircuit', () => {
   it('reopens when the half-open trial fails', async () => {
     const cb = new PowerCircuit({ threshold: 1, timeout: 10 });
 
-    await expect(cb.call(() => Promise.reject(new Error('first fail')))).rejects.toThrow('first fail');
+    await expect(cb.call(() => Promise.reject(new Error('first fail')))).rejects.toThrow(
+      'first fail'
+    );
     expect(cb.state).toBe('open');
 
     await new Promise((r) => setTimeout(r, 15));
     expect(cb.state).toBe('half-open');
 
-    await expect(cb.call(() => Promise.reject(new Error('trial fail')))).rejects.toThrow('trial fail');
+    await expect(cb.call(() => Promise.reject(new Error('trial fail')))).rejects.toThrow(
+      'trial fail'
+    );
     expect(cb.state).toBe('open');
     expect(cb.failures).toBe(0);
   });

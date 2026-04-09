@@ -132,7 +132,7 @@ import { PowerPool } from '../src/helpers/powerPool.js';
 // Create a small pool tuned for CPU-bound thumbnailing
 const pool = new PowerPool(ImageWorker, { size: 2, maxSize: 4, idleTimeout: 30_000 });
 // For low-load deployments avoid eager worker startup:
-// const pool = new PowerPool(ImageWorker, { size: 2, maxSize: 4, idleTimeout: 30_000, lazy: true });
+// (example alternative: lazy startup omitted for brevity)
 
 // Helper to post a job and await the worker's response
 async function makeThumbnail(imageBuffer) {

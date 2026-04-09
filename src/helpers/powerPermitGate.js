@@ -6,6 +6,16 @@
  */
 import { PowerQueue } from './powerQueue.js';
 
+/**
+ * PowerPermitGate
+ *
+ * Internal helper that manages a finite number of permits and a FIFO waiter queue.
+ * Provides `acquire()`, `tryAcquire()` and `release()` primitives used by
+ * semaphore-like helpers.
+ *
+ * @class PowerPermitGate
+ * @public
+ */
 export class PowerPermitGate {
   /**
    * @param {Object} [options]
@@ -91,7 +101,7 @@ export class PowerPermitGate {
     let remaining = Math.max(0, Math.floor(Number(count) || 1));
     while (remaining > 0 && this._waiters.length > 0) {
       const next = this._waiters.shift();
-      if (next && typeof next.resolve === 'function') {
+      if (typeof next?.resolve === 'function') {
         next.resolve(this._makeRelease());
         remaining -= 1;
       }
@@ -112,7 +122,7 @@ export class PowerPermitGate {
     this._available = Math.min(this._capacity, Math.max(0, Math.floor(Number(available) || 0)));
     while (this._waiters.length > 0) {
       const next = this._waiters.shift();
-      if (next && typeof next.reject === 'function') next.reject(reason);
+      if (typeof next?.reject === 'function') next.reject(reason);
     }
   }
 

@@ -6,16 +6,12 @@
 
 # Class: PowerPool
 
-Manager for a pool of web workers.
+PowerPool
 
-## Example
+Manager for a pool of worker-like objects providing task dispatch, queuing,
+autoscaling, and lifecycle management. See constructor docs for options.
 
-```ts
-import MinionWorker from './worker.js?worker&inline'
-const pool = new PowerPool(MinionWorker, { size: 4, idleTimeout: 30000 });
-pool.onmessage = (e) => { logger.log(e.data); };
-pool.postMessage({ payload: {} });
-```
+ PowerPool
 
 ## Indexable
 
@@ -25,7 +21,7 @@ pool.postMessage({ payload: {} });
 
 ### Constructor
 
-> **new PowerPool**(`workerSource`, `options?`): `PowerPool`
+> **new PowerPool**(`workerSource`, `options`, ...`args?`): `PowerPool`
 
 Create a PowerPool.
 
@@ -37,7 +33,7 @@ Create a PowerPool.
 
 A Worker constructor, a worker factory, or a relative path string. If the provided function is not constructable, it is invoked directly; if a string path is provided, the pool attempts to resolve it via `new URL(path, import.meta.url)` before falling back to a plain `Worker(path)`.
 
-##### options?
+##### options
 
 [`PowerPoolOptions`](../interfaces/PowerPoolOptions.md) \| `undefined`
 
@@ -46,6 +42,10 @@ A Worker constructor, a worker factory, or a relative path string. If the provid
 ***
 
 `undefined`
+
+##### args?
+
+...`any`[] = `{}`
 
 #### Returns
 
@@ -85,9 +85,21 @@ number of currently active (dispatched) tasks across all workers
 
 ***
 
+### \_correlationCounter
+
+> **\_correlationCounter**: `number`
+
+***
+
 ### \_createdAt
 
 > **\_createdAt**: `number`
+
+***
+
+### \_defaultAwaitResponseTimeout
+
+> **\_defaultAwaitResponseTimeout**: `number`
 
 ***
 
@@ -131,7 +143,7 @@ whether the pool is considered idle (no active tasks and empty queue)
 
 ### \_lastAutoScaleAt
 
-> **\_lastAutoScaleAt**: `number` \| `null`
+> **\_lastAutoScaleAt**: `number`
 
 ***
 
@@ -203,7 +215,9 @@ whether the pool is considered idle (no active tasks and empty queue)
 
 ### \_queuePaused
 
-> **\_queuePaused**: `boolean` \| `undefined`
+> **\_queuePaused**: `boolean`
+
+whether queued dispatch is paused
 
 ***
 
@@ -454,6 +468,34 @@ Whether queued dispatch is currently paused.
 
 ## Methods
 
+### \_createPendingResponsePromise()
+
+> **\_createPendingResponsePromise**(`correlationId`, `options`): `object`
+
+#### Parameters
+
+##### correlationId
+
+`any`
+
+##### options
+
+`any`
+
+#### Returns
+
+`object`
+
+##### correlationKey
+
+> **correlationKey**: `any`
+
+##### pendingPromise
+
+> **pendingPromise**: `Promise`\<`any`\>
+
+***
+
 ### \_deleteWorkerUnderlyingMapping()
 
 > **\_deleteWorkerUnderlyingMapping**(`workerObj`): `void`
@@ -656,6 +698,10 @@ Optional flags controlling behavior such as `awaitResponse`, `timeout`, `workerI
 
 When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
 
+#### Throws
+
+When `options.awaitResponse` is used but the provided `message` is not a plain object.
+
 ***
 
 ### postMessageBatch()
@@ -682,6 +728,10 @@ Optional options forwarded to each `postMessage` call.
 #### Returns
 
 (`boolean` \| `Promise`\<`any`\>)[]
+
+#### Throws
+
+When `items` is not an array.
 
 ***
 

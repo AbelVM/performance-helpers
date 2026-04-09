@@ -5,7 +5,7 @@ import { PowerPool } from '../src/helpers/powerPool.js';
 class MockUnderlyingWithDuration {
   constructor() {
     this.onmessage = null;
-    this.postMessage = (msg) => {
+    this.postMessage = () => {
       // respond on next tick with a reported duration
       setTimeout(() => {
         if (this.onmessage)

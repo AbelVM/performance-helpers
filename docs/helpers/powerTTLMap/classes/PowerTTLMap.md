@@ -6,6 +6,13 @@
 
 # Class: PowerTTLMap
 
+PowerTTLMap
+
+Lightweight Map-like store where each key has an optional TTL (milliseconds).
+Entries expire lazily on access or iteration.
+
+ PowerTTLMap
+
 ## Constructors
 
 ### Constructor
@@ -41,6 +48,18 @@
 ### \_map
 
 > **\_map**: `Map`\<`any`, `any`\>
+
+***
+
+### \_nextExpiryAt
+
+> **\_nextExpiryAt**: `number`
+
+***
+
+### \_nextExpiryDirty
+
+> **\_nextExpiryDirty**: `boolean`
 
 ***
 
@@ -81,6 +100,42 @@ Number of non-expired entries (purges expired entries lazily).
 #### Returns
 
 `boolean`
+
+***
+
+### \_sweepExpirations()
+
+> **\_sweepExpirations**(`now`): `void`
+
+#### Parameters
+
+##### now
+
+`any`
+
+#### Returns
+
+`void`
+
+***
+
+### \_updateNextExpiryOnWrite()
+
+> **\_updateNextExpiryOnWrite**(`prevExpiry`, `nextExpiry`): `void`
+
+#### Parameters
+
+##### prevExpiry
+
+`any`
+
+##### nextExpiry
+
+`any`
+
+#### Returns
+
+`void`
 
 ***
 

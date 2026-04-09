@@ -7,6 +7,15 @@
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
 
+/**
+ * PowerBulkhead
+ *
+ * Partitioned executor that isolates noisy workloads into separate
+ * concurrency partitions to avoid starving critical paths.
+ *
+ * @class PowerBulkhead
+ * @public
+ */
 export class PowerBulkhead {
   /**
    * @param {Object} [options]
@@ -89,24 +98,27 @@ export class PowerBulkhead {
     else this._activeCount += 1;
 
     const permit = bucket.gate.acquire();
-    const result = permit.then((release) => {
-      if (willQueue) {
-        this._pendingCount = Math.max(0, this._pendingCount - 1);
-        this._activeCount += 1;
-      }
+    const result = permit.then(
+      (release) => {
+        if (willQueue) {
+          this._pendingCount = Math.max(0, this._pendingCount - 1);
+          this._activeCount += 1;
+        }
 
-      return Promise.resolve()
-        .then(() => task())
-        .finally(() => {
-          release();
-          this._activeCount = Math.max(0, this._activeCount - 1);
-          this._resolveDrainWaitersIfIdle();
-        });
-    }, (err) => {
-      if (willQueue) this._pendingCount = Math.max(0, this._pendingCount - 1);
-      this._resolveDrainWaitersIfIdle();
-      throw err;
-    });
+        return Promise.resolve()
+          .then(() => task())
+          .finally(() => {
+            release();
+            this._activeCount = Math.max(0, this._activeCount - 1);
+            this._resolveDrainWaitersIfIdle();
+          });
+      },
+      (err) => {
+        if (willQueue) this._pendingCount = Math.max(0, this._pendingCount - 1);
+        this._resolveDrainWaitersIfIdle();
+        throw err;
+      }
+    );
 
     return result.finally(() => {
       this._resolveDrainWaitersIfIdle();

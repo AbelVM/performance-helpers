@@ -8,6 +8,9 @@
  * - `tokens` (number): initial tokens (default = capacity)
  * - `refillRate` (number): tokens per second to add (default 0)
  * - `refillInterval` (number): ms interval used for bookkeeping (default 1000)
+ *
+ * @class PowerThrottle
+ * @public
  */
 /**
  * @typedef {Object} PowerThrottleOptions
