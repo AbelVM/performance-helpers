@@ -19,8 +19,7 @@ export class PowerTTLMap {
    * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
    */
   /**
-   * @typedef {Object} PowerTTLMapOptions
-   * @property {(key:any,value:any)=>void} [onExpire]
+   * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
    */
   constructor(defaultTTL = 0, options = {}) {
     this._defaultTTL = Number(defaultTTL) || 0; // milliseconds; 0 = no expiry

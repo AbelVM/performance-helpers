@@ -9,9 +9,7 @@ import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
  * @class PowerEventBus
  */
 /**
- * @typedef {Object} PowerEventBusOptions
- * @property {number} [maxListeners]
- * @property {boolean} [weak]
+ * @typedef {import('./jsdoc-types.js').PowerEventBusOptions} PowerEventBusOptions
  */
 export class PowerEventBus {
   /**

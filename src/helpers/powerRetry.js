@@ -1,14 +1,8 @@
 /**
- * @typedef {Object} PowerRetryOptions
- * @property {number} [maxAttempts=3] Maximum attempts (initial try + retries). Must be a positive finite number.
- * @property {'exponential'|'linear'|'fixed'} [backoff='exponential'] Delay strategy between attempts.
- * @property {number} [baseDelay=100] Base delay in milliseconds.
- * @property {number} [maxDelay=10000] Maximum delay in milliseconds.
- * @property {boolean} [jitter=true] Adds jitter to delay calculations.
- * @property {(err:any)=>boolean} [retryIf]
- * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
- * @property {number} [attemptTimeout] Per-attempt timeout in milliseconds.
+ * @typedef {import('./jsdoc-types.js').PowerRetryOptions} PowerRetryOptions
  */
+
+import { DEFAULT_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS } from './constants.js';
 
 /**
  * Retry helper with configurable backoff and jitter.
@@ -40,8 +34,8 @@ export class PowerRetry {
     const {
       maxAttempts = 3,
       backoff = 'exponential',
-      baseDelay = 100,
-      maxDelay = 10000,
+      baseDelay = DEFAULT_RETRY_BASE_DELAY_MS,
+      maxDelay = DEFAULT_RETRY_MAX_DELAY_MS,
       jitter = true,
       attemptTimeout,
       retryIf = () => true,

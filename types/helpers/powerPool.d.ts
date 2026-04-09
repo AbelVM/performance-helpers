@@ -10,42 +10,20 @@
 export class PowerPoolShutdownError extends Error {
 }
 /**
- * @typedef {Object} WorkerObj
- * @property {number} id - Numeric id for the worker entry.
- * @property {Worker} worker - The underlying Worker instance or worker-like object.
- * @property {number} tasks - Number of active tasks currently assigned.
- * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
- * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).
- * @property {number[]|PowerQueue} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
+ * @typedef {import('./jsdoc-types.js').WorkerObj} WorkerObj
  */
 /**
- * @typedef {Object} PostMessageOptions
- * @property {boolean} [awaitResponse] - If true, returns a Promise resolved when a response with a matching `correlationId` is received.
- * @property {number} [timeout] - Timeout in milliseconds for `awaitResponse` promises. If omitted, the pool's default is used.
- * @property {number|string} [workerId] - Optional id of the target worker to prefer when dispatching the message. If omitted, the pool chooses the least-loaded worker.
- * @property {boolean} [zeroCopy] - When true and the message is a plain object, attempt zero-copy transfer (use internal encoding to a Uint8Array and transfer its buffer).
+ * PostMessage and pending-response typedefs are defined centrally to avoid
+ * duplication across multiple helper modules. Import aliases are used here
+ * so typedoc and editors can resolve the shape while keeping local docs
+ * concise.
+ * @typedef {import('./jsdoc-types.js').PostMessageOptions} PostMessageOptions
  */
 /**
- * @typedef {Object} PendingResponseEntry
- * @property {function(any):void} resolve - Function to resolve the pending Promise with the worker response.
- * @property {function(any):void} reject - Function to reject the pending Promise with an error.
- * @property {number|NodeJS.Timeout|null} [timer] - Optional timeout handle used to cancel the pending request.
+ * @typedef {import('./jsdoc-types.js').PendingResponseEntry} PendingResponseEntry
  */
 /**
- * @typedef {Object} PowerPoolOptions
- * @property {number} [size] - Initial number of workers to create when `lazy` is false.
- * @property {number} [minSize] - Minimum number of workers to keep alive.
- * @property {number} [maxSize] - Maximum number of workers allowed in the pool. Coerced to be at least `minSize`.
- * @property {Object} [workerOptions] - Options forwarded to the underlying `Worker` constructor when using a string path.
- * @property {number} [maxTasksPerWorker] - Soft capacity per worker used during task dispatch.
- * @property {number} [idleTimeout] - Milliseconds after which idle workers beyond `minSize` are terminated.
- * @property {boolean} [taskQueue] - Whether to queue tasks when all workers are busy.
- * @property {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
- * @property {boolean} [lazy] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
- * @property {number} [debugLevel] - Debug verbosity level for internal logging.
- * @property {number} [listenerMaxListeners]
- * @property {boolean} [weakListeners]
- * @property {number} [queueHighThreshold] - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
+ * @typedef {import('./jsdoc-types.js').PowerPoolOptions} PowerPoolOptions
  */
 /**
  * Manager for a pool of web workers.
@@ -66,7 +44,7 @@ export class PowerPoolShutdownError extends Error {
  * @public
  */
 export class PowerPool {
-    [x: number]: () => void;
+    [x: number]: () => Promise<void>;
     /**
      * Create a PowerPool.
      *
@@ -554,112 +532,16 @@ export class PowerPool {
      */
     private _dispatchQueuedTasks;
 }
-export type WorkerObj = {
-    /**
-     * - Numeric id for the worker entry.
-     */
-    id: number;
-    /**
-     * - The underlying Worker instance or worker-like object.
-     */
-    worker: Worker;
-    /**
-     * - Number of active tasks currently assigned.
-     */
-    tasks: number;
-    /**
-     * - Timestamp (ms) of last activity on this worker.
-     */
-    lastActive: number;
-    /**
-     * - EWMA of historical task latency (ms).
-     */
-    latencyEwma?: number | null | undefined;
-    /**
-     * - Queue of start timestamps for inflight tasks (ms).
-     */
-    _startTimes?: number[] | PowerQueue | undefined;
-};
-export type PostMessageOptions = {
-    /**
-     * - If true, returns a Promise resolved when a response with a matching `correlationId` is received.
-     */
-    awaitResponse?: boolean | undefined;
-    /**
-     * - Timeout in milliseconds for `awaitResponse` promises. If omitted, the pool's default is used.
-     */
-    timeout?: number | undefined;
-    /**
-     * - Optional id of the target worker to prefer when dispatching the message. If omitted, the pool chooses the least-loaded worker.
-     */
-    workerId?: string | number | undefined;
-    /**
-     * - When true and the message is a plain object, attempt zero-copy transfer (use internal encoding to a Uint8Array and transfer its buffer).
-     */
-    zeroCopy?: boolean | undefined;
-};
-export type PendingResponseEntry = {
-    /**
-     * - Function to resolve the pending Promise with the worker response.
-     */
-    resolve: (arg0: any) => void;
-    /**
-     * - Function to reject the pending Promise with an error.
-     */
-    reject: (arg0: any) => void;
-    /**
-     * - Optional timeout handle used to cancel the pending request.
-     */
-    timer?: number | NodeJS.Timeout | null;
-};
-export type PowerPoolOptions = {
-    /**
-     * - Initial number of workers to create when `lazy` is false.
-     */
-    size?: number | undefined;
-    /**
-     * - Minimum number of workers to keep alive.
-     */
-    minSize?: number | undefined;
-    /**
-     * - Maximum number of workers allowed in the pool. Coerced to be at least `minSize`.
-     */
-    maxSize?: number | undefined;
-    /**
-     * - Options forwarded to the underlying `Worker` constructor when using a string path.
-     */
-    workerOptions?: Object | undefined;
-    /**
-     * - Soft capacity per worker used during task dispatch.
-     */
-    maxTasksPerWorker?: number | undefined;
-    /**
-     * - Milliseconds after which idle workers beyond `minSize` are terminated.
-     */
-    idleTimeout?: number | undefined;
-    /**
-     * - Whether to queue tasks when all workers are busy.
-     */
-    taskQueue?: boolean | undefined;
-    /**
-     * - Queue overflow behavior when the pool is saturated.
-     */
-    queuePolicy?: "enqueue" | "drop-oldest" | "drop-newest" | "reject" | undefined;
-    /**
-     * - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
-     */
-    lazy?: boolean | undefined;
-    /**
-     * - Debug verbosity level for internal logging.
-     */
-    debugLevel?: number | undefined;
-    listenerMaxListeners?: number | undefined;
-    weakListeners?: boolean | undefined;
-    /**
-     * - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
-     */
-    queueHighThreshold?: number | undefined;
-};
+export type WorkerObj = import("./jsdoc-types.js").WorkerObj;
+/**
+ * PostMessage and pending-response typedefs are defined centrally to avoid
+ * duplication across multiple helper modules. Import aliases are used here
+ * so typedoc and editors can resolve the shape while keeping local docs
+ * concise.
+ */
+export type PostMessageOptions = import("./jsdoc-types.js").PostMessageOptions;
+export type PendingResponseEntry = import("./jsdoc-types.js").PendingResponseEntry;
+export type PowerPoolOptions = import("./jsdoc-types.js").PowerPoolOptions;
 import { PowerQueue } from './powerQueue.js';
 import { PowerEventBus } from './powerEventBus.js';
 import { PowerLogger } from './powerLogger.js';

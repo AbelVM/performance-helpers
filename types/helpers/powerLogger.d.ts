@@ -22,11 +22,7 @@
  * @class PowerLogger
  */
 /**
- * @typedef {Object} PowerLoggerOptions
- * @property {'text'|'json'} [format] - Output mode for console logging and structured payloads.
- * @property {string} [name] - Optional logger name included in structured payloads.
- * @property {(payload:Object)=>string|Object|null} [formatter] - Optional formatter for structured payloads. If it returns a string, the string is emitted directly.
- * @property {(payload:Object|string)=>void} [output] - Optional output transport that receives structured payloads or formatted strings.
+ * @typedef {import('./jsdoc-types.js').PowerLoggerOptions} PowerLoggerOptions
  */
 export class PowerLogger {
     /**
@@ -140,21 +136,4 @@ export class PowerLogger {
      */
     resetDebugCounters(): void;
 }
-export type PowerLoggerOptions = {
-    /**
-     * - Output mode for console logging and structured payloads.
-     */
-    format?: "text" | "json" | undefined;
-    /**
-     * - Optional logger name included in structured payloads.
-     */
-    name?: string | undefined;
-    /**
-     * - Optional formatter for structured payloads. If it returns a string, the string is emitted directly.
-     */
-    formatter?: ((payload: Object) => string | Object | null) | undefined;
-    /**
-     * - Optional output transport that receives structured payloads or formatted strings.
-     */
-    output?: ((payload: Object | string) => void) | undefined;
-};
+export type PowerLoggerOptions = import("./jsdoc-types.js").PowerLoggerOptions;

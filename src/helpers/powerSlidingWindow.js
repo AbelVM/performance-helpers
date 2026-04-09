@@ -3,6 +3,7 @@
  * Uses a timestamp queue to track event occurrences.
  */
 import { nowMs } from '../utils/now.js';
+import { MS_PER_SEC } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
 
 export class PowerSlidingWindow {
@@ -12,14 +13,12 @@ export class PowerSlidingWindow {
    * @param {number} [options.windowMs=1000] Window size in milliseconds.
    */
   /**
-   * @typedef {Object} PowerSlidingWindowOptions
-   * @property {number} [capacity]
-   * @property {number} [windowMs]
+   * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
    */
   constructor(options = {}) {
-    const { capacity = 1, windowMs = 1000 } = options;
+    const { capacity = 1, windowMs = MS_PER_SEC } = options;
     this.capacity = Math.max(0, Number(capacity) || 0);
-    this.windowMs = Math.max(1, Number(windowMs) || 1000);
+    this.windowMs = Math.max(1, Number(windowMs) || MS_PER_SEC);
     // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
     this._timestamps = new PowerQueue(16);
   }

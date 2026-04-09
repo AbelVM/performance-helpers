@@ -75,13 +75,16 @@ describe('UMD bundle exhaustive branches', () => {
     // PowerMemoizer: sync and async caching behavior
     const syncFn = (x) => x * 2;
     const memoSync = new lib.PowerMemoizer(syncFn, { cacheOptions: { maxEntries: 10 } });
-    expect(memoSync(2)).toBe(4);
-    expect(memoSync(2)).toBe(4);
+    const callSync = typeof memoSync === 'function' ? memoSync : (...args) => memoSync.run(...args);
+    expect(callSync(2)).toBe(4);
+    expect(callSync(2)).toBe(4);
 
     const asyncFn = async (n) => n + 1;
     const memoAsync = new lib.PowerMemoizer(asyncFn, { cacheOptions: { maxEntries: 10 } });
-    const p1 = memoAsync(3);
-    const p2 = memoAsync(3);
+    const callAsync =
+      typeof memoAsync === 'function' ? memoAsync : (...args) => memoAsync.run(...args);
+    const p1 = callAsync(3);
+    const p2 = callAsync(3);
     expect(p1).toBe(p2);
     const res = await p1;
     expect(res).toBe(4);

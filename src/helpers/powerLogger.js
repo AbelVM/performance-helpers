@@ -84,11 +84,7 @@ function safeStringify(obj) {
  * @class PowerLogger
  */
 /**
- * @typedef {Object} PowerLoggerOptions
- * @property {'text'|'json'} [format] - Output mode for console logging and structured payloads.
- * @property {string} [name] - Optional logger name included in structured payloads.
- * @property {(payload:Object)=>string|Object|null} [formatter] - Optional formatter for structured payloads. If it returns a string, the string is emitted directly.
- * @property {(payload:Object|string)=>void} [output] - Optional output transport that receives structured payloads or formatted strings.
+ * @typedef {import('./jsdoc-types.js').PowerLoggerOptions} PowerLoggerOptions
  */
 export class PowerLogger {
   /**

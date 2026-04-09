@@ -11,9 +11,26 @@
 - [PowerPool](classes/PowerPool.md)
 - [PowerPoolShutdownError](classes/PowerPoolShutdownError.md)
 
-## Interfaces
+## References
 
-- [PendingResponseEntry](interfaces/PendingResponseEntry.md)
-- [PostMessageOptions](interfaces/PostMessageOptions.md)
-- [PowerPoolOptions](interfaces/PowerPoolOptions.md)
-- [WorkerObj](interfaces/WorkerObj.md)
+### PendingResponseEntry
+
+Re-exports [PendingResponseEntry](../jsdoc-types/interfaces/PendingResponseEntry.md)
+
+***
+
+### PostMessageOptions
+
+Re-exports [PostMessageOptions](../jsdoc-types/interfaces/PostMessageOptions.md)
+
+***
+
+### PowerPoolOptions
+
+Re-exports [PowerPoolOptions](../jsdoc-types/interfaces/PowerPoolOptions.md)
+
+***
+
+### WorkerObj
+
+Re-exports [WorkerObj](../jsdoc-types/interfaces/WorkerObj.md)

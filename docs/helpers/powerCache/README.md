@@ -12,11 +12,18 @@
 - [PowerMemoizer](classes/PowerMemoizer.md)
 - [PowerTimedCache](classes/PowerTimedCache.md)
 
-## Interfaces
-
-- [CacheNode](interfaces/CacheNode.md)
-- [PowerCacheOptions](interfaces/PowerCacheOptions.md)
-
 ## Functions
 
 - [simpleArgsKey](functions/simpleArgsKey.md)
+
+## References
+
+### CacheNode
+
+Re-exports [CacheNode](../jsdoc-types/interfaces/CacheNode.md)
+
+***
+
+### PowerCacheOptions
+
+Re-exports [PowerCacheOptions](../jsdoc-types/interfaces/PowerCacheOptions.md)

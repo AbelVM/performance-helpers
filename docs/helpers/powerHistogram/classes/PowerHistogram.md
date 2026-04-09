@@ -6,13 +6,6 @@
 
 # Class: PowerHistogram
 
-Lock-free in-process histogram for latency telemetry and percentile estimation.
-
-Use `PowerHistogram` to record latency values and query estimated
-percentiles with a compact bucketed sketch.
-
- PowerHistogram
-
 ## Constructors
 
 ### Constructor

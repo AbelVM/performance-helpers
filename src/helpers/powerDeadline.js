@@ -1,14 +1,8 @@
 import { PowerRetry } from './powerRetry.js';
+import { nowMs } from '../utils/now.js';
 
 /**
- * @typedef {Object} PowerDeadlineOptions
- * @property {number} [maxAttempts] Maximum attempts (including the initial try).
- * @property {number} [attemptTimeout] Timeout in milliseconds for each attempt.
- * @property {number} [totalTimeout] Total deadline in milliseconds for the entire run.
- * @property {number} [retryDelay] Delay in milliseconds before retrying.
- * @property {(err:any)=>boolean} [retryIf] Predicate to determine whether to retry after an error.
- * @property {AbortSignal} [signal] Optional abort signal to cancel the operation.
- * @property {(attempt:number, err:any, delay:number)=>void} [onRetry] Callback invoked before a retry delay.
+ * @typedef {import('./jsdoc-types.js').PowerDeadlineOptions} PowerDeadlineOptions
  */
 
 /**
@@ -50,7 +44,7 @@ export class PowerDeadline {
     const delayMs = Math.max(0, Number(retryDelay) || 0);
     const shouldRetry = typeof retryIf === 'function' ? retryIf : () => Boolean(retryIf);
 
-    const startedAt = Date.now();
+    const startedAt = nowMs();
     const deadlineAt = deadlineMs !== null ? startedAt + deadlineMs : null;
 
     const createAbortPromise = () => {
@@ -73,12 +67,12 @@ export class PowerDeadline {
     };
 
     const wrapAttempt = async (attempt) => {
-      const attemptStarted = Date.now();
+      const attemptStarted = nowMs();
       if (deadlineAt !== null && attemptStarted >= deadlineAt) {
         const err = new Error('Deadline exceeded');
         err.code = 'EDEADLINE';
         err.attempts = attempt;
-        err.elapsedMs = Date.now() - startedAt;
+        err.elapsedMs = nowMs() - startedAt;
         throw err;
       }
 
@@ -87,14 +81,14 @@ export class PowerDeadline {
       const cleanups = [];
 
       if (deadlineAt !== null) {
-        const remaining = deadlineAt - Date.now();
+        const remaining = deadlineAt - nowMs();
         let clearTotalTimeout;
         const p = new Promise((_, reject) => {
           const timer = setTimeout(() => {
             const err = new Error('Deadline exceeded');
             err.code = 'EDEADLINE';
             err.attempts = attempt;
-            err.elapsedMs = Date.now() - startedAt;
+            err.elapsedMs = nowMs() - startedAt;
             reject(err);
           }, remaining);
           clearTotalTimeout = () => clearTimeout(timer);
@@ -179,7 +173,7 @@ const createAbortError = (reason, startedAt, deadlineMs) => {
   err.code = 'EABORT';
   err.reason = reason;
   err.attempts = 0;
-  err.elapsedMs = Date.now() - startedAt;
+  err.elapsedMs = nowMs() - startedAt;
   err.totalTimeout = deadlineMs;
   return err;
 };

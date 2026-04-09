@@ -70,8 +70,6 @@ Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format
 
 > **name**: `any`
 
-Optional logger name included in structured payloads.
-
 ## Methods
 
 ### debug()

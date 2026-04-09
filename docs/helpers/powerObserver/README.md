@@ -10,12 +10,14 @@
 
 - [PowerObserver](classes/PowerObserver.md)
 
-## Interfaces
-
-- [PowerObserverOptions](interfaces/PowerObserverOptions.md)
-
 ## References
 
 ### default
 
 Renames and re-exports [PowerObserver](classes/PowerObserver.md)
+
+***
+
+### PowerObserverOptions
+
+Re-exports [PowerObserverOptions](../jsdoc-types/interfaces/PowerObserverOptions.md)

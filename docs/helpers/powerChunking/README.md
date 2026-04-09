@@ -10,6 +10,8 @@
 
 - [PowerChunker](classes/PowerChunker.md)
 
-## Interfaces
+## References
 
-- [PowerChunkingOptions](interfaces/PowerChunkingOptions.md)
+### PowerChunkingOptions
+
+Re-exports [PowerChunkingOptions](../jsdoc-types/interfaces/PowerChunkingOptions.md)

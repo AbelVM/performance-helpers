@@ -10,6 +10,8 @@
 
 - [PowerLogger](classes/PowerLogger.md)
 
-## Interfaces
+## References
 
-- [PowerLoggerOptions](interfaces/PowerLoggerOptions.md)
+### PowerLoggerOptions
+
+Re-exports [PowerLoggerOptions](../jsdoc-types/interfaces/PowerLoggerOptions.md)

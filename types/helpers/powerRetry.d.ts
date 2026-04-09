@@ -1,15 +1,4 @@
 /**
- * @typedef {Object} PowerRetryOptions
- * @property {number} [maxAttempts=3] Maximum attempts (initial try + retries). Must be a positive finite number.
- * @property {'exponential'|'linear'|'fixed'} [backoff='exponential'] Delay strategy between attempts.
- * @property {number} [baseDelay=100] Base delay in milliseconds.
- * @property {number} [maxDelay=10000] Maximum delay in milliseconds.
- * @property {boolean} [jitter=true] Adds jitter to delay calculations.
- * @property {(err:any)=>boolean} [retryIf]
- * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
- * @property {number} [attemptTimeout] Per-attempt timeout in milliseconds.
- */
-/**
  * Retry helper with configurable backoff and jitter.
  *
  * @class PowerRetry
@@ -32,7 +21,7 @@ export class PowerRetry {
      * @param {PowerRetryOptions} [options] Default options applied to every `run()` invocation.
      */
     constructor(options?: PowerRetryOptions);
-    _options: PowerRetryOptions;
+    _options: import("./jsdoc-types.js").PowerRetryOptions;
     /**
      * Instance method that runs `fn` with the configured options merged with
      * any per-call `options` provided.
@@ -43,31 +32,4 @@ export class PowerRetry {
     run(fn: Function, options?: PowerRetryOptions): Promise<any>;
 }
 export default PowerRetry;
-export type PowerRetryOptions = {
-    /**
-     * Maximum attempts (initial try + retries). Must be a positive finite number.
-     */
-    maxAttempts?: number | undefined;
-    /**
-     * Delay strategy between attempts.
-     */
-    backoff?: "exponential" | "linear" | "fixed" | undefined;
-    /**
-     * Base delay in milliseconds.
-     */
-    baseDelay?: number | undefined;
-    /**
-     * Maximum delay in milliseconds.
-     */
-    maxDelay?: number | undefined;
-    /**
-     * Adds jitter to delay calculations.
-     */
-    jitter?: boolean | undefined;
-    retryIf?: ((err: any) => boolean) | undefined;
-    onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;
-    /**
-     * Per-attempt timeout in milliseconds.
-     */
-    attemptTimeout?: number | undefined;
-};
+export type PowerRetryOptions = import("./jsdoc-types.js").PowerRetryOptions;

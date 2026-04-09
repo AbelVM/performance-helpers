@@ -6,6 +6,8 @@
 
 ## Modules
 
+- [helpers/constants](helpers/constants/README.md)
+- [helpers/jsdoc-types](helpers/jsdoc-types/README.md)
 - [helpers/powerBackpressure](helpers/powerBackpressure/README.md)
 - [helpers/powerBatch](helpers/powerBatch/README.md)
 - [helpers/powerBuffer](helpers/powerBuffer/README.md)

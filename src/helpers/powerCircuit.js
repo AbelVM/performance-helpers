@@ -15,14 +15,11 @@
  * await cb.call(() => fetch('/api'));
  */
 /**
- * @typedef {Object} PowerCircuitOptions
- * @property {number} [threshold]
- * @property {number} [timeout]
- * @property {(state:string,reason?:string)=>void} [onStateChange]
- * @property {import("./powerEventBus.js").PowerEventBus} [eventBus]
+ * @typedef {import('./jsdoc-types.js').PowerCircuitOptions} PowerCircuitOptions
  */
 import { PowerEventBus } from './powerEventBus.js';
 import { nowMs } from '../utils/now.js';
+import { DEFAULT_TIMEOUT_MS } from './constants.js';
 
 /**
  * PowerCircuit
@@ -35,9 +32,14 @@ import { nowMs } from '../utils/now.js';
  */
 export class PowerCircuit {
   constructor(options = {}) {
-    const { threshold = 5, timeout = 30000, onStateChange = null, eventBus = null } = options;
+    const {
+      threshold = 5,
+      timeout = DEFAULT_TIMEOUT_MS,
+      onStateChange = null,
+      eventBus = null,
+    } = options;
     this._threshold = Number(threshold) || 5;
-    this._timeout = Number(timeout) || 30000;
+    this._timeout = Number(timeout) || DEFAULT_TIMEOUT_MS;
     this._state = 'closed';
     this._failures = 0; // consecutive failures
     this.lastError = null;

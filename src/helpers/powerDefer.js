@@ -20,8 +20,7 @@ const _deferInternals = new WeakMap();
  */
 export class PowerDefer {
   /**
-   * @typedef {Object} PowerDeferOptions
-   * @property {boolean} [autoReject]
+   * @typedef {import('./jsdoc-types.js').PowerDeferOptions} PowerDeferOptions
    */
   constructor() {
     this._settled = false;

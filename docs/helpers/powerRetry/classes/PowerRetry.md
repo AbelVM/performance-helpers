@@ -30,7 +30,7 @@ Create a configured retry helper.
 
 ##### options?
 
-[`PowerRetryOptions`](../interfaces/PowerRetryOptions.md) = `{}`
+[`PowerRetryOptions`](../../jsdoc-types/interfaces/PowerRetryOptions.md) = `{}`
 
 Default options applied to every `run()` invocation.
 
@@ -42,7 +42,7 @@ Default options applied to every `run()` invocation.
 
 ### \_options
 
-> **\_options**: [`PowerRetryOptions`](../interfaces/PowerRetryOptions.md)
+> **\_options**: [`PowerRetryOptions`](../../jsdoc-types/interfaces/PowerRetryOptions.md)
 
 ## Methods
 
@@ -63,7 +63,7 @@ Async function to execute.
 
 ##### options?
 
-[`PowerRetryOptions`](../interfaces/PowerRetryOptions.md) = `{}`
+[`PowerRetryOptions`](../../jsdoc-types/interfaces/PowerRetryOptions.md) = `{}`
 
 Per-call retry overrides.
 
@@ -91,7 +91,7 @@ Async function to execute.
 
 ##### options?
 
-[`PowerRetryOptions`](../interfaces/PowerRetryOptions.md) = `{}`
+[`PowerRetryOptions`](../../jsdoc-types/interfaces/PowerRetryOptions.md) = `{}`
 
 Retry behavior overrides for this invocation.
 

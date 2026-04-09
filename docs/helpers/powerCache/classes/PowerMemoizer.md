@@ -13,11 +13,12 @@ It memoizes synchronous values and Promise-returning functions.
 Concurrent calls for the same arguments are deduplicated (single inflight Promise).
 Rejected Promises are not cached.
 
-Usage (constructor returns a callable memoized function when given `fn`):
+Usage (constructor returns a `PowerMemoizer` instance; when a function is supplied
+the instance creates a memoized wrapper and exposes a convenience `run()` alias):
 const fetcher = async (id) => await fetchData(id)
-const memoizedFetch = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
-// call the memoized function directly
-await memoizedFetch(1)
+const pm = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
+// call the memoized function via the convenience alias
+await pm.run(1)
 
  PowerMemoizer
 
@@ -79,6 +80,12 @@ Default weight used when constructing the memoized wrapper for `fn`.
 
 ***
 
+### \_fnWrapper
+
+> **\_fnWrapper**: `Function` \| `undefined`
+
+***
+
 ### \_inflight
 
 > **\_inflight**: `Map`\<`any`, `any`\>
@@ -87,7 +94,7 @@ Default weight used when constructing the memoized wrapper for `fn`.
 
 ### \_originalFn
 
-> **\_originalFn**: `any`
+> **\_originalFn**: `Function` \| `null`
 
 ***
 
@@ -115,7 +122,17 @@ Default weight used when constructing the memoized wrapper for `fn`.
 
 ### run
 
-> **run**: (() => `never`) \| `undefined`
+> **run**: (...`args`) => `any`
+
+#### Parameters
+
+##### args
+
+...`any`[]
+
+#### Returns
+
+`any`
 
 ## Methods
 

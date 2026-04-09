@@ -10,6 +10,8 @@
 
 - [PowerThrottle](classes/PowerThrottle.md)
 
-## Interfaces
+## References
 
-- [PowerThrottleOptions](interfaces/PowerThrottleOptions.md)
+### PowerThrottleOptions
+
+Re-exports [PowerThrottleOptions](../jsdoc-types/interfaces/PowerThrottleOptions.md)

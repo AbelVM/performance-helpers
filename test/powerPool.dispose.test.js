@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { PowerPool } from '../src/helpers/powerPool.js';
 
 describe('PowerPool disposal hooks', () => {
-  it('Symbol.dispose calls terminate synchronously', () => {
+  it('Symbol.dispose disposes (sync or async)', async () => {
     class MockUnderlying {
       constructor() {
         this.onmessage = null;
@@ -12,8 +12,11 @@ describe('PowerPool disposal hooks', () => {
     }
 
     const pool = new PowerPool(MockUnderlying, { size: 1, idleTimeout: 1000 });
-    // call the sync dispose hook
-    if (typeof pool[Symbol.dispose] === 'function') pool[Symbol.dispose]();
+    // call the dispose hook; support both sync and async implementations
+    if (typeof pool[Symbol.dispose] === 'function') {
+      const res = pool[Symbol.dispose]();
+      if (res && typeof res.then === 'function') await res;
+    }
     expect(pool.workers.length).toBe(0);
     expect(pool._activeTasks).toBe(0);
   });

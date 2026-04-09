@@ -45,6 +45,10 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [Now utilities: high-resolution timers and measure helpers](guides/now.md) — `nowMs()`, `measureSync()`, `measureAsync()` and timing best-practices.
 - [Errors utilities: recommended error shapes and patterns](guides/errors.md) — guidance for attaching `duration`, `correlationId` and structured diagnostics to errors and responses.
 
+## When to use what
+
+Check the [Quick Guide](guides/metaGuide.md)
+
 ## Quick start
 
 Requirements: Node.js and npm.
@@ -151,8 +155,8 @@ You can import the package directly from a CDN for quick demos. Example using un
 <script type="module">
   import { PowerMemoizer } from 'https://unpkg.com/performance-helpers@latest?module';
   const fetchUser = async (id) => fetch(`/users/${id}`).then((r) => r.json());
-  const memo = new PowerMemoizer(fetchUser);
-  console.log(await memo(1));
+  const pm = new PowerMemoizer(fetchUser);
+  console.log(await pm.run(1));
 </script>
 ```
 
@@ -180,6 +184,10 @@ UMD example (script tag):
   console.log(cache.get('a'));
 </script>
 ```
+
+## API docs
+
+Full documentation [here](docs/README.md)
 
 ## License
 

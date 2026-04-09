@@ -1,0 +1,103 @@
+[**performance-helpers**](../../../README.md)
+
+***
+
+[performance-helpers](../../../README.md) / [helpers/constants](../README.md) / default
+
+# Variable: default
+
+> **default**: `object`
+
+## Type Declaration
+
+### DEFAULT\_AUTOSCALE\_BACKOFF\_MAX\_MULTIPLIER
+
+> **DEFAULT\_AUTOSCALE\_BACKOFF\_MAX\_MULTIPLIER**: `number`
+
+### DEFAULT\_AUTOSCALE\_COOLDOWN\_MS
+
+> **DEFAULT\_AUTOSCALE\_COOLDOWN\_MS**: `number`
+
+### DEFAULT\_AUTOSCALE\_INTERVAL\_MS
+
+> **DEFAULT\_AUTOSCALE\_INTERVAL\_MS**: `number`
+
+### DEFAULT\_AUTOSCALE\_MIN\_INTERVAL\_MS
+
+> **DEFAULT\_AUTOSCALE\_MIN\_INTERVAL\_MS**: `number`
+
+### DEFAULT\_BACKPRESSURE\_QUEUE\_CAPACITY
+
+> **DEFAULT\_BACKPRESSURE\_QUEUE\_CAPACITY**: `number`
+
+### DEFAULT\_BACKPRESSURE\_REFILL\_INTERVAL\_MS
+
+> **DEFAULT\_BACKPRESSURE\_REFILL\_INTERVAL\_MS**: `number`
+
+### DEFAULT\_BATCH\_MAX\_SIZE
+
+> **DEFAULT\_BATCH\_MAX\_SIZE**: `number`
+
+### DEFAULT\_CACHE\_DEFAULT\_TTL\_MS
+
+> **DEFAULT\_CACHE\_DEFAULT\_TTL\_MS**: `number`
+
+### DEFAULT\_CACHE\_MAX\_POOL\_SIZE
+
+> **DEFAULT\_CACHE\_MAX\_POOL\_SIZE**: `number`
+
+### DEFAULT\_CACHE\_MAX\_WEIGHT\_BYTES
+
+> **DEFAULT\_CACHE\_MAX\_WEIGHT\_BYTES**: `number`
+
+### DEFAULT\_HISTOGRAM\_BUCKET\_COUNT
+
+> **DEFAULT\_HISTOGRAM\_BUCKET\_COUNT**: `number`
+
+### DEFAULT\_HISTOGRAM\_MAX\_VALUE
+
+> **DEFAULT\_HISTOGRAM\_MAX\_VALUE**: `number`
+
+### DEFAULT\_MAX\_CLEANUP\_PER\_TICK
+
+> **DEFAULT\_MAX\_CLEANUP\_PER\_TICK**: `number`
+
+### DEFAULT\_QUEUE\_CAPACITY
+
+> **DEFAULT\_QUEUE\_CAPACITY**: `number`
+
+### DEFAULT\_REAPER\_MIN\_INTERVAL\_MS
+
+> **DEFAULT\_REAPER\_MIN\_INTERVAL\_MS**: `number`
+
+### DEFAULT\_REFILL\_INTERVAL\_MS
+
+> **DEFAULT\_REFILL\_INTERVAL\_MS**: `number`
+
+### DEFAULT\_RETRY\_BASE\_DELAY\_MS
+
+> **DEFAULT\_RETRY\_BASE\_DELAY\_MS**: `number`
+
+### DEFAULT\_RETRY\_MAX\_DELAY\_MS
+
+> **DEFAULT\_RETRY\_MAX\_DELAY\_MS**: `number`
+
+### DEFAULT\_TIMEOUT\_MS
+
+> **DEFAULT\_TIMEOUT\_MS**: `number`
+
+### ENCODE\_CACHE\_LARGE\_KEY\_LENGTH
+
+> **ENCODE\_CACHE\_LARGE\_KEY\_LENGTH**: `number`
+
+### MAX\_DEEP\_EQUAL\_DEPTH
+
+> **MAX\_DEEP\_EQUAL\_DEPTH**: `number`
+
+### MS\_PER\_MIN
+
+> **MS\_PER\_MIN**: `number`
+
+### MS\_PER\_SEC
+
+> **MS\_PER\_SEC**: `number`

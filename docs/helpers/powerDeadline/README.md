@@ -10,12 +10,14 @@
 
 - [PowerDeadline](classes/PowerDeadline.md)
 
-## Interfaces
-
-- [PowerDeadlineOptions](interfaces/PowerDeadlineOptions.md)
-
 ## References
 
 ### default
 
 Renames and re-exports [PowerDeadline](classes/PowerDeadline.md)
+
+***
+
+### PowerDeadlineOptions
+
+Re-exports [PowerDeadlineOptions](../jsdoc-types/interfaces/PowerDeadlineOptions.md)

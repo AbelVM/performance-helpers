@@ -18,10 +18,18 @@ import { nowMs } from '../utils/now.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
 import { PowerEventBus } from './powerEventBus.js';
+import {
+  DEFAULT_REAPER_MIN_INTERVAL_MS,
+  ENCODE_CACHE_LARGE_KEY_LENGTH,
+  DEFAULT_CACHE_DEFAULT_TTL_MS,
+  DEFAULT_TIMEOUT_MS,
+  DEFAULT_AUTOSCALE_MIN_INTERVAL_MS,
+  DEFAULT_AUTOSCALE_INTERVAL_MS,
+  DEFAULT_AUTOSCALE_COOLDOWN_MS,
+  DEFAULT_AUTOSCALE_BACKOFF_MAX_MULTIPLIER,
+} from './constants.js';
 
-// Module-level constants for easy tuning and readability
-const REAPER_MIN_INTERVAL_MS = 1000;
-const ENCODE_CACHE_LARGE_KEY_LENGTH = 2048;
+// Module-level tuning constants (imported from shared constants.js)
 
 // Lightweight stable-shape wrapper for underlying worker-like objects.
 // Extracted to module-level to avoid recreating the class on every
@@ -48,29 +56,16 @@ class WorkerWrapper {
     if (isPlainObject) {
       try {
         const u8 = this._pool._encodeForTransfer(message);
-        if (!tr || (Array.isArray(tr) && tr.length === 0)) {
+        // Efficiently ensure the encoded buffer is included in the transfer list
+        if (!tr) {
           tr = [u8.buffer];
+        } else if (Array.isArray(tr)) {
+          if (!tr.includes(u8.buffer)) tr.push(u8.buffer);
         } else {
-          let found = false;
-          if (Array.isArray(tr)) {
-            for (let item of tr) {
-              if (item === u8.buffer) {
-                found = true;
-                break;
-              }
-            }
-            if (!found) tr = [...tr, u8.buffer];
-          } else if (tr.length === 0) {
-            tr = [u8.buffer];
-          } else {
-            const arr = [];
-            for (let item of tr) {
-              arr.push(item);
-              if (item === u8.buffer) found = true;
-            }
-            if (!found) arr.push(u8.buffer);
-            tr = arr;
-          }
+          // For array-like or other iterable transfer lists, convert once
+          const arr = Array.from(tr);
+          if (!arr.includes(u8.buffer)) arr.push(u8.buffer);
+          tr = arr;
         }
         msg = u8;
       } catch (err) {
@@ -126,45 +121,23 @@ export class PowerPoolShutdownError extends Error {
 }
 
 /**
- * @typedef {Object} WorkerObj
- * @property {number} id - Numeric id for the worker entry.
- * @property {Worker} worker - The underlying Worker instance or worker-like object.
- * @property {number} tasks - Number of active tasks currently assigned.
- * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
- * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).
- * @property {number[]|PowerQueue} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
+ * @typedef {import('./jsdoc-types.js').WorkerObj} WorkerObj
  */
 
 /**
- * @typedef {Object} PostMessageOptions
- * @property {boolean} [awaitResponse] - If true, returns a Promise resolved when a response with a matching `correlationId` is received.
- * @property {number} [timeout] - Timeout in milliseconds for `awaitResponse` promises. If omitted, the pool's default is used.
- * @property {number|string} [workerId] - Optional id of the target worker to prefer when dispatching the message. If omitted, the pool chooses the least-loaded worker.
- * @property {boolean} [zeroCopy] - When true and the message is a plain object, attempt zero-copy transfer (use internal encoding to a Uint8Array and transfer its buffer).
+ * PostMessage and pending-response typedefs are defined centrally to avoid
+ * duplication across multiple helper modules. Import aliases are used here
+ * so typedoc and editors can resolve the shape while keeping local docs
+ * concise.
+ * @typedef {import('./jsdoc-types.js').PostMessageOptions} PostMessageOptions
  */
 
 /**
- * @typedef {Object} PendingResponseEntry
- * @property {function(any):void} resolve - Function to resolve the pending Promise with the worker response.
- * @property {function(any):void} reject - Function to reject the pending Promise with an error.
- * @property {number|NodeJS.Timeout|null} [timer] - Optional timeout handle used to cancel the pending request.
+ * @typedef {import('./jsdoc-types.js').PendingResponseEntry} PendingResponseEntry
  */
 
 /**
- * @typedef {Object} PowerPoolOptions
- * @property {number} [size] - Initial number of workers to create when `lazy` is false.
- * @property {number} [minSize] - Minimum number of workers to keep alive.
- * @property {number} [maxSize] - Maximum number of workers allowed in the pool. Coerced to be at least `minSize`.
- * @property {Object} [workerOptions] - Options forwarded to the underlying `Worker` constructor when using a string path.
- * @property {number} [maxTasksPerWorker] - Soft capacity per worker used during task dispatch.
- * @property {number} [idleTimeout] - Milliseconds after which idle workers beyond `minSize` are terminated.
- * @property {boolean} [taskQueue] - Whether to queue tasks when all workers are busy.
- * @property {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
- * @property {boolean} [lazy] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
- * @property {number} [debugLevel] - Debug verbosity level for internal logging.
- * @property {number} [listenerMaxListeners]
- * @property {boolean} [weakListeners]
- * @property {number} [queueHighThreshold] - Optional threshold; when `queue.length > queueHighThreshold` the pool emits a `pool:queue:high` event on the internal bus.
+ * @typedef {import('./jsdoc-types.js').PowerPoolOptions} PowerPoolOptions
  */
 
 /**
@@ -209,13 +182,18 @@ export class PowerPool {
       maxSize = Math.max(size, hwConcurrency),
       workerOptions = {},
       maxTasksPerWorker = Infinity,
-      idleTimeout = 60_000,
+      idleTimeout = DEFAULT_CACHE_DEFAULT_TTL_MS,
       taskQueue = true,
       queuePolicy = 'enqueue',
       lazy = true,
       // default timeout (ms) applied to awaitResponse Promises when callers omit per-call timeout
-      awaitResponseTimeout = 30000,
+      awaitResponseTimeout = DEFAULT_TIMEOUT_MS,
     } = options;
+
+    // Validate workerSource early to fail fast on incorrect usage.
+    if (typeof workerSource !== 'function' && typeof workerSource !== 'string') {
+      throw new TypeError('PowerPool workerSource must be a function or string');
+    }
 
     this._workerSource = workerSource;
     this._workerOptions = workerOptions;
@@ -291,7 +269,7 @@ export class PowerPool {
     // pool-level default awaitResponse timeout (ms). `0` means disabled.
     this._defaultAwaitResponseTimeout = Number.isFinite(Number(awaitResponseTimeout))
       ? Math.max(0, Math.floor(Number(awaitResponseTimeout)))
-      : 30000;
+      : DEFAULT_TIMEOUT_MS;
 
     // When `lazy` is truthy only create `minSize` workers now and allow the
     // pool to grow on demand when tasks are posted. Default is `true`.
@@ -313,12 +291,12 @@ export class PowerPool {
         try {
           this._logger.error(err, 'Initial worker creation failed');
         } catch (e) {
-          /* ignore logger errors */
+          this._debugLog?.(e, 'Initial worker creation: logger error');
         }
         try {
           this._bus.emit('pool:error', { phase: 'init', error: err });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'Initial worker creation: bus.emit failed');
         }
         break;
       }
@@ -327,7 +305,7 @@ export class PowerPool {
     // reaper checks periodically and terminates idle workers
     this._reaperInterval = setInterval(
       () => this._reapIdleWorkers(),
-      Math.max(REAPER_MIN_INTERVAL_MS, Math.floor(this.idleTimeout / 2))
+      Math.max(DEFAULT_REAPER_MIN_INTERVAL_MS, Math.floor(this.idleTimeout / 2))
     );
     // no Node `crypto` import: prefer Web Crypto APIs where available
     // small LRU-like cache for encoded messages (keyed by JSON string)
@@ -350,15 +328,15 @@ export class PowerPool {
     if (options?.autoScale) {
       const as = typeof options.autoScale === 'object' ? options.autoScale : {};
       const intervalMs = Number.isFinite(Number(as.intervalMs))
-        ? Math.max(100, Math.floor(as.intervalMs))
-        : 1000;
+        ? Math.max(DEFAULT_AUTOSCALE_MIN_INTERVAL_MS, Math.floor(as.intervalMs))
+        : DEFAULT_AUTOSCALE_INTERVAL_MS;
       const targetMs = Number.isFinite(Number(as.targetMs)) ? Math.max(1, Number(as.targetMs)) : 50;
       const alpha = Number.isFinite(Number(as.alpha))
         ? Math.max(0, Math.min(1, Number(as.alpha)))
         : 0.2;
       const cooldownMs = Number.isFinite(Number(as.cooldownMs))
         ? Math.max(0, Math.floor(as.cooldownMs))
-        : 5000;
+        : DEFAULT_AUTOSCALE_COOLDOWN_MS;
       const hysteresis = Number.isFinite(Number(as.hysteresis))
         ? Math.max(0, Math.min(1, Number(as.hysteresis)))
         : 0.2;
@@ -375,7 +353,7 @@ export class PowerPool {
         : 1;
       const backoffMaxMultiplier = Number.isFinite(Number(as.backoffMaxMultiplier))
         ? Math.max(1, Number(as.backoffMaxMultiplier))
-        : 8;
+        : DEFAULT_AUTOSCALE_BACKOFF_MAX_MULTIPLIER;
       // time (ms) since last scale after which backoff multiplier is reset to 1
       const backoffResetMs = Number.isFinite(Number(as.backoffResetMs))
         ? Math.max(0, Math.floor(Number(as.backoffResetMs)))
@@ -400,7 +378,7 @@ export class PowerPool {
       try {
         this._autoScaleInterval = setInterval(() => this._autoScaleTick(), intervalMs);
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'autoScale: interval setup failed');
       }
     }
   }
@@ -418,7 +396,10 @@ export class PowerPool {
         else this._logger.debug(msg || 'swallowed error');
       }
     } catch (e) {
-      /* ignore */
+      try {
+        if (typeof console !== 'undefined' && typeof console.debug === 'function')
+          console.debug(e, msg || 'swallowed error');
+      } catch (_) {}
     }
   }
 
@@ -428,11 +409,11 @@ export class PowerPool {
       if (!this._reaperInterval) {
         this._reaperInterval = setInterval(
           () => this._reapIdleWorkers(),
-          Math.max(REAPER_MIN_INTERVAL_MS, Math.floor(this.idleTimeout / 2))
+          Math.max(DEFAULT_REAPER_MIN_INTERVAL_MS, Math.floor(this.idleTimeout / 2))
         );
       }
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, '_ensureReaper: setInterval failed');
     }
   }
 
@@ -463,7 +444,7 @@ export class PowerPool {
             try {
               reject(new Error('postMessage response timeout'));
             } catch (e2) {
-              /* ignore */
+              this._debugLog?.(e2, 'createPendingResponsePromise: reject fallback failed');
             }
           }
         }, perCallTimeout);
@@ -495,19 +476,19 @@ export class PowerPool {
         try {
           this._cleanupPendingResponse(correlationKey, { rejectWith: err });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postToWorkerObj: cleanupPendingResponse failed');
         }
         try {
           this._logger.error(err, 'Failed to postMessage to worker');
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postToWorkerObj: logger.error failed');
         }
         return pendingPromise;
       }
       try {
         this._logger.error(err, 'Failed to postMessage to worker');
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'postToWorkerObj: logger.error failed');
       }
       return false;
     }
@@ -534,18 +515,18 @@ export class PowerPool {
       try {
         this._logger.error(err, 'Failed to grow pool');
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'tryGrowPool: logger.error failed');
       }
       try {
         this._bus.emit('pool:error', { phase: 'grow', error: err });
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'tryGrowPool: bus.emit failed');
       }
       if (wantResponse && correlationKey) {
         try {
           this._cleanupPendingResponse(correlationKey, { rejectWith: err });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'tryGrowPool: cleanupPendingResponse failed');
         }
         return pendingPromise;
       }
@@ -558,7 +539,7 @@ export class PowerPool {
             rejectWith: new Error('failed to add worker'),
           });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'tryGrowPool: cleanupPendingResponse failed');
         }
         return pendingPromise;
       }
@@ -624,7 +605,7 @@ export class PowerPool {
         });
       }
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, 'enqueueOrReject: bus.emit failed');
     }
     this._updateIdleState();
     return wantResponse ? pendingPromise : true;
@@ -641,7 +622,7 @@ export class PowerPool {
         this._reaperInterval = null;
       }
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, 'clearLifecycleIntervals: clearInterval(reaper) failed');
     }
     try {
       if (this._autoScaleInterval) {
@@ -649,7 +630,7 @@ export class PowerPool {
         this._autoScaleInterval = null;
       }
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, 'clearLifecycleIntervals: clearInterval(autoScale) failed');
     }
   }
 
@@ -676,7 +657,7 @@ export class PowerPool {
       try {
         if (typeof this._pendingResponses?.clear === 'function') this._pendingResponses.clear();
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'shutdown: pendingResponses.clear failed');
       }
     } catch (e) {
       this._debugLog?.(e, 'shutdown: iterate pending responses');
@@ -699,7 +680,7 @@ export class PowerPool {
     try {
       if (this._underlyingToWorkerObj) this._underlyingToWorkerObj.clear();
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, 'shutdown: underlyingToWorkerObj.clear failed');
     }
 
     // emit pool:scale for shutdown removals
@@ -755,17 +736,27 @@ export class PowerPool {
         this._encodeCache.size >= this._encodeCacheLimit ||
         (this._encodeCacheByteLimit !== Infinity &&
           this._encodeCacheBytes + willBeBytes > this._encodeCacheByteLimit);
+      // Batch-evict oldest entries to reduce Map iterator/delete churn
       while (needEviction()) {
-        const firstKey = this._encodeCache.keys().next().value;
-        if (!firstKey) break;
-        try {
-          const removed = this._encodeCache.get(firstKey);
-          const removedBytes = typeof removed?.byteLength === 'number' ? removed.byteLength : 0;
-          this._encodeCacheBytes = Math.max(0, this._encodeCacheBytes - removedBytes);
-        } catch (e) {
-          /* ignore bookkeeping errors */
+        const keysToDelete = [];
+        const it = this._encodeCache.keys();
+        const BATCH = 10;
+        while (needEviction() && keysToDelete.length < BATCH) {
+          const nxt = it.next();
+          if (nxt.done) break;
+          keysToDelete.push(nxt.value);
         }
-        this._encodeCache.delete(firstKey);
+        if (!keysToDelete.length) break;
+        for (const k of keysToDelete) {
+          try {
+            const removed = this._encodeCache.get(k);
+            const removedBytes = typeof removed?.byteLength === 'number' ? removed.byteLength : 0;
+            this._encodeCacheBytes = Math.max(0, this._encodeCacheBytes - removedBytes);
+          } catch (e) {
+            /* ignore bookkeeping errors */
+          }
+          this._encodeCache.delete(k);
+        }
       }
       this._encodeCache.set(s, u8);
       if (u8?.byteLength) this._encodeCacheBytes += u8.byteLength;
@@ -831,12 +822,8 @@ export class PowerPool {
         }
         try {
           const u8 = this._encodeForTransfer(msg);
-          if (clone) {
-            const buf = u8.slice();
-            out[i] = { message: buf, transfer: [buf.buffer] };
-          } else {
-            out[i] = { message: u8, transfer: undefined };
-          }
+          const buf = clone ? u8.slice() : u8;
+          out[i] = { message: buf, transfer: clone ? [buf.buffer] : undefined };
           continue;
         } catch (err) {
           out[i] = { message: msg, transfer: undefined };
@@ -969,11 +956,13 @@ export class PowerPool {
       } catch (err) {
         try {
           this._logger.error(err, 'resize: add worker failed');
-        } catch (e) {}
+        } catch (e) {
+          this._debugLog?.(e, 'resize: logger.error failed');
+        }
         try {
           this._bus.emit('pool:error', { phase: 'resize', error: err });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'resize: bus.emit failed');
         }
         break;
       }
@@ -989,7 +978,7 @@ export class PowerPool {
         try {
           w.worker.terminate();
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'resize: worker.terminate failed');
         }
         this._deleteWorkerUnderlyingMapping(w);
         this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
@@ -1101,7 +1090,7 @@ export class PowerPool {
       const u = workerObj?.worker?._underlying;
       if (u && this._underlyingToWorkerObj) this._underlyingToWorkerObj.delete(u);
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, '_deleteWorkerUnderlyingMapping failed');
     }
   }
 
@@ -1285,7 +1274,7 @@ export class PowerPool {
           try {
             _handleMessageError(err);
           } catch (ee) {
-            /* ignore */
+            this._debugLog?.(ee, '_handleMessage: _handleMessageError failed');
           }
           decoded = data;
         }
@@ -1493,19 +1482,19 @@ export class PowerPool {
           try {
             this._cleanupPendingResponse(correlationId, { rejectWith: err });
           } catch (e) {
-            /* ignore */
+            this._debugLog?.(e, 'postMessage: cleanupPendingResponse failed');
           }
           try {
             this._logger.error(err, 'Failed to postMessage to worker');
           } catch (e) {
-            /* ignore */
+            this._debugLog?.(e, 'postMessage: logger.error failed');
           }
           return pendingPromise;
         }
         try {
           this._logger.error(err, 'Failed to postMessage to worker');
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postMessage: logger.error failed');
         }
         return false;
       }
@@ -1520,7 +1509,7 @@ export class PowerPool {
             rejectWith: new Error('targeted worker unavailable'),
           });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postMessage: cleanupPendingResponse failed');
         }
         return pendingPromise;
       }
@@ -1530,7 +1519,7 @@ export class PowerPool {
     // if we can grow the pool, create a new worker and use it
     // If a specific workerId was requested, do not auto-grow the pool to satisfy it
     if (targetWorkerId == null && this.workers.length < this.maxSize) {
-      const startTime = nowMs();
+      const startTime = now;
       return this._tryGrowPool(
         message,
         transfer,
@@ -1570,19 +1559,19 @@ export class PowerPool {
         try {
           this._cleanupPendingResponse(correlationId, { rejectWith: err });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postMessage: cleanupPendingResponse failed');
         }
         try {
           this._logger.error(err, 'Failed to postMessage to fallback worker');
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postMessage: logger.error failed');
         }
         return pendingPromise;
       }
       try {
         this._logger.error(err, 'Failed to postMessage to fallback worker');
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'postMessage: logger.error failed');
       }
       return false;
     }
@@ -1600,7 +1589,7 @@ export class PowerPool {
     try {
       const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
       if (typeof cryptoObj?.randomUUID === 'function') {
-        return `${cryptoObj.randomUUID()}-${this._correlationCounter++}`;
+        return String(`${cryptoObj.randomUUID()}-${this._correlationCounter++}`);
       }
     } catch (e) {
       // ignore and fall back
@@ -1615,7 +1604,7 @@ export class PowerPool {
         const hex = Array.from(arr)
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('');
-        return `${hex}-${this._correlationCounter++}`;
+        return String(`${hex}-${this._correlationCounter++}`);
       }
     } catch (e) {
       // ignore
@@ -1623,7 +1612,7 @@ export class PowerPool {
 
     // Last-resort fallback: timestamp + Math.random + counter
     const rand = Math.floor(Math.random() * 0xffffffff).toString(16);
-    return `cid-${Date.now().toString(36)}-${rand}-${this._correlationCounter++}`;
+    return String(`cid-${Math.floor(nowMs()).toString(36)}-${rand}-${this._correlationCounter++}`);
   }
 
   /**
@@ -1642,11 +1631,11 @@ export class PowerPool {
         try {
           clearTimeout(entry.timer);
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, '_cleanupPendingResponse: clearTimeout failed');
         }
       }
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, '_cleanupPendingResponse: timer check failed');
     }
     try {
       if (Object.prototype.hasOwnProperty.call(opts, 'resolveWith'))
@@ -1654,12 +1643,12 @@ export class PowerPool {
       else if (Object.prototype.hasOwnProperty.call(opts, 'rejectWith'))
         entry.reject(opts.rejectWith);
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, '_cleanupPendingResponse: resolve/reject failed');
     } finally {
       try {
         this._pendingResponses.delete(k);
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, '_cleanupPendingResponse: delete failed');
       }
     }
     return true;
@@ -1748,7 +1737,7 @@ export class PowerPool {
     try {
       this._queueHighCrossed = false;
     } catch (e) {
-      /* ignore */
+      this._debugLog?.(e, '_resetPoolForStopThePress: queueHighCrossed reset failed');
     }
 
     try {
@@ -1758,7 +1747,7 @@ export class PowerPool {
             rejectWith: new Error(`${scope}: cancelled pending response`),
           });
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, '_resetPoolForStopThePress: cleanupPendingResponse failed');
         }
       }
     } catch (err) {
@@ -1790,7 +1779,7 @@ export class PowerPool {
         try {
           w.worker.terminate();
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, '_resetPoolForStopThePress: worker.terminate failed');
         }
         this._deleteWorkerUnderlyingMapping(w);
       }
@@ -1814,17 +1803,21 @@ export class PowerPool {
         } catch (err) {
           try {
             this._logger.error(err, 'recreate: add worker failed');
-          } catch (e) {}
+          } catch (e) {
+            this._debugLog?.(e, 'recreate: logger.error failed');
+          }
           try {
             this._bus.emit('pool:error', { phase: 'recreate', error: err });
-          } catch (e) {}
+          } catch (e) {
+            this._debugLog?.(e, 'recreate: bus.emit failed');
+          }
           break;
         }
       }
       try {
         this._ensureReaper();
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'recreate: ensureReaper failed');
       }
     }
 
@@ -2073,7 +2066,7 @@ export class PowerPool {
             });
           }
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'postMessageBatch: bus.emit pool:queue:high failed');
         }
       } catch (err) {
         this._logger.error(err, 'postMessageBatch: failed to enqueue prepared items');
@@ -2114,7 +2107,7 @@ export class PowerPool {
       try {
         this._logger.error(err, 'stopThePressBatch: postMessageBatch failed');
       } catch (e) {
-        /* ignore logging errors */
+        this._debugLog?.(e, 'stopThePressBatch: logger.error failed');
       }
       // return an array of `false` to indicate none dispatched
       try {
@@ -2136,12 +2129,12 @@ export class PowerPool {
       try {
         this._logger.error(err, 'addWorker: failed');
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'addWorker: logger.error failed');
       }
       try {
         this._bus.emit('pool:error', { phase: 'addWorker', error: err });
       } catch (e) {
-        /* ignore */
+        this._debugLog?.(e, 'addWorker: bus.emit failed');
       }
       return null;
     }
@@ -2159,7 +2152,7 @@ export class PowerPool {
       try {
         w.worker.terminate();
       } catch (err) {
-        /* ignore */
+        this._debugLog?.(err, 'removeWorker: worker.terminate failed');
       }
       this._deleteWorkerUnderlyingMapping(w);
       this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
@@ -2189,13 +2182,13 @@ export class PowerPool {
         try {
           w.worker.terminate();
         } catch (err) {
-          /* ignore */
+          this._debugLog?.(err, '_reapIdleWorkers: worker.terminate failed');
         }
         try {
           const u = w.worker?._underlying;
           if (u && this._underlyingToWorkerObj) this._underlyingToWorkerObj.delete(u);
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, '_reapIdleWorkers: underlyingToWorkerObj.delete failed');
         }
         // Remove the worker without O(n) splice by swapping with the last
         // element and popping. This keeps removal O(1) and avoids shifting
@@ -2266,16 +2259,17 @@ export class PowerPool {
                 try {
                   this._bus.emit('pool:error', { phase: 'autoScale:add', error: e });
                 } catch (ee) {
-                  /* ignore */
+                  this._debugLog?.(ee, 'autoScale: bus.emit failed');
                 }
                 break;
               }
             }
             this._lastAutoScaleAt = now;
             // increase backoff multiplier for successive rapid scales
+            // Cap the backoff multiplier to avoid unbounded growth.
             this._autoScaleBackoffMultiplier = Math.min(
-              cfg.backoffMaxMultiplier || 8,
-              Math.max(1, (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1))
+              (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1),
+              cfg.backoffMaxMultiplier || 8
             );
           } catch (e) {
             this._debugLog?.(e, 'autoScale: addWorker failed outer');
@@ -2318,9 +2312,10 @@ export class PowerPool {
             // Only record a scale action when we actually removed workers.
             if (removed > 0) {
               this._lastAutoScaleAt = now;
+              // Cap the backoff multiplier to avoid unbounded growth.
               this._autoScaleBackoffMultiplier = Math.min(
-                cfg.backoffMaxMultiplier || 8,
-                Math.max(1, (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1))
+                (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1),
+                cfg.backoffMaxMultiplier || 8
               );
             }
           } catch (e) {
@@ -2419,7 +2414,14 @@ export class PowerPool {
    * Synchronous disposal hook (TC39 Explicit Resource Management).
    * Allows `using`-style disposal when supported: `pool[Symbol.dispose]()`.
    */
-  [Symbol.dispose]() {
+  async [Symbol.dispose]() {
+    // Prefer the async disposal path when available so callers can `using`-
+    // style dispose against an async cleanup routine. Fall back to
+    // synchronous terminate for older runtimes.
+    if (typeof this[Symbol.asyncDispose] === 'function') {
+      await this[Symbol.asyncDispose]();
+      return;
+    }
     this.terminate();
   }
 
@@ -2519,7 +2521,7 @@ export class PowerPool {
         try {
           this.removeEventListener('idle', cb);
         } catch (e) {
-          /* ignore */
+          this._debugLog?.(e, 'drain: removeEventListener failed');
         }
         resolve(this.getStats());
       };

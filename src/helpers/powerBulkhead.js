@@ -6,6 +6,7 @@
  */
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
+import { DEFAULT_QUEUE_CAPACITY } from './constants.js';
 
 /**
  * PowerBulkhead
@@ -28,13 +29,13 @@ export class PowerBulkhead {
     const {
       partitions = 4,
       maxConcurrency = 1,
-      queueCapacity = 100,
+      queueCapacity = DEFAULT_QUEUE_CAPACITY,
       partitioner = null,
     } = options || {};
 
     this._partitions = Math.max(1, Math.floor(Number(partitions) || 4));
     this._maxConcurrency = Math.max(1, Math.floor(Number(maxConcurrency) || 1));
-    this._queueCapacity = Math.max(0, Math.floor(Number(queueCapacity) || 100));
+    this._queueCapacity = Math.max(0, Math.floor(Number(queueCapacity) || DEFAULT_QUEUE_CAPACITY));
     this._partitioner = typeof partitioner === 'function' ? partitioner : null;
     this._nextPartition = 0;
     this._pendingCount = 0;

@@ -10,12 +10,14 @@
 
 - [PowerCircuit](classes/PowerCircuit.md)
 
-## Interfaces
-
-- [PowerCircuitOptions](interfaces/PowerCircuitOptions.md)
-
 ## References
 
 ### default
 
 Renames and re-exports [PowerCircuit](classes/PowerCircuit.md)
+
+***
+
+### PowerCircuitOptions
+
+Re-exports [PowerCircuitOptions](../jsdoc-types/interfaces/PowerCircuitOptions.md)

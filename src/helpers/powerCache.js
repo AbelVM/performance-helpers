@@ -1,26 +1,9 @@
 /**
- * @typedef {Object} CacheNode
- * @property {*} key
- * @property {*} value
- * @property {number} weight
- * @property {number} expiresAt
- * @property {CacheNode|null} prev
- * @property {CacheNode|null} next
+ * @typedef {import('./jsdoc-types.js').CacheNode} CacheNode
  */
 
 /**
- * @typedef {Object} PowerCacheOptions
- * @property {number} [maxEntries]
- * @property {number} [maxWeight]
- * @property {function(*):number} [weightFn]
- * @property {number} [defaultTTL]
- * @property {number} [maxPoolSize]
- * @property {boolean} [rejectOversized]
- * @property {function(*, *, string):void} [onEvict]
- * @property {function(*, *):void} [onExpire]
- * @property {number} [initialPoolSize]
- * @property {number} [maxCleanupPerTick]
- * @property {boolean} [eagerCleanupOnRead]
+ * @typedef {import('./jsdoc-types.js').PowerCacheOptions} PowerCacheOptions
  */
 
 /**
@@ -53,6 +36,14 @@
  * @public
  */
 import { nowMs } from '../utils/now.js';
+import {
+  DEFAULT_MAX_CLEANUP_PER_TICK,
+  DEFAULT_CACHE_DEFAULT_TTL_MS,
+  DEFAULT_CACHE_MAX_POOL_SIZE,
+  DEFAULT_TIMEOUT_MS,
+  MS_PER_SEC,
+  MAX_DEEP_EQUAL_DEPTH,
+} from './constants.js';
 
 /**
  * PowerCache
@@ -84,16 +75,16 @@ export class PowerCache {
     maxEntries = Infinity,
     maxWeight = Infinity,
     weightFn = () => 1,
-    defaultTTL = 60000,
-    maxPoolSize = 1000,
+    defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
+    maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
     rejectOversized = false,
     onEvict = null,
     onExpire = null,
     initialPoolSize = 0,
-    maxCleanupPerTick = 100,
+    maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
     eagerCleanupOnRead = false,
     // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
-    defaultAsyncTimeout = 30000,
+    defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
   } = {}) {
     // Basic options validation: when an explicit options argument is provided it must be an object
     if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
@@ -109,7 +100,7 @@ export class PowerCache {
     this.onExpire = typeof onExpire === 'function' ? onExpire : null;
     this.maxCleanupPerTick = Number.isFinite(+maxCleanupPerTick)
       ? Math.max(1, +maxCleanupPerTick)
-      : 100;
+      : DEFAULT_MAX_CLEANUP_PER_TICK;
 
     this.eagerCleanupOnRead = Boolean(eagerCleanupOnRead);
 
@@ -283,6 +274,30 @@ export class PowerCache {
   }
 
   /**
+   * Compute and validate a weight for a value.
+   * If `explicitWeight` is provided it is normalized and returned.
+   * Otherwise `this.weightFn` is invoked safely and any thrown error
+   * or non-finite return value results in a weight of `0`.
+   * @private
+   * @param {*} value
+   * @param {number|null|undefined} explicitWeight
+   * @returns {number}
+   */
+  _computeWeight(value, explicitWeight) {
+    if (explicitWeight != null) {
+      const v = +explicitWeight;
+      return Number.isFinite(v) ? Math.max(0, v) : 0;
+    }
+    try {
+      const w = this.weightFn(value);
+      const n = +w;
+      return Number.isFinite(n) ? Math.max(0, n) : 0;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  /**
    * Reset and return a node to the pool for reuse.
    *
    * This helper clears the node fields and returns it to the node pool when
@@ -314,9 +329,11 @@ export class PowerCache {
    * @private
    * @param {CacheNode} node
    * @param {number} now - Current timestamp (ms) used for comparisons
-   * @param {boolean} [countMiss=false] - When true, increment the `misses` counter for user-facing lookups.
+   * @remarks This helper does not modify the `misses` counter; callers should
+   * increment `this._misses` when the removal corresponds to a user-facing
+   * lookup (for example, `get()`/`getMany()`/`getOrSet()`).
    */
-  _removeExpiredNode(node, now, countMiss = false) {
+  _removeExpiredNode(node, now) {
     // Only remove when the node is actually expired according to `now`.
     if (!node.expiresAt || node.expiresAt > now) return false;
     const k = node.key;
@@ -329,9 +346,15 @@ export class PowerCache {
     this._remove(node);
     try {
       if (this.onExpire) this.onExpire(k, v);
-    } catch (err) {}
+    } catch (err) {
+      try {
+        if (typeof this._logger?.error === 'function')
+          this._logger.error(err, 'PowerCache onExpire callback threw');
+        else if (typeof console !== 'undefined' && typeof console.error === 'function')
+          console.error('PowerCache onExpire callback threw', err);
+      } catch (_) {}
+    }
     this._freeNode(node);
-    if (countMiss) this._misses++;
     this._expirations++;
     return true;
   }
@@ -356,7 +379,8 @@ export class PowerCache {
     const now = !ignoreExpiry && node.expiresAt ? nowMs() : 0;
     if (now && node.expiresAt <= now) {
       if (allowExpired) return node;
-      this._removeExpiredNode(node, now, countMiss);
+      this._removeExpiredNode(node, now);
+      if (countMiss) this._misses++;
       return null;
     }
     return node;
@@ -486,7 +510,14 @@ export class PowerCache {
       this._evictions++;
       try {
         if (this.onEvict) this.onEvict(k, v, 'evicted');
-      } catch (err) {}
+      } catch (err) {
+        try {
+          if (typeof this._logger?.error === 'function')
+            this._logger.error(err, 'PowerCache onEvict callback threw');
+          else if (typeof console !== 'undefined' && typeof console.error === 'function')
+            console.error('PowerCache onEvict callback threw', err);
+        } catch (_) {}
+      }
       this._freeNode(node);
     }
     // Ensure eviction candidate remains aligned with current head after evictions
@@ -506,22 +537,10 @@ export class PowerCache {
    * @returns {this|false} `this` on success, or `false` when insertion was rejected due to oversize.
    */
   set(key, value, { ttl = this.defaultTTL, weight = null } = {}) {
-    const now = Date.now();
+    const now = nowMs();
     const expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
-    // Compute weight once. Guard against user-supplied weightFn throwing
-    // and fall back to 0 if it does or returns a non-finite value.
-    let wRaw;
-    if (weight != null) {
-      wRaw = weight;
-    } else {
-      try {
-        wRaw = this.weightFn(value);
-      } catch (err) {
-        wRaw = 0;
-      }
-      if (wRaw == null) wRaw = 0;
-    }
-    const w = Number.isFinite(+wRaw) ? Math.max(0, +wRaw) : 0;
+    // Compute weight once and validate it before mutating bookkeeping.
+    const w = this._computeWeight(value, weight);
     // If item is heavier than maxWeight, optionally reject insertion
     if (this.rejectOversized && Number.isFinite(this.maxWeight) && w > this.maxWeight) {
       this._rejected++;
@@ -609,7 +628,7 @@ export class PowerCache {
     factory,
     { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
   ) {
-    const now = Date.now();
+    const now = nowMs();
     const node = this._fetchValidNode(key, {
       countMiss: false,
       allowExpired: staleWhileRevalidate,
@@ -623,7 +642,8 @@ export class PowerCache {
           this._refreshStaleEntry(key, factory, { ttl, weight });
           return node.value;
         }
-        this._removeExpiredNode(node, now, true);
+        this._removeExpiredNode(node, now);
+        this._misses++;
       } else {
         this._moveToTail(node);
         this._hits++;
@@ -663,22 +683,12 @@ export class PowerCache {
    * @returns {this}
    */
   setMany(entries, { ttl = undefined, weight = undefined } = {}) {
-    const now = Date.now();
+    const now = nowMs();
     const expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
     for (const pair of entries) {
       if (!pair) continue;
       const [key, value] = pair;
-      let wRaw;
-      if (weight != null) wRaw = weight;
-      else {
-        try {
-          wRaw = this.weightFn(value);
-        } catch (err) {
-          wRaw = 0;
-        }
-        if (wRaw == null) wRaw = 0;
-      }
-      const w = Number.isFinite(+wRaw) ? Math.max(0, +wRaw) : 0;
+      const w = this._computeWeight(value, weight);
 
       if (this._map.has(key)) {
         const node = this._map.get(key);
@@ -729,7 +739,7 @@ export class PowerCache {
   touch(key, ttl = undefined) {
     const node = this._fetchValidNode(key);
     if (!node) return false;
-    const now = Date.now();
+    const now = nowMs();
     if (ttl !== undefined) {
       node.expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
     }
@@ -759,7 +769,7 @@ export class PowerCache {
       return Promise.resolve(this.getOrSet(key, asyncFactory, { ttl, weight }));
     }
 
-    const now = Date.now();
+    const now = nowMs();
     const node = this._map.get(key);
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
@@ -770,7 +780,7 @@ export class PowerCache {
           return Promise.resolve(node.value);
         }
         // expired: remove and proceed to compute; count the miss once below.
-        this._removeExpiredNode(node, now, false);
+        this._removeExpiredNode(node, now);
       } else {
         this._moveToTail(node);
         this._hits++;
@@ -951,7 +961,7 @@ export class PowerCache {
    * @returns {number} Number of nodes scanned
    */
   cleanupExpiredUpTo(maxScan = Infinity) {
-    const now = Date.now();
+    const now = nowMs();
     let scanned = 0;
     // Resume from the previous cursor when possible to avoid re-scanning from head.
     // `_cleanupCursorValid` is toggled by mutation paths that affect the cursor,
@@ -1003,7 +1013,10 @@ export class PowerCache {
     } else {
       interval = Number.isFinite(+intervalOrOptions.interval)
         ? +intervalOrOptions.interval
-        : Math.max(1000, Math.min(this.defaultTTL || 60000, 60000));
+        : Math.max(
+            MS_PER_SEC,
+            Math.min(this.defaultTTL || DEFAULT_CACHE_DEFAULT_TTL_MS, DEFAULT_CACHE_DEFAULT_TTL_MS)
+          );
       maxCleanupPerTick = Number.isFinite(+intervalOrOptions.maxCleanupPerTick)
         ? Math.max(1, +intervalOrOptions.maxCleanupPerTick)
         : this.maxCleanupPerTick;
@@ -1186,7 +1199,6 @@ export class PowerCache {
  * @returns {boolean}
  */
 function deepEqual(a, b, seen = undefined, depth = 0) {
-  const MAX_DEEP_EQUAL_DEPTH = 100;
   if (depth > MAX_DEEP_EQUAL_DEPTH) {
     // Fall back to reference equality when we've recursed too deep.
     return a === b;
@@ -1278,10 +1290,80 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
       for (const item of a) if (!b.has(item)) return false;
       return true;
     }
+    // For non-primitive items try to reduce comparisons:
+    // 1) fast reference matches
+    // 2) attempt a safe JSON-based signature grouping to limit candidates
+    // 3) fall back to structural deepEqual scan for remaining items
+    const bItems = Array.from(b);
+    const used = new Array(bItems.length).fill(false);
+
+    // Fast reference check: mark direct reference matches
+    const refIndex = new Map();
+    for (let i = 0; i < bItems.length; i++) refIndex.set(bItems[i], i);
+
+    // Helper: try to produce a stable-ish signature for many common objects
+    const trySignature = (val) => {
+      try {
+        return JSON.stringify(val, (k, v) => {
+          if (v instanceof Date) return { __type: 'Date', v: v.getTime() };
+          if (v instanceof RegExp) return { __type: 'RegExp', v: v.toString() };
+          if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(v))
+            return {
+              __type: 'TypedArray',
+              v: Array.from(new Uint8Array(v.buffer, v.byteOffset || 0, v.byteLength)),
+            };
+          if (typeof ArrayBuffer !== 'undefined' && v instanceof ArrayBuffer)
+            return { __type: 'ArrayBuffer', v: Array.from(new Uint8Array(v)) };
+          return v;
+        });
+      } catch (err) {
+        return null;
+      }
+    };
+
+    // Build signature -> indices map for bItems when possible
+    const sigMap = new Map();
+    const unsigIndices = [];
+    for (let i = 0; i < bItems.length; i++) {
+      const s = trySignature(bItems[i]);
+      if (s == null) unsigIndices.push(i);
+      else {
+        const arr = sigMap.get(s);
+        if (arr) arr.push(i);
+        else sigMap.set(s, [i]);
+      }
+    }
+
+    // For each item in `a`, try to find a matching unused candidate in bItems
     for (const itemA of a) {
+      // reference match
+      const refI = refIndex.get(itemA);
+      if (refI !== undefined && !used[refI]) {
+        used[refI] = true;
+        continue;
+      }
+
+      // signature match
+      const sigA = trySignature(itemA);
       let found = false;
-      for (const itemB of b) {
-        if (deepEqual(itemA, itemB, seen, depth + 1)) {
+      if (sigA != null) {
+        const cand = sigMap.get(sigA) || [];
+        for (const idx of cand) {
+          if (used[idx]) continue;
+          if (deepEqual(itemA, bItems[idx], seen, depth + 1)) {
+            used[idx] = true;
+            found = true;
+            break;
+          }
+        }
+        if (found) continue;
+      }
+
+      // fallback structural scan across any remaining unmatched bItems
+      for (let i = 0; i < bItems.length; i++) {
+        if (used[i]) continue;
+        if (deepEqual(itemA, bItems[i], seen, depth + 1)) {
+          used[i] = true;
           found = true;
           break;
         }
@@ -1311,11 +1393,12 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
  * Concurrent calls for the same arguments are deduplicated (single inflight Promise).
  * Rejected Promises are not cached.
  *
- * Usage (constructor returns a callable memoized function when given `fn`):
+ * Usage (constructor returns a `PowerMemoizer` instance; when a function is supplied
+ * the instance creates a memoized wrapper and exposes a convenience `run()` alias):
  * const fetcher = async (id) => await fetchData(id)
- * const memoizedFetch = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
- * // call the memoized function directly
- * await memoizedFetch(1)
+ * const pm = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
+ * // call the memoized function via the convenience alias
+ * await pm.run(1)
  *
  * @class PowerMemoizer
  * @public
@@ -1350,35 +1433,34 @@ export class PowerMemoizer {
     if (ttl !== undefined) this._defaultMemoizeOptions.ttl = ttl;
     if (weight !== undefined) this._defaultMemoizeOptions.weight = weight;
 
-    // If a function is provided at construction time, return the memoized function directly.
-    // The returned function has helper methods attached (get, has, delete, clear, stats, cache).
-    if (typeof fn === 'function') {
-      const memoizedFn = this._memoize(fn, this._defaultMemoizeOptions);
-      // attach delegating helpers bound to this PowerMemoizer instance
-      memoizedFn.get = (...args) => this.get(...args);
-      memoizedFn.has = (...args) => this.has(...args);
-      memoizedFn.delete = (...args) => this.delete(...args);
-      memoizedFn.clear = () => this.clear();
-      memoizedFn.stats = () => this.stats();
-      memoizedFn.cache = this.cache;
-      memoizedFn.original = fn;
-      // Make the returned function behave like an instance so `instanceof PowerMemoizer` works
-      try {
-        Object.setPrototypeOf(memoizedFn, PowerMemoizer.prototype);
-        memoizedFn.constructor = PowerMemoizer;
-      } catch (err) {
-        // if environment forbids prototype mutation, fall back to returning the function
-      }
-      return memoizedFn;
-    }
-
-    // When no function supplied, keep the instance behavior and require explicit `memoize(fn)`.
+    // Default run behavior: when no function is supplied the instance will
+    // throw if `run()` is invoked. Callers should use `memoize(fn)` to obtain
+    // a memoized wrapper for a function.
     this.run = () => {
       throw new TypeError(
-        'No function supplied to PowerMemoizer; call memoize(fn) or construct with a function.'
+        'No function supplied to PowerMemoizer; call memoize(fn) to create a memoized wrapper.'
       );
     };
     this._originalFn = null;
+
+    // If a function was provided at construction time, keep it as the
+    // original function and create a memoized wrapper available via
+    // `memoize(fn)` and the convenience `run()` alias. The constructor
+    // always returns the instance (never a bare function).
+    if (typeof fn === 'function') {
+      this._originalFn = fn;
+      try {
+        // Create and cache a memoized wrapper using the instance defaults.
+        this._fnWrapper = this.memoize(fn);
+        // Provide a simple convenience method to invoke the memoized wrapper
+        // directly on the instance for callers that previously relied on
+        // constructor-returned functions.
+        this.run = (...args) => this._fnWrapper(...args);
+      } catch (err) {
+        // Ignore failures to create the wrapper; callers can still call
+        // `memoize(fn)` explicitly.
+      }
+    }
   }
 
   /**
@@ -1403,20 +1485,27 @@ export class PowerMemoizer {
       const res = fn(...args);
       // Promise-like
       if (typeof res?.then === 'function') {
-        const p = res.then(
-          (value) => {
+        // Wrap the incoming thenable/promise in an async wrapper so we can
+        // register the inflight marker before the original thenable may
+        // synchronously invoke callbacks (some thenables call handlers
+        // synchronously). The wrapper ensures we always delete the inflight
+        // marker exactly once after settlement and avoids races where a
+        // deletion could occur before the inflight was recorded.
+        const p = (async () => {
+          try {
+            const value = await res;
             try {
               self.cache.set(key, value, { ttl, weight });
-            } catch (err) {}
-            self._inflight.delete(key);
+            } catch (err) {
+              /* swallow cache errors */
+            }
             return value;
-          },
-          (err) => {
-            // do not cache rejections; remove inflight marker
+          } finally {
+            // Ensure inflight marker is removed regardless of resolution
+            // or rejection.
             self._inflight.delete(key);
-            throw err;
           }
-        );
+        })();
         self._inflight.set(key, p);
         return p;
       }

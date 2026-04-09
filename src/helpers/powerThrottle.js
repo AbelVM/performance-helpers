@@ -13,13 +13,10 @@
  * @public
  */
 /**
- * @typedef {Object} PowerThrottleOptions
- * @property {number} [capacity]
- * @property {number} [tokens]
- * @property {number} [refillRate]
- * @property {number} [refillInterval]
+ * @typedef {import('./jsdoc-types.js').PowerThrottleOptions} PowerThrottleOptions
  */
 import { nowMs } from '../utils/now.js';
+import { DEFAULT_REFILL_INTERVAL_MS, MS_PER_SEC } from './constants.js';
 
 export class PowerThrottle {
   /**
@@ -30,11 +27,16 @@ export class PowerThrottle {
    * @param {number} [options.refillInterval=1000]
    */
   constructor(options = {}) {
-    const { capacity = 1, tokens = undefined, refillRate = 0, refillInterval = 1000 } = options;
+    const {
+      capacity = 1,
+      tokens = undefined,
+      refillRate = 0,
+      refillInterval = DEFAULT_REFILL_INTERVAL_MS,
+    } = options;
     this.capacity = Math.max(0, Number(capacity) || 0);
     this.tokens = Number.isFinite(tokens) ? Math.min(this.capacity, tokens) : this.capacity;
     this.refillRate = Math.max(0, Number(refillRate) || 0);
-    this.refillInterval = Math.max(1, Math.floor(refillInterval) || 1000);
+    this.refillInterval = Math.max(1, Math.floor(refillInterval) || DEFAULT_REFILL_INTERVAL_MS);
 
     // track last refill timestamp (ms)
     this._lastRefill = nowMs();
@@ -56,7 +58,7 @@ export class PowerThrottle {
     if (this.refillRate <= 0) return;
     const elapsedMs = Math.max(0, now - this._lastRefill);
     if (elapsedMs <= 0) return;
-    const tokensToAdd = (elapsedMs / 1000) * this.refillRate + this._tokenRemainder;
+    const tokensToAdd = (elapsedMs / MS_PER_SEC) * this.refillRate + this._tokenRemainder;
     const whole = Math.floor(tokensToAdd);
     this._tokenRemainder = tokensToAdd - whole;
     // advance the last refill timestamp to avoid double-counting elapsed time

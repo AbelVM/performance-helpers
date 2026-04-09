@@ -39,10 +39,6 @@ export class PowerObserver {
     _flushPending(): void;
 }
 export default PowerObserver;
-export type PowerObserverOptions = {
-    map?: Function | undefined;
-    distinct?: boolean | undefined;
-    async?: boolean | "microtask" | "macrotask" | undefined;
-};
+export type PowerObserverOptions = import("./jsdoc-types.js").PowerObserverOptions;
 import { PowerSubscriberSet } from './powerSubscriberSet.js';
 import { PowerScheduler } from './powerScheduler.js';

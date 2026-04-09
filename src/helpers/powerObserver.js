@@ -11,10 +11,7 @@
  * obs.value = 99;
  */
 /**
- * @typedef {Object} PowerObserverOptions
- * @property {function} [map]
- * @property {boolean} [distinct]
- * @property {boolean|'microtask'|'macrotask'} [async]
+ * @typedef {import('./jsdoc-types.js').PowerObserverOptions} PowerObserverOptions
  */
 import { PowerScheduler } from './powerScheduler.js';
 import { PowerSubscriberSet } from './powerSubscriberSet.js';

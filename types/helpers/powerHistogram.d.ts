@@ -1,12 +1,3 @@
-/**
- * Lock-free in-process histogram for latency telemetry and percentile estimation.
- *
- * Use `PowerHistogram` to record latency values and query estimated
- * percentiles with a compact bucketed sketch.
- *
- * @class PowerHistogram
- * @public
- */
 export class PowerHistogram {
     /**
      * @param {Object} [options]

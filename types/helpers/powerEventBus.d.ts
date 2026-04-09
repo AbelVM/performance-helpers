@@ -7,9 +7,7 @@
  * @class PowerEventBus
  */
 /**
- * @typedef {Object} PowerEventBusOptions
- * @property {number} [maxListeners]
- * @property {boolean} [weak]
+ * @typedef {import('./jsdoc-types.js').PowerEventBusOptions} PowerEventBusOptions
  */
 export class PowerEventBus {
     /**
@@ -106,8 +104,5 @@ export class PowerEventBus {
     clear(event?: string): void;
 }
 export default PowerEventBus;
-export type PowerEventBusOptions = {
-    maxListeners?: number | undefined;
-    weak?: boolean | undefined;
-};
+export type PowerEventBusOptions = import("./jsdoc-types.js").PowerEventBusOptions;
 import { PowerSubscriberSet } from './powerSubscriberSet.js';

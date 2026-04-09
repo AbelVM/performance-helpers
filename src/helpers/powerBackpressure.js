@@ -6,6 +6,11 @@
  * pressure is high.
  */
 import { PowerPermitGate } from './powerPermitGate.js';
+import {
+  DEFAULT_QUEUE_CAPACITY,
+  DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
+  DEFAULT_BACKPRESSURE_REFILL_INTERVAL_MS,
+} from './constants.js';
 
 /**
  * PowerBackpressure
@@ -28,22 +33,25 @@ export class PowerBackpressure extends PowerPermitGate {
    */
   constructor(options = {}) {
     const {
-      capacity = 100,
-      queueCapacity = 1000,
+      capacity = DEFAULT_QUEUE_CAPACITY,
+      queueCapacity = DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
       lowWaterMark = null,
       refillAmount = null,
-      refillInterval = 200,
+      refillInterval = DEFAULT_BACKPRESSURE_REFILL_INTERVAL_MS,
       initialTokens = undefined,
     } = options || {};
 
-    const normalizedCapacity = Math.max(1, Math.floor(Number(capacity) || 100));
+    const normalizedCapacity = Math.max(1, Math.floor(Number(capacity) || DEFAULT_QUEUE_CAPACITY));
     const normalizedLowWaterMark = Number.isFinite(lowWaterMark)
       ? Math.min(Math.max(1, Math.floor(lowWaterMark)), normalizedCapacity - 1)
       : Math.max(1, Math.ceil(normalizedCapacity * 0.25));
     const normalizedRefillAmount = Number.isFinite(refillAmount)
       ? Math.max(1, Math.min(Math.floor(refillAmount), normalizedCapacity))
       : Math.max(1, Math.ceil(normalizedCapacity * 0.1));
-    const normalizedRefillInterval = Math.max(1, Math.floor(Number(refillInterval) || 200));
+    const normalizedRefillInterval = Math.max(
+      1,
+      Math.floor(Number(refillInterval) || DEFAULT_BACKPRESSURE_REFILL_INTERVAL_MS)
+    );
 
     super({
       capacity: normalizedCapacity,

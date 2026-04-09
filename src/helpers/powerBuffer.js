@@ -11,13 +11,11 @@ let _encoder;
 let _decoder;
 
 /**
- * @typedef {Object} BufferEncoder
- * @property {(s:string)=>Uint8Array} encode
+ * @typedef {import('./jsdoc-types.js').BufferEncoder} BufferEncoder
  */
 
 /**
- * @typedef {Object} BufferDecoder
- * @property {(u8:Uint8Array)=>string} decode
+ * @typedef {import('./jsdoc-types.js').BufferDecoder} BufferDecoder
  */
 
 function getEncoder() {

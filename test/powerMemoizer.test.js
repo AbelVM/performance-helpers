@@ -8,7 +8,8 @@ describe('PowerMemoizer', () => {
       calls++;
       return a * 2;
     };
-    const memo = new PowerMemoizer(fn);
+    const pm = new PowerMemoizer();
+    const memo = pm.memoize(fn);
     expect(memo(2)).toBe(4);
     expect(calls).toBe(1);
     expect(memo(2)).toBe(4);
@@ -22,7 +23,8 @@ describe('PowerMemoizer', () => {
       await new Promise((r) => setTimeout(r, 10));
       return x * 3;
     };
-    const memo = new PowerMemoizer(fn);
+    const pm = new PowerMemoizer();
+    const memo = pm.memoize(fn);
     const p1 = memo(3);
     const p2 = memo(3);
     // same in-flight promise
@@ -43,7 +45,8 @@ describe('PowerMemoizer', () => {
       await new Promise((r) => setTimeout(r, 1));
       throw new Error('boom');
     };
-    const memo = new PowerMemoizer(fn);
+    const pm = new PowerMemoizer();
+    const memo = pm.memoize(fn);
     await expect(memo()).rejects.toThrow('boom');
     await expect(memo()).rejects.toThrow('boom');
     expect(calls).toBe(2);
@@ -55,7 +58,8 @@ describe('PowerMemoizer', () => {
       calls++;
       return x;
     };
-    const memo = new PowerMemoizer(fn, { ttl: 5 });
+    const pm = new PowerMemoizer(undefined, { ttl: 5 });
+    const memo = pm.memoize(fn);
     expect(memo(1)).toBe(1);
     expect(calls).toBe(1);
     await new Promise((r) => setTimeout(r, 10));
@@ -69,7 +73,8 @@ describe('PowerMemoizer', () => {
       calls++;
       return x;
     };
-    const memo = new PowerMemoizer(fn);
+    const pm = new PowerMemoizer();
+    const memo = pm.memoize(fn);
     expect(memo(5)).toBe(5);
     memo.delete(5);
     expect(memo(5)).toBe(5);

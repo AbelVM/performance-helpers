@@ -10,12 +10,14 @@
 
 - [PowerRetry](classes/PowerRetry.md)
 
-## Interfaces
-
-- [PowerRetryOptions](interfaces/PowerRetryOptions.md)
-
 ## References
 
 ### default
 
 Renames and re-exports [PowerRetry](classes/PowerRetry.md)
+
+***
+
+### PowerRetryOptions
+
+Re-exports [PowerRetryOptions](../jsdoc-types/interfaces/PowerRetryOptions.md)

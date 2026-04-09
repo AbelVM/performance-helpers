@@ -15,7 +15,7 @@ autoscaling, and lifecycle management. See constructor docs for options.
 
 ## Indexable
 
-> \[`key`: `number`\]: () => `void`
+> \[`key`: `number`\]: () => `Promise`\<`void`\>
 
 ## Constructors
 
@@ -35,9 +35,9 @@ A Worker constructor, a worker factory, or a relative path string. If the provid
 
 ##### options
 
-[`PowerPoolOptions`](../interfaces/PowerPoolOptions.md) \| `undefined`
+[`PowerPoolOptions`](../../jsdoc-types/interfaces/PowerPoolOptions.md) \| `undefined`
 
-[`PowerPoolOptions`](../interfaces/PowerPoolOptions.md)
+[`PowerPoolOptions`](../../jsdoc-types/interfaces/PowerPoolOptions.md)
 
 ***
 
@@ -337,7 +337,7 @@ whether queued dispatch is paused
 
 ### workers
 
-> **workers**: [`WorkerObj`](../interfaces/WorkerObj.md)[]
+> **workers**: [`WorkerObj`](../../jsdoc-types/interfaces/WorkerObj.md)[]
 
 ## Accessors
 
@@ -536,13 +536,13 @@ Add an event listener for pool events. Supported types: 'message', 'error', 'mes
 
 ### addWorker()
 
-> **addWorker**(): [`WorkerObj`](../interfaces/WorkerObj.md)
+> **addWorker**(): [`WorkerObj`](../../jsdoc-types/interfaces/WorkerObj.md)
 
 Add one worker to the pool immediately.
 
 #### Returns
 
-[`WorkerObj`](../interfaces/WorkerObj.md)
+[`WorkerObj`](../../jsdoc-types/interfaces/WorkerObj.md)
 
 The newly created worker entry.
 
@@ -688,7 +688,7 @@ the transfer list to avoid structured-clone copies.
 
 ##### options
 
-[`PostMessageOptions`](../interfaces/PostMessageOptions.md) \| `undefined`
+[`PostMessageOptions`](../../jsdoc-types/interfaces/PostMessageOptions.md) \| `undefined`
 
 Optional flags controlling behavior such as `awaitResponse`, `timeout`, `workerId`, and `zeroCopy`.
 

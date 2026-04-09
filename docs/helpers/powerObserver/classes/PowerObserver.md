@@ -24,7 +24,7 @@ Initial value
 
 ##### options?
 
-[`PowerObserverOptions`](../interfaces/PowerObserverOptions.md) = `{}`
+[`PowerObserverOptions`](../../jsdoc-types/interfaces/PowerObserverOptions.md) = `{}`
 
 #### Returns
 

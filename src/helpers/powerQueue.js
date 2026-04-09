@@ -14,8 +14,7 @@
  */
 export class PowerQueue {
   /**
-   * @typedef {Object} PowerQueueOptions
-   * @property {number} [initialCapacity]
+   * @typedef {import('./jsdoc-types.js').PowerQueueOptions} PowerQueueOptions
    */
   /**
    * Create a PowerQueue.

@@ -39,10 +39,5 @@ export class PowerCircuit {
     reset(): void;
 }
 export default PowerCircuit;
-export type PowerCircuitOptions = {
-    threshold?: number | undefined;
-    timeout?: number | undefined;
-    onStateChange?: ((state: string, reason?: string) => void) | undefined;
-    eventBus?: PowerEventBus | undefined;
-};
+export type PowerCircuitOptions = import("./jsdoc-types.js").PowerCircuitOptions;
 import { PowerEventBus } from './powerEventBus.js';

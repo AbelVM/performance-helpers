@@ -171,7 +171,7 @@ When a non-object is provided as the options argument.
 
 ### \_head
 
-> **\_head**: [`CacheNode`](../interfaces/CacheNode.md) \| `null`
+> **\_head**: [`CacheNode`](../../jsdoc-types/interfaces/CacheNode.md) \| `null`
 
 ***
 
@@ -237,7 +237,7 @@ When a non-object is provided as the options argument.
 
 ### \_tail
 
-> **\_tail**: [`CacheNode`](../interfaces/CacheNode.md) \| `null`
+> **\_tail**: [`CacheNode`](../../jsdoc-types/interfaces/CacheNode.md) \| `null`
 
 ***
 

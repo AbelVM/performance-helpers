@@ -148,23 +148,24 @@ try {
 }
 ```
 
+
 ## PowerMemoizer
 
 Small memoization helper that uses a `PowerCache` instance internally. It deduplicates concurrent Promise-returning calls and does not cache rejected Promises.
 
-The constructor returns the memoized function directly (callable). The returned function has helper methods attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
+The constructor always returns a `PowerMemoizer` instance. Use the instance method `memoize(fn)` to create a callable memoized wrapper for a function. The returned memoized function has helper methods attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
 
 #### Memoizer constructor params
 
 | param | type | default | description |
 |---|---:|---:|---|
-| `fn` | `Function?` | — | Optional function to memoize immediately. When provided the constructor returns the callable memoized function instead of a `PowerMemoizer` instance. |
+| `fn` | `Function?` | — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied). |
 | `options.keyResolver` | `function(...args):string` | `(...args)=>JSON.stringify(args)` | Function mapping call args to a stable cache key. |
 | `options.cacheOptions` | `Object` | `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`). |
 | `options.ttl` | `number?` | `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor. |
 | `options.weight` | `number?` | `undefined` | Default weight used when caching results for the `fn` passed to the constructor. |
 
-You can also create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
+You can create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
 
 ```javascript
 // share a single cache across multiple functions
@@ -185,11 +186,18 @@ const memoB = pm.memoize(fnB, { ttl: 5000 })
 
 - `memoize(fn)` — Wrap and return a memoized version of `fn` using this instance's cache. The returned function has helper methods attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
 
+- `run(...args)` — Convenience alias that invokes the memoized wrapper created from the constructor-supplied function. If the `PowerMemoizer` was constructed without a function, `run()` will throw a `TypeError` instructing callers to use `memoize(fn)`.
+
+- `memoize(fn)` — Wrap and return a memoized version of `fn` using this instance's cache. The returned function has helper methods attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
+
 ### Example
 
 ```javascript
 const fetchUserFn = async (id) => fetch(`/users/${id}`).then(r => r.json())
-const memo = new PowerMemoizer(fetchUserFn, { cacheOptions: { defaultTTL: 10_000 } })
+// when constructing without an immediate function you must pass the
+// options as the *second* argument (first arg is the optional `fn`):
+const pm = new PowerMemoizer(undefined, { cacheOptions: { defaultTTL: 10_000 } })
+const memo = pm.memoize(fetchUserFn)
 // call the memoized function directly
 await memo(1)
 ```
@@ -204,8 +212,10 @@ import { PowerMemoizer, simpleArgsKey } from '../src/helpers/powerCache.js'
 
 const fetchUserFn = async (id) => fetch(`/users/${id}`).then(r => r.json())
 // use the fast resolver for simple scalar args
-const memo = new PowerMemoizer(fetchUserFn, { keyResolver: simpleArgsKey })
-await memo(1)
+// when a function is supplied to the constructor the instance provides a
+// convenience `run()` alias that invokes the memoized wrapper:
+const pm = new PowerMemoizer(fetchUserFn, { keyResolver: simpleArgsKey })
+await pm.run(1)
 ```
 
 `simpleArgsKey` performs a cheap, deterministic encoding for primitive args

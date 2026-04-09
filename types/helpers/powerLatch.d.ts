@@ -5,8 +5,7 @@ export class PowerLatch {
      */
     static one(): PowerLatch;
     /**
-     * @typedef {Object} PowerLatchOptions
-     * @property {(reason:any)=>void} [onAbort]
+     * @typedef {import('./jsdoc-types.js').PowerLatchOptions} PowerLatchOptions
      */
     /**
      * @param {number} [count=1] - initial count required to release the latch

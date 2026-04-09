@@ -65,8 +65,8 @@ export class PowerCache {
     maxCleanupPerTick: number;
     eagerCleanupOnRead: boolean;
     _map: Map<any, any>;
-    _head: CacheNode | null;
-    _tail: CacheNode | null;
+    _head: import("./jsdoc-types.js").CacheNode | null;
+    _tail: import("./jsdoc-types.js").CacheNode | null;
     _pool: {
         key: null;
         value: null;
@@ -108,6 +108,17 @@ export class PowerCache {
      */
     private _allocNode;
     /**
+     * Compute and validate a weight for a value.
+     * If `explicitWeight` is provided it is normalized and returned.
+     * Otherwise `this.weightFn` is invoked safely and any thrown error
+     * or non-finite return value results in a weight of `0`.
+     * @private
+     * @param {*} value
+     * @param {number|null|undefined} explicitWeight
+     * @returns {number}
+     */
+    private _computeWeight;
+    /**
      * Reset and return a node to the pool for reuse.
      *
      * This helper clears the node fields and returns it to the node pool when
@@ -130,7 +141,9 @@ export class PowerCache {
      * @private
      * @param {CacheNode} node
      * @param {number} now - Current timestamp (ms) used for comparisons
-     * @param {boolean} [countMiss=false] - When true, increment the `misses` counter for user-facing lookups.
+     * @remarks This helper does not modify the `misses` counter; callers should
+     * increment `this._misses` when the removal corresponds to a user-facing
+     * lookup (for example, `get()`/`getMany()`/`getOrSet()`).
      */
     private _removeExpiredNode;
     /**
@@ -454,11 +467,12 @@ export class PowerCache {
  * Concurrent calls for the same arguments are deduplicated (single inflight Promise).
  * Rejected Promises are not cached.
  *
- * Usage (constructor returns a callable memoized function when given `fn`):
+ * Usage (constructor returns a `PowerMemoizer` instance; when a function is supplied
+ * the instance creates a memoized wrapper and exposes a convenience `run()` alias):
  * const fetcher = async (id) => await fetchData(id)
- * const memoizedFetch = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
- * // call the memoized function directly
- * await memoizedFetch(1)
+ * const pm = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
+ * // call the memoized function via the convenience alias
+ * await pm.run(1)
  *
  * @class PowerMemoizer
  * @public
@@ -487,8 +501,9 @@ export class PowerMemoizer {
     cache: PowerCache;
     _inflight: Map<any, any>;
     _defaultMemoizeOptions: {};
-    run: (() => never) | undefined;
-    _originalFn: any;
+    run: (...args: any[]) => any;
+    _originalFn: Function | null;
+    _fnWrapper: Function | undefined;
     /**
      * Wrap a function with memoization.
      * @private
@@ -594,24 +609,5 @@ export class PowerTimedCache {
     keys(order: any): Generator<any, void, unknown>;
     values(order: any): Generator<any, void, unknown>;
 }
-export type CacheNode = {
-    key: any;
-    value: any;
-    weight: number;
-    expiresAt: number;
-    prev: CacheNode | null;
-    next: CacheNode | null;
-};
-export type PowerCacheOptions = {
-    maxEntries?: number | undefined;
-    maxWeight?: number | undefined;
-    weightFn?: ((arg0: any) => number) | undefined;
-    defaultTTL?: number | undefined;
-    maxPoolSize?: number | undefined;
-    rejectOversized?: boolean | undefined;
-    onEvict?: ((arg0: any, arg1: any, arg2: string) => void) | undefined;
-    onExpire?: ((arg0: any, arg1: any) => void) | undefined;
-    initialPoolSize?: number | undefined;
-    maxCleanupPerTick?: number | undefined;
-    eagerCleanupOnRead?: boolean | undefined;
-};
+export type CacheNode = import("./jsdoc-types.js").CacheNode;
+export type PowerCacheOptions = import("./jsdoc-types.js").PowerCacheOptions;

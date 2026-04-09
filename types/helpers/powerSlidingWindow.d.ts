@@ -5,9 +5,7 @@ export class PowerSlidingWindow {
      * @param {number} [options.windowMs=1000] Window size in milliseconds.
      */
     /**
-     * @typedef {Object} PowerSlidingWindowOptions
-     * @property {number} [capacity]
-     * @property {number} [windowMs]
+     * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
      */
     constructor(options?: {});
     capacity: number;

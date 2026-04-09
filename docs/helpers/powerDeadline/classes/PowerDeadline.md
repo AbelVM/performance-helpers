@@ -57,7 +57,7 @@ Async function to execute.
 
 ##### options?
 
-[`PowerDeadlineOptions`](../interfaces/PowerDeadlineOptions.md) = `{}`
+[`PowerDeadlineOptions`](../../jsdoc-types/interfaces/PowerDeadlineOptions.md) = `{}`
 
 #### Returns
 
@@ -81,7 +81,7 @@ Async function to execute.
 
 ##### options?
 
-[`PowerDeadlineOptions`](../interfaces/PowerDeadlineOptions.md) = `{}`
+[`PowerDeadlineOptions`](../../jsdoc-types/interfaces/PowerDeadlineOptions.md) = `{}`
 
 #### Returns
 

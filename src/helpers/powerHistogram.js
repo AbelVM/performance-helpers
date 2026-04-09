@@ -7,6 +7,8 @@
  * @class PowerHistogram
  * @public
  */
+import { DEFAULT_HISTOGRAM_MAX_VALUE, DEFAULT_HISTOGRAM_BUCKET_COUNT } from './constants.js';
+
 export class PowerHistogram {
   /**
    * @param {Object} [options]
@@ -15,10 +17,17 @@ export class PowerHistogram {
    * @param {number} [options.bucketCount=128] Number of buckets used internally.
    */
   constructor(options = {}) {
-    const { minValue = 1, maxValue = 10000, bucketCount = 128 } = options || {};
+    const {
+      minValue = 1,
+      maxValue = DEFAULT_HISTOGRAM_MAX_VALUE,
+      bucketCount = DEFAULT_HISTOGRAM_BUCKET_COUNT,
+    } = options || {};
     this._minValue = Number.isFinite(Number(minValue)) ? Math.max(0, Number(minValue)) : 1;
-    this._maxValue = Math.max(this._minValue + 1, Number(maxValue) || 10000);
-    this._bucketCount = Math.max(4, Math.floor(Number(bucketCount) || 128));
+    this._maxValue = Math.max(this._minValue + 1, Number(maxValue) || DEFAULT_HISTOGRAM_MAX_VALUE);
+    this._bucketCount = Math.max(
+      4,
+      Math.floor(Number(bucketCount) || DEFAULT_HISTOGRAM_BUCKET_COUNT)
+    );
     this._buckets = new Uint32Array(this._bucketCount);
     this._count = 0;
     this._sum = 0;

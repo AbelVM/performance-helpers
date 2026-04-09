@@ -52,9 +52,7 @@ Explicit chunk size to use. When omitted a heuristic is used.
 
 ## Param
 
-Hint about `fn` complexity to bias chunking. When omitted the helper
-  will attempt to analyze `fn`'s source to infer a complexity score ('light'|'medium'|'heavy') and use that
-  to bias the chunk size. If analysis fails the helper falls back to 'medium'.
+Hint about `fn` complexity to bias chunking.
  PowerChunker
 
 ## Constructors

@@ -27,8 +27,7 @@ import { PowerScheduler } from './powerScheduler.js';
  */
 export class PowerBatch {
   /**
-   * @typedef {Object} PowerBatchOptions
-   * @property {number} [maxSize]
+   * @typedef {import('./jsdoc-types.js').PowerBatchOptions} PowerBatchOptions
    */
   /**
    * @param {Function} handler - Function called with an array of collected items.
