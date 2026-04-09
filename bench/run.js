@@ -397,7 +397,7 @@ function formatMd(report, filename) {
   }
 
   // Variable-load benchmark reporting
-  lines.push('\n## Variable-load benchmark');
+  lines.push('\n## Variable-load benchmark\n');
   if (report.variable) {
     if (report.variable.singleThreaded) {
       lines.push(
