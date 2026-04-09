@@ -1,3 +1,12 @@
+/**
+ * PowerBackpressure
+ *
+ * Producer-facing backpressure controller built on top of `PowerPermitGate`.
+ * Provides adaptive refill behavior and FIFO queuing for producers.
+ *
+ * @class PowerBackpressure
+ * @public
+ */
 export class PowerBackpressure extends PowerPermitGate {
     /**
      * @param {Object} [options]

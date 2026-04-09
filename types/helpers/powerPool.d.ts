@@ -1,5 +1,11 @@
 /**
- * Error used when the pool is shutdown and pending promises are rejected.
+ * PowerPoolShutdownError
+ *
+ * Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
+ *
+ * @class PowerPoolShutdownError
+ * @extends {Error}
+ * @public
  */
 export class PowerPoolShutdownError extends Error {
 }
@@ -49,6 +55,15 @@ export class PowerPoolShutdownError extends Error {
  * const pool = new PowerPool(MinionWorker, { size: 4, idleTimeout: 30000 });
  * pool.onmessage = (e) => { logger.log(e.data); };
  * pool.postMessage({ payload: {} });
+ */
+/**
+ * PowerPool
+ *
+ * Manager for a pool of worker-like objects providing task dispatch, queuing,
+ * autoscaling, and lifecycle management. See constructor docs for options.
+ *
+ * @class PowerPool
+ * @public
  */
 export class PowerPool {
     [x: number]: () => void;
@@ -245,8 +260,8 @@ export class PowerPool {
      * is neither a function nor a string.
      *
      * @private
-      * @returns {Worker|any} The underlying worker instance or factory result.
-      * @throws {Error} When `workerSource` is invalid or worker construction fails.
+     * @returns {Worker|any} The underlying worker instance or factory result.
+     * @throws {Error} When `workerSource` is invalid or worker construction fails.
      */
     private _createWorkerInstance;
     _deleteWorkerUnderlyingMapping(workerObj: any): void;
@@ -286,8 +301,8 @@ export class PowerPool {
      * to a transferable `Uint8Array` (via `o2u8`) and pass its `ArrayBuffer` as
      * the transfer list to avoid structured-clone copies.
      * @param {PostMessageOptions=} options - Optional flags controlling behavior such as `awaitResponse`, `timeout`, `workerId`, and `zeroCopy`.
-      * @returns {boolean|Promise<any>} When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
-      * @throws {Error} When `options.awaitResponse` is used but the provided `message` is not a plain object.
+     * @returns {boolean|Promise<any>} When `options.awaitResponse` is truthy this returns a `Promise` that resolves with the worker response; otherwise returns `true` when the message was accepted (dispatched or queued) or `false` when it was rejected.
+     * @throws {Error} When `options.awaitResponse` is used but the provided `message` is not a plain object.
      */
     postMessage(message: any, transfer?: Transferable[] | undefined, options?: PostMessageOptions | undefined): boolean | Promise<any>;
     /**
@@ -353,8 +368,8 @@ export class PowerPool {
      * either a boolean (accepted) or a Promise (when `options.awaitResponse` is used).
      * @param {{message:*,transfer?:Transferable[]}[]} items
      * @param {Object=} options - Optional options forwarded to each `postMessage` call.
-      * @returns {(boolean|Promise<any>)[]}
-      * @throws {Error} When `items` is not an array.
+     * @returns {(boolean|Promise<any>)[]}
+     * @throws {Error} When `items` is not an array.
      */
     postMessageBatch(items: {
         message: any;

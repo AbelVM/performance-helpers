@@ -1,7 +1,10 @@
 /**
- * Typed micro event bus.
- * Lightweight pub/sub for intra-process coordination.
- * Subscriber errors are swallowed to avoid breaking emitters.
+ * PowerEventBus
+ *
+ * Typed micro event bus providing lightweight pub/sub for intra-process
+ * coordination. Subscriber errors are swallowed to avoid breaking emitters.
+ *
+ * @class PowerEventBus
  */
 /**
  * @typedef {Object} PowerEventBusOptions

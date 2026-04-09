@@ -1,14 +1,4 @@
 /**
- * Exported helper that allows callers to reuse a `seen` WeakMap for
- * repeated deep-equality checks to avoid allocating a new WeakMap/WeakSet
- * structure on every call.
- * @param {*} a
- * @param {*} b
- * @param {WeakMap} [seen]
- * @returns {boolean}
- */
-export function deepEqualWithSeen(a: any, b: any, seen?: WeakMap<any, any>): boolean;
-/**
  * A small, fast key resolver for common cases where arguments are simple scalars.
  * - Fast path for primitive scalar args (string, number, boolean, null, undefined).
  * - Joins scalar args with `|` and prefixes type codes to avoid collisions.
@@ -20,8 +10,19 @@ export function deepEqualWithSeen(a: any, b: any, seen?: WeakMap<any, any>): boo
  * `keyResolver` in that case.
  *
  * Example: `new PowerMemoizer(fn, { keyResolver: simpleArgsKey })`
+ *
+ * @public
  */
 export function simpleArgsKey(...args: any[]): string;
+/**
+ * PowerCache
+ *
+ * In-memory cache with weight-aware eviction, TTLs and optional cleanup.
+ * Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
+ *
+ * @class PowerCache
+ * @public
+ */
 export class PowerCache {
     [x: number]: () => void;
     /**
@@ -38,7 +39,7 @@ export class PowerCache {
      * @param {number} [options.initialPoolSize=0] Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
      * @param {number} [options.maxCleanupPerTick=100] Default max nodes scanned per cleanup tick when running `startCleanup()`.
      * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
-    * @throws {TypeError} When a non-object is provided as the options argument.
+     * @throws {TypeError} When a non-object is provided as the options argument.
      */
     constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, }?: {
         maxEntries?: number | undefined;
@@ -460,6 +461,7 @@ export class PowerCache {
  * await memoizedFetch(1)
  *
  * @class PowerMemoizer
+ * @public
  */
 export class PowerMemoizer {
     /**
@@ -551,6 +553,7 @@ export class PowerMemoizer {
  * // entries will be automatically expired by the background cleaner
  *
  * @class PowerTimedCache
+ * @public
  */
 export class PowerTimedCache {
     [x: number]: () => void;

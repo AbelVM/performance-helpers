@@ -1,3 +1,12 @@
+/**
+ * PowerCircuit
+ *
+ * Circuit-breaker primitive that short-circuits calls after repeated failures.
+ * Use for isolating flaky downstream dependencies and to avoid cascading failures.
+ *
+ * @class PowerCircuit
+ * @public
+ */
 export class PowerCircuit {
     constructor(options?: {});
     _threshold: number;

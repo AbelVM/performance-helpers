@@ -1,8 +1,19 @@
 /**
  * Cleanup dead weak refs from a subscriber bucket.
+ *
+ * @public
  * @param {any} bucket
  */
 export function cleanupWeakRefs(bucket: any): void;
+/**
+ * PowerSubscriberSet
+ *
+ * Shared subscriber set helper used by event buses and observable stores.
+ * Supports optional weak references, once-listeners, and max listener counts.
+ *
+ * @class PowerSubscriberSet
+ * @public
+ */
 export class PowerSubscriberSet {
     /**
      * @param {Object} [options]

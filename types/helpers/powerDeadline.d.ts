@@ -13,6 +13,9 @@
  *
  * Use `PowerDeadline` to wrap async work with per-attempt timeouts, a total
  * deadline for the whole operation, and optional retry/backoff behavior.
+ *
+ * @class PowerDeadline
+ * @public
  */
 export class PowerDeadline {
     /**

@@ -1,3 +1,13 @@
+/**
+ * PowerPermitGate
+ *
+ * Internal helper that manages a finite number of permits and a FIFO waiter queue.
+ * Provides `acquire()`, `tryAcquire()` and `release()` primitives used by
+ * semaphore-like helpers.
+ *
+ * @class PowerPermitGate
+ * @public
+ */
 export class PowerPermitGate {
     /**
      * @param {Object} [options]

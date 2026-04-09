@@ -37,6 +37,8 @@
  * @param {'light'|'medium'|'heavy'} [options.fnComplexity] - Hint about `fn` complexity to bias chunking. When omitted the helper
  *   will attempt to analyze `fn`'s source to infer a complexity score ('light'|'medium'|'heavy') and use that
  *   to bias the chunk size. If analysis fails the helper falls back to 'medium'.
+ * @class PowerChunker
+ * @public
  * @returns {PowerPool} The created `PowerPool` instance managing the chunked work.
  *   The constructor returns the `PowerPool` instance; the helper enqueues
  *   chunk tasks internally (via `pool.postMessageBatch`). Listen to

@@ -12,6 +12,7 @@
 /**
  * Retry helper with configurable backoff and jitter.
  *
+ * @class PowerRetry
  * @example
  * const retry = new PowerRetry({ maxAttempts: 4, baseDelay: 50 });
  * const data = await retry.run(() => fetch('/api/data'));

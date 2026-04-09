@@ -1,3 +1,12 @@
+/**
+ * PowerBulkhead
+ *
+ * Partitioned executor that isolates noisy workloads into separate
+ * concurrency partitions to avoid starving critical paths.
+ *
+ * @class PowerBulkhead
+ * @public
+ */
 export class PowerBulkhead {
     /**
      * @param {Object} [options]

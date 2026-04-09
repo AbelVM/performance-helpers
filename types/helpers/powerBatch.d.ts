@@ -1,3 +1,12 @@
+/**
+ * PowerBatch
+ *
+ * Scheduler-driven batching helper that collects items and dispatches them
+ * to a provided handler on a microtask/macrotask boundary.
+ *
+ * @class PowerBatch
+ * @public
+ */
 export class PowerBatch {
     /**
      * @typedef {Object} PowerBatchOptions
