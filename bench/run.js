@@ -1,11 +1,24 @@
 import { Worker as NodeWorker } from 'worker_threads';
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync } from 'fs';
 // Expose Node Worker as global Worker so PowerPool can use it
 globalThis.Worker = NodeWorker;
 
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { PowerCache, PowerMemoizer } from '../src/helpers/powerCache.js';
 import { o2u8 } from '../src/helpers/powerBuffer.js';
+import { PowerRateLimit } from '../src/helpers/powerRateLimit.js';
+import { PowerCircuit } from '../src/helpers/powerCircuit.js';
+import { PowerRetry } from '../src/helpers/powerRetry.js';
+import { PowerSemaphore } from '../src/helpers/powerSemaphore.js';
+import { PowerBulkhead } from '../src/helpers/powerBulkhead.js';
+import { PowerBatch } from '../src/helpers/powerBatch.js';
+import { PowerBackpressure } from '../src/helpers/powerBackpressure.js';
+import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
+import { PowerEventBus } from '../src/helpers/powerEventBus.js';
+import { PowerDeadline } from '../src/helpers/powerDeadline.js';
+import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
+import { PowerQueue } from '../src/helpers/powerQueue.js';
+import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 
 const args = process.argv.slice(2);
 const mode = args[0] || 'all';
@@ -15,6 +28,13 @@ const POOL_SIZES = (process.env.BENCH_POOLS || '1,2,4,8').split(',').map((s) => 
 const CACHE_DUPLICATE_KEYS = Number(process.env.BENCH_CACHE_DUPLICATE_KEYS || 10);
 const MEMOIZER_DUPLICATE_KEYS = Number(process.env.BENCH_MEMOIZER_DUPLICATE_KEYS || 10);
 const AUTOSCALE_CACHE_KEYS = Number(process.env.BENCH_AUTOSCALE_CACHE_KEYS || 10);
+// How many times to repeat each helper micro-benchmark; median is reported.
+const BENCH_RUNS = Math.max(1, Number(process.env.BENCH_RUNS || 5));
+// How many times to repeat each pool/scenario variant; median is reported.
+// Defaults to 1 because pool runs are slow; set to 3 for more stable results.
+const POOL_RUNS = Math.max(1, Number(process.env.BENCH_POOL_RUNS || 3));
+// Number of operations for helper micro-benchmarks.
+const HELPER_OPS = Number(process.env.BENCH_HELPER_OPS || 100000);
 // Timeout for PowerPool per-pool run in ms. Set to 0 to disable timeout.
 // Default to 0 so the harness exercises PowerPool fully unless overridden.
 const POOL_TIMEOUT =
@@ -39,7 +59,9 @@ function buildLoadProfile(tasks, baseIterations, variableFraction) {
   const uniqueTaskCount = Math.round(tasks * variableFraction);
   const repeatedTaskCount = tasks - uniqueTaskCount;
   const repeatedKeyCount =
-    variableFraction === 0 ? 1 : Math.max(1, Math.min(10, Math.round(repeatedTaskCount / 10)));
+    variableFraction === 0
+      ? Math.max(1, Math.min(10, Math.round(repeatedTaskCount / 100)))
+      : Math.max(1, Math.min(10, Math.round(repeatedTaskCount / 10)));
   const repeatedIterations = new Array(repeatedKeyCount)
     .fill(null)
     .map(() => sampleIterations(baseIterations));
@@ -102,10 +124,14 @@ async function runSingleThreaded(tasks, iterations) {
     durations.push(Number(s1 - s0) / 1e6);
   }
   const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const durationStats = computeDurationStats(durations);
   return {
-    totalMs: Number(t1 - t0) / 1e6,
-    avgMs: durations.reduce((a, b) => a + b, 0) / durations.length,
+    totalMs,
+    avgMs: durationStats.avg,
+    throughput: totalMs > 0 ? tasks / (totalMs / 1000) : 0,
     durations,
+    durationStats,
   };
 }
 
@@ -120,10 +146,14 @@ async function runSingleThreadedVariable(tasks, iterationsArray) {
     durations.push(Number(s1 - s0) / 1e6);
   }
   const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const durationStats = computeDurationStats(durations);
   return {
-    totalMs: Number(t1 - t0) / 1e6,
-    avgMs: durations.reduce((a, b) => a + b, 0) / durations.length,
+    totalMs,
+    avgMs: durationStats.avg,
+    throughput: totalMs > 0 ? tasks / (totalMs / 1000) : 0,
     durations,
+    durationStats,
   };
 }
 
@@ -296,12 +326,118 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Run a pool benchmark function POOL_RUNS times and return the result
+ * whose totalMs is closest to the median (preserving the full result object).
+ */
+async function poolMedian(fn) {
+  if (POOL_RUNS === 1) return fn();
+  const results = [];
+  for (let i = 0; i < POOL_RUNS; i++) results.push(await fn());
+  const times = results.map((r) => r.totalMs);
+  const med = medianOf(times);
+  // Return the result whose totalMs is closest to the median.
+  return results.reduce((a, b) => (Math.abs(a.totalMs - med) <= Math.abs(b.totalMs - med) ? a : b));
+}
+
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i -= 1) {
     const j = Math.floor(Math.random() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
+}
+
+// ─── Statistics helpers ────────────────────────────────────────────────────
+
+/** Return the p-th percentile (0–100) of a pre-sorted numeric array. */
+function percentile(sorted, p) {
+  if (!sorted.length) return 0;
+  if (sorted.length === 1) return sorted[0];
+  const idx = (p / 100) * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+/** Compute summary stats from a durations array (ms). */
+function computeDurationStats(durations) {
+  if (!durations || !durations.length) return { avg: 0, min: 0, max: 0, p50: 0, p95: 0, p99: 0 };
+  const sorted = durations.slice().sort((a, b) => a - b);
+  const sum = sorted.reduce((a, b) => a + b, 0);
+  return {
+    avg: sum / sorted.length,
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    p50: percentile(sorted, 50),
+    p95: percentile(sorted, 95),
+    p99: percentile(sorted, 99),
+  };
+}
+
+/** Median of a numeric array (mutates a copy). */
+function medianOf(values) {
+  if (!values.length) return 0;
+  const s = values.slice().sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
+}
+
+/** Current heap usage in kilobytes. */
+function heapKb() {
+  return Math.round(process.memoryUsage().heapUsed / 1024);
+}
+
+/** Load the previous results.json at the repository root, or null. */
+function loadPreviousResults() {
+  try {
+    return JSON.parse(readFileSync('results.json', 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a flat lookup: scenario/profile key -> best totalMs across pool sizes.
+ * Key format: "<profiles|scenarios>/<name>/<pattern>"
+ */
+function buildDeltaMap(report) {
+  const map = new Map();
+  if (!report) return map;
+  const patternKeys = ['pool', 'optimizedPool', 'autoscalePool', 'autoscaleOptimizedPool'];
+  for (const section of ['profiles', 'scenarios']) {
+    for (const item of report[section] || []) {
+      for (const pk of patternKeys) {
+        const arr = item[pk];
+        if (!Array.isArray(arr)) continue;
+        for (const entry of arr) {
+          if (typeof entry.totalMs === 'number' && entry.totalMs > 0) {
+            map.set(`${section}/${item.name}/${pk}/${entry.size}`, entry.totalMs);
+          }
+        }
+      }
+    }
+  }
+  // Helper benchmarks
+  for (const h of report.helpers || []) {
+    for (const v of h.variants || []) {
+      if (typeof v.totalMs === 'number') {
+        map.set(`helpers/${h.name}/${v.label}`, v.totalMs);
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * Format a delta string like "+12.3%" / "-8.1%" / "(new)" given current and previous values.
+ */
+function formatDelta(current, prev) {
+  if (prev == null || prev === 0) return '(new)';
+  const pct = ((current - prev) / prev) * 100;
+  const sign = pct >= 0 ? '+' : '';
+  return `${sign}${pct.toFixed(1)}%`;
 }
 
 function buildMixedSizeProfile(tasks, baseIterations) {
@@ -615,10 +751,11 @@ async function runWorkerPoolPayloadSizeOptimized(poolSize, tasks, iterations, ke
   for (let i = 0; i < tasks; i += 1) {
     const iters = normalizeIteration(iterations, i);
     const key = keys[i];
-    const payload = makePayload(iters, { payloadSize: payloadSizes[i] });
+    const payloadSize = payloadSizes[i];
     promises[i] = cache.getOrSetAsync(
       key,
-      () => pool.postMessage(payload, undefined, { awaitResponse: true }),
+      () =>
+        pool.postMessage(makePayload(iters, { payloadSize }), undefined, { awaitResponse: true }),
       { ttl: 60000 }
     );
   }
@@ -811,6 +948,613 @@ async function runCacheWarmupPhase(cache, iterations, keys) {
   await Promise.all(promises);
   const t1 = process.hrtime.bigint();
   return Number(t1 - t0) / 1e6;
+}
+
+// ─── Helper micro-benchmarks ───────────────────────────────────────────────
+// Each function returns { name, ops, variants: [{ label, totalMs, opsPerSec, ...extra }] }.
+// A silent warmup pass runs before timing to stabilise JIT.
+// When BENCH_RUNS > 1, the variant is run that many times and the median totalMs is reported.
+
+async function benchVariantRepeat(runs, fn) {
+  // Silent warmup — lets V8 JIT-compile the hot path before we start timing.
+  await fn();
+  const times = [];
+  for (let r = 0; r < runs; r++) times.push(await fn());
+  return medianOf(times);
+}
+
+// ── PowerRateLimit ──────────────────────────────────────────────────────────
+async function runBenchmarkPowerRateLimit(ops) {
+  const warmOps = Math.min(1000, Math.ceil(ops / 100));
+
+  // Under rate: bucket has more tokens than ops — every tryConsume succeeds.
+  const underRateMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const throttle = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
+    const limiter = new PowerRateLimit([throttle]);
+    for (let i = 0; i < warmOps; i++) limiter.tryConsume(1);
+    const throttle2 = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
+    const limiter2 = new PowerRateLimit([throttle2]);
+    const t0 = process.hrtime.bigint();
+    let passed = 0;
+    for (let i = 0; i < ops; i++) {
+      if (limiter2.tryConsume(1)) passed++;
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Over rate: bucket holds ops/2 tokens — ~50 % of calls are rejected.
+  const overRateMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const throttle = new PowerThrottle({
+      capacity: Math.ceil(ops / 2),
+      tokens: Math.ceil(ops / 2),
+      refillRate: 0,
+    });
+    const limiter = new PowerRateLimit([throttle]);
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < ops; i++) limiter.tryConsume(1);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerRateLimit',
+    ops,
+    variants: [
+      {
+        label: 'under rate (all pass)',
+        totalMs: underRateMs,
+        opsPerSec: ops / (underRateMs / 1000),
+      },
+      {
+        label: 'over rate (~50% reject)',
+        totalMs: overRateMs,
+        opsPerSec: ops / (overRateMs / 1000),
+      },
+    ],
+  };
+}
+
+// ── PowerCircuit ─────────────────────────────────────────────────────────────
+async function runBenchmarkPowerCircuit(ops) {
+  const smallOps = Math.min(ops, 20000);
+
+  // Closed state: happy-path overhead of call() wrapping a sync fn.
+  const closedMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const circuit = new PowerCircuit({ threshold: smallOps + 1, timeout: 60000 });
+    // warmup
+    for (let i = 0; i < Math.min(100, smallOps / 10); i++) await circuit.call(() => 1);
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) await circuit.call(() => 1);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Open state: fast-fail overhead after circuit is tripped.
+  const openMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const circuit = new PowerCircuit({ threshold: 1, timeout: 60000 });
+    try {
+      await circuit.call(() => {
+        throw new Error('trip');
+      });
+    } catch (_) {}
+    const t0 = process.hrtime.bigint();
+    let rejections = 0;
+    for (let i = 0; i < smallOps; i++) {
+      try {
+        await circuit.call(() => 1);
+      } catch (_) {
+        rejections++;
+      }
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerCircuit',
+    ops: smallOps,
+    variants: [
+      { label: 'closed (happy path)', totalMs: closedMs, opsPerSec: smallOps / (closedMs / 1000) },
+      { label: 'open (fast-fail)', totalMs: openMs, opsPerSec: smallOps / (openMs / 1000) },
+    ],
+  };
+}
+
+// ── PowerRetry ───────────────────────────────────────────────────────────────
+async function runBenchmarkPowerRetry(ops) {
+  const smallOps = Math.min(ops, 10000);
+
+  // 1 attempt, always succeeds — measures wrapper overhead only.
+  const successMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    // warmup
+    for (let i = 0; i < Math.min(50, smallOps / 100); i++) {
+      await PowerRetry.run(() => 1, { maxAttempts: 3, baseDelay: 0, jitter: false });
+    }
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) {
+      await PowerRetry.run(() => 1, { maxAttempts: 3, baseDelay: 0, jitter: false });
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Fail-once: function rejects on attempt 1, succeeds on attempt 2.
+  const retryOnceMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) {
+      let calls = 0;
+      await PowerRetry.run(
+        () => {
+          if (++calls < 2) throw new Error('transient');
+          return 1;
+        },
+        { maxAttempts: 3, baseDelay: 0, jitter: false }
+      );
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerRetry',
+    ops: smallOps,
+    variants: [
+      {
+        label: '1 attempt (no retry)',
+        totalMs: successMs,
+        opsPerSec: smallOps / (successMs / 1000),
+      },
+      {
+        label: '2 attempts (1 retry, baseDelay=0)',
+        totalMs: retryOnceMs,
+        opsPerSec: smallOps / (retryOnceMs / 1000),
+      },
+    ],
+  };
+}
+
+// ── PowerSemaphore ────────────────────────────────────────────────────────────
+async function runBenchmarkPowerSemaphore(ops) {
+  const smallOps = Math.min(ops, 50000);
+
+  // Limit=1: exclusive lock, fully serial.
+  const serial1Ms = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const sem = new PowerSemaphore(1);
+    for (let i = 0; i < Math.min(50, smallOps / 100); i++) await sem.run(() => 1);
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) await sem.run(() => 1);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Limit=8: concurrent pool — all tasks fly in parallel.
+  const conc8Ms = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const sem = new PowerSemaphore(8);
+    const t0 = process.hrtime.bigint();
+    await Promise.all(Array.from({ length: smallOps }, () => sem.run(() => 1)));
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerSemaphore',
+    ops: smallOps,
+    variants: [
+      {
+        label: 'limit=1 (exclusive lock, serial)',
+        totalMs: serial1Ms,
+        opsPerSec: smallOps / (serial1Ms / 1000),
+      },
+      {
+        label: 'limit=8 (concurrent pool)',
+        totalMs: conc8Ms,
+        opsPerSec: smallOps / (conc8Ms / 1000),
+      },
+    ],
+  };
+}
+
+// ── PowerBulkhead ─────────────────────────────────────────────────────────────
+async function runBenchmarkPowerBulkhead(ops) {
+  const smallOps = Math.min(ops, 20000);
+  const half = Math.floor(smallOps / 2);
+
+  // Mixed critical + background lanes under the same bulkhead.
+  const mixedMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const bh = new PowerBulkhead({ partitions: 2, maxConcurrency: 8, queueCapacity: smallOps });
+    const t0 = process.hrtime.bigint();
+    const critTasks = Array.from({ length: half }, () => bh.run(() => 1, { partitionKey: 0 }));
+    const bgTasks = Array.from({ length: half }, () => bh.run(() => 1, { partitionKey: 1 }));
+    await Promise.all([...critTasks, ...bgTasks]);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Single partition as baseline (no isolation overhead).
+  const singleMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const bh = new PowerBulkhead({ partitions: 1, maxConcurrency: 8, queueCapacity: smallOps });
+    const t0 = process.hrtime.bigint();
+    await Promise.all(Array.from({ length: smallOps }, () => bh.run(() => 1)));
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerBulkhead',
+    ops: smallOps,
+    variants: [
+      {
+        label: '1 partition (baseline)',
+        totalMs: singleMs,
+        opsPerSec: smallOps / (singleMs / 1000),
+      },
+      {
+        label: '2 partitions (critical vs background)',
+        totalMs: mixedMs,
+        opsPerSec: smallOps / (mixedMs / 1000),
+      },
+    ],
+  };
+}
+
+// ── PowerBatch ────────────────────────────────────────────────────────────────
+async function runBenchmarkPowerBatch(ops) {
+  const smallOps = Math.min(ops, 100000);
+
+  // Individual dispatch: maxSize=1 so every add() triggers an immediate flush.
+  let handlerCallsIndividual = 0;
+  const individualMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    handlerCallsIndividual = 0;
+    const batch = new PowerBatch(
+      (items) => {
+        handlerCallsIndividual += items.length;
+      },
+      { maxSize: 1 }
+    );
+    const t0 = process.hrtime.bigint();
+    const ps = [];
+    for (let i = 0; i < smallOps; i++) ps.push(batch.add(i));
+    await Promise.all(ps);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Coalesced dispatch: large maxSize — all items land in one (or few) handler calls.
+  let handlerCallsCoalesced = 0;
+  const coalescedMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    handlerCallsCoalesced = 0;
+    const batch = new PowerBatch(
+      (items) => {
+        handlerCallsCoalesced++;
+      },
+      { maxSize: smallOps }
+    );
+    const t0 = process.hrtime.bigint();
+    const ps = [];
+    for (let i = 0; i < smallOps; i++) ps.push(batch.add(i));
+    await Promise.all(ps);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerBatch',
+    ops: smallOps,
+    variants: [
+      {
+        label: 'individual dispatch (maxSize=1)',
+        totalMs: individualMs,
+        opsPerSec: smallOps / (individualMs / 1000),
+        handlerCalls: handlerCallsIndividual,
+      },
+      {
+        label: 'coalesced dispatch (maxSize=ops)',
+        totalMs: coalescedMs,
+        opsPerSec: smallOps / (coalescedMs / 1000),
+        handlerCalls: handlerCallsCoalesced,
+      },
+    ],
+  };
+}
+
+// ── PowerBackpressure ─────────────────────────────────────────────────────────
+async function runBenchmarkPowerBackpressure(ops) {
+  const smallOps = Math.min(ops, 30000);
+
+  // No backpressure: capacity >> task count, acquire never blocks.
+  const noPresMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const bp = new PowerBackpressure({ capacity: smallOps * 2, queueCapacity: smallOps * 2 });
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) {
+      const rel = await bp.acquire();
+      rel();
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // With backpressure: capacity = 100, producers queue up.
+  const presMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    const bp = new PowerBackpressure({ capacity: 100, queueCapacity: smallOps, refillInterval: 1 });
+    const t0 = process.hrtime.bigint();
+    await Promise.all(Array.from({ length: smallOps }, () => bp.acquire().then((rel) => rel())));
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerBackpressure',
+    ops: smallOps,
+    variants: [
+      {
+        label: 'no pressure (capacity >> ops)',
+        totalMs: noPresMs,
+        opsPerSec: smallOps / (noPresMs / 1000),
+      },
+      {
+        label: 'with pressure (capacity=100)',
+        totalMs: presMs,
+        opsPerSec: smallOps / (presMs / 1000),
+      },
+    ],
+  };
+}
+
+// ── PowerTTLMap ───────────────────────────────────────────────────────────────
+async function runBenchmarkPowerTTLMap(ops) {
+  const keyCount = Math.min(1000, Math.ceil(ops / 10));
+
+  // Long TTL: entries never expire during the benchmark run.
+  const longMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const m = new PowerTTLMap(60000);
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < ops; i++) {
+      const k = `key:${i % keyCount}`;
+      m.set(k, i);
+      m.get(k);
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Short TTL (1 ms): entries expire rapidly, measuring eviction overhead.
+  const shortMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const m = new PowerTTLMap(1);
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < ops; i++) {
+      const k = `key:${i % keyCount}`;
+      m.set(k, i);
+      m.get(k);
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerTTLMap',
+    ops,
+    variants: [
+      { label: 'long TTL (60 s, no eviction)', totalMs: longMs, opsPerSec: ops / (longMs / 1000) },
+      {
+        label: 'short TTL (1 ms, high eviction)',
+        totalMs: shortMs,
+        opsPerSec: ops / (shortMs / 1000),
+      },
+    ],
+  };
+}
+
+// ── PowerEventBus ─────────────────────────────────────────────────────────────
+async function runBenchmarkPowerEventBus(ops) {
+  const smallOps = Math.min(ops, 100000);
+  const subscriberCounts = [1, 10, 50, 100];
+  const variants = [];
+
+  for (const subCount of subscriberCounts) {
+    const ms = await benchVariantRepeat(BENCH_RUNS, () => {
+      const bus = new PowerEventBus();
+      let received = 0;
+      for (let s = 0; s < subCount; s++)
+        bus.on('evt', () => {
+          received++;
+        });
+      // warmup
+      for (let i = 0; i < Math.min(100, smallOps / 100); i++) bus.emit('evt', i);
+      received = 0;
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) bus.emit('evt', i);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    });
+    variants.push({
+      label: `${subCount} subscriber${subCount > 1 ? 's' : ''}`,
+      totalMs: ms,
+      opsPerSec: smallOps / (ms / 1000),
+      totalDeliveries: smallOps * subCount,
+    });
+  }
+
+  return { name: 'PowerEventBus', ops: smallOps, variants };
+}
+
+// ── PowerDeadline ─────────────────────────────────────────────────────────────
+async function runBenchmarkPowerDeadline(ops) {
+  const smallOps = Math.min(ops, 5000);
+
+  // Success path: task resolves well within deadline.
+  const successMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    for (let i = 0; i < Math.min(20, smallOps / 50); i++) {
+      await PowerDeadline.run(() => 1, { totalTimeout: 1000 });
+    }
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) await PowerDeadline.run(() => 1, { totalTimeout: 1000 });
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Abort path: every task outlives its 1 ms deadline.
+  let deadlineHits = 0;
+  const abortMs = await benchVariantRepeat(BENCH_RUNS, async () => {
+    deadlineHits = 0;
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < smallOps; i++) {
+      try {
+        await PowerDeadline.run(() => new Promise((r) => setTimeout(r, 5)), {
+          totalTimeout: 1,
+          maxAttempts: 1,
+        });
+      } catch (_) {
+        deadlineHits++;
+      }
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerDeadline',
+    ops: smallOps,
+    variants: [
+      {
+        label: 'success (task within deadline)',
+        totalMs: successMs,
+        opsPerSec: smallOps / (successMs / 1000),
+      },
+      {
+        label: 'abort (task exceeds 1 ms deadline)',
+        totalMs: abortMs,
+        opsPerSec: smallOps / (abortMs / 1000),
+        deadlineHits,
+      },
+    ],
+  };
+}
+
+// ── PowerSlidingWindow ────────────────────────────────────────────────────────
+async function runBenchmarkPowerSlidingWindow(ops) {
+  // Under capacity: window is large enough to accept all ops.
+  const underMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const win = new PowerSlidingWindow({ capacity: ops + 1, windowMs: 60000 });
+    // warmup
+    for (let i = 0; i < Math.min(1000, ops / 100); i++) win.tryConsume(1);
+    const win2 = new PowerSlidingWindow({ capacity: ops + 1, windowMs: 60000 });
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < ops; i++) win2.tryConsume(1);
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // At capacity: half the tokens available — ~50 % of calls rejected.
+  const capMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const win = new PowerSlidingWindow({ capacity: Math.ceil(ops / 2), windowMs: 60000 });
+    const t0 = process.hrtime.bigint();
+    let consumed = 0;
+    for (let i = 0; i < ops; i++) {
+      if (win.tryConsume(1)) consumed++;
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerSlidingWindow',
+    ops,
+    variants: [
+      { label: 'under capacity (all pass)', totalMs: underMs, opsPerSec: ops / (underMs / 1000) },
+      { label: 'at capacity (~50% reject)', totalMs: capMs, opsPerSec: ops / (capMs / 1000) },
+    ],
+  };
+}
+
+// ── PowerQueue ────────────────────────────────────────────────────────────────
+async function runBenchmarkPowerQueue(ops) {
+  // Bulk push then bulk shift.
+  const pushShiftMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const q = new PowerQueue(Math.min(ops, 65536));
+    for (let i = 0; i < 1000; i++) {
+      q.push(i);
+      q.shift();
+    } // warmup
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < ops; i++) q.push(i);
+    while (q.length > 0) q.shift();
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  // Interleaved push+shift (ring-buffer steady state).
+  const interleavedMs = await benchVariantRepeat(BENCH_RUNS, () => {
+    const q = new PowerQueue(64);
+    const half = 32;
+    for (let i = 0; i < half; i++) q.push(i); // pre-fill
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < ops; i++) {
+      q.push(i);
+      q.shift();
+    }
+    return Number(process.hrtime.bigint() - t0) / 1e6;
+  });
+
+  return {
+    name: 'PowerQueue',
+    ops,
+    variants: [
+      {
+        label: `push x${ops} + shift x${ops}`,
+        totalMs: pushShiftMs,
+        opsPerSec: ops / (pushShiftMs / 1000),
+      },
+      {
+        label: 'interleaved push+shift (steady state)',
+        totalMs: interleavedMs,
+        opsPerSec: ops / (interleavedMs / 1000),
+      },
+    ],
+  };
+}
+
+// ── Cache eviction under tight capacity ──────────────────────────────────────
+async function runCacheEvictionPressure(tasks, iterations) {
+  // maxEntries = 20 % of unique keys → heavy eviction on every miss
+  const uniqueKeys = tasks;
+  const maxEntries = Math.max(1, Math.ceil(uniqueKeys * 0.2));
+  const cache = new PowerCache({ maxEntries, defaultTTL: 60000 });
+  const keys = Array.from({ length: tasks }, (_, i) => `evict:${i}`);
+
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i++) {
+    let v = cache.get(keys[i]);
+    if (v === undefined) {
+      v = heavy(iterations);
+      cache.set(keys[i], v);
+    }
+  }
+  const t1 = process.hrtime.bigint();
+  const missTotal = Number(t1 - t0) / 1e6;
+
+  // Second pass: cache is full with the most recently inserted entries (LRU
+  // evicted the oldest). Read from the tail of the keys array so every access
+  // hits a live entry and we measure true hit throughput under eviction pressure.
+  const hitStartIdx = uniqueKeys - maxEntries;
+  const t2 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i++) cache.get(keys[hitStartIdx + (i % maxEntries)]);
+  const t3 = process.hrtime.bigint();
+  const hitTotal = Number(t3 - t2) / 1e6;
+
+  return { missTotal, hitTotal, maxEntries, keysCount: uniqueKeys };
+}
+
+// ── Serial vs concurrent cache getOrSetAsync ─────────────────────────────────
+async function runCacheSerialVsConcurrent(tasks, iterations) {
+  const uniqueKeys = 10;
+  // Use a 1-ms async factory to simulate I/O latency so in-flight deduplication
+  // can activate. A sync factory (e.g. Promise.resolve(heavy())) caches the
+  // value before a second caller can observe the in-flight promise, making serial
+  // and concurrent behave identically and defeating the purpose of this benchmark.
+  const asyncFactory = () => new Promise((r) => setTimeout(r, 1));
+
+  // Serial: one getOrSetAsync at a time — no in-flight deduplication benefit.
+  // Each unique key's factory runs once then subsequent calls are cache hits.
+  const serialCache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i++) {
+    await serialCache.getOrSetAsync(`s:${i % uniqueKeys}`, asyncFactory, { ttl: 60000 });
+  }
+  const t1 = process.hrtime.bigint();
+  const serialMs = Number(t1 - t0) / 1e6;
+
+  // Concurrent: all getOrSetAsync calls fired at once — identical keys coalesce
+  // to a single underlying call (in-flight deduplication).
+  const concCache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const t2 = process.hrtime.bigint();
+  await Promise.all(
+    Array.from({ length: tasks }, (_, i) =>
+      concCache.getOrSetAsync(`c:${i % uniqueKeys}`, asyncFactory, { ttl: 60000 })
+    )
+  );
+  const t3 = process.hrtime.bigint();
+  const concurrentMs = Number(t3 - t2) / 1e6;
+
+  return { serialMs, concurrentMs, tasks, uniqueKeys };
 }
 
 async function runScenarioBurstiness() {
@@ -1180,7 +1924,45 @@ async function runCacheBenchmark(tasks, iterations) {
   return { missTotal, hitTotal, keysCount: keys.length, reps };
 }
 
-function formatMd(report, filename) {
+// ─── Helper benchmarks orchestrator ───────────────────────────────────────────
+async function runAllHelperBenchmarks() {
+  const results = [];
+  const runners = [
+    ['PowerRateLimit', () => runBenchmarkPowerRateLimit(HELPER_OPS)],
+    ['PowerCircuit', () => runBenchmarkPowerCircuit(HELPER_OPS)],
+    ['PowerRetry', () => runBenchmarkPowerRetry(HELPER_OPS)],
+    ['PowerSemaphore', () => runBenchmarkPowerSemaphore(HELPER_OPS)],
+    ['PowerBulkhead', () => runBenchmarkPowerBulkhead(HELPER_OPS)],
+    ['PowerBatch', () => runBenchmarkPowerBatch(HELPER_OPS)],
+    ['PowerBackpressure', () => runBenchmarkPowerBackpressure(HELPER_OPS)],
+    ['PowerTTLMap', () => runBenchmarkPowerTTLMap(HELPER_OPS)],
+    ['PowerEventBus', () => runBenchmarkPowerEventBus(HELPER_OPS)],
+    ['PowerDeadline', () => runBenchmarkPowerDeadline(HELPER_OPS)],
+    ['PowerSlidingWindow', () => runBenchmarkPowerSlidingWindow(HELPER_OPS)],
+    ['PowerQueue', () => runBenchmarkPowerQueue(HELPER_OPS)],
+  ];
+
+  for (const [name, fn] of runners) {
+    const heapBefore = heapKb();
+    console.log(`  Running helper: ${name}...`);
+    try {
+      const result = await fn();
+      result.memDeltaKb = heapKb() - heapBefore;
+      for (const v of result.variants) {
+        const opsPerSec = v.opsPerSec ? Math.round(v.opsPerSec).toLocaleString() : '?';
+        console.log(`    [${v.label}]  ${v.totalMs.toFixed(2)} ms  ${opsPerSec} ops/sec`);
+      }
+      results.push(result);
+    } catch (err) {
+      console.warn(`  Helper benchmark ${name} failed:`, err && err.message);
+      results.push({ name, ops: HELPER_OPS, variants: [], error: err && err.message });
+    }
+  }
+
+  return results;
+}
+
+function formatMd(report, filename, prevDeltaMap = new Map()) {
   const lines = [];
   // Labels map and helper for rendering short, descriptive column headers
   const LABELS = {
@@ -1272,62 +2054,109 @@ function formatMd(report, filename) {
   lines.push(`- ITERS: ${report.config.ITERS}`);
   lines.push(`- POOL_SIZES: ${report.config.POOL_SIZES.join(', ')}`);
   lines.push(`- LOAD_PROFILES: ${report.config.PROFILES.join(', ')}`);
+  if (report.config.BENCH_RUNS > 1) lines.push(`- BENCH_RUNS: ${report.config.BENCH_RUNS}`);
+  if (report.config.POOL_RUNS > 1) lines.push(`- POOL_RUNS: ${report.config.POOL_RUNS}`);
+  if (report.config.HELPER_OPS) lines.push(`- HELPER_OPS: ${report.config.HELPER_OPS}`);
 
   lines.push('\nLearn more about the benchmarks [here](README.md)\n');
 
   lines.push('\n## Synthetic scenario benchmarks\n');
 
-  function renderProfileSection(profile) {
+  const patternKeys = ['pool', 'optimizedPool', 'autoscalePool', 'autoscaleOptimizedPool'];
+
+  function renderProfileSection(profile, section = 'profiles') {
     lines.push(`\n### Load profile: ${profile.name}`);
     if (profile.singleThreaded) {
-      lines.push(`- Single-threaded total: ${profile.singleThreaded.totalMs.toFixed(2)} ms`);
+      const st = profile.singleThreaded;
+      const throughput = st.throughput
+        ? ` | throughput: ${Math.round(st.throughput).toLocaleString()} tasks/s`
+        : '';
+      let statsStr = '';
+      if (st.durationStats) {
+        const ds = st.durationStats;
+        statsStr = ` | p50: ${ds.p50.toFixed(2)} ms | p95: ${ds.p95.toFixed(2)} ms | p99: ${ds.p99.toFixed(2)} ms`;
+      }
+      lines.push(`- Single-threaded total: ${st.totalMs.toFixed(2)} ms${throughput}${statsStr}`);
     }
     if (profile.workerThread) {
       lines.push(`- Worker-thread total: ${profile.workerThread.totalMs.toFixed(2)} ms`);
     }
     lines.push('');
 
-    const sizeHeaders = report.config.POOL_SIZES.map((size) => `${size}`);
-    lines.push(`| Pattern \\ Pool size  | ${sizeHeaders.join(' | ')} |`);
-    lines.push(`| :--- | ${report.config.POOL_SIZES.map(() => '---:').join(' | ')} |`);
-
     const patterns = [
-      { label: 'Pool', results: profile.pool },
-      { label: 'Pool + Autoscale', results: profile.autoscalePool },
-      { label: 'Pool + Cache', results: profile.optimizedPool },
-      { label: 'Pool + Cache + Autoscale', results: profile.autoscaleOptimizedPool },
+      { label: 'Pool', key: 'pool', results: profile.pool },
+      { label: 'Pool + Autoscale', key: 'autoscalePool', results: profile.autoscalePool },
+      { label: 'Pool + Cache', key: 'optimizedPool', results: profile.optimizedPool },
+      {
+        label: 'Pool + Cache + Autoscale',
+        key: 'autoscaleOptimizedPool',
+        results: profile.autoscaleOptimizedPool,
+      },
     ];
+
+    const singleThreadedMs =
+      profile.singleThreaded && profile.singleThreaded.totalMs > 0
+        ? profile.singleThreaded.totalMs
+        : null;
 
     const allValues = [];
     for (const pattern of patterns) {
       for (const size of report.config.POOL_SIZES) {
         const row = pattern.results?.find((item) => item.size === size);
-        if (row && typeof row.totalMs === 'number') {
-          allValues.push(row.totalMs);
-        }
+        if (row && typeof row.totalMs === 'number') allValues.push(row.totalMs);
       }
     }
     const minValue = allValues.length ? Math.min(...allValues) : null;
+
+    // Build header: one column per pool size + optional speedup column
+    const sizeHeaders = report.config.POOL_SIZES.map((size) => `${size}`);
+    const hasDelta = prevDeltaMap && prevDeltaMap.size > 0;
+    lines.push(
+      `| Pattern \\ Pool size  | ${sizeHeaders.join(' | ')} |${singleThreadedMs ? ' Speedup |' : ''}`
+    );
+    lines.push(
+      `| :--- | ${report.config.POOL_SIZES.map(() => '---:').join(' | ')} |${singleThreadedMs ? ' ---: |' : ''}`
+    );
 
     for (const pattern of patterns) {
       const values = report.config.POOL_SIZES.map((size) => {
         const row = pattern.results?.find((item) => item.size === size);
         if (row && typeof row.totalMs === 'number') {
-          const formatted = row.totalMs.toFixed(2);
-          if (minValue !== null && row.totalMs === minValue) {
-            return `\`${formatted}\``;
+          let cell = row.totalMs.toFixed(2);
+          if (minValue !== null && row.totalMs === minValue) cell = `\`${cell}\``;
+          // Inline delta from previous run
+          const deltaKey = `${section}/${profile.name}/${pattern.key}/${size}`;
+          const prev = prevDeltaMap && prevDeltaMap.get(deltaKey);
+          if (prev != null && prev > 0) {
+            cell += ` *(${formatDelta(row.totalMs, prev)})*`;
           }
-          return formatted;
+          return cell;
         }
         return '';
       });
-      lines.push(`| ${pattern.label} | ${values.join(' | ')} |`);
+
+      // Best speedup across pool sizes for this pattern
+      let speedupCell = '';
+      if (singleThreadedMs) {
+        const bestMs = Math.min(
+          ...report.config.POOL_SIZES.map(
+            (size) => pattern.results?.find((item) => item.size === size)?.totalMs
+          ).filter((v) => v != null && v > 0)
+        );
+        if (isFinite(bestMs) && bestMs > 0) {
+          speedupCell = ` ${(singleThreadedMs / bestMs).toFixed(2)}x |`;
+        } else {
+          speedupCell = ' — |';
+        }
+      }
+
+      lines.push(`| ${pattern.label} | ${values.join(' | ')} |${speedupCell}`);
     }
   }
 
   if (report.profiles && report.profiles.length) {
     for (const profile of report.profiles) {
-      renderProfileSection(profile);
+      renderProfileSection(profile, 'profiles');
     }
   } else {
     lines.push('- No profile benchmark results');
@@ -1336,7 +2165,7 @@ function formatMd(report, filename) {
   if (report.scenarios && report.scenarios.length) {
     lines.push('\n## Realistic scenario benchmarks\n');
     for (const scenario of report.scenarios) {
-      renderProfileSection(scenario);
+      renderProfileSection(scenario, 'scenarios');
     }
   }
 
@@ -1348,6 +2177,26 @@ function formatMd(report, filename) {
     lines.push('');
   } else {
     lines.push('- No cache results');
+    lines.push('');
+  }
+
+  if (report.cacheEviction) {
+    const ev = report.cacheEviction;
+    lines.push('### Cache eviction under pressure\n');
+    lines.push(`- maxEntries: ${ev.maxEntries} (20% of ${ev.keysCount} unique keys)`);
+    lines.push(`- Miss pass total: ${ev.missTotal.toFixed(2)} ms`);
+    lines.push(`- Hit pass under eviction: ${ev.hitTotal.toFixed(2)} ms`);
+    lines.push('');
+  }
+
+  if (report.cacheSerialVsConcurrent) {
+    const sv = report.cacheSerialVsConcurrent;
+    const improvement =
+      sv.serialMs > 0 ? ` (${((1 - sv.concurrentMs / sv.serialMs) * 100).toFixed(1)}% faster)` : '';
+    lines.push('### Serial vs concurrent getOrSetAsync (in-flight deduplication)\n');
+    lines.push(`- Tasks: ${sv.tasks} | Unique keys: ${sv.uniqueKeys}`);
+    lines.push(`- Serial (no dedup): ${sv.serialMs.toFixed(2)} ms`);
+    lines.push(`- Concurrent (dedup): ${sv.concurrentMs.toFixed(2)} ms${improvement}`);
     lines.push('');
   }
 
@@ -1373,6 +2222,142 @@ function formatMd(report, filename) {
     lines.push('');
   }
 
+  // ── Helper micro-benchmark section ────────────────────────────────────────
+  if (report.helpers && report.helpers.length) {
+    lines.push('\n## Helper micro-benchmarks\n');
+    lines.push(
+      `_${HELPER_OPS.toLocaleString()} ops per variant${BENCH_RUNS > 1 ? `, median of ${BENCH_RUNS} runs` : ''}_\n`
+    );
+    lines.push('| Helper | Variant | Total (ms) | ops/sec | Δ prev |');
+    lines.push('| :--- | :--- | ---: | ---: | ---: |');
+
+    for (const h of report.helpers) {
+      if (h.error) {
+        lines.push(`| **${h.name}** | *error: ${h.error}* | — | — | — |`);
+        continue;
+      }
+      for (const v of h.variants) {
+        const opsPerSec = v.opsPerSec ? Math.round(v.opsPerSec).toLocaleString() : '?';
+        const deltaKey = `helpers/${h.name}/${v.label}`;
+        const prev = prevDeltaMap && prevDeltaMap.get(deltaKey);
+        const deltaStr = prev != null ? formatDelta(v.totalMs, prev) : '(new)';
+        lines.push(
+          `| **${h.name}** | ${v.label} | ${v.totalMs.toFixed(2)} | ${opsPerSec} | ${deltaStr} |`
+        );
+      }
+    }
+    lines.push('');
+  }
+
+  // ── Historical delta summary ───────────────────────────────────────────────
+  // Thresholds:
+  //   pool/scenario — multi-threaded wall-clock; OS/thermal jitter is large.
+  //     Require pct > 35% AND abs diff > 50 ms before flagging.
+  //   helper — median of BENCH_RUNS with warmup; much more stable.
+  //     Require pct > 20% AND abs diff > 8 ms before flagging.
+  //
+  //   These thresholds reflect real hardware noise floors on developer machines:
+  //   CPU turbo/thermal state changes between benchmark invocations easily cause
+  //   25–35% wall-clock swings for multi-threaded pool runs. Async helpers are
+  //   subject to event-loop scheduler variance. To get tighter numbers, lock CPU
+  //   frequency (e.g. `sudo cpupower frequency-set -g performance`) and run on
+  //   a quiescent machine.
+  const POOL_PCT_THRESHOLD = 35;
+  const POOL_ABS_FLOOR_MS = 50;
+  const HELPER_PCT_THRESHOLD = 20;
+  const HELPER_ABS_FLOOR_MS = 8;
+
+  if (prevDeltaMap && prevDeltaMap.size > 0) {
+    const deltas = [];
+    // Collect pool/scenario deltas
+    for (const section of ['profiles', 'scenarios']) {
+      for (const item of report[section] || []) {
+        for (const pk of patternKeys) {
+          for (const entry of item[pk] || []) {
+            if (typeof entry.totalMs !== 'number' || entry.totalMs <= 0) continue;
+            const deltaKey = `${section}/${item.name}/${pk}/${entry.size}`;
+            const prev = prevDeltaMap.get(deltaKey);
+            if (prev == null || prev <= 0) continue;
+            // Skip sub-floor absolute differences — they are measurement noise.
+            if (Math.abs(entry.totalMs - prev) < POOL_ABS_FLOOR_MS) continue;
+            deltas.push({
+              key: deltaKey,
+              current: entry.totalMs,
+              prev,
+              pct: ((entry.totalMs - prev) / prev) * 100,
+              category: 'pool',
+            });
+          }
+        }
+      }
+    }
+    // Helper deltas
+    for (const h of report.helpers || []) {
+      for (const v of h.variants || []) {
+        const deltaKey = `helpers/${h.name}/${v.label}`;
+        const prev = prevDeltaMap.get(deltaKey);
+        if (prev == null || prev <= 0 || typeof v.totalMs !== 'number') continue;
+        // Skip sub-floor absolute differences — too fast for meaningful comparison.
+        if (Math.abs(v.totalMs - prev) < HELPER_ABS_FLOOR_MS) continue;
+        deltas.push({
+          key: deltaKey,
+          current: v.totalMs,
+          prev,
+          pct: ((v.totalMs - prev) / prev) * 100,
+          category: 'helper',
+        });
+      }
+    }
+
+    if (deltas.length) {
+      const regressions = deltas
+        .filter(
+          (d) =>
+            (d.category === 'pool' && d.pct > POOL_PCT_THRESHOLD) ||
+            (d.category === 'helper' && d.pct > HELPER_PCT_THRESHOLD)
+        )
+        .sort((a, b) => b.pct - a.pct);
+      const improvements = deltas
+        .filter(
+          (d) =>
+            (d.category === 'pool' && d.pct < -POOL_PCT_THRESHOLD) ||
+            (d.category === 'helper' && d.pct < -HELPER_PCT_THRESHOLD)
+        )
+        .sort((a, b) => a.pct - b.pct);
+
+      lines.push('\n## Δ vs previous run\n');
+      lines.push(
+        `_Pool/scenario: flagged when >±${POOL_PCT_THRESHOLD}% AND >±${POOL_ABS_FLOOR_MS} ms. ` +
+          `Helpers: flagged when >±${HELPER_PCT_THRESHOLD}% AND >±${HELPER_ABS_FLOOR_MS} ms._\n`
+      );
+      if (regressions.length) {
+        lines.push('### Regressions\n');
+        lines.push('| Key | prev (ms) | current (ms) | Δ |');
+        lines.push('| :--- | ---: | ---: | ---: |');
+        for (const d of regressions.slice(0, 20)) {
+          lines.push(
+            `| ${d.key} | ${d.prev.toFixed(2)} | ${d.current.toFixed(2)} | **${formatDelta(d.current, d.prev)}** |`
+          );
+        }
+        lines.push('');
+      }
+      if (improvements.length) {
+        lines.push('### Improvements\n');
+        lines.push('| Key | prev (ms) | current (ms) | Δ |');
+        lines.push('| :--- | ---: | ---: | ---: |');
+        for (const d of improvements.slice(0, 20)) {
+          lines.push(
+            `| ${d.key} | ${d.prev.toFixed(2)} | ${d.current.toFixed(2)} | ${formatDelta(d.current, d.prev)} |`
+          );
+        }
+        lines.push('');
+      }
+      if (!regressions.length && !improvements.length) {
+        lines.push('_All results within thresholds — no significant changes detected._\n');
+      }
+    }
+  }
+
   // write raw JSON file alongside the markdown and add a link to it at the end
   const jsonFilename = 'results.json';
   try {
@@ -1386,6 +2371,10 @@ function formatMd(report, filename) {
 }
 
 async function main() {
+  // Load previous results for delta comparison before anything is overwritten.
+  const prevResults = loadPreviousResults();
+  const prevDeltaMap = buildDeltaMap(prevResults);
+
   const report = {
     timestamp: new Date().toISOString(),
     config: {
@@ -1393,6 +2382,9 @@ async function main() {
       TASKS,
       ITERS,
       POOL_SIZES,
+      BENCH_RUNS,
+      POOL_RUNS,
+      HELPER_OPS,
       PROFILES: LOAD_PROFILES.map((profile) => profile.name),
       SCENARIOS: [
         'Burstiness',
@@ -1409,15 +2401,20 @@ async function main() {
     profiles: [],
     scenarios: [],
     cache: null,
+    cacheEviction: null,
+    cacheSerialVsConcurrent: null,
     cacheDedupe: null,
     memoizer: null,
     cacheWarmup: null,
+    helpers: [],
+    prevDeltaMap: prevDeltaMap ? Object.fromEntries(prevDeltaMap) : null,
   };
 
-  console.log('Bench config:', { mode, TASKS, ITERS, POOL_SIZES });
+  console.log('Bench config:', { mode, TASKS, ITERS, POOL_SIZES, BENCH_RUNS, HELPER_OPS });
   const runProfiles = new Set(['all', 'pool', 'variable', 'profiles']).has(mode);
   const runScenarios = new Set(['all', 'pool', 'profiles', 'scenarios']).has(mode);
   const runCacheWarmup = new Set(['all', 'cache', 'scenarios']).has(mode);
+  const runHelpers = new Set(['all', 'helpers']).has(mode);
 
   if (runProfiles) {
     const withTimeout = (p, ms) =>
@@ -1447,8 +2444,12 @@ async function main() {
         );
       }
 
+      const st = profileReport.singleThreaded;
       console.log(
-        `  single-threaded total ${profileReport.singleThreaded.totalMs.toFixed(2)}ms avg ${profileReport.singleThreaded.avgMs.toFixed(2)}ms`
+        `  single-threaded total ${st.totalMs.toFixed(2)}ms avg ${st.avgMs.toFixed(2)}ms` +
+          (st.durationStats
+            ? ` p95=${st.durationStats.p95.toFixed(2)}ms p99=${st.durationStats.p99.toFixed(2)}ms`
+            : '')
       );
       console.log(
         `  worker-thread total ${profileReport.workerThread.totalMs.toFixed(2)}ms avg ${profileReport.workerThread.avgMs.toFixed(2)}ms`
@@ -1458,24 +2459,32 @@ async function main() {
         console.log(`  Running pool size=${size}...`);
         let r;
         try {
-          if (POOL_TIMEOUT > 0)
-            r = await withTimeout(runWorkerPool(size, TASKS, workload.iterations), POOL_TIMEOUT);
-          else r = await runWorkerPool(size, TASKS, workload.iterations);
+          r = await poolMedian(() =>
+            POOL_TIMEOUT > 0
+              ? withTimeout(runWorkerPool(size, TASKS, workload.iterations), POOL_TIMEOUT)
+              : runWorkerPool(size, TASKS, workload.iterations)
+          );
         } catch (err) {
           console.warn('  PowerPool run failed or timed out:', err && err.message);
           r = { totalMs: 0, avgMs: 0, results: null, stats: {} };
         }
-        console.log(`    pool total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`);
+        const stMs = st.totalMs;
+        const speedup = stMs > 0 && r.totalMs > 0 ? (stMs / r.totalMs).toFixed(2) : '?';
+        console.log(
+          `    pool total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms  speedup=${speedup}x`
+        );
         profileReport.pool.push({ size, totalMs: r.totalMs });
 
         let rOpt;
         try {
-          if (POOL_TIMEOUT > 0)
-            rOpt = await withTimeout(
-              runWorkerPoolOptimized(size, TASKS, workload.iterations, workload.keys),
-              POOL_TIMEOUT
-            );
-          else rOpt = await runWorkerPoolOptimized(size, TASKS, workload.iterations, workload.keys);
+          rOpt = await poolMedian(() =>
+            POOL_TIMEOUT > 0
+              ? withTimeout(
+                  runWorkerPoolOptimized(size, TASKS, workload.iterations, workload.keys),
+                  POOL_TIMEOUT
+                )
+              : runWorkerPoolOptimized(size, TASKS, workload.iterations, workload.keys)
+          );
         } catch (err) {
           console.warn('  Optimized PowerPool run failed or timed out:', err && err.message);
           rOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
@@ -1487,12 +2496,11 @@ async function main() {
 
         let rAuto;
         try {
-          if (POOL_TIMEOUT > 0)
-            rAuto = await withTimeout(
-              runWorkerPoolAutoscale(size, TASKS, workload.iterations),
-              POOL_TIMEOUT
-            );
-          else rAuto = await runWorkerPoolAutoscale(size, TASKS, workload.iterations);
+          rAuto = await poolMedian(() =>
+            POOL_TIMEOUT > 0
+              ? withTimeout(runWorkerPoolAutoscale(size, TASKS, workload.iterations), POOL_TIMEOUT)
+              : runWorkerPoolAutoscale(size, TASKS, workload.iterations)
+          );
         } catch (err) {
           console.warn('  Autoscale PowerPool run failed or timed out:', err && err.message);
           rAuto = { totalMs: 0, avgMs: 0, results: null, stats: {} };
@@ -1504,18 +2512,14 @@ async function main() {
 
         let rAutoOpt;
         try {
-          if (POOL_TIMEOUT > 0)
-            rAutoOpt = await withTimeout(
-              runWorkerPoolAutoscaleOptimized(size, TASKS, workload.iterations, workload.keys),
-              POOL_TIMEOUT
-            );
-          else
-            rAutoOpt = await runWorkerPoolAutoscaleOptimized(
-              size,
-              TASKS,
-              workload.iterations,
-              workload.keys
-            );
+          rAutoOpt = await poolMedian(() =>
+            POOL_TIMEOUT > 0
+              ? withTimeout(
+                  runWorkerPoolAutoscaleOptimized(size, TASKS, workload.iterations, workload.keys),
+                  POOL_TIMEOUT
+                )
+              : runWorkerPoolAutoscaleOptimized(size, TASKS, workload.iterations, workload.keys)
+          );
         } catch (err) {
           console.warn('  Autoscale+cache PowerPool run failed or timed out:', err && err.message);
           rAutoOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
@@ -1559,6 +2563,31 @@ async function main() {
     );
     report.cache = r;
 
+    // Cache eviction under tight capacity
+    try {
+      console.log('Running cache eviction pressure benchmark...');
+      report.cacheEviction = await runCacheEvictionPressure(
+        TASKS,
+        Math.max(1, Math.floor(ITERS / 1000))
+      );
+      console.log(
+        `Cache eviction: miss=${report.cacheEviction.missTotal.toFixed(2)}ms hit=${report.cacheEviction.hitTotal.toFixed(2)}ms maxEntries=${report.cacheEviction.maxEntries}`
+      );
+    } catch (err) {
+      console.warn('Cache eviction benchmark failed:', err && err.message);
+    }
+
+    // Serial vs concurrent getOrSetAsync
+    try {
+      console.log('Running serial vs concurrent cache benchmark...');
+      report.cacheSerialVsConcurrent = await runCacheSerialVsConcurrent(TASKS, ITERS);
+      console.log(
+        `Serial ${report.cacheSerialVsConcurrent.serialMs.toFixed(2)}ms  Concurrent ${report.cacheSerialVsConcurrent.concurrentMs.toFixed(2)}ms`
+      );
+    } catch (err) {
+      console.warn('Serial vs concurrent cache benchmark failed:', err && err.message);
+    }
+
     try {
       const rCacheDedupe = await runCacheGetOrSetAsyncBenchmark(TASKS, ITERS);
       console.log(
@@ -1594,8 +2623,13 @@ async function main() {
     }
   }
 
+  if (runHelpers) {
+    console.log('\nRunning helper micro-benchmarks...');
+    report.helpers = await runAllHelperBenchmarks();
+  }
+
   const fname = 'bench/results.md';
-  formatMd(report, fname);
+  formatMd(report, fname, prevDeltaMap);
   console.log('Wrote results to', fname);
 }
 
