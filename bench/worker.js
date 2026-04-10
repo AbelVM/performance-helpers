@@ -22,7 +22,7 @@ function heavy(iterations) {
   return s;
 }
 
-parentPort.on('message', (msg) => {
+parentPort.on('message', async (msg) => {
   // Use high-resolution timing to measure decode and compute durations
   const decodeStart = process.hrtime.bigint();
   const data = decodeMessage(msg);
@@ -30,6 +30,10 @@ parentPort.on('message', (msg) => {
   // (no-op) worker debug logging removed
   const id = data && (data.id ?? null);
   const iterations = data && (data.iterations ?? 0);
+  const waitMs = data && typeof data.asyncWaitMs === 'number' ? data.asyncWaitMs : 0;
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
   const computeStart = process.hrtime.bigint();
   const res = heavy(iterations);
   const computeDuration = Number(process.hrtime.bigint() - computeStart) / 1e6;

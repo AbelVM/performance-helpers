@@ -127,13 +127,14 @@ async function runSingleThreadedVariable(tasks, iterationsArray) {
   };
 }
 
-function createWorkerPool(poolSize, autoscale = false) {
+function createWorkerPool(poolSize, autoscale = false, queuePolicy = 'enqueue') {
   const options = {
     size: autoscale ? 1 : poolSize,
     minSize: autoscale ? 1 : poolSize,
     maxSize: poolSize,
     idleTimeout: 10000,
     taskQueue: true,
+    queuePolicy,
     lazy: autoscale,
     workerOptions: { type: 'module' },
   };
@@ -150,6 +151,15 @@ function createWorkerPool(poolSize, autoscale = false) {
     };
   }
   return new PowerPool('./bench/worker.js', options);
+}
+
+function makePayload(iterations, opts = {}) {
+  const payload = { iterations };
+  if (typeof opts.asyncWaitMs === 'number') payload.asyncWaitMs = opts.asyncWaitMs;
+  if (typeof opts.payloadSize === 'number' && opts.payloadSize > 0) {
+    payload.payload = 'x'.repeat(opts.payloadSize);
+  }
+  return payload;
 }
 
 function normalizeIteration(iterations, index) {
@@ -280,6 +290,762 @@ async function runWorkerPoolAutoscaleOptimized(poolSize, tasks, iterations, keys
 
   pool.terminate();
   return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+function buildMixedSizeProfile(tasks, baseIterations) {
+  const smallIterations = Math.max(1, Math.round(baseIterations * 0.1));
+  const largeIterations = Math.max(1, Math.round(baseIterations * 2));
+  const repeatedKeyCount = Math.max(1, Math.min(20, Math.round(tasks / 10)));
+  const entries = [];
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = i % 2 === 0 ? smallIterations : largeIterations;
+    entries.push({ iterations: iters, key: `mix:${i % repeatedKeyCount}` });
+  }
+  const shuffled = shuffleArray(entries);
+  return {
+    iterations: shuffled.map((entry) => entry.iterations),
+    keys: shuffled.map((entry) => entry.key),
+  };
+}
+
+function buildCacheHitRatioProfile(tasks, baseIterations, hitRatio) {
+  const repeatedCount = Math.round(tasks * hitRatio);
+  const uniqueCount = tasks - repeatedCount;
+  const repeatedKeyCount = Math.max(1, Math.min(50, Math.round(repeatedCount / 10)));
+  const entries = [];
+  for (let i = 0; i < repeatedCount; i += 1) {
+    entries.push({ iterations: baseIterations, key: `hot:${i % repeatedKeyCount}` });
+  }
+  for (let i = 0; i < uniqueCount; i += 1) {
+    entries.push({ iterations: baseIterations, key: `uni:${i}` });
+  }
+  const shuffled = shuffleArray(entries);
+  return {
+    iterations: shuffled.map((entry) => entry.iterations),
+    keys: shuffled.map((entry) => entry.key),
+  };
+}
+
+function buildThunderingHerdProfile(tasks, baseIterations) {
+  return {
+    iterations: new Array(tasks).fill(baseIterations),
+    keys: new Array(tasks).fill('herd:key'),
+  };
+}
+
+function buildBurstKeys(tasks, activeKeys = 10) {
+  return Array.from({ length: tasks }, (_, i) => `burst:${i % activeKeys}`);
+}
+
+async function runWorkerPoolBurst(poolSize, tasks, iterations) {
+  const pool = createWorkerPool(poolSize, false);
+  const t0 = process.hrtime.bigint();
+  const burstCount = 3;
+  const tasksPerBurst = Math.ceil(tasks / burstCount);
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const payload = o2u8({ iterations: iters });
+    pool.postMessage(payload, [payload.buffer]);
+    if ((i + 1) % tasksPerBurst === 0 && i + 1 < tasks) {
+      await delay(25);
+    }
+  }
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolBurstOptimized(poolSize, tasks, iterations, keys) {
+  const pool = createWorkerPool(poolSize, false);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const t0 = process.hrtime.bigint();
+  const burstCount = 3;
+  const tasksPerBurst = Math.ceil(tasks / burstCount);
+
+  const promises = new Array(tasks);
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () => pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true }),
+      { ttl: 60000 }
+    );
+    if ((i + 1) % tasksPerBurst === 0 && i + 1 < tasks) {
+      await delay(25);
+    }
+  }
+
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolBurstAutoscale(poolSize, tasks, iterations) {
+  const pool = createWorkerPool(poolSize, true);
+  const t0 = process.hrtime.bigint();
+  const burstCount = 3;
+  const tasksPerBurst = Math.ceil(tasks / burstCount);
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true });
+    if ((i + 1) % tasksPerBurst === 0 && i + 1 < tasks) {
+      await delay(25);
+    }
+  }
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolBurstAutoscaleOptimized(poolSize, tasks, iterations, keys) {
+  const pool = createWorkerPool(poolSize, true);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const t0 = process.hrtime.bigint();
+  const burstCount = 3;
+  const tasksPerBurst = Math.ceil(tasks / burstCount);
+
+  const promises = new Array(tasks);
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () => pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true }),
+      { ttl: 60000 }
+    );
+    if ((i + 1) % tasksPerBurst === 0 && i + 1 < tasks) {
+      await delay(25);
+    }
+  }
+
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+function buildRampTrafficProfile(tasks, baseIterations) {
+  const keyCount = Math.max(1, Math.min(20, Math.round(tasks / 10)));
+  const keys = Array.from({ length: tasks }, (_, i) => `ramp:${i % keyCount}`);
+  return { iterations: new Array(tasks).fill(baseIterations), keys };
+}
+
+async function runWorkerPoolRampTraffic(poolSize, tasks, iterations) {
+  const pool = createWorkerPool(poolSize, false);
+  const t0 = process.hrtime.bigint();
+  const phases = [15, 30, 60, 30];
+  const tasksPerPhase = Math.ceil(tasks / phases.length);
+
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const payload = o2u8(makePayload(iters));
+    pool.postMessage(payload, [payload.buffer]);
+    const phase = Math.min(Math.floor(i / tasksPerPhase), phases.length - 1);
+    if ((i + 1) % tasksPerPhase === 0 && i + 1 < tasks) {
+      await delay(phases[phase]);
+    }
+  }
+
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolRampTrafficOptimized(poolSize, tasks, iterations, keys) {
+  const pool = createWorkerPool(poolSize, false);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const t0 = process.hrtime.bigint();
+  const phases = [15, 30, 60, 30];
+  const tasksPerPhase = Math.ceil(tasks / phases.length);
+
+  const promises = new Array(tasks);
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () => pool.postMessage(makePayload(iters), undefined, { awaitResponse: true }),
+      { ttl: 60000 }
+    );
+    const phase = Math.min(Math.floor(i / tasksPerPhase), phases.length - 1);
+    if ((i + 1) % tasksPerPhase === 0 && i + 1 < tasks) {
+      await delay(phases[phase]);
+    }
+  }
+
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolRampTrafficAutoscale(poolSize, tasks, iterations) {
+  const pool = createWorkerPool(poolSize, true);
+  const t0 = process.hrtime.bigint();
+  const phases = [15, 30, 60, 30];
+  const tasksPerPhase = Math.ceil(tasks / phases.length);
+
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    pool.postMessage(makePayload(iters), undefined, { awaitResponse: true });
+    const phase = Math.min(Math.floor(i / tasksPerPhase), phases.length - 1);
+    if ((i + 1) % tasksPerPhase === 0 && i + 1 < tasks) {
+      await delay(phases[phase]);
+    }
+  }
+
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolRampTrafficAutoscaleOptimized(poolSize, tasks, iterations, keys) {
+  const pool = createWorkerPool(poolSize, true);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const t0 = process.hrtime.bigint();
+  const phases = [15, 30, 60, 30];
+  const tasksPerPhase = Math.ceil(tasks / phases.length);
+
+  const promises = new Array(tasks);
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () => pool.postMessage(makePayload(iters), undefined, { awaitResponse: true }),
+      { ttl: 60000 }
+    );
+    const phase = Math.min(Math.floor(i / tasksPerPhase), phases.length - 1);
+    if ((i + 1) % tasksPerPhase === 0 && i + 1 < tasks) {
+      await delay(phases[phase]);
+    }
+  }
+
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+function buildPayloadSizeProfile(tasks, baseIterations) {
+  const payloadSizes = [0, 1000, 5000, 15000];
+  const keyCount = Math.max(1, Math.min(20, Math.round(tasks / 10)));
+  const entries = Array.from({ length: tasks }, (_, i) => ({
+    iterations: baseIterations,
+    key: `payload:${i % keyCount}`,
+    payloadSize: payloadSizes[i % payloadSizes.length],
+  }));
+  const shuffled = shuffleArray(entries);
+  return {
+    iterations: shuffled.map((entry) => entry.iterations),
+    keys: shuffled.map((entry) => entry.key),
+    payloadSizes: shuffled.map((entry) => entry.payloadSize),
+  };
+}
+
+async function runWorkerPoolPayloadSize(poolSize, tasks, iterations, payloadSizes) {
+  const pool = createWorkerPool(poolSize, false);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const payload = makePayload(iters, { payloadSize: payloadSizes[i] });
+    const enc = o2u8(payload);
+    pool.postMessage(enc, [enc.buffer]);
+  }
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolPayloadSizeOptimized(poolSize, tasks, iterations, keys, payloadSizes) {
+  const pool = createWorkerPool(poolSize, false);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const promises = new Array(tasks);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    const payload = makePayload(iters, { payloadSize: payloadSizes[i] });
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () => pool.postMessage(payload, undefined, { awaitResponse: true }),
+      { ttl: 60000 }
+    );
+  }
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolPayloadSizeAutoscale(poolSize, tasks, iterations, payloadSizes) {
+  const pool = createWorkerPool(poolSize, true);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const payload = makePayload(iters, { payloadSize: payloadSizes[i] });
+    pool.postMessage(payload, undefined, { awaitResponse: true });
+  }
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolPayloadSizeAutoscaleOptimized(
+  poolSize,
+  tasks,
+  iterations,
+  keys,
+  payloadSizes
+) {
+  const pool = createWorkerPool(poolSize, true);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const promises = new Array(tasks);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () =>
+        pool.postMessage(makePayload(iters, { payloadSize: payloadSizes[i] }), undefined, {
+          awaitResponse: true,
+        }),
+      { ttl: 60000 }
+    );
+  }
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+function buildIOBoundProfile(tasks, baseIterations) {
+  const keyCount = Math.max(1, Math.min(20, Math.round(tasks / 10)));
+  return {
+    iterations: new Array(tasks).fill(baseIterations),
+    keys: Array.from({ length: tasks }, (_, i) => `io:${i % keyCount}`),
+    asyncWaitMs: new Array(tasks).fill(5),
+  };
+}
+
+async function runWorkerPoolIOBound(poolSize, tasks, iterations, waitMs) {
+  const pool = createWorkerPool(poolSize, false);
+  const t0 = process.hrtime.bigint();
+
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    pool.postMessage(makePayload(iters, { asyncWaitMs: waitMs }), undefined, {
+      awaitResponse: true,
+    });
+  }
+
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolIOBoundOptimized(poolSize, tasks, iterations, keys, waitMs) {
+  const pool = createWorkerPool(poolSize, false);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const promises = new Array(tasks);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () =>
+        pool.postMessage(makePayload(iters, { asyncWaitMs: waitMs }), undefined, {
+          awaitResponse: true,
+        }),
+      { ttl: 60000 }
+    );
+  }
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolIOBoundAutoscale(poolSize, tasks, iterations, waitMs) {
+  const pool = createWorkerPool(poolSize, true);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    pool.postMessage(makePayload(iters, { asyncWaitMs: waitMs }), undefined, {
+      awaitResponse: true,
+    });
+  }
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+async function runWorkerPoolIOBoundAutoscaleOptimized(poolSize, tasks, iterations, keys, waitMs) {
+  const pool = createWorkerPool(poolSize, true);
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const promises = new Array(tasks);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < tasks; i += 1) {
+    const iters = normalizeIteration(iterations, i);
+    const key = keys[i];
+    promises[i] = cache.getOrSetAsync(
+      key,
+      () =>
+        pool.postMessage(makePayload(iters, { asyncWaitMs: waitMs }), undefined, {
+          awaitResponse: true,
+        }),
+      { ttl: 60000 }
+    );
+  }
+  await Promise.all(promises);
+  const statsObj = await pool.drain();
+  const t1 = process.hrtime.bigint();
+  const totalMs = Number(t1 - t0) / 1e6;
+  const perf = (statsObj && statsObj.performance) || {};
+  const avgMs = tasks ? totalMs / tasks : 0;
+  pool.terminate();
+  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
+}
+
+function buildCacheWarmupProfile(tasks, baseIterations) {
+  const keyCount = Math.max(1, Math.min(20, Math.round(tasks / 10)));
+  const keys = Array.from({ length: tasks }, (_, i) => `warm:${i % keyCount}`);
+  return { iterations: new Array(tasks).fill(baseIterations), keys };
+}
+
+async function runCacheWarmupBenchmark(tasks, iterations) {
+  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const profile = buildCacheWarmupProfile(tasks, iterations);
+
+  const coldStart = await runCacheWarmupPhase(cache, profile.iterations, profile.keys);
+  const warmStart = await runCacheWarmupPhase(cache, profile.iterations, profile.keys);
+  return { coldStart, warmStart, keysCount: new Set(profile.keys).size };
+}
+
+async function runCacheWarmupPhase(cache, iterations, keys) {
+  const promises = new Array(iterations.length);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < iterations.length; i += 1) {
+    const key = keys[i];
+    const iters = iterations[i];
+    promises[i] = cache.getOrSetAsync(key, () => Promise.resolve(heavy(iters)), {
+      ttl: 60000,
+    });
+  }
+  await Promise.all(promises);
+  const t1 = process.hrtime.bigint();
+  return Number(t1 - t0) / 1e6;
+}
+
+async function runScenarioBurstiness() {
+  const scenario = {
+    name: 'Burstiness',
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const keys = buildBurstKeys(TASKS, Math.max(1, Math.min(20, Math.round(TASKS / 10))));
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPoolBurst(size, TASKS, ITERS);
+    const rOpt = await runWorkerPoolBurstOptimized(size, TASKS, ITERS, keys);
+    const rAuto = await runWorkerPoolBurstAutoscale(size, TASKS, ITERS);
+    const rAutoOpt = await runWorkerPoolBurstAutoscaleOptimized(size, TASKS, ITERS, keys);
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runScenarioMixedTaskSizes() {
+  const scenario = {
+    name: 'Mixed task sizes',
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const profile = buildMixedSizeProfile(TASKS, ITERS);
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPool(size, TASKS, profile.iterations);
+    const rOpt = await runWorkerPoolOptimized(size, TASKS, profile.iterations, profile.keys);
+    const rAuto = await runWorkerPoolAutoscale(size, TASKS, profile.iterations);
+    const rAutoOpt = await runWorkerPoolAutoscaleOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys
+    );
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runScenarioRampTraffic() {
+  const scenario = {
+    name: 'Ramp traffic',
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const profile = buildRampTrafficProfile(TASKS, ITERS);
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPoolRampTraffic(size, TASKS, profile.iterations);
+    const rOpt = await runWorkerPoolRampTrafficOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys
+    );
+    const rAuto = await runWorkerPoolRampTrafficAutoscale(size, TASKS, profile.iterations);
+    const rAutoOpt = await runWorkerPoolRampTrafficAutoscaleOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys
+    );
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runScenarioPayloadSize() {
+  const scenario = {
+    name: 'Variable payload sizes',
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const profile = buildPayloadSizeProfile(TASKS, ITERS);
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPoolPayloadSize(size, TASKS, profile.iterations, profile.payloadSizes);
+    const rOpt = await runWorkerPoolPayloadSizeOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys,
+      profile.payloadSizes
+    );
+    const rAuto = await runWorkerPoolPayloadSizeAutoscale(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.payloadSizes
+    );
+    const rAutoOpt = await runWorkerPoolPayloadSizeAutoscaleOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys,
+      profile.payloadSizes
+    );
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runScenarioIOBound() {
+  const scenario = {
+    name: 'I/O bound',
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const profile = buildIOBoundProfile(TASKS, ITERS);
+  const waitMs = profile.asyncWaitMs[0];
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPoolIOBound(size, TASKS, profile.iterations, waitMs);
+    const rOpt = await runWorkerPoolIOBoundOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys,
+      waitMs
+    );
+    const rAuto = await runWorkerPoolIOBoundAutoscale(size, TASKS, profile.iterations, waitMs);
+    const rAutoOpt = await runWorkerPoolIOBoundAutoscaleOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys,
+      waitMs
+    );
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runScenarioThunderingHerd() {
+  const scenario = {
+    name: 'Thundering herd',
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const profile = buildThunderingHerdProfile(TASKS, ITERS);
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPool(size, TASKS, profile.iterations);
+    const rOpt = await runWorkerPoolOptimized(size, TASKS, profile.iterations, profile.keys);
+    const rAuto = await runWorkerPoolAutoscale(size, TASKS, profile.iterations);
+    const rAutoOpt = await runWorkerPoolAutoscaleOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys
+    );
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runScenarioCacheHitRatio(hitRatio) {
+  const scenario = {
+    name: `Cache hit ratio ${Math.round(hitRatio * 100)}%`,
+    pool: [],
+    optimizedPool: [],
+    autoscalePool: [],
+    autoscaleOptimizedPool: [],
+  };
+  const profile = buildCacheHitRatioProfile(TASKS, ITERS, hitRatio);
+
+  for (const size of POOL_SIZES) {
+    const r = await runWorkerPool(size, TASKS, profile.iterations);
+    const rOpt = await runWorkerPoolOptimized(size, TASKS, profile.iterations, profile.keys);
+    const rAuto = await runWorkerPoolAutoscale(size, TASKS, profile.iterations);
+    const rAutoOpt = await runWorkerPoolAutoscaleOptimized(
+      size,
+      TASKS,
+      profile.iterations,
+      profile.keys
+    );
+
+    scenario.pool.push({ size, totalMs: r.totalMs });
+    scenario.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+    scenario.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+    scenario.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+  }
+
+  return scenario;
+}
+
+async function runCacheWarmupScenario() {
+  const result = await runCacheWarmupBenchmark(TASKS, ITERS);
+  return result;
 }
 
 async function runCacheGetOrSetAsyncBenchmark(
@@ -509,8 +1275,10 @@ function formatMd(report, filename) {
 
   lines.push('\nLearn more about the benchmarks [here](README.md)\n');
 
+  lines.push('\n## Synthetic scenario benchmarks\n');
+
   function renderProfileSection(profile) {
-    lines.push(`\n## Load profile: ${profile.name}`);
+    lines.push(`\n### Load profile: ${profile.name}`);
     if (profile.singleThreaded) {
       lines.push(`- Single-threaded total: ${profile.singleThreaded.totalMs.toFixed(2)} ms`);
     }
@@ -565,6 +1333,13 @@ function formatMd(report, filename) {
     lines.push('- No profile benchmark results');
   }
 
+  if (report.scenarios && report.scenarios.length) {
+    lines.push('\n## Realistic scenario benchmarks\n');
+    for (const scenario of report.scenarios) {
+      renderProfileSection(scenario);
+    }
+  }
+
   lines.push('\n## Cache benchmark\n');
   if (report.cache) {
     lines.push(`- Miss total: ${report.cache.missTotal.toFixed(2)} ms`);
@@ -580,6 +1355,14 @@ function formatMd(report, filename) {
     lines.push(`- Cache getOrSetAsync dedupe total: ${report.cacheDedupe.totalMs.toFixed(2)} ms`);
     lines.push(`- Cache getOrSetAsync avg per task: ${report.cacheDedupe.avgMs.toFixed(2)} ms`);
     lines.push(`- Cache getOrSetAsync duplicate keys: ${report.cacheDedupe.uniqueKeys}`);
+    lines.push('');
+  }
+
+  if (report.cacheWarmup) {
+    lines.push('\n## Cache warmup benchmark\n');
+    lines.push(`- Keys tested: ${report.cacheWarmup.keysCount}`);
+    lines.push(`- Cold-start total: ${report.cacheWarmup.coldStart.toFixed(2)} ms`);
+    lines.push(`- Warm-start total: ${report.cacheWarmup.warmStart.toFixed(2)} ms`);
     lines.push('');
   }
 
@@ -611,15 +1394,30 @@ async function main() {
       ITERS,
       POOL_SIZES,
       PROFILES: LOAD_PROFILES.map((profile) => profile.name),
+      SCENARIOS: [
+        'Burstiness',
+        'Mixed task sizes',
+        'Ramp traffic',
+        'Variable payload sizes',
+        'I/O bound',
+        'Thundering herd',
+        'Cache hit ratio 10%',
+        'Cache hit ratio 50%',
+        'Cache hit ratio 90%',
+      ],
     },
     profiles: [],
+    scenarios: [],
     cache: null,
     cacheDedupe: null,
     memoizer: null,
+    cacheWarmup: null,
   };
 
   console.log('Bench config:', { mode, TASKS, ITERS, POOL_SIZES });
   const runProfiles = new Set(['all', 'pool', 'variable', 'profiles']).has(mode);
+  const runScenarios = new Set(['all', 'pool', 'profiles', 'scenarios']).has(mode);
+  const runCacheWarmup = new Set(['all', 'cache', 'scenarios']).has(mode);
 
   if (runProfiles) {
     const withTimeout = (p, ms) =>
@@ -731,6 +1529,28 @@ async function main() {
       report.profiles.push(profileReport);
     }
   }
+  if (runScenarios) {
+    const scenarios = [
+      runScenarioBurstiness,
+      runScenarioMixedTaskSizes,
+      runScenarioRampTraffic,
+      runScenarioPayloadSize,
+      runScenarioIOBound,
+      runScenarioThunderingHerd,
+      () => runScenarioCacheHitRatio(0.1),
+      () => runScenarioCacheHitRatio(0.5),
+      () => runScenarioCacheHitRatio(0.9),
+    ];
+    for (const fn of scenarios) {
+      try {
+        const scenarioReport = await fn();
+        console.log(`\nRunning scenario: ${scenarioReport.name}...`);
+        report.scenarios.push(scenarioReport);
+      } catch (err) {
+        console.warn('Scenario benchmark failed:', err && err.message);
+      }
+    }
+  }
   if (mode === 'all' || mode === 'cache') {
     console.log('Running cache benchmark...');
     const r = await runCacheBenchmark(TASKS, Math.max(1, Math.floor(ITERS / 1000)));
@@ -759,6 +1579,18 @@ async function main() {
     } catch (err) {
       console.warn('PowerMemoizer benchmark failed:', err && err.message);
       report.memoizer = { totalMs: 0, avgMs: 0, uniqueKeys: MEMOIZER_DUPLICATE_KEYS };
+    }
+  }
+
+  if (runCacheWarmup) {
+    try {
+      report.cacheWarmup = await runCacheWarmupScenario();
+      console.log(
+        `Cache warmup cold=${report.cacheWarmup.coldStart.toFixed(2)}ms warm=${report.cacheWarmup.warmStart.toFixed(2)}ms`
+      );
+    } catch (err) {
+      console.warn('Cache warmup benchmark failed:', err && err.message);
+      report.cacheWarmup = { coldStart: 0, warmStart: 0, keysCount: 0 };
     }
   }
 

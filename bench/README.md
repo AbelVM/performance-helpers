@@ -11,6 +11,15 @@ This folder contains a small harness (`bench/run.js`) that measures:
 - `PowerPool` autoscaling performance
 - `PowerMemoizer` memoization overhead with duplicate keys
 - multiple real-world load profiles: `0%`, `25%`, `50%`, `75%`, and `100%` variable load
+- additional realistic scenario benchmarks, including:
+  - `Burstiness`: sudden bursts of work followed by short quiet periods
+  - `Mixed task sizes`: alternating light and heavy work items to mimic uneven request costs
+  - `Ramp traffic`: gradual ramp-up and ramp-down of task submission rates
+  - `Variable payload sizes`: payloads with different serialized sizes to exercise data movement
+  - `I/O bound`: tasks that include small async wait periods to simulate I/O latency
+  - `Thundering herd`: many tasks contending for the same cache key at once
+  - `Cache hit-ratio sweeps`: low/medium/high reuse ratios for cache-backed work
+  - `Cache warmup behavior`: cold vs warm cache performance for repeated workloads
 
 Quick usage
 
@@ -26,6 +35,9 @@ npm run bench:cache
 
 # Run the profile-based pool benchmark directly
 node bench/run.js profiles
+
+# Run only the realistic scenario benchmarks
+node bench/run.js scenarios
 
 # Alias for the same profile benchmark flow
 node bench/run.js variable
