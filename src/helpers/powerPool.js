@@ -202,14 +202,17 @@ export class PowerPool {
       minSize = 2,
       maxSize = Math.max(size, hwConcurrency),
       workerOptions = {},
-      maxTasksPerWorker = Infinity,
+      maxTasksPerWorker: maxTasksPerWorkerOption,
       idleTimeout = DEFAULT_CACHE_DEFAULT_TTL_MS,
       taskQueue = true,
       queuePolicy = 'enqueue',
       lazy = true,
       // default timeout (ms) applied to awaitResponse Promises when callers omit per-call timeout
       awaitResponseTimeout = DEFAULT_TIMEOUT_MS,
+      autoScale = false,
     } = options;
+    const maxTasksPerWorker =
+      maxTasksPerWorkerOption === undefined && autoScale ? 1 : maxTasksPerWorkerOption ?? Infinity;
 
     // Validate workerSource early to fail fast on incorrect usage.
     if (typeof workerSource !== 'function' && typeof workerSource !== 'string') {

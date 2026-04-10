@@ -13,6 +13,8 @@ const pool = new PowerPool(WorkerScript, {
   size: 2,
   minSize: 1,
   maxSize: 8,
+  // When autoscaling is enabled, the pool defaults to a soft worker capacity
+  // of 1 task per worker unless `maxTasksPerWorker` is explicitly set.
   autoScale: {
     intervalMs: 1000,   // how often the pool evaluates scale decisions (ms)
     targetMs: 50,       // target latency (ms) the pool tries to maintain

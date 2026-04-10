@@ -51,10 +51,10 @@ describe('PowerPool autoscale - extra behaviors', () => {
   });
 
   it('backoff: backoff multiplier increases after scale action', async () => {
-    MockUnderlyingWithDuration.responseDuration = 200;
+    MockUnderlyingWithDuration.responseDuration = 10;
 
     const pool = new PowerPool(MockUnderlyingWithDuration, {
-      size: 1,
+      size: 8,
       minSize: 1,
       maxSize: 8,
       lazy: false,
@@ -67,18 +67,19 @@ describe('PowerPool autoscale - extra behaviors', () => {
         hysteresis: 0.1,
         backoffFactor: 4,
         backoffMaxMultiplier: 8,
+        backoffResetMs: 1000,
       },
     });
 
     try {
+      // Start at max size so normal auto-growth cannot add workers.
       for (let i = 0; i < 8; i++) pool.postMessage({ i });
 
       // wait enough time for at least one scale action
       await new Promise((r) => setTimeout(r, 200));
 
-      // internal multiplier should have increased from 1
+      // internal multiplier should have increased from 1 when autoscale scaled down
       expect(pool._autoScaleBackoffMultiplier).toBeGreaterThanOrEqual(1);
-      // If backoffFactor applied, multiplier should be >= backoffFactor
       expect(pool._autoScaleBackoffMultiplier).toBeGreaterThanOrEqual(4);
     } finally {
       pool.terminate();

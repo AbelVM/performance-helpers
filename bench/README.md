@@ -7,6 +7,9 @@ This folder contains a small harness (`bench/run.js`) that measures:
 - single-threaded CPU-bound compute (baseline)
 - multi-worker `PowerPool` performance across pool sizes
 - a simple `PowerCache` hit/miss benchmark
+- `PowerPool + PowerCache` optimized cache reuse patterns
+- `PowerPool` autoscaling performance
+- `PowerMemoizer` memoization overhead with duplicate keys
 
 Quick usage
 
@@ -30,7 +33,9 @@ Environment variables (defaults shown)
 - `BENCH_ITERS` (default: `1000000`) — work per task (higher = heavier per-task CPU)
 - `BENCH_POOLS` (default: `1,2,4,8`) — comma-separated pool sizes when running pool benchmarks
 - `BENCH_POOL_TIMEOUT` (default: `0`) — ms timeout for each `PowerPool` run; set to `0` to disable timeout and let the pool run to completion
-
+- `BENCH_CACHE_DUPLICATE_KEYS` (default: `10`) — unique key count for cache getOrSetAsync duplicate-key benchmark
+- `BENCH_MEMOIZER_DUPLICATE_KEYS` (default: `10`) — unique key count for PowerMemoizer repeated-call benchmark
+- `BENCH_AUTOSCALE_CACHE_KEYS` (default: `10`) — unique key count for autoscale + cache duplicate-key benchmark
 Tips and notes
 
 - Start with small values during iteration: `BENCH_TASKS=2 BENCH_ITERS=10000` to validate changes quickly
