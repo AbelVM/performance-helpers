@@ -1,6 +1,6 @@
 # Benchmark Results
 
-Generated: 2026-04-10T10:15:05.206Z
+Generated: 2026-04-10T10:25:11.767Z
 
 ## Configuration
 
@@ -10,71 +10,74 @@ Generated: 2026-04-10T10:15:05.206Z
 - POOL_SIZES: 1, 2, 4, 8
 - LOAD_PROFILES: 0% variable, 25% variable, 50% variable, 75% variable, 100% variable
 
+Learn more about the benchmarks [here](bench/README.md)
+
+
 ## Load profile: 0% variable
-- Single-threaded total: 1529.42 ms
-- Worker-thread total: 2292.31 ms
+- Single-threaded total: 1573.95 ms
+- Worker-thread total: 2263.44 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2701.40 | 993.97 | 527.29 | 358.50 |
-| Pool + Autoscale | 2735.89 | 1041.36 | 527.29 | 333.18 |
-| Pool + Cache | 23.70 | **`18.36`** | 30.72 | 25.30 |
-| Pool + Cache + Autoscale | 27.53 | 30.58 | 21.47 | 27.29 |
+| Pool | 2936.09 | 1025.56 | 564.29 | 392.10 |
+| Pool + Autoscale | 2975.39 | 1028.57 | 539.40 | 348.80 |
+| Pool + Cache | `25.83` | 27.91 | 29.27 | 32.91 |
+| Pool + Cache + Autoscale | 28.05 | 37.48 | 28.00 | 29.18 |
 
 ## Load profile: 25% variable
-- Single-threaded total: 1629.95 ms
-- Worker-thread total: 2363.46 ms
+- Single-threaded total: 1490.69 ms
+- Worker-thread total: 2333.46 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2359.27 | 875.23 | 449.92 | 323.95 |
-| Pool + Autoscale | 2364.13 | 865.45 | 491.59 | 312.60 |
-| Pool + Cache | 426.77 | 253.34 | 138.50 | 112.00 |
-| Pool + Cache + Autoscale | 421.02 | 242.64 | 144.28 | **`102.34`** |
+| Pool | 2286.85 | 830.88 | 430.07 | 317.95 |
+| Pool + Autoscale | 2390.09 | 818.27 | 439.92 | 276.81 |
+| Pool + Cache | 426.55 | 231.40 | 139.37 | 115.98 |
+| Pool + Cache + Autoscale | 455.53 | 240.30 | 137.10 | `105.08` |
 
 ## Load profile: 50% variable
-- Single-threaded total: 1578.03 ms
-- Worker-thread total: 2299.66 ms
+- Single-threaded total: 1637.54 ms
+- Worker-thread total: 2464.22 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2298.38 | 832.04 | 452.34 | 321.72 |
-| Pool + Autoscale | 2356.93 | 836.28 | 468.17 | 285.77 |
-| Pool + Cache | 819.57 | 441.30 | 255.37 | 179.39 |
-| Pool + Cache + Autoscale | 827.10 | 452.39 | 255.05 | **`170.88`** |
+| Pool | 2465.48 | 861.70 | 508.88 | 336.01 |
+| Pool + Autoscale | 2475.24 | 875.91 | 489.64 | 307.81 |
+| Pool + Cache | 854.22 | 458.85 | 254.49 | 187.08 |
+| Pool + Cache + Autoscale | 864.79 | 441.73 | 252.23 | `160.34` |
 
 ## Load profile: 75% variable
-- Single-threaded total: 1886.32 ms
-- Worker-thread total: 2209.13 ms
+- Single-threaded total: 1859.27 ms
+- Worker-thread total: 2280.91 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2219.49 | 817.23 | 411.33 | 302.35 |
-| Pool + Autoscale | 2197.73 | 793.08 | 429.34 | 274.99 |
-| Pool + Cache | 1579.95 | 618.91 | 335.52 | 246.59 |
-| Pool + Cache + Autoscale | 1523.11 | 616.27 | 333.67 | **`230.86`** |
+| Pool | 2272.27 | 877.23 | 511.26 | 316.71 |
+| Pool + Autoscale | 2279.06 | 810.55 | 450.99 | 276.58 |
+| Pool + Cache | 1547.77 | 632.02 | 428.82 | 251.60 |
+| Pool + Cache + Autoscale | 1548.55 | 626.82 | 361.50 | `229.68` |
 
 ## Load profile: 100% variable
-- Single-threaded total: 1516.77 ms
-- Worker-thread total: 2243.40 ms
+- Single-threaded total: 1567.64 ms
+- Worker-thread total: 2312.10 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2277.71 | 800.38 | 518.67 | 309.92 |
-| Pool + Autoscale | 2294.51 | 820.85 | 429.90 | **`280.96`** |
-| Pool + Cache | 2235.43 | 802.52 | 454.29 | 313.05 |
-| Pool + Cache + Autoscale | 2230.93 | 804.57 | 434.19 | 285.20 |
+| Pool | 2306.77 | 841.54 | 443.11 | 324.03 |
+| Pool + Autoscale | 2340.40 | 890.85 | 447.43 | 279.50 |
+| Pool + Cache | 2317.78 | 824.15 | 436.80 | 322.73 |
+| Pool + Cache + Autoscale | 2315.57 | 828.55 | 495.60 | `277.06` |
 
 ## Cache benchmark
 
-- Miss total: 2.32 ms
-- Hit total (5 reps): 1.38 ms
+- Miss total: 3.25 ms
+- Hit total (5 reps): 1.55 ms
 - Keys tested: 1000
 
-- Cache getOrSetAsync dedupe total: 15.82 ms
+- Cache getOrSetAsync dedupe total: 16.30 ms
 - Cache getOrSetAsync avg per task: 0.02 ms
 - Cache getOrSetAsync duplicate keys: 10
 
-- PowerMemoizer total: 16.80 ms
+- PowerMemoizer total: 16.07 ms
 - PowerMemoizer avg per call: 0.02 ms
 - PowerMemoizer duplicate keys: 10

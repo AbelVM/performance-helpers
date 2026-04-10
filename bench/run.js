@@ -507,6 +507,8 @@ function formatMd(report, filename) {
   lines.push(`- POOL_SIZES: ${report.config.POOL_SIZES.join(', ')}`);
   lines.push(`- LOAD_PROFILES: ${report.config.PROFILES.join(', ')}`);
 
+  lines.push('\nLearn more about the benchmarks [here](README.md)\n');
+
   function renderProfileSection(profile) {
     lines.push(`\n## Load profile: ${profile.name}`);
     if (profile.singleThreaded) {
@@ -545,7 +547,7 @@ function formatMd(report, filename) {
         if (row && typeof row.totalMs === 'number') {
           const formatted = row.totalMs.toFixed(2);
           if (minValue !== null && row.totalMs === minValue) {
-            return `**\`${formatted}\`**`;
+            return `\`${formatted}\``;
           }
           return formatted;
         }

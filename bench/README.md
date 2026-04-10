@@ -10,20 +10,24 @@ This folder contains a small harness (`bench/run.js`) that measures:
 - `PowerPool + PowerCache` optimized cache reuse patterns
 - `PowerPool` autoscaling performance
 - `PowerMemoizer` memoization overhead with duplicate keys
+- multiple real-world load profiles: `0%`, `25%`, `50%`, `75%`, and `100%` variable load
 
 Quick usage
 
 ```bash
-# Run the full benchmark suite (single-threaded, pool, cache)
+# Run the full benchmark suite (profiles + cache)
 npm run bench
 
-# Run only the worker-pool benchmarks (example: 1,2,4 workers)
+# Run only the profile-based worker-pool benchmarks (across variable load mixes)
 npm run bench:pool
 
 # Run only the cache workload
 npm run bench:cache
 
-# Run the pool benchmark using the "variable" profile
+# Run the profile-based pool benchmark directly
+node bench/run.js profiles
+
+# Alias for the same profile benchmark flow
 node bench/run.js variable
 ```
 
@@ -36,6 +40,7 @@ Environment variables (defaults shown)
 - `BENCH_CACHE_DUPLICATE_KEYS` (default: `10`) — unique key count for cache getOrSetAsync duplicate-key benchmark
 - `BENCH_MEMOIZER_DUPLICATE_KEYS` (default: `10`) — unique key count for PowerMemoizer repeated-call benchmark
 - `BENCH_AUTOSCALE_CACHE_KEYS` (default: `10`) — unique key count for autoscale + cache duplicate-key benchmark
+
 Tips and notes
 
 - Start with small values during iteration: `BENCH_TASKS=2 BENCH_ITERS=10000` to validate changes quickly
