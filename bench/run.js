@@ -20,6 +20,56 @@ const AUTOSCALE_CACHE_KEYS = Number(process.env.BENCH_AUTOSCALE_CACHE_KEYS || 10
 const POOL_TIMEOUT =
   process.env.BENCH_POOL_TIMEOUT === undefined ? 0 : Number(process.env.BENCH_POOL_TIMEOUT);
 
+const LOAD_PROFILES = [
+  { name: '0% variable', variableFraction: 0 },
+  { name: '25% variable', variableFraction: 0.25 },
+  { name: '50% variable', variableFraction: 0.5 },
+  { name: '75% variable', variableFraction: 0.75 },
+  { name: '100% variable', variableFraction: 1 },
+];
+
+function sampleIterations(baseIterations) {
+  return Math.max(
+    1,
+    Math.round(randomNormalArray(1, baseIterations, Math.max(1, baseIterations * 0.25))[0])
+  );
+}
+
+function buildLoadProfile(tasks, baseIterations, variableFraction) {
+  const uniqueTaskCount = Math.round(tasks * variableFraction);
+  const repeatedTaskCount = tasks - uniqueTaskCount;
+  const repeatedKeyCount =
+    variableFraction === 0 ? 1 : Math.max(1, Math.min(10, Math.round(repeatedTaskCount / 10)));
+  const repeatedIterations = new Array(repeatedKeyCount)
+    .fill(null)
+    .map(() => sampleIterations(baseIterations));
+
+  const taskEntries = [];
+  for (let i = 0; i < repeatedTaskCount; i += 1) {
+    const keyIndex = i % repeatedKeyCount;
+    taskEntries.push({
+      key: `rep:${keyIndex}`,
+      iterations: repeatedIterations[keyIndex],
+    });
+  }
+  for (let i = 0; i < uniqueTaskCount; i += 1) {
+    taskEntries.push({
+      key: `uni:${i}`,
+      iterations: sampleIterations(baseIterations),
+    });
+  }
+
+  for (let i = taskEntries.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [taskEntries[i], taskEntries[j]] = [taskEntries[j], taskEntries[i]];
+  }
+
+  return {
+    iterations: taskEntries.map((entry) => entry.iterations),
+    keys: taskEntries.map((entry) => entry.key),
+  };
+}
+
 // Generate samples from a normal distribution using Box-Muller transform.
 // Works like numpy.random.normal: mean and std can be provided.
 function randomNormalArray(n, mean = 0, std = 1) {
@@ -77,19 +127,41 @@ async function runSingleThreadedVariable(tasks, iterationsArray) {
   };
 }
 
-async function runWorkerPool(poolSize, tasks, iterations) {
-  // Ensure Node worker loads as an ES module
-  const pool = new PowerPool('./bench/worker.js', {
-    size: poolSize,
-    minSize: poolSize,
+function createWorkerPool(poolSize, autoscale = false) {
+  const options = {
+    size: autoscale ? 1 : poolSize,
+    minSize: autoscale ? 1 : poolSize,
     maxSize: poolSize,
     idleTimeout: 10000,
     taskQueue: true,
+    lazy: autoscale,
     workerOptions: { type: 'module' },
-  });
+  };
+  if (autoscale) {
+    options.maxTasksPerWorker = 1;
+    options.autoScale = {
+      enabled: true,
+      intervalMs: 50,
+      targetMs: 10,
+      cooldownMs: 100,
+      hysteresis: 0.2,
+      backoffFactor: 2,
+      backoffResetMs: 1000,
+    };
+  }
+  return new PowerPool('./bench/worker.js', options);
+}
 
-  // Instrumentation: measure encode/post durations (ms) and collect
-  // per-task decode/compute timings reported back by workers.
+function normalizeIteration(iterations, index) {
+  return Array.isArray(iterations) ? Math.max(1, Math.round(iterations[index])) : iterations;
+}
+
+function repeatedKey(i, uniqueKeys) {
+  return `key:${i % uniqueKeys}`;
+}
+
+async function runWorkerPool(poolSize, tasks, iterations) {
+  const pool = createWorkerPool(poolSize, false);
   const instrumentation = {
     encodeTotalMs: 0,
     postTotalMs: 0,
@@ -108,16 +180,11 @@ async function runWorkerPool(poolSize, tasks, iterations) {
     }
   };
 
-  // Simplified flow: post all tasks, wait for the pool to become idle (drain),
-  // then read `getStats().performance` for detailed timing metrics.
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
-    // fire-and-forget; PowerPool will track task timings
-    // Encode each payload to a fresh Uint8Array and transfer its buffer
-    // to avoid the pool's plain-object encoding path which may reuse
-    // internal cached buffers and cause unsupported transfer errors.
+    const iters = normalizeIteration(iterations, i);
     const encStart = process.hrtime.bigint();
-    const payload = o2u8({ iterations });
+    const payload = o2u8({ iterations: iters });
     instrumentation.encodeTotalMs += Number(process.hrtime.bigint() - encStart) / 1e6;
 
     const postStart = process.hrtime.bigint();
@@ -125,12 +192,9 @@ async function runWorkerPool(poolSize, tasks, iterations) {
     instrumentation.postTotalMs += Number(process.hrtime.bigint() - postStart) / 1e6;
   }
 
-  // Wait until pool drains (queue empty and workers idle). `drain()` resolves with getStats().
   const statsObj = await pool.drain();
   const t1 = process.hrtime.bigint();
   const totalMs = Number(t1 - t0) / 1e6;
-
-  // Derive average from pool stats when available, fallback to total/tasks
   const perf = (statsObj && statsObj.performance) || {};
   const avgMs =
     perf.timePerTask && typeof perf.timePerTask.average === 'number' && perf.timePerTask.average > 0
@@ -143,70 +207,23 @@ async function runWorkerPool(poolSize, tasks, iterations) {
   return { totalMs, avgMs, results: null, stats: perf, instrumentation };
 }
 
-function repeatedKey(i, uniqueKeys) {
-  return `key:${i % uniqueKeys}`;
-}
-
-async function runWorkerPoolOptimized(poolSize, tasks, iterations) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: poolSize,
-    minSize: poolSize,
-    maxSize: poolSize,
-    idleTimeout: 10000,
-    taskQueue: true,
-    workerOptions: { type: 'module' },
-  });
+async function runWorkerPoolOptimized(poolSize, tasks, iterations, keys) {
+  const pool = createWorkerPool(poolSize, false);
   const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
-  const uniqueKeys = Math.max(1, Math.min(50, Math.floor(tasks / 10)));
 
-  const tasksPromises = new Array(tasks);
+  const taskPromises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
-    const key = repeatedKey(i, uniqueKeys);
-    tasksPromises[i] = cache.getOrSetAsync(
-      key,
-      () => pool.postMessage({ iterations }, undefined, { awaitResponse: true }),
-      { ttl: 60000 }
-    );
-  }
-
-  await Promise.all(tasksPromises);
-  const statsObj = await pool.drain();
-  const t1 = process.hrtime.bigint();
-  const totalMs = Number(t1 - t0) / 1e6;
-  const perf = (statsObj && statsObj.performance) || {};
-  const avgMs = tasks ? totalMs / tasks : 0;
-
-  pool.terminate();
-  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
-}
-
-async function runWorkerPoolVariableOptimized(poolSize, tasks, iterationsArray) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: poolSize,
-    minSize: poolSize,
-    maxSize: poolSize,
-    idleTimeout: 10000,
-    taskQueue: true,
-    workerOptions: { type: 'module' },
-  });
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
-  // For random variable load, avoid artificial cache hits by using distinct keys.
-  const uniqueKeys = tasks;
-
-  const tasksPromises = new Array(tasks);
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < tasks; i++) {
-    const iters = Math.max(1, Math.round(iterationsArray[i]));
-    const key = repeatedKey(i, uniqueKeys);
-    tasksPromises[i] = cache.getOrSetAsync(
+    const iters = normalizeIteration(iterations, i);
+    const key = keys && keys[i] != null ? keys[i] : `key:${i}`;
+    taskPromises[i] = cache.getOrSetAsync(
       key,
       () => pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true }),
       { ttl: 60000 }
     );
   }
 
-  await Promise.all(tasksPromises);
+  await Promise.all(taskPromises);
   const statsObj = await pool.drain();
   const t1 = process.hrtime.bigint();
   const totalMs = Number(t1 - t0) / 1e6;
@@ -218,33 +235,16 @@ async function runWorkerPoolVariableOptimized(poolSize, tasks, iterationsArray) 
 }
 
 async function runWorkerPoolAutoscale(poolSize, tasks, iterations) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: 1,
-    minSize: 1,
-    maxSize: poolSize,
-    maxTasksPerWorker: 1,
-    idleTimeout: 10000,
-    taskQueue: true,
-    lazy: true,
-    autoScale: {
-      enabled: true,
-      intervalMs: 50,
-      targetMs: 10,
-      cooldownMs: 100,
-      hysteresis: 0.2,
-      backoffFactor: 2,
-      backoffResetMs: 1000,
-    },
-    workerOptions: { type: 'module' },
-  });
-
-  const tasksPromises = new Array(tasks);
+  const pool = createWorkerPool(poolSize, true);
+  const taskPromises = new Array(tasks);
   const t0 = process.hrtime.bigint();
+
   for (let i = 0; i < tasks; i++) {
-    tasksPromises[i] = pool.postMessage({ iterations }, undefined, { awaitResponse: true });
+    const iters = normalizeIteration(iterations, i);
+    taskPromises[i] = pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true });
   }
 
-  await Promise.all(tasksPromises);
+  await Promise.all(taskPromises);
   const statsObj = await pool.drain();
   const t1 = process.hrtime.bigint();
   const totalMs = Number(t1 - t0) / 1e6;
@@ -255,128 +255,23 @@ async function runWorkerPoolAutoscale(poolSize, tasks, iterations) {
   return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
 }
 
-async function runWorkerPoolAutoscaleOptimized(poolSize, tasks, iterations) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: 1,
-    minSize: 1,
-    maxSize: poolSize,
-    maxTasksPerWorker: 1,
-    idleTimeout: 10000,
-    taskQueue: true,
-    lazy: true,
-    autoScale: {
-      enabled: true,
-      intervalMs: 50,
-      targetMs: 10,
-      cooldownMs: 100,
-      hysteresis: 0.2,
-      backoffFactor: 2,
-      backoffResetMs: 1000,
-    },
-    workerOptions: { type: 'module' },
-  });
+async function runWorkerPoolAutoscaleOptimized(poolSize, tasks, iterations, keys) {
+  const pool = createWorkerPool(poolSize, true);
   const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
-  const uniqueKeys = Math.max(1, Math.min(50, AUTOSCALE_CACHE_KEYS));
 
-  const tasksPromises = new Array(tasks);
+  const taskPromises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
-    const key = repeatedKey(i, uniqueKeys);
-    tasksPromises[i] = cache.getOrSetAsync(
-      key,
-      () => pool.postMessage({ iterations }, undefined, { awaitResponse: true }),
-      { ttl: 60000 }
-    );
-  }
-
-  await Promise.all(tasksPromises);
-  const statsObj = await pool.drain();
-  const t1 = process.hrtime.bigint();
-  const totalMs = Number(t1 - t0) / 1e6;
-  const perf = (statsObj && statsObj.performance) || {};
-  const avgMs = tasks ? totalMs / tasks : 0;
-
-  pool.terminate();
-  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
-}
-
-async function runWorkerPoolVariableAutoscale(poolSize, tasks, iterationsArray) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: 1,
-    minSize: 1,
-    maxSize: poolSize,
-    maxTasksPerWorker: 1,
-    idleTimeout: 10000,
-    taskQueue: true,
-    lazy: true,
-    autoScale: {
-      enabled: true,
-      intervalMs: 50,
-      targetMs: 10,
-      cooldownMs: 100,
-      hysteresis: 0.2,
-      backoffFactor: 2,
-      backoffResetMs: 1000,
-    },
-    workerOptions: { type: 'module' },
-  });
-
-  const tasksPromises = new Array(tasks);
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < tasks; i++) {
-    const iters = Math.max(1, Math.round(iterationsArray[i]));
-    tasksPromises[i] = pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true });
-  }
-
-  await Promise.all(tasksPromises);
-  const statsObj = await pool.drain();
-  const t1 = process.hrtime.bigint();
-  const totalMs = Number(t1 - t0) / 1e6;
-  const perf = (statsObj && statsObj.performance) || {};
-  const avgMs = tasks ? totalMs / tasks : 0;
-
-  pool.terminate();
-  return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
-}
-
-async function runWorkerPoolVariableAutoscaleOptimized(poolSize, tasks, iterationsArray) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: 1,
-    minSize: 1,
-    maxSize: poolSize,
-    maxTasksPerWorker: 1,
-    idleTimeout: 10000,
-    taskQueue: true,
-    lazy: true,
-    autoScale: {
-      enabled: true,
-      intervalMs: 50,
-      targetMs: 10,
-      cooldownMs: 100,
-      hysteresis: 0.2,
-      backoffFactor: 2,
-      backoffResetMs: 1000,
-    },
-    workerOptions: { type: 'module' },
-  });
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
-  // Use unique keys for variable load so the cache does not artificially
-  // accelerate workloads with no repeated task inputs.
-  const uniqueKeys = tasks;
-
-  const tasksPromises = new Array(tasks);
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < tasks; i++) {
-    const iters = Math.max(1, Math.round(iterationsArray[i]));
-    const key = repeatedKey(i, uniqueKeys);
-    tasksPromises[i] = cache.getOrSetAsync(
+    const iters = normalizeIteration(iterations, i);
+    const key = keys && keys[i] != null ? keys[i] : `key:${i}`;
+    taskPromises[i] = cache.getOrSetAsync(
       key,
       () => pool.postMessage({ iterations: iters }, undefined, { awaitResponse: true }),
       { ttl: 60000 }
     );
   }
 
-  await Promise.all(tasksPromises);
+  await Promise.all(taskPromises);
   const statsObj = await pool.drain();
   const t1 = process.hrtime.bigint();
   const totalMs = Number(t1 - t0) / 1e6;
@@ -387,7 +282,11 @@ async function runWorkerPoolVariableAutoscaleOptimized(poolSize, tasks, iteratio
   return { totalMs, avgMs, results: null, stats: perf, instrumentation: null };
 }
 
-async function runCacheGetOrSetAsyncBenchmark(tasks, iterations, uniqueKeys = CACHE_DUPLICATE_KEYS) {
+async function runCacheGetOrSetAsyncBenchmark(
+  tasks,
+  iterations,
+  uniqueKeys = CACHE_DUPLICATE_KEYS
+) {
   const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
   const promises = new Array(tasks);
   const t0 = process.hrtime.bigint();
@@ -414,62 +313,6 @@ function runMemoizerBenchmark(tasks, iterations, uniqueKeys = MEMOIZER_DUPLICATE
   const t1 = process.hrtime.bigint();
   const totalMs = Number(t1 - t0) / 1e6;
   return { totalMs, avgMs: tasks ? totalMs / tasks : 0, uniqueKeys };
-}
-
-async function runWorkerPoolVariable(poolSize, tasks, iterationsArray) {
-  const pool = new PowerPool('./bench/worker.js', {
-    size: poolSize,
-    minSize: poolSize,
-    maxSize: poolSize,
-    idleTimeout: 10000,
-    taskQueue: true,
-    workerOptions: { type: 'module' },
-  });
-
-  // Instrumentation like `runWorkerPool`
-  const instrumentation = {
-    encodeTotalMs: 0,
-    postTotalMs: 0,
-    messagesReceived: 0,
-    decodeTotalMs: 0,
-    computeTotalMs: 0,
-  };
-  pool.onmessage = (e) => {
-    const payload = e && e.data ? e.data : e;
-    if (payload && typeof payload === 'object') {
-      if (typeof payload.decodeDuration === 'number')
-        instrumentation.decodeTotalMs += payload.decodeDuration;
-      if (typeof payload.duration === 'number') instrumentation.computeTotalMs += payload.duration;
-      instrumentation.messagesReceived++;
-    }
-  };
-
-  const t0 = process.hrtime.bigint();
-  for (let i = 0; i < tasks; i++) {
-    const iters = Math.max(1, Math.round(iterationsArray[i]));
-    const encStart = process.hrtime.bigint();
-    const payload = o2u8({ iterations: iters });
-    instrumentation.encodeTotalMs += Number(process.hrtime.bigint() - encStart) / 1e6;
-
-    const postStart = process.hrtime.bigint();
-    pool.postMessage(payload, [payload.buffer]);
-    instrumentation.postTotalMs += Number(process.hrtime.bigint() - postStart) / 1e6;
-  }
-
-  const statsObj = await pool.drain();
-  const t1 = process.hrtime.bigint();
-  const totalMs = Number(t1 - t0) / 1e6;
-
-  const perf = (statsObj && statsObj.performance) || {};
-  const avgMs =
-    perf.timePerTask && typeof perf.timePerTask.average === 'number' && perf.timePerTask.average > 0
-      ? perf.timePerTask.average
-      : tasks
-        ? totalMs / tasks
-        : 0;
-
-  pool.terminate();
-  return { totalMs, avgMs, results: null, stats: perf, instrumentation };
 }
 
 async function runWorkerThreadBaseline(tasks, iterations) {
@@ -658,72 +501,68 @@ function formatMd(report, filename) {
   lines.push('# Benchmark Results');
   lines.push(`\nGenerated: ${report.timestamp}\n`);
   lines.push('## Configuration\n');
+  lines.push(`- MODE: ${report.config.mode}`);
   lines.push(`- TASKS: ${report.config.TASKS}`);
   lines.push(`- ITERS: ${report.config.ITERS}`);
   lines.push(`- POOL_SIZES: ${report.config.POOL_SIZES.join(', ')}`);
-  // Constant-load benchmark (single-threaded + pool)
-  lines.push('\n## Constant-load benchmark\n');
-  if (report.singleThreaded) {
-    lines.push(`- Single-threaded total: ${report.singleThreaded.totalMs.toFixed(2)} ms`);
-    lines.push(`- Single-threaded avg per task: ${report.singleThreaded.avgMs.toFixed(2)} ms`);
-  }
-  if (report.workerThread) {
-    lines.push(`- Worker-thread total: ${report.workerThread.totalMs.toFixed(2)} ms`);
-    lines.push(`- Worker-thread avg per task: ${report.workerThread.avgMs.toFixed(2)} ms`);
+  lines.push(`- LOAD_PROFILES: ${report.config.PROFILES.join(', ')}`);
+
+  function renderProfileSection(profile) {
+    lines.push(`\n## Load profile: ${profile.name}`);
+    if (profile.singleThreaded) {
+      lines.push(`- Single-threaded total: ${profile.singleThreaded.totalMs.toFixed(2)} ms`);
+    }
+    if (profile.workerThread) {
+      lines.push(`- Worker-thread total: ${profile.workerThread.totalMs.toFixed(2)} ms`);
+    }
+    lines.push('');
+
+    const sizeHeaders = report.config.POOL_SIZES.map((size) => `${size}`);
+    lines.push(`| Pattern \\ Pool size  | ${sizeHeaders.join(' | ')} |`);
+    lines.push(`| :--- | ${report.config.POOL_SIZES.map(() => '---:').join(' | ')} |`);
+
+    const patterns = [
+      { label: 'Pool', results: profile.pool },
+      { label: 'Pool + Autoscale', results: profile.autoscalePool },
+      { label: 'Pool + Cache', results: profile.optimizedPool },
+      { label: 'Pool + Cache + Autoscale', results: profile.autoscaleOptimizedPool },
+    ];
+
+    const allValues = [];
+    for (const pattern of patterns) {
+      for (const size of report.config.POOL_SIZES) {
+        const row = pattern.results?.find((item) => item.size === size);
+        if (row && typeof row.totalMs === 'number') {
+          allValues.push(row.totalMs);
+        }
+      }
+    }
+    const minValue = allValues.length ? Math.min(...allValues) : null;
+
+    for (const pattern of patterns) {
+      const values = report.config.POOL_SIZES.map((size) => {
+        const row = pattern.results?.find((item) => item.size === size);
+        if (row && typeof row.totalMs === 'number') {
+          const formatted = row.totalMs.toFixed(2);
+          if (minValue !== null && row.totalMs === minValue) {
+            return `**\`${formatted}\`**`;
+          }
+          return formatted;
+        }
+        return '';
+      });
+      lines.push(`| ${pattern.label} | ${values.join(' | ')} |`);
+    }
   }
 
-  renderPoolSection(lines, report.pool);
-  if (report.optimizedPool && report.optimizedPool.length) {
-    lines.push('\n### PowerPool + PowerCache optimized benchmark');
-    renderPoolSection(lines, report.optimizedPool);
-  }
-  if (report.autoscalePool && report.autoscalePool.length) {
-    lines.push('\n### PowerPool autoscale benchmark');
-    renderPoolSection(lines, report.autoscalePool);
-  }
-  if (report.autoscaleOptimizedPool && report.autoscaleOptimizedPool.length) {
-    lines.push('\n### PowerPool autoscale + cache benchmark');
-    renderPoolSection(lines, report.autoscaleOptimizedPool);
-  }
-
-  // Variable-load benchmark reporting
-  lines.push('\n## Variable-load benchmark\n');
-  if (report.variable) {
-    if (report.variable.singleThreaded) {
-      lines.push(
-        `- Single-threaded total: ${report.variable.singleThreaded.totalMs.toFixed(2)} ms`
-      );
-      lines.push(
-        `- Single-threaded avg per task: ${report.variable.singleThreaded.avgMs.toFixed(2)} ms`
-      );
-    }
-    if (report.variable.workerThread) {
-      lines.push(`- Worker-thread total: ${report.variable.workerThread.totalMs.toFixed(2)} ms`);
-      lines.push(
-        `- Worker-thread avg per task: ${report.variable.workerThread.avgMs.toFixed(2)} ms`
-      );
-    }
-
-    if (report.variable.pool && report.variable.pool.length) {
-      renderPoolSection(lines, report.variable.pool);
-    } else {
-      lines.push('- No variable pool results');
-    }
-    if (report.variable.optimizedPool && report.variable.optimizedPool.length) {
-      lines.push('\n### PowerPool + PowerCache optimized benchmark');
-      renderPoolSection(lines, report.variable.optimizedPool);
-    }
-    if (report.variable.autoscalePool && report.variable.autoscalePool.length) {
-      lines.push('\n### PowerPool autoscale benchmark');
-      renderPoolSection(lines, report.variable.autoscalePool);
-    }
-    if (report.variable.autoscaleOptimizedPool && report.variable.autoscaleOptimizedPool.length) {
-      lines.push('\n### PowerPool autoscale + cache benchmark');
-      renderPoolSection(lines, report.variable.autoscaleOptimizedPool);
+  if (report.profiles && report.profiles.length) {
+    for (const profile of report.profiles) {
+      renderProfileSection(profile);
     }
   } else {
-    lines.push('- No variable-load results');
+    lines.push('- No profile benchmark results');
   }
+
   lines.push('\n## Cache benchmark\n');
   if (report.cache) {
     lines.push(`- Miss total: ${report.cache.missTotal.toFixed(2)} ms`);
@@ -764,99 +603,130 @@ function formatMd(report, filename) {
 async function main() {
   const report = {
     timestamp: new Date().toISOString(),
-    config: { mode, TASKS, ITERS, POOL_SIZES },
-    singleThreaded: null,
-    workerThread: null,
-    pool: [],
-    optimizedPool: [],
-    autoscalePool: [],
-    autoscaleOptimizedPool: [],
+    config: {
+      mode,
+      TASKS,
+      ITERS,
+      POOL_SIZES,
+      PROFILES: LOAD_PROFILES.map((profile) => profile.name),
+    },
+    profiles: [],
     cache: null,
     cacheDedupe: null,
     memoizer: null,
   };
 
   console.log('Bench config:', { mode, TASKS, ITERS, POOL_SIZES });
-  if (mode === 'all' || mode === 'single') {
-    console.log('Running single-threaded compute benchmark...');
-    const r = await runSingleThreaded(TASKS, ITERS);
-    console.log(`Single-threaded total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`);
-    report.singleThreaded = r;
-  }
-  if (mode === 'all' || mode === 'pool') {
-    console.log('Running worker-thread baseline benchmark...');
-    try {
-      report.workerThread = await runWorkerThreadBaseline(TASKS, ITERS);
-      console.log(
-        `Worker-thread baseline total ${report.workerThread.totalMs.toFixed(2)}ms avg ${report.workerThread.avgMs.toFixed(2)}ms`
-      );
-    } catch (err) {
-      console.warn('Worker-thread baseline failed:', err && err.message);
-      report.workerThread = { totalMs: 0, avgMs: 0 };
-    }
+  const runProfiles = new Set(['all', 'pool', 'variable', 'profiles']).has(mode);
 
-    for (const size of POOL_SIZES) {
-      console.log(`Running worker pool benchmark with poolSize=${size}...`);
-      let r;
-      try {
-        // attempt PowerPool but allow configurable per-pool timeout (0 = no timeout)
-        const withTimeout = (p, ms) =>
-          Promise.race([
-            p,
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
-          ]);
-        if (POOL_TIMEOUT > 0)
-          r = await withTimeout(runWorkerPool(size, TASKS, ITERS), POOL_TIMEOUT);
-        else r = await runWorkerPool(size, TASKS, ITERS);
-      } catch (err) {
-        console.warn('PowerPool run failed or timed out:', err && err.message);
-        // No fallback: report an empty result for this pool size.
-        r = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
-      console.log(`Pool size ${size} total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`);
-      report.pool.push({ size, ...r });
+  if (runProfiles) {
+    const withTimeout = (p, ms) =>
+      Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
 
-      let rOpt;
-      try {
-        if (POOL_TIMEOUT > 0)
-          rOpt = await withTimeout(runWorkerPoolOptimized(size, TASKS, ITERS), POOL_TIMEOUT);
-        else rOpt = await runWorkerPoolOptimized(size, TASKS, ITERS);
-      } catch (err) {
-        console.warn('Optimized PowerPool run failed or timed out:', err && err.message);
-        rOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
-      console.log(
-        `Optimized pool size ${size} total ${rOpt.totalMs.toFixed(2)}ms avg ${rOpt.avgMs.toFixed(2)}ms`
-      );
-      report.optimizedPool.push({ size, ...rOpt });
+    for (const profile of LOAD_PROFILES) {
+      console.log(`\nRunning profile ${profile.name}...`);
+      const workload = buildLoadProfile(TASKS, ITERS, profile.variableFraction);
+      const profileReport = {
+        name: profile.name,
+        singleThreaded: null,
+        workerThread: null,
+        pool: [],
+        optimizedPool: [],
+        autoscalePool: [],
+        autoscaleOptimizedPool: [],
+      };
 
-      let rAuto;
-      try {
-        if (POOL_TIMEOUT > 0)
-          rAuto = await withTimeout(runWorkerPoolAutoscale(size, TASKS, ITERS), POOL_TIMEOUT);
-        else rAuto = await runWorkerPoolAutoscale(size, TASKS, ITERS);
-      } catch (err) {
-        console.warn('Autoscale PowerPool run failed or timed out:', err && err.message);
-        rAuto = { totalMs: 0, avgMs: 0, results: null, stats: {} };
+      if (profile.variableFraction === 0) {
+        profileReport.singleThreaded = await runSingleThreaded(TASKS, ITERS);
+        profileReport.workerThread = await runWorkerThreadBaseline(TASKS, ITERS);
+      } else {
+        profileReport.singleThreaded = await runSingleThreadedVariable(TASKS, workload.iterations);
+        profileReport.workerThread = await runWorkerThreadBaselineVariable(
+          TASKS,
+          workload.iterations
+        );
       }
-      console.log(
-        `Autoscale pool size ${size} total ${rAuto.totalMs.toFixed(2)}ms avg ${rAuto.avgMs.toFixed(2)}ms`
-      );
-      report.autoscalePool.push({ size, ...rAuto });
 
-      let rAutoOpt;
-      try {
-        if (POOL_TIMEOUT > 0)
-          rAutoOpt = await withTimeout(runWorkerPoolAutoscaleOptimized(size, TASKS, ITERS), POOL_TIMEOUT);
-        else rAutoOpt = await runWorkerPoolAutoscaleOptimized(size, TASKS, ITERS);
-      } catch (err) {
-        console.warn('Autoscale + cache PowerPool run failed or timed out:', err && err.message);
-        rAutoOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
       console.log(
-        `Autoscale+cache pool size ${size} total ${rAutoOpt.totalMs.toFixed(2)}ms avg ${rAutoOpt.avgMs.toFixed(2)}ms`
+        `  single-threaded total ${profileReport.singleThreaded.totalMs.toFixed(2)}ms avg ${profileReport.singleThreaded.avgMs.toFixed(2)}ms`
       );
-      report.autoscaleOptimizedPool.push({ size, ...rAutoOpt });
+      console.log(
+        `  worker-thread total ${profileReport.workerThread.totalMs.toFixed(2)}ms avg ${profileReport.workerThread.avgMs.toFixed(2)}ms`
+      );
+
+      for (const size of POOL_SIZES) {
+        console.log(`  Running pool size=${size}...`);
+        let r;
+        try {
+          if (POOL_TIMEOUT > 0)
+            r = await withTimeout(runWorkerPool(size, TASKS, workload.iterations), POOL_TIMEOUT);
+          else r = await runWorkerPool(size, TASKS, workload.iterations);
+        } catch (err) {
+          console.warn('  PowerPool run failed or timed out:', err && err.message);
+          r = { totalMs: 0, avgMs: 0, results: null, stats: {} };
+        }
+        console.log(`    pool total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`);
+        profileReport.pool.push({ size, totalMs: r.totalMs });
+
+        let rOpt;
+        try {
+          if (POOL_TIMEOUT > 0)
+            rOpt = await withTimeout(
+              runWorkerPoolOptimized(size, TASKS, workload.iterations, workload.keys),
+              POOL_TIMEOUT
+            );
+          else rOpt = await runWorkerPoolOptimized(size, TASKS, workload.iterations, workload.keys);
+        } catch (err) {
+          console.warn('  Optimized PowerPool run failed or timed out:', err && err.message);
+          rOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
+        }
+        console.log(
+          `    pool+cache total ${rOpt.totalMs.toFixed(2)}ms avg ${rOpt.avgMs.toFixed(2)}ms`
+        );
+        profileReport.optimizedPool.push({ size, totalMs: rOpt.totalMs });
+
+        let rAuto;
+        try {
+          if (POOL_TIMEOUT > 0)
+            rAuto = await withTimeout(
+              runWorkerPoolAutoscale(size, TASKS, workload.iterations),
+              POOL_TIMEOUT
+            );
+          else rAuto = await runWorkerPoolAutoscale(size, TASKS, workload.iterations);
+        } catch (err) {
+          console.warn('  Autoscale PowerPool run failed or timed out:', err && err.message);
+          rAuto = { totalMs: 0, avgMs: 0, results: null, stats: {} };
+        }
+        console.log(
+          `    pool+autoscale total ${rAuto.totalMs.toFixed(2)}ms avg ${rAuto.avgMs.toFixed(2)}ms`
+        );
+        profileReport.autoscalePool.push({ size, totalMs: rAuto.totalMs });
+
+        let rAutoOpt;
+        try {
+          if (POOL_TIMEOUT > 0)
+            rAutoOpt = await withTimeout(
+              runWorkerPoolAutoscaleOptimized(size, TASKS, workload.iterations, workload.keys),
+              POOL_TIMEOUT
+            );
+          else
+            rAutoOpt = await runWorkerPoolAutoscaleOptimized(
+              size,
+              TASKS,
+              workload.iterations,
+              workload.keys
+            );
+        } catch (err) {
+          console.warn('  Autoscale+cache PowerPool run failed or timed out:', err && err.message);
+          rAutoOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
+        }
+        console.log(
+          `    pool+cache+autoscale total ${rAutoOpt.totalMs.toFixed(2)}ms avg ${rAutoOpt.avgMs.toFixed(2)}ms`
+        );
+        profileReport.autoscaleOptimizedPool.push({ size, totalMs: rAutoOpt.totalMs });
+      }
+
+      report.profiles.push(profileReport);
     }
   }
   if (mode === 'all' || mode === 'cache') {
@@ -870,7 +740,8 @@ async function main() {
     try {
       const rCacheDedupe = await runCacheGetOrSetAsyncBenchmark(TASKS, ITERS);
       console.log(
-        `Cache getOrSetAsync dedupe total ${rCacheDedupe.totalMs.toFixed(2)}ms avg ${rCacheDedupe.avgMs.toFixed(2)}ms`);
+        `Cache getOrSetAsync dedupe total ${rCacheDedupe.totalMs.toFixed(2)}ms avg ${rCacheDedupe.avgMs.toFixed(2)}ms`
+      );
       report.cacheDedupe = rCacheDedupe;
     } catch (err) {
       console.warn('Cache getOrSetAsync benchmark failed:', err && err.message);
@@ -880,115 +751,12 @@ async function main() {
     try {
       const rMemo = runMemoizerBenchmark(TASKS, ITERS);
       console.log(
-        `PowerMemoizer total ${rMemo.totalMs.toFixed(2)}ms avg ${rMemo.avgMs.toFixed(2)}ms`);
+        `PowerMemoizer total ${rMemo.totalMs.toFixed(2)}ms avg ${rMemo.avgMs.toFixed(2)}ms`
+      );
       report.memoizer = rMemo;
     } catch (err) {
       console.warn('PowerMemoizer benchmark failed:', err && err.message);
       report.memoizer = { totalMs: 0, avgMs: 0, uniqueKeys: MEMOIZER_DUPLICATE_KEYS };
-    }
-  }
-
-  // Variable-load benchmark: per-task iterations sampled from a normal distribution.
-  if (mode === 'all' || mode === 'variable') {
-    console.log('Running variable-load benchmark (per-task iterations sampled from normal)...');
-    // Generate samples centered at 0.5 (so mapping v*2*ITERS produces values around ITERS)
-    const samples = randomNormalArray(TASKS, 0.5, 0.15).map((v) => Math.max(0, v) * 2 * ITERS);
-    // single-threaded variable load
-    report.variable = report.variable || {
-      singleThreaded: null,
-      workerThread: null,
-      pool: [],
-      optimizedPool: [],
-      autoscalePool: [],
-      autoscaleOptimizedPool: [],
-    };
-    try {
-      const rVarSingle = await runSingleThreadedVariable(TASKS, samples);
-      console.log(
-        `Single-threaded (variable) total ${rVarSingle.totalMs.toFixed(2)}ms avg ${rVarSingle.avgMs.toFixed(2)}ms`
-      );
-      report.variable.singleThreaded = rVarSingle;
-    } catch (err) {
-      console.warn('Single-threaded variable run failed:', err && err.message);
-      report.variable.singleThreaded = { totalMs: 0, avgMs: 0 };
-    }
-
-    // worker-thread variable baseline
-    try {
-      const rVarWorker = await runWorkerThreadBaselineVariable(TASKS, samples);
-      console.log(
-        `Worker-thread variable baseline total ${rVarWorker.totalMs.toFixed(2)}ms avg ${rVarWorker.avgMs.toFixed(2)}ms`
-      );
-      report.variable.workerThread = rVarWorker;
-    } catch (err) {
-      console.warn('Worker-thread variable baseline failed:', err && err.message);
-      report.variable.workerThread = { totalMs: 0, avgMs: 0 };
-    }
-
-    // pool variable runs
-    for (const size of POOL_SIZES) {
-      console.log(`Running worker pool (variable) benchmark with poolSize=${size}...`);
-      let r;
-      try {
-        const withTimeout = (p, ms) =>
-          Promise.race([
-            p,
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms)),
-          ]);
-        if (POOL_TIMEOUT > 0)
-          r = await withTimeout(runWorkerPoolVariable(size, TASKS, samples), POOL_TIMEOUT);
-        else r = await runWorkerPoolVariable(size, TASKS, samples);
-      } catch (err) {
-        console.warn('PowerPool variable run failed or timed out:', err && err.message);
-        r = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
-      console.log(
-        `Pool variable size ${size} total ${r.totalMs.toFixed(2)}ms avg ${r.avgMs.toFixed(2)}ms`
-      );
-      report.variable = report.variable || { singleThreaded: null, pool: [], optimizedPool: [] };
-      report.variable.pool.push({ size, ...r });
-
-      let rVarOpt;
-      try {
-        if (POOL_TIMEOUT > 0)
-          rVarOpt = await withTimeout(runWorkerPoolVariableOptimized(size, TASKS, samples), POOL_TIMEOUT);
-        else rVarOpt = await runWorkerPoolVariableOptimized(size, TASKS, samples);
-      } catch (err) {
-        console.warn('Optimized PowerPool variable run failed or timed out:', err && err.message);
-        rVarOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
-      console.log(
-        `Optimized variable pool size ${size} total ${rVarOpt.totalMs.toFixed(2)}ms avg ${rVarOpt.avgMs.toFixed(2)}ms`
-      );
-      report.variable.optimizedPool.push({ size, ...rVarOpt });
-
-      let rVarAuto;
-      try {
-        if (POOL_TIMEOUT > 0)
-          rVarAuto = await withTimeout(runWorkerPoolVariableAutoscale(size, TASKS, samples), POOL_TIMEOUT);
-        else rVarAuto = await runWorkerPoolVariableAutoscale(size, TASKS, samples);
-      } catch (err) {
-        console.warn('Autoscale PowerPool variable run failed or timed out:', err && err.message);
-        rVarAuto = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
-      console.log(
-        `Autoscale variable pool size ${size} total ${rVarAuto.totalMs.toFixed(2)}ms avg ${rVarAuto.avgMs.toFixed(2)}ms`
-      );
-      report.variable.autoscalePool.push({ size, ...rVarAuto });
-
-      let rVarAutoOpt;
-      try {
-        if (POOL_TIMEOUT > 0)
-          rVarAutoOpt = await withTimeout(runWorkerPoolVariableAutoscaleOptimized(size, TASKS, samples), POOL_TIMEOUT);
-        else rVarAutoOpt = await runWorkerPoolVariableAutoscaleOptimized(size, TASKS, samples);
-      } catch (err) {
-        console.warn('Autoscale + cache PowerPool variable run failed or timed out:', err && err.message);
-        rVarAutoOpt = { totalMs: 0, avgMs: 0, results: null, stats: {} };
-      }
-      console.log(
-        `Autoscale+cache variable pool size ${size} total ${rVarAutoOpt.totalMs.toFixed(2)}ms avg ${rVarAutoOpt.avgMs.toFixed(2)}ms`
-      );
-      report.variable.autoscaleOptimizedPool.push({ size, ...rVarAutoOpt });
     }
   }
 

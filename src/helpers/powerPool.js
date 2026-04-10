@@ -212,7 +212,9 @@ export class PowerPool {
       autoScale = false,
     } = options;
     const maxTasksPerWorker =
-      maxTasksPerWorkerOption === undefined && autoScale ? 1 : maxTasksPerWorkerOption ?? Infinity;
+      maxTasksPerWorkerOption === undefined && autoScale
+        ? 1
+        : (maxTasksPerWorkerOption ?? Infinity);
 
     // Validate workerSource early to fail fast on incorrect usage.
     if (typeof workerSource !== 'function' && typeof workerSource !== 'string') {
