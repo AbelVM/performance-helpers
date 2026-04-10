@@ -187,7 +187,7 @@ UMD example (script tag):
 
 ## API docs
 
-Full documentation [here](docs/README.md)
+Full API documentation [here](docs/README.md)
 
 ## License
 
