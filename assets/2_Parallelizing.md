@@ -10,8 +10,8 @@
 - [PowerBackpressure: Producer-facing backpressure controller](../guides/powerBackpressure.md). Gate producers with adaptive refill and bounded waiting.
 - [PowerBatch: Microtask coalescing dispatcher](../guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](../guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
-- [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.
-- [PowerRateLimit: Compose multiple limiters](guides/powerRateLimit.md). Combine `PowerThrottle`, `PowerSlidingWindow` and others; supports an `atomic` option to attempt atomic consumes across composed limiters.
+- [PowerThrottle: A token-bucket limiter](../guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.
+- [PowerRateLimit: Compose multiple limiters](../guides/powerRateLimit.md). Combine `PowerThrottle`, `PowerSlidingWindow` and others; supports an `atomic` option to attempt atomic consumes across composed limiters.
 - [PowerSlidingWindow: Sliding-window limiter](../guides/powerSlidingWindow.md). A simple rolling-window limiter for quota-style rate limiting.
 - [PowerQueue: O(1) ring-buffer queue](../guides/powerQueue.md). A resizable, high-performance queue intended for use in `PowerPool` and other high-throughput scenarios.
 - [PowerSemaphore: Async concurrency gate](../guides/powerSemaphore.md). Lightweight semaphore for limiting concurrent I/O and fan-out workloads.
