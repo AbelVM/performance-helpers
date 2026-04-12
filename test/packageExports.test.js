@@ -21,4 +21,11 @@ describe('package exports', () => {
     expect(mod.nowMs).toBeTypeOf('function');
     expect(mod.measureAsync).toBeTypeOf('function');
   });
+
+  it('supports importing errors utilities directly', async () => {
+    const mod = await import('performance-helpers/errors');
+
+    expect(mod.normalizeError).toBeTypeOf('function');
+    expect(mod.formatErrorObj).toBeTypeOf('function');
+  });
 });

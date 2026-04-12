@@ -152,6 +152,7 @@ Import a single helper or utility when you want the smallest possible bundle:
 ```javascript
 import { PowerCache } from 'performance-helpers/powerCache';
 import { nowMs } from 'performance-helpers/now';
+import { normalizeError } from 'performance-helpers/errors';
 ```
 
 The package is marked as side-effect free, so bundlers can treeshake unused exports from the root entry as well.

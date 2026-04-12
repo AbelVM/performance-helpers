@@ -38,7 +38,15 @@
   "author": "Abel Vázquez Montoro",
   "type": "module",
   "main": "src/index.js",
+  "module": "src/index.js",
   "types": "types/index.d.ts",
+  "files": [
+    "src",
+    "types",
+    "README.md",
+    "LICENSE.md",
+    "package.json"
+  ],
   "sideEffects": false,
   "exports": {
     ".": {
@@ -176,6 +184,11 @@
       "types": "./types/utils/now.d.ts",
       "import": "./src/utils/now.js",
       "default": "./src/utils/now.js"
+    },
+    "./errors": {
+      "types": "./types/utils/errors.d.ts",
+      "import": "./src/utils/errors.js",
+      "default": "./src/utils/errors.js"
     },
     "./package.json": "./package.json"
   },
