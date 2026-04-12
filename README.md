@@ -111,7 +111,7 @@ npm run docs
 
 ## Usage examples
 
-Importing from the package entry (or directly from `src/helpers/*` during development):
+Import everything from the package entry:
 
 ```javascript
 import {
@@ -146,6 +146,15 @@ import {
   PowerEventBus,
 } from 'performance-helpers';
 ```
+
+Import a single helper or utility when you want the smallest possible bundle:
+
+```javascript
+import { PowerCache } from 'performance-helpers/powerCache';
+import { nowMs } from 'performance-helpers/now';
+```
+
+The package is marked as side-effect free, so bundlers can treeshake unused exports from the root entry as well.
 
 ## CDN usage
 
@@ -187,7 +196,7 @@ UMD example (script tag):
 
 ## API docs
 
-Full API documentation [here](docs/README.md)
+See the [full API documentation](docs/README.md)
 
 ## License
 

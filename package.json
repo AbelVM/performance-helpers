@@ -1,6 +1,6 @@
 {
   "name": "performance-helpers",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Performance toolbox",
   "keywords": [
     "node",
@@ -39,11 +39,143 @@
   "type": "module",
   "main": "src/index.js",
   "types": "types/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
+      "types": "./types/index.d.ts",
       "import": "./src/index.js",
       "require": "./src/index.js",
       "default": "./src/index.js"
+    },
+    "./powerBackpressure": {
+      "types": "./types/helpers/powerBackpressure.d.ts",
+      "import": "./src/helpers/powerBackpressure.js",
+      "default": "./src/helpers/powerBackpressure.js"
+    },
+    "./powerBatch": {
+      "types": "./types/helpers/powerBatch.d.ts",
+      "import": "./src/helpers/powerBatch.js",
+      "default": "./src/helpers/powerBatch.js"
+    },
+    "./powerBuffer": {
+      "types": "./types/helpers/powerBuffer.d.ts",
+      "import": "./src/helpers/powerBuffer.js",
+      "default": "./src/helpers/powerBuffer.js"
+    },
+    "./powerBulkhead": {
+      "types": "./types/helpers/powerBulkhead.d.ts",
+      "import": "./src/helpers/powerBulkhead.js",
+      "default": "./src/helpers/powerBulkhead.js"
+    },
+    "./powerCache": {
+      "types": "./types/helpers/powerCache.d.ts",
+      "import": "./src/helpers/powerCache.js",
+      "default": "./src/helpers/powerCache.js"
+    },
+    "./powerChunking": {
+      "types": "./types/helpers/powerChunking.d.ts",
+      "import": "./src/helpers/powerChunking.js",
+      "default": "./src/helpers/powerChunking.js"
+    },
+    "./powerCircuit": {
+      "types": "./types/helpers/powerCircuit.d.ts",
+      "import": "./src/helpers/powerCircuit.js",
+      "default": "./src/helpers/powerCircuit.js"
+    },
+    "./powerDeadline": {
+      "types": "./types/helpers/powerDeadline.d.ts",
+      "import": "./src/helpers/powerDeadline.js",
+      "default": "./src/helpers/powerDeadline.js"
+    },
+    "./powerDefer": {
+      "types": "./types/helpers/powerDefer.d.ts",
+      "import": "./src/helpers/powerDefer.js",
+      "default": "./src/helpers/powerDefer.js"
+    },
+    "./powerEventBus": {
+      "types": "./types/helpers/powerEventBus.d.ts",
+      "import": "./src/helpers/powerEventBus.js",
+      "default": "./src/helpers/powerEventBus.js"
+    },
+    "./powerHistogram": {
+      "types": "./types/helpers/powerHistogram.d.ts",
+      "import": "./src/helpers/powerHistogram.js",
+      "default": "./src/helpers/powerHistogram.js"
+    },
+    "./powerLatch": {
+      "types": "./types/helpers/powerLatch.d.ts",
+      "import": "./src/helpers/powerLatch.js",
+      "default": "./src/helpers/powerLatch.js"
+    },
+    "./powerLogger": {
+      "types": "./types/helpers/powerLogger.d.ts",
+      "import": "./src/helpers/powerLogger.js",
+      "default": "./src/helpers/powerLogger.js"
+    },
+    "./powerObserver": {
+      "types": "./types/helpers/powerObserver.d.ts",
+      "import": "./src/helpers/powerObserver.js",
+      "default": "./src/helpers/powerObserver.js"
+    },
+    "./powerPermitGate": {
+      "types": "./types/helpers/powerPermitGate.d.ts",
+      "import": "./src/helpers/powerPermitGate.js",
+      "default": "./src/helpers/powerPermitGate.js"
+    },
+    "./powerPool": {
+      "types": "./types/helpers/powerPool.d.ts",
+      "import": "./src/helpers/powerPool.js",
+      "default": "./src/helpers/powerPool.js"
+    },
+    "./powerQueue": {
+      "types": "./types/helpers/powerQueue.d.ts",
+      "import": "./src/helpers/powerQueue.js",
+      "default": "./src/helpers/powerQueue.js"
+    },
+    "./powerRateLimit": {
+      "types": "./types/helpers/powerRateLimit.d.ts",
+      "import": "./src/helpers/powerRateLimit.js",
+      "default": "./src/helpers/powerRateLimit.js"
+    },
+    "./powerRetry": {
+      "types": "./types/helpers/powerRetry.d.ts",
+      "import": "./src/helpers/powerRetry.js",
+      "default": "./src/helpers/powerRetry.js"
+    },
+    "./powerScheduler": {
+      "types": "./types/helpers/powerScheduler.d.ts",
+      "import": "./src/helpers/powerScheduler.js",
+      "default": "./src/helpers/powerScheduler.js"
+    },
+    "./powerSemaphore": {
+      "types": "./types/helpers/powerSemaphore.d.ts",
+      "import": "./src/helpers/powerSemaphore.js",
+      "default": "./src/helpers/powerSemaphore.js"
+    },
+    "./powerSlidingWindow": {
+      "types": "./types/helpers/powerSlidingWindow.d.ts",
+      "import": "./src/helpers/powerSlidingWindow.js",
+      "default": "./src/helpers/powerSlidingWindow.js"
+    },
+    "./powerSubscriberSet": {
+      "types": "./types/helpers/powerSubscriberSet.d.ts",
+      "import": "./src/helpers/powerSubscriberSet.js",
+      "default": "./src/helpers/powerSubscriberSet.js"
+    },
+    "./powerThrottle": {
+      "types": "./types/helpers/powerThrottle.d.ts",
+      "import": "./src/helpers/powerThrottle.js",
+      "default": "./src/helpers/powerThrottle.js"
+    },
+    "./powerTTLMap": {
+      "types": "./types/helpers/powerTTLMap.d.ts",
+      "import": "./src/helpers/powerTTLMap.js",
+      "default": "./src/helpers/powerTTLMap.js"
+    },
+    "./now": {
+      "types": "./types/utils/now.d.ts",
+      "import": "./src/utils/now.js",
+      "default": "./src/utils/now.js"
     },
     "./package.json": "./package.json"
   },
