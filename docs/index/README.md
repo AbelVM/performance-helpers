@@ -14,6 +14,12 @@ Re-exports [b2o](../helpers/powerBuffer/functions/b2o.md)
 
 ***
 
+### formatErrorObj
+
+Re-exports [formatErrorObj](../utils/errors/functions/formatErrorObj.md)
+
+***
+
 ### measureAsync
 
 Re-exports [measureAsync](../utils/now/functions/measureAsync.md)
@@ -23,6 +29,12 @@ Re-exports [measureAsync](../utils/now/functions/measureAsync.md)
 ### measureSync
 
 Re-exports [measureSync](../utils/now/functions/measureSync.md)
+
+***
+
+### normalizeError
+
+Re-exports [normalizeError](../utils/errors/functions/normalizeError.md)
 
 ***
 

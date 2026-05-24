@@ -488,6 +488,31 @@ export class PowerPool {
    * @private
    */
   _postToWorkerObj(obj, prepared, startTime, wantResponse, correlationKey, pendingPromise) {
+    // Monkey-patch: bypass wrapper if possible to avoid losing transferred typed arrays
+    const canBypassWrapper =
+      prepared &&
+      prepared.message &&
+      typeof prepared.message === 'object' &&
+      prepared.message !== null &&
+      !ArrayBuffer.isView(prepared.message) &&
+      !(prepared.message instanceof ArrayBuffer) &&
+      Array.isArray(prepared.transfer) &&
+      prepared.transfer.length > 0 &&
+      obj?.worker?.['_underlying']?.postMessage;
+
+    if (canBypassWrapper) {
+      try {
+        obj.worker._underlying.postMessage(prepared.message, prepared.transfer);
+        if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
+        obj.tasks++;
+        this._activeTasks++;
+        obj.lastActive = startTime;
+        if (this._isIdle) this._updateIdleState();
+        return wantResponse ? pendingPromise : true;
+      } catch (err) {
+        // Fallback to the original behavior if direct postMessage fails.
+      }
+    }
     try {
       if (prepared.transfer?.length) obj.worker.postMessage(prepared.message, prepared.transfer);
       else obj.worker.postMessage(prepared.message);

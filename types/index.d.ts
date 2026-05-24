@@ -23,4 +23,5 @@ export { PowerObserver } from "./helpers/powerObserver.js";
 export { PowerEventBus } from "./helpers/powerEventBus.js";
 export { o2b, o2u8, u82o, b2o } from "./helpers/powerBuffer.js";
 export { PowerCache, PowerMemoizer, PowerTimedCache } from "./helpers/powerCache.js";
+export { normalizeError, formatErrorObj } from "./utils/errors.js";
 export { nowMs, measureSync, measureAsync } from "./utils/now.js";

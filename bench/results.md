@@ -1,6 +1,6 @@
 # Benchmark Results
 
-Generated: 2026-04-10T15:43:35.965Z
+Generated: 2026-05-24T10:17:53.466Z
 
 ## Configuration
 
@@ -20,59 +20,59 @@ Learn more about the benchmarks [here](README.md)
 
 
 ### Load profile: 0% variable
-- Single-threaded total: 1577.94 ms | throughput: 634 tasks/s | p50: 1.50 ms | p95: 1.77 ms | p99: 2.55 ms
-- Worker-thread total: 2237.89 ms
+- Single-threaded total: 1556.54 ms | throughput: 642 tasks/s | p50: 1.51 ms | p95: 1.73 ms | p99: 1.80 ms
+- Worker-thread total: 2373.79 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 | Speedup |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| Pool | 2343.06 *(+4.3%)* | 875.79 *(+12.4%)* | 459.94 *(+10.3%)* | 324.84 *(+5.3%)* | 4.86x |
-| Pool + Autoscale | 2397.76 *(+8.7%)* | 865.34 *(+9.3%)* | 461.56 *(+11.5%)* | 295.40 *(+8.5%)* | 5.34x |
-| Pool + Cache | 42.89 *(+22.5%)* | 36.25 *(+22.2%)* | 34.38 *(+3.3%)* | 41.44 *(+15.4%)* | 45.90x |
-| Pool + Cache + Autoscale | 32.97 *(-1.9%)* | `32.12` *(-7.4%)* | 34.25 *(+19.5%)* | 37.65 *(+6.5%)* | 49.13x |
+| Pool | 2412.47 *(+3.0%)* | 847.38 *(-3.2%)* | 606.93 *(+32.0%)* | 332.19 *(+2.3%)* | 4.69x |
+| Pool + Autoscale | 2409.33 *(+0.5%)* | 840.92 *(-2.8%)* | 457.56 *(-0.9%)* | 299.51 *(+1.4%)* | 5.20x |
+| Pool + Cache | 52.16 *(+21.6%)* | 45.31 *(+25.0%)* | 45.08 *(+31.1%)* | 44.26 *(+6.8%)* | 35.17x |
+| Pool + Cache + Autoscale | 36.80 *(+11.6%)* | 41.97 *(+30.7%)* | `31.15` *(-9.1%)* | 39.07 *(+3.8%)* | 49.97x |
 
 ### Load profile: 25% variable
-- Single-threaded total: 1612.17 ms | throughput: 620 tasks/s | p50: 1.65 ms | p95: 2.00 ms | p99: 2.24 ms
-- Worker-thread total: 2430.94 ms
+- Single-threaded total: 1526.08 ms | throughput: 655 tasks/s | p50: 1.48 ms | p95: 2.15 ms | p99: 2.59 ms
+- Worker-thread total: 2337.10 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 | Speedup |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| Pool | 2383.17 *(-3.7%)* | 867.65 *(-1.8%)* | 495.19 *(-0.2%)* | 337.64 *(+4.5%)* | 4.77x |
-| Pool + Autoscale | 2387.20 *(-3.7%)* | 875.63 *(+1.2%)* | 476.12 *(+1.8%)* | 305.36 *(+0.2%)* | 5.28x |
-| Pool + Cache | 434.59 *(-2.2%)* | 246.52 *(+7.6%)* | 161.75 *(+23.0%)* | 119.79 *(+9.8%)* | 13.46x |
-| Pool + Cache + Autoscale | 443.94 *(-0.1%)* | 248.89 *(-1.0%)* | 147.86 *(+6.7%)* | `107.05` *(+6.9%)* | 15.06x |
+| Pool | 2246.98 *(-5.7%)* | 851.21 *(-1.9%)* | 510.95 *(+3.2%)* | 405.20 *(+20.0%)* | 3.77x |
+| Pool + Autoscale | 2337.47 *(-2.1%)* | 867.35 *(-0.9%)* | 565.02 *(+18.7%)* | 292.62 *(-4.2%)* | 5.22x |
+| Pool + Cache | 444.48 *(+2.3%)* | 265.03 *(+7.5%)* | 198.99 *(+23.0%)* | 151.22 *(+26.2%)* | 10.09x |
+| Pool + Cache + Autoscale | 433.06 *(-2.5%)* | 239.28 *(-3.9%)* | 165.41 *(+11.9%)* | `105.41` *(-1.5%)* | 14.48x |
 
 ### Load profile: 50% variable
-- Single-threaded total: 1376.89 ms | throughput: 726 tasks/s | p50: 1.45 ms | p95: 2.15 ms | p99: 2.36 ms
-- Worker-thread total: 1970.16 ms
+- Single-threaded total: 1612.28 ms | throughput: 620 tasks/s | p50: 1.54 ms | p95: 2.43 ms | p99: 2.67 ms
+- Worker-thread total: 2278.63 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 | Speedup |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| Pool | 1935.63 *(-9.4%)* | 739.17 *(-7.1%)* | 392.23 *(-10.4%)* | 282.08 *(-8.3%)* | 4.88x |
-| Pool + Autoscale | 2002.47 *(-8.4%)* | 717.99 *(-7.4%)* | 385.74 *(-10.6%)* | 243.75 *(-11.5%)* | 5.65x |
-| Pool + Cache | 792.73 *(-1.8%)* | 409.96 *(-5.2%)* | 228.45 *(-13.5%)* | 174.32 *(+0.2%)* | 7.90x |
-| Pool + Cache + Autoscale | 807.61 *(-2.4%)* | 425.25 *(+2.8%)* | 241.02 *(+3.9%)* | `159.86` *(+1.9%)* | 8.61x |
+| Pool | 2282.03 *(+17.9%)* | 850.29 *(+15.0%)* | 463.29 *(+18.1%)* | 390.05 *(+38.3%)* | 4.13x |
+| Pool + Autoscale | 2309.16 *(+15.3%)* | 826.22 *(+15.1%)* | 445.38 *(+15.5%)* | 312.57 *(+28.2%)* | 5.16x |
+| Pool + Cache | 812.42 *(+2.5%)* | 422.91 *(+3.2%)* | 341.00 *(+49.3%)* | 219.21 *(+25.8%)* | 7.35x |
+| Pool + Cache + Autoscale | 825.96 *(+2.3%)* | 429.78 *(+1.1%)* | 287.14 *(+19.1%)* | `159.00` *(-0.5%)* | 10.14x |
 
 ### Load profile: 75% variable
-- Single-threaded total: 1936.35 ms | throughput: 516 tasks/s | p50: 1.74 ms | p95: 3.61 ms | p99: 4.17 ms
-- Worker-thread total: 2269.71 ms
+- Single-threaded total: 2005.35 ms | throughput: 499 tasks/s | p50: 1.82 ms | p95: 3.67 ms | p99: 4.19 ms
+- Worker-thread total: 2369.50 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 | Speedup |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| Pool | 2254.53 *(-3.1%)* | 813.34 *(-4.8%)* | 440.13 *(-4.2%)* | 298.85 *(-12.8%)* | 6.48x |
-| Pool + Autoscale | 2297.49 *(-3.1%)* | 812.14 *(-5.3%)* | 456.06 *(-2.0%)* | 274.49 *(-14.7%)* | 7.05x |
-| Pool + Cache | 1511.73 *(-2.0%)* | 618.15 *(-3.0%)* | 329.05 *(-9.6%)* | 249.32 *(-0.5%)* | 7.77x |
-| Pool + Cache + Autoscale | 1533.07 *(-3.6%)* | 616.75 *(-5.6%)* | 332.24 *(-5.8%)* | `217.93` *(-3.7%)* | 8.89x |
+| Pool | 2333.88 *(+3.5%)* | 880.26 *(+8.2%)* | 589.68 *(+34.0%)* | 392.07 *(+31.2%)* | 5.11x |
+| Pool + Autoscale | 2364.28 *(+2.9%)* | 917.54 *(+13.0%)* | 465.50 *(+2.1%)* | 309.09 *(+12.6%)* | 6.49x |
+| Pool + Cache | 1598.53 *(+5.7%)* | 640.16 *(+3.6%)* | 487.87 *(+48.3%)* | 300.78 *(+20.6%)* | 6.67x |
+| Pool + Cache + Autoscale | 1620.00 *(+5.7%)* | 715.28 *(+16.0%)* | 356.30 *(+7.2%)* | `218.82` *(+0.4%)* | 9.16x |
 
 ### Load profile: 100% variable
-- Single-threaded total: 1596.12 ms | throughput: 627 tasks/s | p50: 1.59 ms | p95: 2.26 ms | p99: 2.48 ms
-- Worker-thread total: 2229.34 ms
+- Single-threaded total: 1598.47 ms | throughput: 626 tasks/s | p50: 1.57 ms | p95: 2.41 ms | p99: 3.02 ms
+- Worker-thread total: 2250.99 ms
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 | Speedup |
 | :--- | ---: | ---: | ---: | ---: | ---: |
-| Pool | 2241.90 *(-2.9%)* | 828.16 *(+0.4%)* | 448.75 *(+1.4%)* | 332.92 *(+1.4%)* | 4.79x |
-| Pool + Autoscale | 2292.29 *(-1.2%)* | 838.59 *(+1.1%)* | 453.09 *(+0.7%)* | `285.69` *(-3.8%)* | 5.59x |
-| Pool + Cache | 2256.27 *(-0.9%)* | 836.90 *(+0.0%)* | 445.96 *(-1.6%)* | 316.87 *(-3.8%)* | 5.04x |
-| Pool + Cache + Autoscale | 2312.00 *(-0.5%)* | 902.92 *(+9.1%)* | 453.89 *(-0.3%)* | 293.96 *(+1.7%)* | 5.43x |
+| Pool | 2255.82 *(+0.6%)* | 818.44 *(-1.2%)* | 449.43 *(+0.2%)* | 362.96 *(+9.0%)* | 4.40x |
+| Pool + Autoscale | 2370.93 *(+3.4%)* | 824.49 *(-1.7%)* | 466.45 *(+2.9%)* | 333.78 *(+16.8%)* | 4.79x |
+| Pool + Cache | 2249.15 *(-0.3%)* | 850.60 *(+1.6%)* | 482.69 *(+8.2%)* | 363.49 *(+14.7%)* | 4.40x |
+| Pool + Cache + Autoscale | 2341.48 *(+1.3%)* | 812.72 *(-10.0%)* | 480.52 *(+5.9%)* | `287.38` *(-2.2%)* | 5.56x |
 
 ## Realistic scenario benchmarks
 
@@ -81,102 +81,102 @@ Learn more about the benchmarks [here](README.md)
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2283.05 *(+1.3%)* | 827.72 *(-1.9%)* | 469.81 *(+7.5%)* | 314.75 *(+1.9%)* |
-| Pool + Autoscale | 2303.37 *(+0.2%)* | 838.99 *(+2.4%)* | 430.56 *(-3.7%)* | 277.57 *(-9.4%)* |
-| Pool + Cache | 61.10 *(+18.6%)* | 50.70 *(-2.1%)* | 51.10 *(+0.4%)* | `49.73` *(-3.7%)* |
-| Pool + Cache + Autoscale | 51.35 *(+2.0%)* | 50.58 *(+0.4%)* | 50.88 *(+0.5%)* | 51.20 *(+1.6%)* |
+| Pool | 2287.49 *(+0.2%)* | 825.06 *(-0.3%)* | 605.82 *(+28.9%)* | 347.29 *(+10.3%)* |
+| Pool + Autoscale | 2324.63 *(+0.9%)* | 841.44 *(+0.3%)* | 436.25 *(+1.3%)* | 315.40 *(+13.6%)* |
+| Pool + Cache | 57.68 *(-5.6%)* | 50.70 *(-0.0%)* | 53.89 *(+5.5%)* | 51.18 *(+2.9%)* |
+| Pool + Cache + Autoscale | 52.00 *(+1.3%)* | 62.57 *(+23.7%)* | 50.59 *(-0.6%)* | `50.42` *(-1.5%)* |
 
 ### Load profile: Mixed task sizes
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2353.29 *(-0.7%)* | 867.60 *(+0.4%)* | 447.59 *(-5.6%)* | 318.77 *(-4.4%)* |
-| Pool + Autoscale | 2374.03 *(-1.1%)* | 849.98 *(-2.1%)* | 439.66 *(-2.7%)* | 286.32 *(-3.7%)* |
-| Pool + Cache | 57.57 *(-0.2%)* | 40.97 *(+6.8%)* | 39.02 *(-6.4%)* | 39.33 *(+5.3%)* |
-| Pool + Cache + Autoscale | 52.78 *(+1.7%)* | 42.62 *(+24.7%)* | `34.78` *(-6.3%)* | 42.22 *(+5.9%)* |
+| Pool | 2354.04 *(+0.0%)* | 853.47 *(-1.6%)* | 483.17 *(+7.9%)* | 396.13 *(+24.3%)* |
+| Pool + Autoscale | 2391.16 *(+0.7%)* | 852.72 *(+0.3%)* | 496.16 *(+12.8%)* | 328.42 *(+14.7%)* |
+| Pool + Cache | 62.91 *(+9.3%)* | 63.90 *(+56.0%)* | 58.92 *(+51.0%)* | `43.57` *(+10.8%)* |
+| Pool + Cache + Autoscale | 70.96 *(+34.5%)* | 45.28 *(+6.2%)* | 50.78 *(+46.0%)* | 58.40 *(+38.3%)* |
 
 ### Load profile: Ramp traffic
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2256.29 *(-0.3%)* | 859.07 *(+5.4%)* | 434.38 *(-3.2%)* | 301.28 *(-4.8%)* |
-| Pool + Autoscale | 2300.12 *(-0.9%)* | 822.03 *(+0.1%)* | 439.56 *(-4.8%)* | 281.51 *(+1.2%)* |
-| Pool + Cache | 106.74 *(+0.6%)* | 106.64 *(+1.4%)* | `104.81` *(-1.5%)* | 105.49 *(-0.6%)* |
-| Pool + Cache + Autoscale | 105.29 *(-1.4%)* | 105.49 *(-0.8%)* | 106.71 *(+1.4%)* | 105.31 *(-0.5%)* |
+| Pool | 2273.03 *(+0.7%)* | 849.36 *(-1.1%)* | 448.15 *(+3.2%)* | 346.96 *(+15.2%)* |
+| Pool + Autoscale | 2330.33 *(+1.3%)* | 880.16 *(+7.1%)* | 464.78 *(+5.7%)* | 304.24 *(+8.1%)* |
+| Pool + Cache | 107.88 *(+1.1%)* | `105.98` *(-0.6%)* | 106.68 *(+1.8%)* | 106.02 *(+0.5%)* |
+| Pool + Cache + Autoscale | 106.52 *(+1.2%)* | 106.52 *(+1.0%)* | 106.18 *(-0.5%)* | 106.25 *(+0.9%)* |
 
 ### Load profile: Variable payload sizes
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2242.06 *(+1.5%)* | 813.73 *(-0.3%)* | 428.94 *(-3.4%)* | 301.80 *(-5.5%)* |
-| Pool + Autoscale | 2305.47 *(+0.9%)* | 837.27 *(+3.1%)* | 433.90 *(-1.0%)* | 282.89 *(-1.9%)* |
-| Pool + Cache | 52.09 *(-8.2%)* | 40.77 *(+1.8%)* | 39.01 *(-2.5%)* | 41.64 *(+16.9%)* |
-| Pool + Cache + Autoscale | 54.66 *(-0.5%)* | 40.07 *(-14.5%)* | 37.97 *(-4.0%)* | `33.47` *(-18.4%)* |
+| Pool | 2241.87 *(-0.0%)* | 866.69 *(+6.5%)* | 546.94 *(+27.5%)* | 402.52 *(+33.4%)* |
+| Pool + Autoscale | 2260.21 *(-2.0%)* | 846.23 *(+1.1%)* | 506.68 *(+16.8%)* | 327.78 *(+15.9%)* |
+| Pool + Cache | 50.47 *(-3.1%)* | 47.35 *(+16.1%)* | 53.51 *(+37.2%)* | 54.79 *(+31.6%)* |
+| Pool + Cache + Autoscale | 62.54 *(+14.4%)* | 42.08 *(+5.0%)* | `36.04` *(-5.1%)* | 46.02 *(+37.5%)* |
 
 ### Load profile: I/O bound
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2214.04 *(-2.7%)* | 838.15 *(+0.7%)* | 447.68 *(-10.9%)* | 317.35 *(+2.3%)* |
-| Pool + Autoscale | 7783.08 *(-2.3%)* | 3866.12 *(-1.0%)* | 1794.82 *(-4.1%)* | 907.10 *(-5.2%)* |
-| Pool + Cache | 54.68 *(-20.9%)* | 53.24 *(-2.9%)* | 44.79 *(+3.9%)* | `42.70` *(+1.3%)* |
-| Pool + Cache + Autoscale | 171.80 *(-15.4%)* | 97.46 *(+3.8%)* | 68.64 *(-3.3%)* | 51.58 *(+4.8%)* |
+| Pool | 2246.73 *(+1.5%)* | 1126.45 *(+34.4%)* | 603.15 *(+34.7%)* | 425.98 *(+34.2%)* |
+| Pool + Autoscale | 8050.49 *(+3.4%)* | 4071.11 *(+5.3%)* | 2029.22 *(+13.1%)* | 1038.53 *(+14.5%)* |
+| Pool + Cache | 55.33 *(+1.2%)* | 62.15 *(+16.7%)* | `50.10` *(+11.8%)* | 57.43 *(+34.5%)* |
+| Pool + Cache + Autoscale | 209.24 *(+21.8%)* | 112.95 *(+15.9%)* | 88.45 *(+28.9%)* | 67.30 *(+30.5%)* |
 
 ### Load profile: Thundering herd
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2364.49 *(+5.1%)* | 808.02 *(-0.2%)* | 439.85 *(-5.9%)* | 304.33 *(-0.1%)* |
-| Pool + Autoscale | 2286.78 *(-1.4%)* | 846.26 *(+1.9%)* | 502.54 *(+12.5%)* | 276.90 *(+1.2%)* |
-| Pool + Cache | 26.45 *(+22.1%)* | 28.90 *(+51.2%)* | 30.40 *(+29.0%)* | 28.86 *(+1.1%)* |
-| Pool + Cache + Autoscale | 21.01 *(-25.0%)* | 30.84 *(+9.1%)* | `19.81` *(-28.2%)* | 29.67 *(+28.2%)* |
+| Pool | 2358.36 *(-0.3%)* | 813.72 *(+0.7%)* | 452.97 *(+3.0%)* | 362.46 *(+19.1%)* |
+| Pool + Autoscale | 2263.28 *(-1.0%)* | 808.86 *(-4.4%)* | 435.51 *(-13.3%)* | 320.65 *(+15.8%)* |
+| Pool + Cache | 20.60 *(-22.1%)* | 26.34 *(-8.9%)* | 28.84 *(-5.1%)* | 39.55 *(+37.0%)* |
+| Pool + Cache + Autoscale | `18.98` *(-9.7%)* | 44.30 *(+43.6%)* | 28.51 *(+44.0%)* | 28.80 *(-2.9%)* |
 
 ### Load profile: Cache hit ratio 10%
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2274.52 *(+0.8%)* | 806.12 *(-2.4%)* | 418.92 *(-2.4%)* | 309.95 *(-0.4%)* |
-| Pool + Autoscale | 2290.89 *(+0.7%)* | 813.45 *(-2.4%)* | 439.40 *(+1.0%)* | 283.26 *(+2.0%)* |
-| Pool + Cache | 1982.23 *(-3.0%)* | 736.75 *(-2.9%)* | 387.88 *(-14.4%)* | 306.82 *(+0.4%)* |
-| Pool + Cache + Autoscale | 2041.72 *(+1.1%)* | 764.39 *(+1.9%)* | 390.41 *(-8.0%)* | `261.86` *(-1.2%)* |
+| Pool | 2237.71 *(-1.6%)* | 814.66 *(+1.1%)* | 445.57 *(+6.4%)* | 397.43 *(+28.2%)* |
+| Pool + Autoscale | 2298.33 *(+0.3%)* | 904.13 *(+11.1%)* | 453.54 *(+3.2%)* | 314.69 *(+11.1%)* |
+| Pool + Cache | 1976.34 *(-0.3%)* | 777.76 *(+5.6%)* | 409.45 *(+5.6%)* | 352.26 *(+14.8%)* |
+| Pool + Cache + Autoscale | 2018.48 *(-1.1%)* | 756.18 *(-1.1%)* | 428.87 *(+9.9%)* | `312.29` *(+19.3%)* |
 
 ### Load profile: Cache hit ratio 50%
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2260.67 *(-3.7%)* | 821.89 *(+1.1%)* | 467.33 *(+8.2%)* | 321.76 *(+1.6%)* |
-| Pool + Autoscale | 2285.72 *(-4.6%)* | 858.44 *(+1.5%)* | 447.27 *(-0.3%)* | 270.65 *(+0.5%)* |
-| Pool + Cache | 912.54 *(-3.8%)* | 455.78 *(-0.3%)* | 269.53 *(+9.6%)* | 198.97 *(+6.6%)* |
-| Pool + Cache + Autoscale | 948.54 *(+0.4%)* | 472.62 *(-1.5%)* | 254.66 *(-0.9%)* | `181.50` *(+4.3%)* |
+| Pool | 2388.05 *(+5.6%)* | 858.36 *(+4.4%)* | 484.45 *(+3.7%)* | 365.07 *(+13.5%)* |
+| Pool + Autoscale | 2458.80 *(+7.6%)* | 827.91 *(-3.6%)* | 445.39 *(-0.4%)* | 354.28 *(+30.9%)* |
+| Pool + Cache | 963.46 *(+5.6%)* | 464.53 *(+1.9%)* | 276.64 *(+2.6%)* | 240.50 *(+20.9%)* |
+| Pool + Cache + Autoscale | 1028.79 *(+8.5%)* | 475.52 *(+0.6%)* | 330.61 *(+29.8%)* | `211.64` *(+16.6%)* |
 
 ### Load profile: Cache hit ratio 90%
 
 | Pattern \ Pool size  | 1 | 2 | 4 | 8 |
 | :--- | ---: | ---: | ---: | ---: |
-| Pool | 2342.29 *(+3.2%)* | 823.22 *(+2.0%)* | 448.98 *(-2.3%)* | 323.21 *(+2.6%)* |
-| Pool + Autoscale | 2330.49 *(+2.9%)* | 822.07 *(+0.9%)* | 455.63 *(+3.1%)* | 288.37 *(-0.2%)* |
-| Pool + Cache | 254.17 *(-2.9%)* | 157.29 *(+14.3%)* | 105.66 *(+25.8%)* | 75.56 *(-1.2%)* |
-| Pool + Cache + Autoscale | 271.25 *(-0.6%)* | 154.49 *(+1.8%)* | 89.79 *(+0.2%)* | `67.60` *(-7.4%)* |
+| Pool | 2240.20 *(-4.4%)* | 848.33 *(+3.1%)* | 478.64 *(+6.6%)* | 372.02 *(+15.1%)* |
+| Pool + Autoscale | 2287.06 *(-1.9%)* | 822.34 *(+0.0%)* | 469.45 *(+3.0%)* | 333.35 *(+15.6%)* |
+| Pool + Cache | 270.45 *(+6.4%)* | 165.94 *(+5.5%)* | 110.52 *(+4.6%)* | 102.70 *(+35.9%)* |
+| Pool + Cache + Autoscale | 273.03 *(+0.7%)* | 155.41 *(+0.6%)* | 103.08 *(+14.8%)* | `85.54` *(+26.5%)* |
 
 ## Cache benchmark
 
-- Miss total: 3.64 ms
-- Hit total (5 reps): 1.49 ms
+- Miss total: 2.17 ms
+- Hit total (5 reps): 0.99 ms
 - Keys tested: 1000
 
 ### Cache eviction under pressure
 
 - maxEntries: 200 (20% of 1000 unique keys)
-- Miss pass total: 3.38 ms
+- Miss pass total: 2.48 ms
 - Hit pass under eviction: 0.27 ms
 
 ### Serial vs concurrent getOrSetAsync (in-flight deduplication)
 
 - Tasks: 1000 | Unique keys: 10
-- Serial (no dedup): 10.30 ms
-- Concurrent (dedup): 1.48 ms (85.6% faster)
+- Serial (no dedup): 11.29 ms
+- Concurrent (dedup): 1.44 ms (87.2% faster)
 
-- Cache getOrSetAsync dedupe total: 15.78 ms
+- Cache getOrSetAsync dedupe total: 17.19 ms
 - Cache getOrSetAsync avg per task: 0.02 ms
 - Cache getOrSetAsync duplicate keys: 10
 
@@ -184,10 +184,10 @@ Learn more about the benchmarks [here](README.md)
 ## Cache warmup benchmark
 
 - Keys tested: 20
-- Cold-start total: 32.20 ms
-- Warm-start total: 0.23 ms
+- Cold-start total: 31.50 ms
+- Warm-start total: 0.24 ms
 
-- PowerMemoizer total: 16.54 ms
+- PowerMemoizer total: 16.64 ms
 - PowerMemoizer avg per call: 0.02 ms
 - PowerMemoizer duplicate keys: 10
 
@@ -198,36 +198,42 @@ _100,000 ops per variant, median of 5 runs_
 
 | Helper | Variant | Total (ms) | ops/sec | Δ prev |
 | :--- | :--- | ---: | ---: | ---: |
-| **PowerRateLimit** | under rate (all pass) | 19.76 | 5,060,900 | -0.5% |
-| **PowerRateLimit** | over rate (~50% reject) | 14.85 | 6,735,604 | +0.3% |
-| **PowerCircuit** | closed (happy path) | 1.45 | 13,754,212 | -11.3% |
-| **PowerCircuit** | open (fast-fail) | 40.21 | 497,449 | -1.8% |
-| **PowerRetry** | 1 attempt (no retry) | 1.08 | 9,255,154 | -24.6% |
-| **PowerRetry** | 2 attempts (1 retry, baseDelay=0) | 10849.06 | 922 | -0.5% |
-| **PowerSemaphore** | limit=1 (exclusive lock, serial) | 5.04 | 9,922,797 | -3.1% |
-| **PowerSemaphore** | limit=8 (concurrent pool) | 20.95 | 2,386,079 | -17.2% |
-| **PowerBulkhead** | 1 partition (baseline) | 17.78 | 1,125,023 | +1.1% |
-| **PowerBulkhead** | 2 partitions (critical vs background) | 18.37 | 1,088,494 | +10.5% |
-| **PowerBatch** | individual dispatch (maxSize=1) | 33.96 | 2,944,420 | +16.3% |
-| **PowerBatch** | coalesced dispatch (maxSize=ops) | 6.64 | 15,059,858 | -1.8% |
-| **PowerBackpressure** | no pressure (capacity >> ops) | 2.02 | 14,851,309 | +44.9% |
-| **PowerBackpressure** | with pressure (capacity=100) | 7.19 | 4,170,700 | +66.5% |
-| **PowerTTLMap** | long TTL (60 s, no eviction) | 24.63 | 4,060,904 | -4.7% |
-| **PowerTTLMap** | short TTL (1 ms, high eviction) | 24.61 | 4,063,041 | +1.7% |
-| **PowerEventBus** | 1 subscriber | 1.65 | 60,554,644 | +1.1% |
-| **PowerEventBus** | 10 subscribers | 6.04 | 16,556,286 | +1.9% |
-| **PowerEventBus** | 50 subscribers | 26.36 | 3,793,868 | +2.7% |
-| **PowerEventBus** | 100 subscribers | 49.23 | 2,031,457 | +0.2% |
-| **PowerDeadline** | success (task within deadline) | 6.24 | 801,553 | +11.4% |
-| **PowerDeadline** | abort (task exceeds 1 ms deadline) | 5516.23 | 906 | +3.0% |
-| **PowerSlidingWindow** | under capacity (all pass) | 11.14 | 8,973,321 | +1.8% |
-| **PowerSlidingWindow** | at capacity (~50% reject) | 10.54 | 9,488,115 | +2.6% |
-| **PowerQueue** | push x100000 + shift x100000 | 0.99 | 100,811,228 | -4.7% |
-| **PowerQueue** | interleaved push+shift (steady state) | 0.42 | 239,725,945 | +0.7% |
+| **PowerRateLimit** | under rate (all pass) | 20.06 | 4,984,558 | +1.5% |
+| **PowerRateLimit** | over rate (~50% reject) | 14.91 | 6,707,270 | +0.4% |
+| **PowerCircuit** | closed (happy path) | 1.66 | 12,078,491 | +13.9% |
+| **PowerCircuit** | open (fast-fail) | 40.69 | 491,521 | +1.2% |
+| **PowerRetry** | 1 attempt (no retry) | 1.27 | 7,876,106 | +17.5% |
+| **PowerRetry** | 2 attempts (1 retry, baseDelay=0) | 10785.72 | 927 | -0.6% |
+| **PowerSemaphore** | limit=1 (exclusive lock, serial) | 7.31 | 6,837,670 | +45.1% |
+| **PowerSemaphore** | limit=8 (concurrent pool) | 27.77 | 1,800,213 | +32.5% |
+| **PowerBulkhead** | 1 partition (baseline) | 20.96 | 954,088 | +17.9% |
+| **PowerBulkhead** | 2 partitions (critical vs background) | 23.67 | 844,973 | +28.8% |
+| **PowerBatch** | individual dispatch (maxSize=1) | 41.48 | 2,410,756 | +22.1% |
+| **PowerBatch** | coalesced dispatch (maxSize=ops) | 6.78 | 14,743,085 | +2.1% |
+| **PowerBackpressure** | no pressure (capacity >> ops) | 1.46 | 20,603,221 | -27.9% |
+| **PowerBackpressure** | with pressure (capacity=100) | 5.23 | 5,737,590 | -27.3% |
+| **PowerTTLMap** | long TTL (60 s, no eviction) | 25.03 | 3,995,836 | +1.6% |
+| **PowerTTLMap** | short TTL (1 ms, high eviction) | 24.06 | 4,156,272 | -2.2% |
+| **PowerEventBus** | 1 subscriber | 1.68 | 59,359,898 | +2.0% |
+| **PowerEventBus** | 10 subscribers | 5.91 | 16,910,614 | -2.1% |
+| **PowerEventBus** | 50 subscribers | 25.74 | 3,885,535 | -2.4% |
+| **PowerEventBus** | 100 subscribers | 49.37 | 2,025,339 | +0.3% |
+| **PowerDeadline** | success (task within deadline) | 5.66 | 884,138 | -9.3% |
+| **PowerDeadline** | abort (task exceeds 1 ms deadline) | 5361.75 | 933 | -2.8% |
+| **PowerSlidingWindow** | under capacity (all pass) | 15.50 | 6,451,959 | +39.1% |
+| **PowerSlidingWindow** | at capacity (~50% reject) | 14.38 | 6,955,753 | +36.4% |
+| **PowerQueue** | push x100000 + shift x100000 | 1.35 | 74,073,306 | +36.1% |
+| **PowerQueue** | interleaved push+shift (steady state) | 0.58 | 172,827,387 | +38.7% |
 
 
 ## Δ vs previous run
 
 _Pool/scenario: flagged when >±35% AND >±50 ms. Helpers: flagged when >±20% AND >±8 ms._
 
-_All results within thresholds — no significant changes detected._
+### Regressions
+
+| Key | prev (ms) | current (ms) | Δ |
+| :--- | ---: | ---: | ---: |
+| profiles/50% variable/optimizedPool/4 | 228.45 | 341.00 | **+49.3%** |
+| profiles/75% variable/optimizedPool/4 | 329.05 | 487.87 | **+48.3%** |
+| profiles/50% variable/pool/8 | 282.08 | 390.05 | **+38.3%** |
