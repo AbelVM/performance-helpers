@@ -73,7 +73,7 @@ The round-robin fallback doesn't forward `options`, so `zeroCopy` is silently ig
 - **Timer leaks:** `PowerPool` reaper + autoscale `setInterval`s keep the process alive. `shutdown()`/`terminate()` clear them (good), but any pool that is GC'd without explicit termination leaks intervals. Consider `WeakRef`/`FinalizationRegistry` finalization, or document "always terminate".
 - **`postMessage` with `correlationId` but no `awaitResponse`** (`powerPool.js:1473`) creates a pending promise that leaks until its timeout if the worker never echoes the id. Either require `awaitResponse` when a correlation id is supplied, or auto-cleanup.
 - **Feature detection gaps:** `FinalizationRegistry`, `WeakRef`, `queueMicrotask`, `ArrayBuffer` transfer, and `Symbol.dispose` require relatively modern runtimes, but `package.json` only declares `engines.node >= 16`. Add runtime feature-checks or bump/document the real minimums.
-  - ✅ **FIXED:** `package.json` `engines.node` bumped to `">=22.12.0"` (covers `Symbol.dispose` + `ArrayBuffer` transfer). Runtime feature-checks not added (out of scope).
+- ✅ **FIXED:** `package.json` `engines.node` bumped to `">=22.12.0"` (covers `Symbol.dispose` + `ArrayBuffer` transfer). Runtime feature-checks not added (out of scope).
 - **`PowerLatch.wait` + `signal`:** already handled, but `abort()` sets `_aborted` and future `wait()`s reject while in-flight ones are resolved via the signal handler — verify the handler is always registered *before* the race (it is, line 115-122). OK, just note the coupling.
 
 ---
