@@ -8,6 +8,14 @@
 
 ## Properties
 
+### defaultTTL?
+
+> `optional` **defaultTTL?**: `number`
+
+Default TTL in ms (0 = no expiry).
+
+***
+
 ### onExpire?
 
 > `optional` **onExpire?**: (`key`, `value`) => `void`

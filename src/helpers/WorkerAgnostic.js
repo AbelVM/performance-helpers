@@ -36,9 +36,17 @@ function _loadNodeRequire() {
     // builtin at build time. Only ever runs in a Node environment.
     // eslint-disable-next-line no-new-func
     _nodeRequirePromise = new Function('return import("node:module")')().then((m) => {
-      _nodeRequire = m.createRequire(
-        typeof import.meta !== 'undefined' ? import.meta.url : process.cwd() + '/'
-      );
+      let base;
+      try {
+        // Dynamic access so bundlers (CJS/UMD) don't statically parse
+        // `import.meta` and emit EMPTY_IMPORT_META warnings. In pure ESM Node
+        // this yields the module URL; in CJS/UMD `import.meta` is replaced with
+        // `{}` and we fall back to the current working directory.
+        base = new Function('return import.meta?.url')() || process.cwd() + '/';
+      } catch (e) {
+        base = process.cwd() + '/';
+      }
+      _nodeRequire = m.createRequire(base);
       return _nodeRequire;
     });
   }
@@ -96,41 +104,42 @@ const SUPPORTED_EVENTS = ['message', 'error', 'messageerror'];
  * @private
  */
 function resolveWorker(workerSource, options, env) {
-  // When a global `Worker` constructor is available (a browser, a Web Worker
-  // polyfill, or a runtime that aliases Node's worker_threads to `Worker` as
-  // the bench harness does) prefer it for string sources. This keeps callers
-  // that set `globalThis.Worker` (e.g. for tests or cross-runtime shims)
-  // transparently honored without environment-specific branching.
-  if (
-    typeof globalThis !== 'undefined' &&
-    typeof globalThis.Worker === 'function' &&
-    typeof workerSource === 'string'
-  ) {
-    return new globalThis.Worker(workerSource, options);
+  // A globally-available Worker constructor (a browser, a Web Worker polyfill,
+  // a runtime that aliases Node's worker_threads to `Worker` as the bench
+  // harness does, or a sandboxed/bundled context) can be used directly for
+  // string sources. We accept both `globalThis.Worker` and a bare `Worker`
+  // global so environments that expose the constructor without attaching it to
+  // `globalThis` still work transparently.
+  const GlobalWorker =
+    (typeof globalThis !== 'undefined' && globalThis.Worker) ||
+    (typeof Worker !== 'undefined' ? Worker : undefined);
+  if (typeof GlobalWorker === 'function' && typeof workerSource === 'string') {
+    return new GlobalWorker(workerSource, options);
   }
 
-  if (env === 'node') {
-    const Worker = getNodeWorkerCtor();
+  if (env === 'node' || env === 'browser' || env === 'webworker') {
+    const Worker = env === 'node' ? getNodeWorkerCtor() : undefined;
     if (typeof workerSource === 'function') {
       return createFromFunction(workerSource, Worker, options, env);
     }
     if (typeof workerSource === 'string') {
-      return new Worker(workerSource, options);
+      return env === 'node'
+        ? new Worker(workerSource, options)
+        : createWebWorkerFromString(workerSource, options);
     }
     throw new Error('Invalid workerSource: expected Worker factory or path string');
   }
 
-  if (env === 'browser' || env === 'webworker') {
-    if (typeof workerSource === 'function') {
-      return createFromFunction(workerSource, Worker, options, env);
-    }
-    if (typeof workerSource === 'string') {
-      return createWebWorkerFromString(workerSource, options);
-    }
-    throw new Error('Invalid workerSource: expected Worker factory or path string');
+  // Unknown environment: a caller-provided function workerSource is
+  // environment-agnostic (the caller supplies the worker implementation), so we
+  // can still construct it directly. String sources require a native Worker and
+  // cannot be resolved without knowing the runtime.
+  if (typeof workerSource === 'function') {
+    return createFromFunction(workerSource, undefined, options, 'unknown');
   }
-
-  throw new Error('Unsupported environment for WorkerAgnostic');
+  throw new Error(
+    'Unsupported environment for WorkerAgnostic: cannot resolve a string workerSource without a global Worker or a known runtime'
+  );
 }
 
 /**

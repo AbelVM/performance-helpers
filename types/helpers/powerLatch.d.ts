@@ -77,6 +77,7 @@ export class PowerLatch {
         signalHandler?: Function;
         signal?: AbortSignal;
     } | null;
+    _settleAll(settle: any): void;
     _resolveAll(): void;
     _rejectAll(err: any): void;
     /**

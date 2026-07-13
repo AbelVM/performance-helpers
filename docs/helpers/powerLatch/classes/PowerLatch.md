@@ -162,6 +162,22 @@ Number of remaining counts.
 
 ***
 
+### \_settleAll()
+
+> **\_settleAll**(`settle`): `void`
+
+#### Parameters
+
+##### settle
+
+`any`
+
+#### Returns
+
+`void`
+
+***
+
 ### abort()
 
 > **abort**(`reason?`): `void`

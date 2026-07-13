@@ -159,6 +159,10 @@ export type PowerQueueOptions = {
  * Options for `PowerTTLMap`.
  */
 export type PowerTTLMapOptions = {
+    /**
+     * Default TTL in ms (0 = no expiry).
+     */
+    defaultTTL?: number | undefined;
     onExpire?: ((key: any, value: any) => void) | undefined;
 };
 /**

@@ -33,6 +33,21 @@ export class PowerPoolShutdownError extends Error {
  * const pool = new PowerPool(MinionWorker, { size: 4, idleTimeout: 30000 });
  * pool.onmessage = (e) => { logger.log(e.data); };
  * pool.postMessage({ payload: {} });
+ *
+ * @example <caption>Explicit Resource Management (Node >= 22.12 / modern browsers)</caption>
+ * // `Symbol.dispose` runs synchronously, so `using` hard-stops the pool at
+ * // scope exit. Prefer `await using` to drain in-flight work first.
+ * import MinionWorker from './worker.js?worker&inline'
+ * {
+ *   using pool = new PowerPool(MinionWorker, { size: 4 });
+ *   await pool.postMessage({ payload: {} }, undefined, { awaitResponse: true });
+ * } // pool.shutdown() is called here, synchronously
+ *
+ * // To drain pending tasks before terminating:
+ * {
+ *   await using pool = new PowerPool(MinionWorker, { size: 4 });
+ *   await pool.postMessage({ payload: {} }, undefined, { awaitResponse: true });
+ * } // pool[Symbol.asyncDispose]() drains then terminates
  */
 /**
  * PowerPool
@@ -44,7 +59,7 @@ export class PowerPoolShutdownError extends Error {
  * @public
  */
 export class PowerPool {
-    [x: number]: () => Promise<void>;
+    [x: number]: () => void;
     /**
      * Create a PowerPool.
      *
@@ -59,6 +74,7 @@ export class PowerPool {
      * @param {boolean} [options.taskQueue=true] - Whether to queue tasks when all workers are busy.
      * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
      * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
+     * @param {number} [options.slowTaskThreshold=Infinity] - Task duration (ms) above which a completed task is counted as "slow". When finite, `stats().performance.percentSlowTasks` reports the exact percentage of tasks exceeding this threshold. Defaults to `Infinity` (disabled; `percentSlowTasks` stays `0`).
      */
     constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined, ...args: any[]);
     _workerSource: string | Function;
@@ -77,6 +93,8 @@ export class PowerPool {
     _taskDurationsWelfordM2: number;
     _taskDurationsMin: number;
     _taskDurationsMax: number;
+    _slowTaskThreshold: number;
+    _slowTaskCount: number;
     _ewmaLatency: any;
     _autoScale: {
         enabled: boolean;
@@ -175,17 +193,6 @@ export class PowerPool {
      */
     private _encodeForTransfer;
     /**
-     * Prepare a transferable Uint8Array for the given object.
-     * Returns a new Uint8Array when `clone` is true (safe to transfer), or
-     * the cached Uint8Array when `clone` is false (do not transfer the returned buffer).
-     * @param {Object} obj
-     * @param {{clone?:boolean}=} options
-     * @returns {Uint8Array}
-     */
-    prepareBuffer(obj: Object, options?: {
-        clone?: boolean;
-    } | undefined): Uint8Array;
-    /**
      * Prepare an array of transferable buffers for a batch of items.
      * Each item may be a plain object, a TypedArray/ArrayBuffer view, or
      * an object `{ message, transfer? }`. The returned array contains
@@ -231,10 +238,11 @@ export class PowerPool {
     /**
      * Create a new worker instance using the configured source.
      *
-     * This helper normalizes the configured `workerSource` which may be a
-     * callable factory (constructor) or a string path. When a string path is
-     * provided it attempts to resolve a `baseUrl` at runtime in a bundler-safe
-     * manner and constructs a `Worker` accordingly. Throws when `workerSource`
+     * Worker creation is delegated to `WorkerAgnostic`, which transparently
+     * resolves the configured `workerSource` (a Worker constructor, a factory
+     * function, or a path/URL string) into the appropriate native worker for the
+     * current runtime — Node.js `worker_threads` or a Web Worker — without any
+     * environment-specific branching in this pool. Throws when `workerSource`
      * is neither a function nor a string.
      *
      * @private
@@ -432,7 +440,15 @@ export class PowerPool {
      * @private
      * @returns {void}
      */
-    private _emitIdle;
+    /**
+     * Build the idle event object. `stats` is computed lazily (via a getter) so
+     * the `getStats()` allocation (which maps over all workers) is skipped on
+     * idle transitions when no listener actually reads `ev.data.stats`.
+     * @private
+     * @returns {{data:{type:string,stats:object}}}
+     */
+    private _buildIdleEvent;
+    _emitIdle(): void;
     /**
      * Check current state and emit idle event if transitioning to idle.
      *

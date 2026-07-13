@@ -215,6 +215,7 @@ export class PowerPool {
    * @param {boolean} [options.taskQueue=true] - Whether to queue tasks when all workers are busy.
    * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
    * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
+   * @param {number} [options.slowTaskThreshold=Infinity] - Task duration (ms) above which a completed task is counted as "slow". When finite, `stats().performance.percentSlowTasks` reports the exact percentage of tasks exceeding this threshold. Defaults to `Infinity` (disabled; `percentSlowTasks` stays `0`).
    */
   constructor(workerSource, options = {}) {
     const hwConcurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
@@ -230,6 +231,7 @@ export class PowerPool {
       lazy = true,
       // default timeout (ms) applied to awaitResponse Promises when callers omit per-call timeout
       awaitResponseTimeout = DEFAULT_TIMEOUT_MS,
+      slowTaskThreshold = Infinity,
       autoScale = false,
     } = options;
     const maxTasksPerWorker =
@@ -263,6 +265,12 @@ export class PowerPool {
     this._taskDurationsWelfordM2 = 0;
     this._taskDurationsMin = Number.POSITIVE_INFINITY;
     this._taskDurationsMax = Number.NEGATIVE_INFINITY;
+    // Threshold (ms) above which a completed task is counted as "slow".
+    // `Infinity` disables slow-task counting so `percentSlowTasks` stays 0.
+    this._slowTaskThreshold = Number.isFinite(slowTaskThreshold)
+      ? Number(slowTaskThreshold)
+      : Infinity;
+    this._slowTaskCount = 0;
     // optional autoscaling configuration (disabled by default)
     this._ewmaLatency = null; // pool-level EWMA for recent task latency (ms)
     this._autoScale = null; // { enabled, intervalMs, targetMs, alpha, cooldownMs, hysteresis }
@@ -429,8 +437,6 @@ export class PowerPool {
       }
     }
   }
-
-  /* Node crypto dynamic import removed to avoid bundler externalization. */
 
   /**
    * Log debug information about swallowed errors when debug logging is enabled.
@@ -848,20 +854,6 @@ export class PowerPool {
   }
 
   /**
-   * Prepare a transferable Uint8Array for the given object.
-   * Returns a new Uint8Array when `clone` is true (safe to transfer), or
-   * the cached Uint8Array when `clone` is false (do not transfer the returned buffer).
-   * @param {Object} obj
-   * @param {{clone?:boolean}=} options
-   * @returns {Uint8Array}
-   */
-  prepareBuffer(obj, options = {}) {
-    const { clone = true } = options;
-    const shared = this._encodeForTransfer(obj);
-    return clone ? shared.slice() : shared;
-  }
-
-  /**
    * Prepare an array of transferable buffers for a batch of items.
    * Each item may be a plain object, a TypedArray/ArrayBuffer view, or
    * an object `{ message, transfer? }`. The returned array contains
@@ -1250,6 +1242,9 @@ export class PowerPool {
             this._taskDurationsWelfordM2 += delta * delta2;
             if (x < this._taskDurationsMin) this._taskDurationsMin = x;
             if (x > this._taskDurationsMax) this._taskDurationsMax = x;
+            if (Number.isFinite(this._slowTaskThreshold) && x > this._slowTaskThreshold) {
+              this._slowTaskCount = (this._slowTaskCount || 0) + 1;
+            }
           }
         } catch (err) {
           this._debugLog?.(err, 'worker.onmessage: latency tracking inner');
@@ -1302,8 +1297,6 @@ export class PowerPool {
      * - scale up: when EWMA > targetMs OR queue length exceeds worker count
      * - scale down: when EWMA < targetMs * 0.5 AND queue is empty
      */
-    // moved to prototype method: _autoScaleTick()
-
     // forward underlying events, decoding binary payloads to JS objects
     /**
      * Handle a raw message event from the underlying Worker and decode
@@ -2597,9 +2590,9 @@ export class PowerPool {
       average = this._taskDurationsWelfordMean;
       const variance = count > 1 ? this._taskDurationsWelfordM2 / count : 0;
       stddev = Math.sqrt(variance);
-      // percentSlowTasks cannot be computed exactly without retaining samples.
-      // For now report 0 when insufficient information is available.
-      percentSlowTasks = 0;
+      // Exact, O(1) percentage of completed tasks whose duration exceeded
+      // `slowTaskThreshold`. Stays 0 when the threshold is disabled (Infinity).
+      percentSlowTasks = count > 0 ? ((this._slowTaskCount || 0) / count) * 100 : 0;
     }
 
     return {

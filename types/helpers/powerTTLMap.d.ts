@@ -9,7 +9,10 @@
  */
 export class PowerTTLMap {
     /**
-     * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
+     * @param {number|PowerTTLMapOptions} [defaultTTL=0] Default TTL in milliseconds for keys set
+     *   without explicit ttl (0 = no expiry). Accepts either a positional number or an options
+     *   object `{ defaultTTL, onExpire }` for consistency with the other helpers.
+     * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
      */
     /**
      * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
@@ -22,13 +25,25 @@ export class PowerTTLMap {
     _nextExpiryAt: number;
     _nextExpiryDirty: boolean;
     /**
+     * Resolve a TTL argument that may be either a positional number or an
+     * options object `{ ttl }` (matching the `PowerCache.set` convention).
+     * @private
+     * @param {number|{ttl?:number}|undefined} ttl
+     * @param {number} fallback Default TTL when `ttl` is nullish.
+     * @returns {number} Resolved TTL in ms (0 = no expiry).
+     */
+    private _resolveTtl;
+    /**
      * Set a key with optional TTL (ms).
      * @param {any} key
      * @param {any} value
-     * @param {number} [ttl] TTL in milliseconds for this key.
+     * @param {number|{ttl?:number}} [ttl] TTL in milliseconds for this key. Accepts either a
+     *   positional number or an options object `{ ttl }` for consistency with `PowerCache.set`.
      * @returns {this}
      */
-    set(key: any, value: any, ttl?: number): this;
+    set(key: any, value: any, ttl?: number | {
+        ttl?: number;
+    }): this;
     /**
      * Internal: remove entry if expired; returns true if removed or missing.
      *
@@ -68,10 +83,12 @@ export class PowerTTLMap {
     /**
      * Refresh TTL for an existing key. No-op if missing/expired.
      * @param {any} key
-     * @param {number} [ttl]
+     * @param {number|{ttl?:number}} [ttl]
      * @returns {boolean} True when TTL refreshed.
      */
-    touch(key: any, ttl?: number): boolean;
+    touch(key: any, ttl?: number | {
+        ttl?: number;
+    }): boolean;
     /**
      * Number of non-expired entries (purges expired entries lazily).
      * @returns {number}

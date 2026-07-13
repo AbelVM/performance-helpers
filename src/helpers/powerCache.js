@@ -563,8 +563,12 @@ export class PowerCache {
       this._map.set(key, node);
       this._append(node);
       this._currentWeight += node.weight || 0;
-      this._evictIfNeeded();
     }
+    // Evict after both inserts and in-place updates. An update that grows an
+    // entry's weight can push the cache over `maxWeight`, and only the insert
+    // branch used to trigger eviction — leaving the cache permanently over
+    // budget until the next insert.
+    this._evictIfNeeded();
     return this;
   }
 

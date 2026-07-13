@@ -15,7 +15,7 @@ autoscaling, and lifecycle management. See constructor docs for options.
 
 ## Indexable
 
-> \[`key`: `number`\]: () => `Promise`\<`void`\>
+> \[`key`: `number`\]: () => `void`
 
 ## Constructors
 
@@ -230,6 +230,18 @@ whether queued dispatch is paused
 ### \_reaperInterval
 
 > **\_reaperInterval**: `number`
+
+***
+
+### \_slowTaskCount
+
+> **\_slowTaskCount**: `number`
+
+***
+
+### \_slowTaskThreshold
+
+> **\_slowTaskThreshold**: `number`
 
 ***
 
@@ -512,6 +524,16 @@ Whether queued dispatch is currently paused.
 
 ***
 
+### \_emitIdle()
+
+> **\_emitIdle**(): `void`
+
+#### Returns
+
+`void`
+
+***
+
 ### addEventListener()
 
 > **addEventListener**(`type`, `cb`): `void`
@@ -732,30 +754,6 @@ Optional options forwarded to each `postMessage` call.
 #### Throws
 
 When `items` is not an array.
-
-***
-
-### prepareBuffer()
-
-> **prepareBuffer**(`obj`, `options?`): `Uint8Array`\<`ArrayBufferLike`\>
-
-Prepare a transferable Uint8Array for the given object.
-Returns a new Uint8Array when `clone` is true (safe to transfer), or
-the cached Uint8Array when `clone` is false (do not transfer the returned buffer).
-
-#### Parameters
-
-##### obj
-
-`Object`
-
-##### options?
-
-\{ `clone?`: `boolean`; \} \| `undefined`
-
-#### Returns
-
-`Uint8Array`\<`ArrayBufferLike`\>
 
 ***
 

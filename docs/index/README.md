@@ -6,11 +6,21 @@
 
 # index
 
+## Classes
+
+- [WorkerAgnostic](classes/WorkerAgnostic.md)
+
 ## References
 
 ### b2o
 
 Re-exports [b2o](../helpers/powerBuffer/functions/b2o.md)
+
+***
+
+### detectEnv
+
+Re-exports [detectEnv](../helpers/WorkerAgnostic/functions/detectEnv.md)
 
 ***
 
@@ -209,6 +219,18 @@ Re-exports [PowerTimedCache](../helpers/powerCache/classes/PowerTimedCache.md)
 ### PowerTTLMap
 
 Re-exports [PowerTTLMap](../helpers/powerTTLMap/classes/PowerTTLMap.md)
+
+***
+
+### preloadNode
+
+Re-exports [preloadNode](../helpers/WorkerAgnostic/functions/preloadNode.md)
+
+***
+
+### simpleArgsKey
+
+Re-exports [simpleArgsKey](../helpers/powerCache/functions/simpleArgsKey.md)
 
 ***
 

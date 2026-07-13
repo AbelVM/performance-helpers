@@ -45,9 +45,14 @@ export class PowerRateLimit {
 
   /**
    * Try to consume `n` tokens across all limiters. Returns true only when
-   * every underlying limiter allows consumption. This method first performs
-   * a non-mutating availability check when `available()` is present; if all
+   * every underlying limiter allows consumption. This method first performs a
+   * best-effort availability pre-check using `available()` when present; if all
    * checks pass it then performs the actual `tryConsume` calls to commit.
+   * Note: some limiters' `available()` also advances internal state (e.g.
+   * `PowerThrottle` refills tokens, `PowerSlidingWindow` prunes expired
+   * timestamps). The pre-check and the commit run synchronously within the
+   * same tick, so results stay consistent — but `available()` is not strictly
+   * read-only.
    *
    * Note: when a limiter does not implement `available()` this method falls
    * back to calling `tryConsume` directly which may partially mutate state

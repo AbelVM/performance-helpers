@@ -95,12 +95,15 @@ export class PowerSubscriberSet {
     } catch (e) {
       // ignore environments that disallow setting properties on functions
     }
-    this._onceMap.set(fn, wrapped);
+    // Enforce maxListeners before mutating state so a rejected addOnce does
+    // not leave a dangling `_onceMap` entry that a later `delete(fn)` would
+    // resolve to a wrapper no longer present in `_listeners`.
     if (this._maxListeners > 0 && this.size + 1 > this._maxListeners) {
       throw new Error(
         `PowerSubscriberSet: adding listener exceeds maxListeners (${this._maxListeners})`
       );
     }
+    this._onceMap.set(fn, wrapped);
     const entry = this._makeEntry(wrapped);
     this._listeners.add(entry);
     return () => this.delete(fn);

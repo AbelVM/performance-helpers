@@ -46,6 +46,11 @@ export class PowerDeadline {
 
     const startedAt = nowMs();
     const deadlineAt = deadlineMs !== null ? startedAt + deadlineMs : null;
+    // Controller whose signal is folded into the user fn's signal so that when
+    // the total deadline fires we can abort in-flight work instead of leaving
+    // it running after the operation has already been rejected.
+    const deadlineController =
+      deadlineAt !== null && typeof AbortController !== 'undefined' ? new AbortController() : null;
 
     const createAbortPromise = () => {
       if (!signal) return null;
@@ -79,7 +84,10 @@ export class PowerDeadline {
       // Signal handed to the user's fn: aborts on external abort and/or on the
       // per-attempt timeout signal provided by PowerRetry, so callers can stop
       // in-flight work instead of leaving it running after a timeout fires.
-      const userSignal = combineSignals(signal, retrySignal);
+      const userSignal = combineSignals(
+        signal,
+        combineSignals(retrySignal, deadlineController ? deadlineController.signal : null)
+      );
       const abortPromise = createAbortPromise();
       const candidates = [Promise.resolve().then(() => fn(userSignal))];
       const cleanups = [];
@@ -89,6 +97,15 @@ export class PowerDeadline {
         let clearTotalTimeout;
         const p = new Promise((_, reject) => {
           const timer = setTimeout(() => {
+            // Abort the user fn's signal so in-flight work can stop instead of
+            // leaking after the deadline has already rejected the operation.
+            if (deadlineController) {
+              try {
+                deadlineController.abort();
+              } catch (e) {
+                /* ignore */
+              }
+            }
             const err = new Error('Deadline exceeded');
             err.code = 'EDEADLINE';
             err.attempts = attempt;

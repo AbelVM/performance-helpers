@@ -281,9 +281,10 @@ Set a key with optional TTL (ms).
 
 ##### ttl?
 
-`number`
+`number` \| \{ `ttl?`: `number`; \}
 
-TTL in milliseconds for this key.
+TTL in milliseconds for this key. Accepts either a
+  positional number or an options object `{ ttl }` for consistency with `PowerCache.set`.
 
 #### Returns
 
@@ -305,7 +306,7 @@ Refresh TTL for an existing key. No-op if missing/expired.
 
 ##### ttl?
 
-`number`
+`number` \| \{ `ttl?`: `number`; \}
 
 #### Returns
 

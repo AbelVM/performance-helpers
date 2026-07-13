@@ -238,7 +238,7 @@ await worker.terminate();
 
 2. **Transparency covers creation and messaging, not your worker's internals.**
    `WorkerAgnostic` spawns the correct native worker and unifies the API, but the
-   worker *source file* you write must still be valid for its target runtime
+   worker _source file_ you write must still be valid for its target runtime
    (Node `worker_threads` uses `parentPort`; a browser worker uses
    `self.onmessage`). It does not transpile worker code between environments.
 

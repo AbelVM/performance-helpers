@@ -33,6 +33,7 @@
 - [helpers/powerSubscriberSet](helpers/powerSubscriberSet/README.md)
 - [helpers/powerThrottle](helpers/powerThrottle/README.md)
 - [helpers/powerTTLMap](helpers/powerTTLMap/README.md)
+- [helpers/WorkerAgnostic](helpers/WorkerAgnostic/README.md)
 - [index](index/README.md)
 - [utils/errors](utils/errors/README.md)
 - [utils/now](utils/now/README.md)

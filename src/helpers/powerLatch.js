@@ -179,7 +179,7 @@ export class PowerLatch {
     return waiter;
   }
 
-  _resolveAll() {
+  _settleAll(settle) {
     const waiters = this._waiters;
     this._waiters = new Map();
     for (const w of waiters.values()) {
@@ -192,31 +192,19 @@ export class PowerLatch {
             /* swallow */
           }
         }
-        w.defer.resolve();
+        settle(w.defer);
       } catch (e) {
         /* swallow */
       }
     }
   }
 
+  _resolveAll() {
+    this._settleAll((defer) => defer.resolve());
+  }
+
   _rejectAll(err) {
-    const waiters = this._waiters;
-    this._waiters = new Map();
-    for (const w of waiters.values()) {
-      try {
-        if (w.timer) clearTimeout(w.timer);
-        if (w.signalHandler && typeof w.signal?.removeEventListener === 'function') {
-          try {
-            w.signal.removeEventListener('abort', w.signalHandler);
-          } catch (e) {
-            /* swallow */
-          }
-        }
-        w.defer.reject(err);
-      } catch (e) {
-        /* swallow */
-      }
-    }
+    this._settleAll((defer) => defer.reject(err));
   }
 
   /**
