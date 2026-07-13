@@ -92,6 +92,22 @@ describe('powerBuffer', () => {
     expect(() => u82o('not-a-buffer')).toThrow(TypeError);
   });
 
+  it('o2u8 uses a pre-stringified value when provided (avoids re-stringify)', async () => {
+    const { o2u8, u82o } = await import('../src/helpers/powerBuffer.js');
+    const obj = { a: 1 };
+    const pre = JSON.stringify({ a: 2 }); // intentionally different
+    const u8 = o2u8(obj, pre);
+    // The encoded bytes must reflect `pre`, not a fresh JSON.stringify(obj).
+    expect(u82o(u8)).toEqual({ a: 2 });
+  });
+
+  it('o2u8 ignores preStringified for non-plain objects (Uint8Array passthrough)', async () => {
+    const { o2u8 } = await import('../src/helpers/powerBuffer.js');
+    const ua = new Uint8Array([4, 5, 6]);
+    const out = o2u8(ua, '{"ignored":true}');
+    expect(out).toBe(ua);
+  });
+
   it('throws when no encoder/decoder available (simulated)', async () => {
     // reload module with globals removed so getEncoder/getDecoder return null
     vi.resetModules();

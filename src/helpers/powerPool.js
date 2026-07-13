@@ -175,6 +175,21 @@ export class PowerPoolShutdownError extends Error {
  * const pool = new PowerPool(MinionWorker, { size: 4, idleTimeout: 30000 });
  * pool.onmessage = (e) => { logger.log(e.data); };
  * pool.postMessage({ payload: {} });
+ *
+ * @example <caption>Explicit Resource Management (Node >= 22.12 / modern browsers)</caption>
+ * // `Symbol.dispose` runs synchronously, so `using` hard-stops the pool at
+ * // scope exit. Prefer `await using` to drain in-flight work first.
+ * import MinionWorker from './worker.js?worker&inline'
+ * {
+ *   using pool = new PowerPool(MinionWorker, { size: 4 });
+ *   await pool.postMessage({ payload: {} }, undefined, { awaitResponse: true });
+ * } // pool.shutdown() is called here, synchronously
+ *
+ * // To drain pending tasks before terminating:
+ * {
+ *   await using pool = new PowerPool(MinionWorker, { size: 4 });
+ *   await pool.postMessage({ payload: {} }, undefined, { awaitResponse: true });
+ * } // pool[Symbol.asyncDispose]() drains then terminates
  */
 /**
  * PowerPool
@@ -790,7 +805,10 @@ export class PowerPool {
         }
         return hit;
       }
-      const u8 = o2u8(obj);
+      // Reuse the already-computed JSON string `s` as the cache key AND as the
+      // source for encoding, so we don't `JSON.stringify` the message twice on
+      // a cache miss (o2u8 would otherwise re-stringify internally).
+      const u8 = o2u8(obj, s);
       // Evict least-recently-used (oldest insertion) when over entry-count
       // limit or when adding this entry would exceed the byte-size limit.
       const willBeBytes = u8?.byteLength || 0;
@@ -2424,8 +2442,33 @@ export class PowerPool {
    * @private
    * @returns {void}
    */
+  /**
+   * Build the idle event object. `stats` is computed lazily (via a getter) so
+   * the `getStats()` allocation (which maps over all workers) is skipped on
+   * idle transitions when no listener actually reads `ev.data.stats`.
+   * @private
+   * @returns {{data:{type:string,stats:object}}}
+   */
+  _buildIdleEvent() {
+    const self = this;
+    let stats;
+    let computed = false;
+    return {
+      data: {
+        type: 'pool:idle',
+        get stats() {
+          if (!computed) {
+            stats = self.getStats();
+            computed = true;
+          }
+          return stats;
+        },
+      },
+    };
+  }
+
   _emitIdle() {
-    const ev = { data: { type: 'pool:idle', stats: this.getStats() } };
+    const ev = this._buildIdleEvent();
     this._isIdle = true;
     if (this._onmessage) {
       try {
@@ -2618,7 +2661,7 @@ export class PowerPool {
       const queueEmpty = this.queue.length === 0;
       const allWorkersIdle = this._activeTasks === 0;
       if (allWorkersIdle && queueEmpty) {
-        const ev = { data: { type: 'pool:idle', stats: this.getStats() } };
+        const ev = this._buildIdleEvent();
         try {
           cb(ev);
         } catch (err) {
@@ -2685,7 +2728,7 @@ export class PowerPool {
       const queueEmpty = this.queue.length === 0;
       const allWorkersIdle = this._activeTasks === 0;
       if (allWorkersIdle && queueEmpty) {
-        const ev = { data: { type: 'pool:idle', stats: this.getStats() } };
+        const ev = this._buildIdleEvent();
         try {
           cb(ev);
         } catch (err) {

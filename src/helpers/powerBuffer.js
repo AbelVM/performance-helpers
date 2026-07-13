@@ -75,11 +75,13 @@ function getDecoder() {
  * @throws {Error} When no encoder is available.
  * @public
  */
-export const o2u8 = (obj) => {
+export const o2u8 = (obj, preStringified) => {
   if (obj instanceof Uint8Array) return obj;
   if (ArrayBuffer.isView(obj)) return new Uint8Array(obj.buffer, obj.byteOffset, obj.byteLength);
   if (obj instanceof ArrayBuffer) return new Uint8Array(obj);
-  const str = JSON.stringify(obj);
+  // Allow callers to pass a pre-computed JSON string (e.g. when the same
+  // string is also used as a cache key) to avoid a redundant `JSON.stringify`.
+  const str = preStringified != null ? preStringified : JSON.stringify(obj);
   const enc = getEncoder();
   if (typeof enc?.encode === 'function') return enc.encode(str);
   throw new Error('No TextEncoder or Buffer available to encode object');

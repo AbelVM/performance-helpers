@@ -56,8 +56,12 @@ The round-robin fallback doesn't forward `options`, so `zeroCopy` is silently ig
 ## 2. Performance improvements
 
 - **`PowerPool._findLeastLoadedWorker` is O(n) per dispatch** (`powerPool.js:1416`). For large pools this is the hot path. Maintain a min-heap (or a small bounded candidate set) keyed by `(tasks, latencyEwma)` for O(log n) selection.
+  - ⬜ **DEFERRED:** a correct O(log n) heap needs an index-aware structure with `decreaseKey` (workers' `tasks`/`latencyEwma` change on every dispatch). A naive per-dispatch heap rebuild is still O(n), and a buggy heap would corrupt load-balancing. The linear scan is acceptable for typical pool sizes (tens of workers); revisit only if large-pool benchmarks show it as a bottleneck.
 - **`PowerPool.getStats()` allocates `this.workers.map(...)` on every idle transition** (`powerPool.js:2514`), and `addEventListener('idle')` / `_emitIdle()` both call `getStats()`. Idle can fire frequently. Avoid the allocation when no consumer needs the payload, or cache and only recompute on change.
+  - ✅ **FIXED:** idle events now build via `_buildIdleEvent()`, where `stats` is a lazy getter. `getStats()` is only invoked when a listener actually reads `ev.data.stats`, so idle transitions with no stats consumer skip the `workers.map(...)` allocation. Verified by `test/powerPool.encodeCache.test.js`.
 - **`_encodeForTransfer` uses the full `JSON.stringify` output as the cache key** (`powerPool.js:765`). For large messages the key itself is memory-heavy and you pay the stringify twice (once for the key, once for the encode). A fast non-crypto hash (FNV-1a) over the JSON string would cut memory and keep the cache.
+  - ✅ **PARTIAL:** removed the double `JSON.stringify` — `o2u8(obj, s)` now accepts the pre-computed JSON string (the cache key) and reuses it for encoding, so a cache miss stringifies `obj` once instead of twice. Verified by `test/powerPool.encodeCache.test.js`.
+  - ⬜ **DEFERRED (hash key):** replacing the full-string key with an FNV-1a hash was considered but **not** done — a hash collision would return a *wrong* cached `Uint8Array`, causing silent worker decode corruption (not just a perf regression). A collision-safe hash would require storing the original string for verification, which negates the memory saving. Keep the full-string key.
 - **`PowerCache.deepEqual` Set branch** (`powerCache.js:1279-1374`) degrades to O(n²) with the signature-based fallback for non-primitive Sets. Document the worst case or special-case common shapes.
 - **`nowMs()` is invoked per message and per receipt** — acceptable, but several internal methods re-call it when a single captured timestamp would do (e.g. `_dispatchQueuedTasks` calls `nowMs()` once — good; `_postToWorkerObj` is fine). Keep the "capture once" pattern everywhere.
 - **`PowerQueue._grow()`** reallocates + copies the whole backing array. For bursty producers consider growing by a larger factor or a hysteresis band to reduce growth churn.
@@ -93,6 +97,7 @@ The round-robin fallback doesn't forward `options`, so `zeroCopy` is silently ig
 
 - **Typedoc + JSDoc is good**, but the public `index.js` re-exports only a subset; `simpleArgsKey` (see §6) is exported from its module yet unreachable from the package root. Make the public surface intentional and documented.
 - **Add a `PowerPool` "quick start" example** showing `using`/`await using` disposal, since the current `dispose` is broken (§1).
+  - ✅ **FIXED:** added a `using`/`await using` disposal example to the `PowerPool` class JSDoc.
 - **Document runtime minimums** (Node/ browser versions for `WeakRef`, `FinalizationRegistry`, `queueMicrotask`, `Symbol.dispose`) in README.
 - **A tiny `debug` story:** `PowerLogger` levels 0–3 are undocumented in the README; a table would help.
 
@@ -153,7 +158,7 @@ The round-robin fallback doesn't forward `options`, so `zeroCopy` is silently ig
 ### Summary of priorities
 1. **Fix now (correctness):** ✅ `Symbol.dispose` async bug, ✅ encode-cache buffer detach, ✅ deadline/retry not cancelling `fn`, ✅ `drain()` hang. All done and validated (514/514 tests pass).
 2. **Safe cleanups:** ✅ remove `constants` default export, ✅ surface `simpleArgsKey` in `index.js`, ⚠️ dead `emit` branch (reverted — broke a committed test), ⚠️ dangling JSDoc / stale comments (N/A — artifacts of a corrupted working copy, absent from clean HEAD).
-3. **Perf:** ⬜ worker min-heap, ⬜ avoid `getStats` allocation on idle, ⬜ hash-based encode cache key. (Out of scope for this pass.)
-4. **Consistency/DX:** ⬜ unify `set`/constructor shapes, ✅ document runtime minimums via `engines.node >= 22.12.0`, ⬜ add `using` example. Tests for disposal/transfer paths added (`test/powerPool.dispose.test.js`, `test/powerPool.workerWrapper.test.js`, `test/powerPool.drain.test.js`, `test/powerRetry.attemptTimeout.test.js`, `test/powerDeadline.test.js`, `test/packageExports.test.js`).
+3. **Perf:** ⬜ worker min-heap (deferred — see §2), ✅ avoid `getStats` allocation on idle (lazy getter in `_buildIdleEvent`), ⬜ hash-based encode cache key (deferred — collision risk; replaced by double-stringify avoidance, see §2).
+4. **Consistency/DX:** ⬜ unify `set`/constructor shapes, ✅ document runtime minimums via `engines.node >= 22.12.0`, ✅ add `using` example (JSDoc). Tests for disposal/transfer paths added (`test/powerPool.dispose.test.js`, `test/powerPool.workerWrapper.test.js`, `test/powerPool.drain.test.js`, `test/powerRetry.attemptTimeout.test.js`, `test/powerDeadline.test.js`, `test/packageExports.test.js`); encode-cache/lazy-stats tests added (`test/powerPool.encodeCache.test.js`, `test/powerBuffer.test.js`).
 
-All 514 tests pass (was 505 at audit time; 9 new tests added for the fixes). Changes were made behind current behavior and re-validated with `npm test`.
+All 519 tests pass (was 505 at audit time; 14 new tests added for the fixes + perf/DX). Changes were made behind current behavior and re-validated with `npm test`.
