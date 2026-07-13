@@ -60,15 +60,32 @@ export class PowerRetry {
 
     let lastErr;
     for (let attempt = 1; attempt <= attempts; attempt++) {
+      // When a per-attempt timeout is configured, create an AbortController and
+      // hand its signal to `fn` so callers can stop in-flight work on timeout
+      // (mirrors the `fetch(url, { signal })` contract). The signal is aborted
+      // only if the attempt actually times out; successful attempts leave it
+      // untouched so `fn` can finish cleanly.
+      let controller = null;
+      let signal = undefined;
+      if (
+        typeof attemptTimeout === 'number' &&
+        attemptTimeout > 0 &&
+        typeof AbortController !== 'undefined'
+      ) {
+        controller = new AbortController();
+        signal = controller.signal;
+      }
       try {
-        const attemptPromise = (async () => fn())();
-        if (typeof attemptTimeout === 'number' && attemptTimeout > 0) {
+        const attemptPromise = (async () => fn(signal))();
+        if (controller) {
           let timer;
+          let timedOut = false;
           try {
             return await Promise.race([
               attemptPromise,
               new Promise((_, rej) => {
                 timer = setTimeout(() => {
+                  timedOut = true;
                   const err = new Error('Attempt timed out');
                   err.code = 'ETIMEOUT';
                   err.attempts = attempt;
@@ -79,6 +96,13 @@ export class PowerRetry {
             ]);
           } finally {
             if (timer) clearTimeout(timer);
+            if (timedOut && controller) {
+              try {
+                controller.abort();
+              } catch (e) {
+                /* ignore abort errors */
+              }
+            }
           }
         }
         return await attemptPromise;

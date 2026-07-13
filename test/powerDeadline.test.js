@@ -137,4 +137,39 @@ describe('PowerDeadline', () => {
       )
     ).rejects.toMatchObject({ code: 'EDEADLINE' });
   });
+
+  it('passes an AbortSignal to fn that aborts on attemptTimeout', async () => {
+    let receivedSignal = null;
+    const fn = (signal) => {
+      receivedSignal = signal;
+      // never resolves -> the attempt times out
+      return new Promise(() => {});
+    };
+
+    await expect(
+      PowerDeadline.run(fn, { maxAttempts: 1, attemptTimeout: 20 })
+    ).rejects.toHaveProperty('code', 'ETIMEOUT');
+
+    expect(receivedSignal).toBeTruthy();
+    expect(receivedSignal.aborted).toBe(true);
+  });
+
+  it('passes an AbortSignal to fn that aborts on external abort', async () => {
+    let receivedSignal = null;
+    const controller = new AbortController();
+    const fn = (signal) => {
+      receivedSignal = signal;
+      return new Promise(() => {});
+    };
+
+    const promise = PowerDeadline.run(fn, {
+      signal: controller.signal,
+      attemptTimeout: 1000,
+    });
+    controller.abort('external cancel');
+
+    await expect(promise).rejects.toHaveProperty('code', 'EABORT');
+    expect(receivedSignal).toBeTruthy();
+    expect(receivedSignal.aborted).toBe(true);
+  });
 });

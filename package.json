@@ -1,6 +1,6 @@
 {
   "name": "performance-helpers",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Performance toolbox",
   "keywords": [
     "node",
@@ -212,7 +212,7 @@
     "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.2",

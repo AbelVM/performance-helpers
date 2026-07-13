@@ -21,6 +21,24 @@ describe('PowerPool disposal hooks', () => {
     expect(pool._activeTasks).toBe(0);
   });
 
+  it('Symbol.dispose is synchronous (returns undefined, not a Promise)', () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = () => {};
+        this.terminate = jestFn();
+      }
+    }
+
+    const pool = new PowerPool(MockUnderlying, { size: 1, idleTimeout: 1000 });
+    // `using` statements call Symbol.dispose and do NOT await it, so it must
+    // be synchronous. Returning a Promise would leak in-flight work.
+    const res = pool[Symbol.dispose]();
+    expect(res).toBeUndefined();
+    expect(pool.workers.length).toBe(0);
+    expect(pool._activeTasks).toBe(0);
+  });
+
   it('Symbol.asyncDispose drains then terminates', async () => {
     class MockUnderlying {
       constructor() {

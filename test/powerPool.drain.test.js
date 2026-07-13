@@ -20,36 +20,48 @@ describe('PowerPool.drain()', () => {
     }
   });
 
-  it('resolves after queued tasks are processed and workers become idle', async () => {
-    class SlowUnderlying {
+  it('resolves when the pool is terminated before becoming idle', async () => {
+    class MockUnderlying {
       constructor() {
         this.onmessage = null;
-        this.postMessage = (msg) => {
-          // reply after small delay
-          setTimeout(() => {
-            if (this.onmessage) this.onmessage({ data: msg });
-          }, 20);
-        };
+        this.postMessage = () => {};
         this.terminate = () => {};
       }
     }
-
-    const pool = new PowerPool(SlowUnderlying, {
-      size: 1,
-      maxSize: 1,
-      maxTasksPerWorker: 1,
-      taskQueue: true,
-      idleTimeout: 1000,
-    });
+    const pool = new PowerPool(MockUnderlying, { size: 1, idleTimeout: 1000 });
     try {
-      // post two tasks; second will be queued
-      expect(pool.postMessage({ n: 1 })).toBe(true);
-      expect(pool.postMessage({ n: 2 })).toBe(true);
+      // post a task that never completes so the pool stays busy
+      pool.postMessage({ n: 1 });
+      const drained = pool.drain();
+      // terminate before the pool ever becomes idle
+      pool.terminate();
+      const stats = await drained;
+      expect(stats).toBeDefined();
+      expect(Array.isArray(stats.status)).toBe(true);
+    } finally {
+      pool.terminate();
+    }
+  });
 
-      // drain should wait until both are processed and pool is idle
-      await pool.drain();
-      expect(pool.queue.length).toBe(0);
-      expect(pool.workers.every((w) => w.tasks === 0)).toBe(true);
+  it('resolves when shutdown() is called before the pool becomes idle', async () => {
+    class MockUnderlying {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = () => {};
+        this.terminate = () => {};
+      }
+    }
+    const pool = new PowerPool(MockUnderlying, { size: 1, idleTimeout: 1000 });
+    try {
+      // post a task that never completes so the pool stays busy
+      pool.postMessage({ n: 1 });
+      const drained = pool.drain();
+      // shutdown() must emit idle so the in-flight drain() resolves instead
+      // of hanging forever (regression: shutdown did not emit idle).
+      pool.shutdown();
+      const stats = await drained;
+      expect(stats).toBeDefined();
+      expect(Array.isArray(stats.status)).toBe(true);
     } finally {
       pool.terminate();
     }

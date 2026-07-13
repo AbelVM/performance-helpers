@@ -66,7 +66,7 @@ export class PowerDeadline {
       return { promise, cleanup };
     };
 
-    const wrapAttempt = async (attempt) => {
+    const wrapAttempt = async (attempt, retrySignal) => {
       const attemptStarted = nowMs();
       if (deadlineAt !== null && attemptStarted >= deadlineAt) {
         const err = new Error('Deadline exceeded');
@@ -76,8 +76,12 @@ export class PowerDeadline {
         throw err;
       }
 
+      // Signal handed to the user's fn: aborts on external abort and/or on the
+      // per-attempt timeout signal provided by PowerRetry, so callers can stop
+      // in-flight work instead of leaving it running after a timeout fires.
+      const userSignal = combineSignals(signal, retrySignal);
       const abortPromise = createAbortPromise();
-      const candidates = [Promise.resolve().then(() => fn())];
+      const candidates = [Promise.resolve().then(() => fn(userSignal))];
       const cleanups = [];
 
       if (deadlineAt !== null) {
@@ -141,9 +145,9 @@ export class PowerDeadline {
     }
 
     let attemptCounter = 0;
-    const attemptFn = async () => {
+    const attemptFn = async (retrySignal) => {
       attemptCounter += 1;
-      return wrapAttempt(attemptCounter);
+      return wrapAttempt(attemptCounter, retrySignal);
     };
 
     return PowerRetry.run(attemptFn, retryOptions);
@@ -176,6 +180,36 @@ const createAbortError = (reason, startedAt, deadlineMs) => {
   err.elapsedMs = nowMs() - startedAt;
   err.totalTimeout = deadlineMs;
   return err;
+};
+
+/**
+ * Combine zero, one, or two AbortSignals into a single signal for the user fn.
+ * The returned signal aborts if any of the provided signals abort. Returns
+ * `undefined` when no signals are supplied (so `fn` is called without one).
+ * @param {AbortSignal} [external]
+ * @param {AbortSignal} [retry]
+ * @returns {AbortSignal|undefined}
+ */
+const combineSignals = (external, retry) => {
+  if (!external && !retry) return undefined;
+  if (!external) return retry;
+  if (!retry) return external;
+  if (typeof AbortController === 'undefined') return external;
+  const controller = new AbortController();
+  const onAbort = () => {
+    try {
+      controller.abort();
+    } catch (e) {
+      /* ignore */
+    }
+  };
+  if (typeof external.addEventListener === 'function') {
+    external.addEventListener('abort', onAbort, { once: true });
+  }
+  if (typeof retry.addEventListener === 'function') {
+    retry.addEventListener('abort', onAbort, { once: true });
+  }
+  return controller.signal;
 };
 
 export default PowerDeadline;

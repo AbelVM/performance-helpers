@@ -28,4 +28,10 @@ describe('package exports', () => {
     expect(mod.normalizeError).toBeTypeOf('function');
     expect(mod.formatErrorObj).toBeTypeOf('function');
   });
+
+  it('exports simpleArgsKey from the root entry', async () => {
+    const mod = await import('performance-helpers');
+
+    expect(mod.simpleArgsKey).toBeTypeOf('function');
+  });
 });

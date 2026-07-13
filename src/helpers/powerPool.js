@@ -22,7 +22,7 @@ import { PowerEventBus } from './powerEventBus.js';
 import {
   DEFAULT_REAPER_MIN_INTERVAL_MS,
   ENCODE_CACHE_LARGE_KEY_LENGTH,
-  DEFAULT_CACHE_DEFAULT_TTL_MS,
+  DEFAULT_POOL_IDLE_TIMEOUT_MS,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_AUTOSCALE_MIN_INTERVAL_MS,
   DEFAULT_AUTOSCALE_INTERVAL_MS,
@@ -86,18 +86,23 @@ class WorkerWrapper {
     if (isPlainObject) {
       try {
         const u8 = this._pool._encodeForTransfer(message);
+        // Clone the encoded bytes before transferring. `_encodeForTransfer`
+        // may return a cached Uint8Array; transferring its buffer would detach
+        // (neuter) the cached instance, corrupting later cache hits. Slicing
+        // mirrors the safe handling in `_prepareForTransfer`.
+        const buf = u8.slice();
         // Efficiently ensure the encoded buffer is included in the transfer list
         if (!tr) {
-          tr = [u8.buffer];
+          tr = [buf.buffer];
         } else if (Array.isArray(tr)) {
-          if (!tr.includes(u8.buffer)) tr.push(u8.buffer);
+          if (!tr.includes(buf.buffer)) tr.push(buf.buffer);
         } else {
           // For array-like or other iterable transfer lists, convert once
           const arr = Array.from(tr);
-          if (!arr.includes(u8.buffer)) arr.push(u8.buffer);
+          if (!arr.includes(buf.buffer)) arr.push(buf.buffer);
           tr = arr;
         }
-        msg = u8;
+        msg = buf;
       } catch (err) {
         tr = transfer;
         msg = message;
@@ -204,7 +209,7 @@ export class PowerPool {
       maxSize = Math.max(size, hwConcurrency),
       workerOptions = {},
       maxTasksPerWorker: maxTasksPerWorkerOption,
-      idleTimeout = DEFAULT_CACHE_DEFAULT_TTL_MS,
+      idleTimeout = DEFAULT_POOL_IDLE_TIMEOUT_MS,
       taskQueue = true,
       queuePolicy = 'enqueue',
       lazy = true,
@@ -751,6 +756,11 @@ export class PowerPool {
     this.queue = new PowerQueue();
     this._queueHighCrossed = false;
     this._activeTasks = 0;
+
+    // Emit idle so any in-flight `drain()` promises resolve instead of
+    // hanging forever (the pool is now idle/terminated and will never
+    // dispatch the synthetic `pool:idle` event through the normal path).
+    this._updateIdleState();
   }
 
   /**
@@ -1580,7 +1590,7 @@ export class PowerPool {
     const fallback = this.workers[idx];
     try {
       const startTime = now;
-      const prepared = this._prepareForTransfer(message, transfer);
+      const prepared = this._prepareForTransfer(message, transfer, options);
       return this._postToWorkerObj(
         fallback,
         prepared,
@@ -2482,16 +2492,11 @@ export class PowerPool {
   /**
    * Synchronous disposal hook (TC39 Explicit Resource Management).
    * Allows `using`-style disposal when supported: `pool[Symbol.dispose]()`.
+   * Must be synchronous (returns `undefined`) so `using` blocks don't await
+   * and leak in-flight work; it performs a hard stop via `shutdown()`.
    */
-  async [Symbol.dispose]() {
-    // Prefer the async disposal path when available so callers can `using`-
-    // style dispose against an async cleanup routine. Fall back to
-    // synchronous terminate for older runtimes.
-    if (typeof this[Symbol.asyncDispose] === 'function') {
-      await this[Symbol.asyncDispose]();
-      return;
-    }
-    this.terminate();
+  [Symbol.dispose]() {
+    this.shutdown();
   }
 
   /**

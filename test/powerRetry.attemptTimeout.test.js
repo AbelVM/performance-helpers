@@ -48,4 +48,42 @@ describe('PowerRetry attemptTimeout', () => {
     expect(res).toBe('ok');
     expect(call).toBeGreaterThanOrEqual(2);
   });
+
+  it('passes an AbortSignal to fn and aborts it on timeout', async () => {
+    let receivedSignal = null;
+    const fn = (signal) => {
+      receivedSignal = signal;
+      // never resolves -> the attempt times out
+      return new Promise(() => {});
+    };
+
+    const opts = {
+      maxAttempts: 1,
+      attemptTimeout: 30,
+      backoff: 'fixed',
+      jitter: false,
+    };
+
+    await expect(PowerRetry.run(fn, opts)).rejects.toBeTruthy();
+    expect(receivedSignal).toBeTruthy();
+    expect(receivedSignal.aborted).toBe(true);
+  });
+
+  it('does not abort the fn signal on a successful attempt', async () => {
+    let receivedSignal = null;
+    const fn = (signal) => {
+      receivedSignal = signal;
+      return 'ok';
+    };
+
+    const res = await PowerRetry.run(fn, {
+      maxAttempts: 1,
+      attemptTimeout: 30,
+      backoff: 'fixed',
+      jitter: false,
+    });
+    expect(res).toBe('ok');
+    expect(receivedSignal).toBeTruthy();
+    expect(receivedSignal.aborted).toBe(false);
+  });
 });
