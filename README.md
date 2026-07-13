@@ -4,7 +4,7 @@
 
 ![logo](assets/logo.png)
 
-Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an LRU TTL cache with a memoizer, a fully-featured worker pool wrapper, a tiny runtime debug logger, and much more:
+Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an environment-agnostic worker abstraction (`WorkerAgnostic`), an LRU TTL cache with a memoizer, a fully-featured worker pool wrapper, a tiny runtime debug logger, and much more:
 
 ## Caching
 
@@ -194,6 +194,59 @@ UMD example (script tag):
   console.log(cache.get('a'));
 </script>
 ```
+
+## Worker support: Node and the browser
+
+`WorkerAgnostic` (re-exported from `performance-helpers/WorkerAgnostic`) gives you one
+transparent API for spawning and talking to a worker whether you are on Node.js
+(`worker_threads`) or in a browser / Web Worker context (Web Worker). `PowerPool`
+uses it under the hood, so the pool is environment-agnostic too.
+
+```javascript
+import WorkerAgnostic, { detectEnv, preloadNode } from 'performance-helpers/WorkerAgnostic';
+
+console.log(detectEnv()); // 'node' | 'browser' | 'webworker' | 'unknown'
+
+const worker = new WorkerAgnostic('./myWorker.js', { type: 'module' });
+worker.addEventListener('message', (ev) => console.log(ev.data));
+worker.postMessage({ hello: 'world' });
+await worker.terminate();
+```
+
+**What is transparent:**
+
+- Worker creation from a path string, a factory function, or a constructor — the
+  correct native worker is chosen for the runtime.
+- The event model (`addEventListener`/`removeEventListener` and Node-style
+  `on`/`off`) and `postMessage(message, transfer)` transfer lists.
+- Message payloads are normalized to `{ data }` (Node delivers the value
+  directly; Web Workers deliver a `MessageEvent` whose payload is on `.data`).
+- `terminate()` always returns a Promise.
+
+**Caveats you should know:**
+
+1. **Pure-ESM Node + string-source workers** need one `await preloadNode()` call
+   before constructing the worker (or set `globalThis.Worker`, or pass a factory
+   function). This is the only non-transparent seam. CJS/vitest, factory-function
+   sources, and all browser paths do **not** need it.
+
+   ```javascript
+   import WorkerAgnostic, { preloadNode } from 'performance-helpers/WorkerAgnostic';
+   await preloadNode();
+   const worker = new WorkerAgnostic('./myWorker.js', { type: 'module' });
+   ```
+
+2. **Transparency covers creation and messaging, not your worker's internals.**
+   `WorkerAgnostic` spawns the correct native worker and unifies the API, but the
+   worker *source file* you write must still be valid for its target runtime
+   (Node `worker_threads` uses `parentPort`; a browser worker uses
+   `self.onmessage`). It does not transpile worker code between environments.
+
+3. **Browser usage requires a bundler or an ESM CDN.** The package ships as raw
+   ESM source (no prebuilt UMD/browser bundle is required for the worker layer).
+   In a bundler or a `<script type="module">` from a CDN, `WorkerAgnostic`
+   resolves the worker URL against `import.meta.url` / `document.currentScript` /
+   `location.href` and falls back to the plain string.
 
 ## API docs
 

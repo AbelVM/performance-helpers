@@ -2,6 +2,7 @@
 export { o2b, o2u8, u82o, b2o } from './helpers/powerBuffer.js';
 export { PowerCache, PowerMemoizer, PowerTimedCache } from './helpers/powerCache.js';
 export { PowerPool } from './helpers/powerPool.js';
+export { default as WorkerAgnostic, detectEnv, preloadNode } from './helpers/WorkerAgnostic.js';
 export { PowerLogger } from './helpers/powerLogger.js';
 export { PowerThrottle } from './helpers/powerThrottle.js';
 export { PowerSlidingWindow } from './helpers/powerSlidingWindow.js';

@@ -14,6 +14,7 @@
  *
  */
 import { o2u8, u82o } from './powerBuffer.js';
+import WorkerAgnostic from './WorkerAgnostic.js';
 import { nowMs } from '../utils/now.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
@@ -1088,10 +1089,11 @@ export class PowerPool {
   /**
    * Create a new worker instance using the configured source.
    *
-   * This helper normalizes the configured `workerSource` which may be a
-   * callable factory (constructor) or a string path. When a string path is
-   * provided it attempts to resolve a `baseUrl` at runtime in a bundler-safe
-   * manner and constructs a `Worker` accordingly. Throws when `workerSource`
+   * Worker creation is delegated to `WorkerAgnostic`, which transparently
+   * resolves the configured `workerSource` (a Worker constructor, a factory
+   * function, or a path/URL string) into the appropriate native worker for the
+   * current runtime — Node.js `worker_threads` or a Web Worker — without any
+   * environment-specific branching in this pool. Throws when `workerSource`
    * is neither a function nor a string.
    *
    * @private
@@ -1099,58 +1101,10 @@ export class PowerPool {
    * @throws {Error} When `workerSource` is invalid or worker construction fails.
    */
   _createWorkerInstance() {
-    if (typeof this._workerSource === 'function') {
-      const source = this._workerSource;
-      if (source.prototype === undefined) {
-        // Arrow functions and bound functions are not constructable.
-        return source();
-      }
-      try {
-        return new source();
-      } catch (err) {
-        const msg = String(err?.message);
-        if (
-          err instanceof TypeError &&
-          /not a constructor|cannot be invoked without\s*'new'|Class constructor|not constructable/i.test(
-            msg
-          )
-        ) {
-          // Not constructable: try invoking as a factory function.
-          return source();
-        }
-        throw err;
-      }
-    }
-
-    if (typeof this._workerSource === 'string') {
-      let baseUrl;
-      try {
-        // Attempt to read `import.meta.url` at runtime using a dynamic
-        // function so bundlers won't statically parse `import.meta`.
-        // If unavailable this will throw or return undefined.
-        // eslint-disable-next-line no-new-func
-        baseUrl = new Function('try { return import.meta?.url } catch (e) { return undefined }')();
-      } catch (e) {
-        baseUrl = undefined;
-      }
-
-      if (!baseUrl && typeof document !== 'undefined') {
-        const cs = document.currentScript;
-        if (cs?.src) baseUrl = cs.src;
-      }
-
-      if (!baseUrl && typeof location !== 'undefined' && location.href) baseUrl = location.href;
-
-      try {
-        if (baseUrl) return new Worker(new URL(this._workerSource, baseUrl), this._workerOptions);
-      } catch (e) {
-        // Fallthrough to try creating a worker directly from the string
-      }
-
-      return new Worker(this._workerSource, this._workerOptions);
-    }
-
-    throw new Error('Invalid workerSource: expected Worker factory or relative path string');
+    // WorkerAgnostic.create resolves the source into the correct native worker
+    // for the current environment and preserves the same contract violations
+    // (throwing an `Invalid workerSource` error) that the pool relies on.
+    return WorkerAgnostic.create(this._workerSource, this._workerOptions);
   }
 
   _deleteWorkerUnderlyingMapping(workerObj) {

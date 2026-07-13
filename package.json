@@ -175,6 +175,11 @@
       "import": "./src/helpers/powerThrottle.js",
       "default": "./src/helpers/powerThrottle.js"
     },
+    "./WorkerAgnostic": {
+      "types": "./types/helpers/WorkerAgnostic.d.ts",
+      "import": "./src/helpers/WorkerAgnostic.js",
+      "default": "./src/helpers/WorkerAgnostic.js"
+    },
     "./powerTTLMap": {
       "types": "./types/helpers/powerTTLMap.d.ts",
       "import": "./src/helpers/powerTTLMap.js",
