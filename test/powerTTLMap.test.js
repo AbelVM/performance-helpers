@@ -104,6 +104,35 @@ describe('PowerTTLMap', () => {
     ]);
   });
 
+  it('accepts options-object form for set/touch (consistent with PowerCache.set)', async () => {
+    const m = new PowerTTLMap();
+    m.set('a', 1, { ttl: 20 });
+    expect(m.get('a')).toBe(1);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(m.get('a')).toBeUndefined();
+
+    m.set('b', 2);
+    expect(m.touch('b', { ttl: 20 })).toBe(true);
+    expect(m.get('b')).toBe(2);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(m.get('b')).toBeUndefined();
+  });
+
+  it('accepts options-object constructor form (defaultTTL + onExpire)', async () => {
+    const called = [];
+    const m = new PowerTTLMap({ defaultTTL: 10, onExpire: (k, v) => called.push([k, v]) });
+    m.set('o', 'val'); // uses defaultTTL from options
+    await new Promise((r) => setTimeout(r, 20));
+    void m.size; // trigger lazy purge
+    expect(called).toEqual([['o', 'val']]);
+  });
+
+  it('positional constructor still works (no regression)', () => {
+    const m = new PowerTTLMap(10);
+    m.set('p', 1);
+    expect(m.get('p')).toBe(1);
+  });
+
   it('supports non-expiring values and swallows onExpire callback errors', async () => {
     const m = new PowerTTLMap(0, {
       onExpire() {

@@ -128,6 +128,7 @@ export {};
 /**
  * Options for `PowerTTLMap`.
  * @typedef {Object} PowerTTLMapOptions
+ * @property {number} [defaultTTL] Default TTL in ms (0 = no expiry).
  * @property {(key:any,value:any)=>void} [onExpire]
  */
 

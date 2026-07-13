@@ -16,13 +16,21 @@ import { nowMs } from '../utils/now.js';
  */
 export class PowerTTLMap {
   /**
-   * @param {number} [defaultTTL=0] Default TTL in milliseconds for keys set without explicit ttl (0 = no expiry).
+   * @param {number|PowerTTLMapOptions} [defaultTTL=0] Default TTL in milliseconds for keys set
+   *   without explicit ttl (0 = no expiry). Accepts either a positional number or an options
+   *   object `{ defaultTTL, onExpire }` for consistency with the other helpers.
+   * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
    */
   /**
    * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
    */
   constructor(defaultTTL = 0, options = {}) {
-    this._defaultTTL = Number(defaultTTL) || 0; // milliseconds; 0 = no expiry
+    // Allow `new PowerTTLMap({ defaultTTL, onExpire })` (options-object convention).
+    if (defaultTTL != null && typeof defaultTTL === 'object') {
+      options = defaultTTL;
+      defaultTTL = 0;
+    }
+    this._defaultTTL = Number(options?.defaultTTL ?? defaultTTL) || 0; // ms; 0 = no expiry
     this._onExpire = typeof options?.onExpire === 'function' ? options.onExpire : null;
     this._map = new Map(); // key -> { value, expiresAt }
     // Track keys that have an expiry to allow faster purging of expired
@@ -33,14 +41,28 @@ export class PowerTTLMap {
   }
 
   /**
+   * Resolve a TTL argument that may be either a positional number or an
+   * options object `{ ttl }` (matching the `PowerCache.set` convention).
+   * @private
+   * @param {number|{ttl?:number}|undefined} ttl
+   * @param {number} fallback Default TTL when `ttl` is nullish.
+   * @returns {number} Resolved TTL in ms (0 = no expiry).
+   */
+  _resolveTtl(ttl, fallback) {
+    if (ttl != null && typeof ttl === 'object') ttl = ttl.ttl;
+    return ttl == null ? fallback : Number(ttl) || 0;
+  }
+
+  /**
    * Set a key with optional TTL (ms).
    * @param {any} key
    * @param {any} value
-   * @param {number} [ttl] TTL in milliseconds for this key.
+   * @param {number|{ttl?:number}} [ttl] TTL in milliseconds for this key. Accepts either a
+   *   positional number or an options object `{ ttl }` for consistency with `PowerCache.set`.
    * @returns {this}
    */
   set(key, value, ttl) {
-    const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
+    const ms = this._resolveTtl(ttl, this._defaultTTL);
     // add a small slack (+1ms) to account for timer scheduling jitter
     const expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
     const prevExpiry = this._expirations.get(key) || 0;
@@ -138,7 +160,7 @@ export class PowerTTLMap {
   /**
    * Refresh TTL for an existing key. No-op if missing/expired.
    * @param {any} key
-   * @param {number} [ttl]
+   * @param {number|{ttl?:number}} [ttl]
    * @returns {boolean} True when TTL refreshed.
    */
   touch(key, ttl) {
@@ -149,7 +171,7 @@ export class PowerTTLMap {
       return false;
     }
     const prevExpiry = entry.expiresAt || 0;
-    const ms = ttl == null ? this._defaultTTL : Number(ttl) || 0;
+    const ms = this._resolveTtl(ttl, this._defaultTTL);
     // add a small slack (+1ms) to account for timer scheduling jitter
     entry.expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
     if (entry.expiresAt) this._expirations.set(key, entry.expiresAt);
