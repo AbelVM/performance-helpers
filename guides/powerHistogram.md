@@ -2,7 +2,7 @@
 
 Lock-free in-process histogram for latency telemetry and approximate percentile estimation.
 
-`PowerHistogram` records latency values and derives percentile estimates without sorting or storing raw samples. It is built on a [DDSketch](https://dl.acm.org/doi/10.14778/3361349.3361381) (Masson, Rim & Lee, *PVLDB* 12(12):2195-2205, 2019) — the format OpenTelemetry uses for its own histogram aggregator.
+`PowerHistogram` records latency values and derives percentile estimates without sorting or storing raw samples. It is built on a [DDSketch](https://dl.acm.org/doi/10.14778/3361349.3361381) (Masson, Rim & Lee, _PVLDB_ 12(12):2195-2205, 2019) — the format OpenTelemetry uses for its own histogram aggregator.
 
 ## Why DDSketch
 
@@ -15,7 +15,7 @@ value(i) = 2 · gamma^i / (1 + gamma)
 
 That buys three things:
 
-- **A relative error bound.** Every quantile is within `relativeAccuracy` of the true value, at *any* magnitude. A fixed-bucket histogram only gives you a *rank* bound, which degrades badly exactly in the tail you care about.
+- **A relative error bound.** Every quantile is within `relativeAccuracy` of the true value, at _any_ magnitude. A fixed-bucket histogram only gives you a _rank_ bound, which degrades badly exactly in the tail you care about.
 - **An unbounded range.** There is no `maxValue` to exceed. `1e-300` and `1e300` are two buckets apart, not clamped.
 - **Exact merging.** Bucket indices are absolute, so a per-worker histogram merges into a global one. Rank-error sketches (t-digest, GK, KLL) are only one-way mergeable.
 
@@ -23,12 +23,12 @@ That buys three things:
 
 ## Constructor
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `relativeAccuracy` | `number` | `0.01` | Target relative error for every quantile, in `(0, 1)` exclusive. Smaller is more accurate and uses more buckets. |
-| `maxValue` | `number` | `10000` | **Advisory** upper bound. Values above it are stored faithfully and only counted in `outOfRangeCount`. |
-| `minValue` | `number` | `0` | **Advisory** lower bound. Values below it are stored faithfully and only counted in `belowRangeCount`. |
-| `bucketCount` | `number` | — | Legacy. Accepted so existing calls keep working; it no longer sizes a dense array. |
+| Option             |     Type | Default | Description                                                                                                      |
+| ------------------ | -------: | ------: | ---------------------------------------------------------------------------------------------------------------- |
+| `relativeAccuracy` | `number` |  `0.01` | Target relative error for every quantile, in `(0, 1)` exclusive. Smaller is more accurate and uses more buckets. |
+| `maxValue`         | `number` | `10000` | **Advisory** upper bound. Values above it are stored faithfully and only counted in `outOfRangeCount`.           |
+| `minValue`         | `number` |     `0` | **Advisory** lower bound. Values below it are stored faithfully and only counted in `belowRangeCount`.           |
+| `bucketCount`      | `number` |       — | Legacy. Accepted so existing calls keep working; it no longer sizes a dense array.                               |
 
 `relativeAccuracy` must be in `(0, 1)`; anything else throws a `TypeError`.
 
@@ -44,7 +44,7 @@ That buys three things:
 - `relativeAccuracy` — The configured bound.
 - `bucketCount` — Number of **occupied** buckets (not a fixed array size).
 - `outOfRangeCount`, `belowRangeCount` — How many values fell outside the advisory bounds.
-- `snapshot()` — Bucket counts from lowest to highest, leading entry being the zero bucket.
+- `snapshot()` — Bucket counts ordered lowest to highest. Layout: `[zero, ...buckets, inf?]`. The leading entry is the exact-zero count and the `+Infinity` bucket is **appended** when present. The counts always sum to `count`.
 
 ## Example
 
@@ -109,3 +109,6 @@ console.log('fleet p99', global.percentile(99));
 - Smaller `relativeAccuracy` means more buckets and slightly more work per record; `0.001` is a reasonable choice when you need a trustworthy `p99.9`.
 - `count`, `sum`, `mean`, `min` and `max` are **exact** — only the quantiles are estimated.
 - Because `maxValue` is now advisory, set it to the range you expect and alert on `outOfRangeCount > 0` if you want to catch a configuration that no longer matches reality.
+- **Quantiles are clamped into `[min, max]`.** A bucket's representative value is the midpoint of its multiplicative range, so the lowest non-zero bucket can report slightly below the true `min`. Without the clamp `percentile(0)` (which returns the exact `min`) came out _above_ `percentile(5)` — a visible non-monotonic p0 > p5 curve. Clamping is safe because `min` and `max` are exact, so the relative bound still holds.
+- **`percentile(1)` is the maximum, not the 1st percentile.** Any argument in `(0, 1]` is read as a _fraction_, so `1` means `1.0` = p100. Use `0.5` for p50 or `50` for p50 — both work, but `1` is the one to watch.
+- **A DDSketch bounds values, not ranks.** With a handful of samples, working out which rank a quantile lands on dominates and the effective value error approaches `2 x relativeAccuracy`. The bound tightens as the sample count grows.

@@ -230,11 +230,33 @@ export class PowerHistogram {
     let cumulative = this._zeroCount;
     for (let i = 0; i < sorted.length; i += 1) {
       cumulative += this._buckets.get(sorted[i]);
-      if (cumulative >= target) return this._value(sorted[i]);
+      if (cumulative >= target) return this._clamp(this._value(sorted[i]));
     }
     if (this._infCount > 0) return Number.POSITIVE_INFINITY;
     // Unreachable for a target <= count, but keep a defined return.
     return this._max;
+  }
+
+  /**
+   * Clamp an estimate into the exact observed `[min, max]` range.
+   *
+   * A bucket's representative value is the midpoint of its multiplicative
+   * range, so the lowest non-zero bucket can report a value slightly *below*
+   * the true `min`. Left alone that makes the quantile function
+   * non-monotonic - `percentile(0)` returns the exact `min` while
+   * `percentile(5)` returns the bucket midpoint beneath it, so a p0 > p5 curve
+   * is observable. Clamping to the exact bounds restores monotonicity and
+   * cannot break the relative bound, because `min`/`max` are exact.
+   *
+   * @param {number} value
+   * @returns {number}
+   * @private
+   */
+  _clamp(value) {
+    if (this._count === 0) return value;
+    if (value < this._min) return this._min;
+    if (value > this._max) return this._max;
+    return value;
   }
 
   /**
@@ -287,10 +309,12 @@ export class PowerHistogram {
    */
   snapshot() {
     const sorted = this._sortedIndexList();
-    const counts = new Array(sorted.length + (this._infCount > 0 ? 1 : 0));
-    counts[0] = this._zeroCount;
-    for (let i = 0; i < sorted.length; i += 1) counts[i + 1] = this._buckets.get(sorted[i]);
-    if (this._infCount > 0) counts[counts.length - 1] = this._infCount;
+    const counts = [this._zeroCount];
+    for (let i = 0; i < sorted.length; i += 1) counts.push(this._buckets.get(sorted[i]));
+    // The +Infinity bucket is *appended*. It used to be written into the last
+    // slot, which silently clobbered a real bucket whenever the sketch held
+    // both a +Inf and an indexed value.
+    if (this._infCount > 0) counts.push(this._infCount);
     return counts;
   }
 
