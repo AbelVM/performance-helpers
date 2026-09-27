@@ -116,6 +116,11 @@
       "import": "./src/helpers/powerMessageCodec.js",
       "default": "./src/helpers/powerMessageCodec.js"
     },
+    "./powerRealtimeHub": {
+      "types": "./types/helpers/powerRealtimeHub.d.ts",
+      "import": "./src/helpers/powerRealtimeHub.js",
+      "default": "./src/helpers/powerRealtimeHub.js"
+    },
     "./powerHistogram": {
       "types": "./types/helpers/powerHistogram.d.ts",
       "import": "./src/helpers/powerHistogram.js",

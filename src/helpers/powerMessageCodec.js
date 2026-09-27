@@ -177,14 +177,20 @@ function _frame(codecId, payload) {
  * which is what the sender meant. Framing pre-encoded JSON as `raw` would hand
  * the receiver a `Uint8Array` and lose the value.
  *
- * @param {Uint8Array} jsonBytes - UTF-8 JSON bytes.
+ * @param {Uint8Array|string} json - UTF-8 JSON bytes, or a JSON string to
+ *   encode first. A string is accepted because that is what a caller caching
+ *   the encoded form actually holds; passing a string here avoids the
+ *   double-encode that `o2u8(someJsonString)` would cause.
  * @returns {Uint8Array} A framed message with the `json` codec id.
  */
-export function frameEncodedJson(jsonBytes) {
-  if (!(jsonBytes instanceof Uint8Array)) {
-    throw new TypeError('PowerMessageCodec: frameEncodedJson() requires a Uint8Array');
+export function frameEncodedJson(json) {
+  if (typeof json === 'string') return _frame(CODECS.JSON, o2u8(null, json));
+  if (!(json instanceof Uint8Array)) {
+    throw new TypeError(
+      'PowerMessageCodec: frameEncodedJson() requires a Uint8Array or a JSON string'
+    );
   }
-  return _frame(CODECS.JSON, jsonBytes);
+  return _frame(CODECS.JSON, json);
 }
 
 /**

@@ -41,10 +41,13 @@ export function encodeMessage(value: any, options?: {
  * which is what the sender meant. Framing pre-encoded JSON as `raw` would hand
  * the receiver a `Uint8Array` and lose the value.
  *
- * @param {Uint8Array} jsonBytes - UTF-8 JSON bytes.
+ * @param {Uint8Array|string} json - UTF-8 JSON bytes, or a JSON string to
+ *   encode first. A string is accepted because that is what a caller caching
+ *   the encoded form actually holds; passing a string here avoids the
+ *   double-encode that `o2u8(someJsonString)` would cause.
  * @returns {Uint8Array} A framed message with the `json` codec id.
  */
-export function frameEncodedJson(jsonBytes: Uint8Array): Uint8Array;
+export function frameEncodedJson(json: Uint8Array | string): Uint8Array;
 /**
  * Decode a framed message.
  *
