@@ -32,6 +32,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Offload CPU-heavy or blocking work                                    | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control              |
 | Move structured values across a byte-stream transport                 | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary              |
 | Fan out to many subscribers without one slow client stalling the rest | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                          |
+| Push to a socket without unbounded client-side buffering              | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                     |
 | Process a very large iterable in parallel                             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle         |
 | Smooth bursts from producers                                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                      |
 | Limit concurrent async work globally                                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block          |
@@ -444,6 +445,10 @@ These two are a family and compose — see `assets/5_Realtime.md`.
   `decodeMessage(e.data).value` instead of `u82o(e.data)`.
 - `encodeNative`: for a `MessagePort` or `Worker`, where the platform's structured clone beats any
   serialization and handles `Map`, `Set`, `Date` and cycles losslessly.
+- `PowerWebSocketClient`: `WebSocket` has **no** back-pressure, so a naive producer fills the
+  browser's buffer until the tab dies. This adds watermarks (or Streams where available), heartbeats
+  with RTT, decorrelated-jitter reconnects, and a connect timeout. Hand it `sendFrame` as the hub's
+  `send` adapter and the two layers compose.
 - `PowerRealtimeHub`: every subscription gets its own bounded queue and a declared slow-consumer
   policy, so a single client that stops reading becomes a bounded, observable problem instead of a
   process-wide memory leak. Batches over `PowerMessageCodec`.

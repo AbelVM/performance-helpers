@@ -28,4 +28,5 @@ export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./hel
 export { default as WorkerAgnostic, detectEnv, preloadNode } from "./helpers/WorkerAgnostic.js";
 export { normalizeError, formatErrorObj } from "./utils/errors.js";
 export { nowMs, measureSync, measureAsync } from "./utils/now.js";
+export { PowerWebSocketClient, READY_STATE } from "./helpers/powerWebSocketClient.js";
 export { PowerMessageCodec, MESSAGE_PROTOCOL_VERSION, CODECS, HEADER_BYTES, encodeMessage, decodeMessage, encodeNative, canUseNativeClone, selectCodec, isRawPayload, frameTransferList } from "./helpers/powerMessageCodec.js";

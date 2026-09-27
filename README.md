@@ -63,6 +63,8 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 - [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` envelope so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`. This is the protocol `PowerPool` speaks by default since 2.0.
 - [PowerRealtimeHub: Topic fan-out with slow-consumer control](guides/powerRealtimeHub.md). Per-subscriber bounded queues and a declared policy (`drop-oldest` / `drop-newest` / `disconnect`) so one slow consumer cannot stall or OOM the process. Transport-agnostic via a `send` adapter; batches over `PowerMessageCodec`.
 
+- [PowerWebSocketClient: Reconnecting client with back-pressure](guides/powerWebSocketClient.md). `WebSocket` has no back-pressure, so this adds it two ways: `bufferedAmount` watermarks (universal, with a backing-off poll and `onPause`/`onResume`) and `WebSocketStream` where available (awaits `writer.ready`). Plus heartbeats with RTT, decorrelated-jitter reconnects, and a connect timeout. Pairs with `PowerRealtimeHub` via `sendFrame`.
+
 ## Logging
 
 - [PowerLogger: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.

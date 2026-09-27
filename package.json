@@ -121,6 +121,11 @@
       "import": "./src/helpers/powerRealtimeHub.js",
       "default": "./src/helpers/powerRealtimeHub.js"
     },
+    "./powerWebSocketClient": {
+      "types": "./types/helpers/powerWebSocketClient.d.ts",
+      "import": "./src/helpers/powerWebSocketClient.js",
+      "default": "./src/helpers/powerWebSocketClient.js"
+    },
     "./powerHistogram": {
       "types": "./types/helpers/powerHistogram.d.ts",
       "import": "./src/helpers/powerHistogram.js",
