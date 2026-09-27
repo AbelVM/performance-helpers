@@ -72,13 +72,22 @@ describe('PowerBatch branches extra', () => {
     expect(calls).toEqual([['a'], ['b']]);
   });
 
-  it('normalizes invalid maxSize and scheduling options', async () => {
+  it('rejects a non-positive maxSize instead of silently never flushing', () => {
+    // `Number(maxSize) || Infinity` turned `maxSize: 0` into `Infinity`, so a
+    // batch accumulated forever and never flushed on its own - a silent leak,
+    // not a "normalization". A nonsensical limit is a configuration error.
+    expect(() => new PowerBatch(() => {}, { maxSize: 0 })).toThrow(/maxSize/);
+    expect(() => new PowerBatch(() => {}, { maxSize: -5 })).toThrow(/maxSize/);
+    expect(() => new PowerBatch(() => {}, { maxSize: Number.NaN })).toThrow(/maxSize/);
+  });
+
+  it('still falls back to microtask for an unknown scheduling mode', async () => {
     const calls = [];
     const b = new PowerBatch(
       async (items) => {
         calls.push(items.slice());
       },
-      { maxSize: 0, scheduling: 'invalid' }
+      { scheduling: 'invalid' }
     );
 
     b.add(1);
@@ -86,6 +95,11 @@ describe('PowerBatch branches extra', () => {
     await b.flush();
 
     expect(calls).toEqual([[1, 2]]);
+  });
+
+  it('accepts Infinity as an explicit "never auto-flush" maxSize', () => {
+    const b = new PowerBatch(() => {}, { maxSize: Number.POSITIVE_INFINITY });
+    expect(b._maxSize).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('flush re-schedules queued work if a pending batch exists but the scheduler was canceled', async () => {

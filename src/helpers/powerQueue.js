@@ -1,3 +1,4 @@
+import { assertLimit } from '../utils/options.js';
 /**
  * PowerQueue
  *
@@ -21,7 +22,17 @@ export class PowerQueue {
    * @param {number} [initialCapacity=16] Initial capacity (rounded up to power-of-two).
    */
   constructor(initialCapacity = 16) {
-    const cap = Math.max(2, Number(initialCapacity) || 16);
+    // A power-of-two buffer length is required for the bitmask indexing, so a
+    // small request is rounded *up* rather than rejected - 1 and 2 are
+    // legitimate hints. A non-finite or negative request is a configuration
+    // error and now says so instead of silently becoming 16.
+    const requested = assertLimit(initialCapacity, {
+      name: 'initialCapacity',
+      className: 'PowerQueue',
+      min: 0,
+      fallback: 16,
+    });
+    const cap = Math.max(2, requested);
     // internal buffer length always a power-of-two for fast masking
     this._capacity = 1;
     while (this._capacity < cap) this._capacity <<= 1;

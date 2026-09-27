@@ -14,6 +14,7 @@
  * // items are coalesced and handler called once in the next tick
  */
 import { PowerQueue } from './powerQueue.js';
+import { assertLimit } from '../utils/options.js';
 import { PowerScheduler } from './powerScheduler.js';
 
 /**
@@ -37,9 +38,16 @@ export class PowerBatch {
    */
   constructor(handler, options = {}) {
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
-    const { maxSize = Infinity, scheduling = 'microtask' } = options;
+    const { maxSize = Number.POSITIVE_INFINITY, scheduling = 'microtask' } = options;
     this._handler = handler;
-    this._maxSize = Number(maxSize) || Infinity;
+    // `Number(maxSize) || Infinity` turned `maxSize: 0` into `Infinity` - a
+    // batch that then never flushes, silently. Validate instead.
+    this._maxSize = assertLimit(maxSize, {
+      name: 'maxSize',
+      className: 'PowerBatch',
+      min: 1,
+      allowInfinity: true,
+    });
     this._queue = new PowerQueue(16);
     this._pending = null; // { promise, resolve, reject }
     this._scheduler = new PowerScheduler(() => this._runBatch(), {

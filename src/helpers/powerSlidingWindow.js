@@ -5,6 +5,7 @@
 import { nowMs } from '../utils/now.js';
 import { MS_PER_SEC } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
+import { assertLimit } from '../utils/options.js';
 
 export class PowerSlidingWindow {
   /**
@@ -17,8 +18,21 @@ export class PowerSlidingWindow {
    */
   constructor(options = {}) {
     const { capacity = 1, windowMs = MS_PER_SEC } = options;
-    this.capacity = Math.max(0, Number(capacity) || 0);
-    this.windowMs = Math.max(1, Number(windowMs) || MS_PER_SEC);
+    // `Math.max(0, Number(capacity) || 0)` accepted `capacity: 0`, producing a
+    // window that refuses everything, and coerced NaN to 0 rather than
+    // surfacing it. Both are configuration errors, so they throw.
+    this.capacity = assertLimit(capacity, {
+      name: 'capacity',
+      className: 'PowerSlidingWindow',
+      min: 1,
+      fallback: 1,
+    });
+    this.windowMs = assertLimit(windowMs, {
+      name: 'windowMs',
+      className: 'PowerSlidingWindow',
+      min: 1,
+      fallback: MS_PER_SEC,
+    });
     // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
     this._timestamps = new PowerQueue(16);
   }
