@@ -1,5 +1,6 @@
 import { PowerPool } from './powerPool.js';
 import { u82o } from './powerBuffer.js';
+import { decodeMessage } from './powerMessageCodec.js';
 import { normalizeError } from '../utils/errors.js';
 
 /**
@@ -141,7 +142,14 @@ function makeInlineWorkerConstructor(fn) {
       let decoded = message;
       try {
         if (message && (message instanceof ArrayBuffer || ArrayBuffer.isView(message))) {
-          decoded = u82o(message);
+          // PowerPool frames its messages (messageCodec 'framed' is the
+          // default), so try the envelope first and fall back to a bare JSON
+          // body for a caller that still posts the legacy shape.
+          try {
+            decoded = decodeMessage(message).value;
+          } catch {
+            decoded = u82o(message);
+          }
         }
       } catch (e) {
         decoded = message;

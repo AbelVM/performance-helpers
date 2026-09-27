@@ -28,12 +28,18 @@ When using the pool's Promise-based `postMessage(..., { awaitResponse: true })` 
 Worker-side example:
 
 ```js
+import { decodeMessage } from 'performance-helpers';
+
 self.onmessage = (e) => {
-  const data = e.data;
+  // PowerPool frames its messages by default (2.0+).
+  const data = decodeMessage(e.data).value;
   // ... process ...
   self.postMessage({ correlationId: data.correlationId, response: result });
 };
 ```
+
+If your pool still runs with `messageCodec: 'legacy'`, use `u82o(e.data)` here instead. See
+[Migrating to the framed protocol](powerPool.md#migrating-to-the-framed-protocol-breaking-change-in-20).
 
 ## Best practices for logging
 

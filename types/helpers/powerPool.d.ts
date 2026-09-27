@@ -138,6 +138,21 @@ export class PowerPool {
     /** whether queued dispatch is paused */
     _queuePaused: boolean;
     /**
+     * Wire protocol for object messages.
+     *
+     * - `'framed'` (**default since 2.0**) posts a `PowerMessageCodec`
+     *   envelope: `[version][codec][length][payload]`. Workers read
+     *   `decodeMessage(e.data).value` instead of `u82o(e.data)`, binary frames
+     *   survive intact, and the version byte lets the protocol evolve without
+     *   another flag day.
+     * - `'legacy'` restores the 1.x behaviour: a bare `Uint8Array` of JSON,
+     *   sniffed on the way back in. Provided so a worker can be migrated on its
+     *   own schedule. See the migration note in guides/powerPool.md.
+     *
+     * @type {'framed'|'legacy'}
+     */
+    _messageCodec: "framed" | "legacy";
+    /**
      * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
      * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
      * resurrect it (which previously created a worker with no reaper
@@ -250,6 +265,17 @@ export class PowerPool {
      * @private
      * @param {Object} obj
      * @returns {Uint8Array}
+     */
+    /**
+     * Wrap an encoded JSON body in a `PowerMessageCodec` envelope.
+     *
+     * The frame is built over a single `Uint8Array` so the existing transfer and
+     * slicing logic above is unchanged; the header is six bytes, so this is a
+     * `set` rather than a second allocation plus a copy.
+     *
+     * @private
+     * @param {Uint8Array} body - Encoded JSON payload.
+     * @returns {Uint8Array} The framed message.
      */
     private _encodeForTransfer;
     /**

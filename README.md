@@ -6,6 +6,31 @@
 
 Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an environment-agnostic worker abstraction (`WorkerAgnostic`), an LRU TTL cache with a memoizer, a fully-featured worker pool wrapper, a tiny runtime debug logger, and much more:
 
+> ## ⚠️ Upgrading to 2.0 — the worker wire format changed
+>
+> `PowerPool` now posts a versioned [`PowerMessageCodec`](guides/powerMessageCodec.md) frame
+> (`[version][codec][length][payload]`) instead of a bare `Uint8Array` of JSON. In 1.x every
+> worker had to hand-decode the bytes, the format had no version so it could never evolve, and a
+> genuinely binary message was silently corrupted by `JSON.parse`.
+>
+> **One line changes in each worker:**
+>
+> ```diff
+> -import { u82o } from 'performance-helpers';
+> +import { decodeMessage, encodeMessage } from 'performance-helpers';
+> -self.onmessage = (e) => handle(u82o(e.data));
+> -self.postMessage({ result });
+> +self.onmessage = (e) => handle(decodeMessage(e.data).value);
+> +self.postMessage(encodeMessage({ result }));
+> ```
+>
+> Your worker must also **reply in the shape it received** — a worker talking to a pool still on
+> `messageCodec: 'legacy'` must reply with `o2u8`, not a frame. Full details, a
+> try-the-frame-and-fall-back recipe, and the `messageCodec: 'legacy'` escape hatch are in
+> [Migrating to the framed protocol](guides/powerPool.md#migrating-to-the-framed-protocol).
+>
+> Nothing else in the public API breaks.
+
 ## Caching
 
 - [PowerCache: Caching (LRU + TTL + weight) and memoizing](guides/powerCache.md). An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an optional reusable node pool.

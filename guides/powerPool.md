@@ -13,6 +13,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 | `options.workerOptions`                                 |                                            `Object` |                                           `{}` | Options forwarded to the Worker constructor when using a string `workerSource`.                                                                                                                                                                                                                                                    |
 | `options.maxTasksPerWorker`                             |                                            `number` |                                     `Infinity` | Soft capacity per worker before it is considered busy.                                                                                                                                                                                                                                                                             |
 | `options.idleTimeout`                                   |                                            `number` |                                        `60000` | Milliseconds after which idle workers (beyond `minSize`) are terminated.                                                                                                                                                                                                                                                           |
+| `options.messageCodec`                                  |                              `'framed' \| 'legacy'` |                                     `'framed'` | Wire protocol for object messages. `'framed'` posts a `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON body. See [Migrating to the framed protocol](#migrating-to-the-framed-protocol-breaking-change-in-20).                                                                                                   |
 | `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                     |
 | `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                 |
 | `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                      |
@@ -22,7 +23,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
 ## API
 
-- `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool will attempt to encode them into `Uint8Array` transferables (via `o2u8`) automatically unless an explicit `transfer` list is supplied.
+- `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool encodes them into a transferable `Uint8Array` automatically, wrapped in a [`PowerMessageCodec`](powerMessageCodec.md) envelope. **See [Migrating to the framed protocol](#migrating-to-the-framed-protocol) — this changed in 2.0 and requires a one-line edit in every worker.**
 
   - Pass `options.workerId` to route the message to a specific worker id; targeting a missing or saturated worker will fail (returns `false` or a rejected Promise).
   - When `options.taskQueue` is enabled, `options.queuePolicy` controls overload behavior:
@@ -324,11 +325,123 @@ Notes:
 - `zeroCopy: true` only affects `ArrayBuffer`/TypedArray messages — plain objects cannot be forwarded zero-copy and will be encoded as before.
 - When using cached buffers via `prepareBuffer(..., { clone: false })`, do NOT transfer the cached buffer itself; clone it first via `slice()` if you need a transferable copy.
 
+## Migrating to the framed protocol (breaking change in 2.0)
+
+### What changed
+
+In 1.x, `PowerPool` encoded a plain object to a **bare `Uint8Array` of JSON** with no
+header, and decided what it received on the way back by _sniffing_ — "if this looks like an
+`ArrayBuffer`, `JSON.parse` it". That had three problems: the wire format had no version, so it
+could never evolve; a genuinely binary worker message was silently corrupted by `JSON.parse`; and
+every worker had to hand-decode the bytes.
+
+From 2.0 the pool sends a [`PowerMessageCodec`](powerMessageCodec.md) frame instead:
+
+```
+byte  0      protocol version
+byte  1      codec id
+bytes 2..5   payload length (uint32 little-endian)
+bytes 6..    payload
+```
+
+### How to migrate a worker
+
+One line changes, in the worker's message handler.
+
+```js
+// 1.x — bare JSON bytes
+import { u82o } from 'performance-helpers';
+self.onmessage = (e) => handle(u82o(e.data));
+
+// 2.0 — framed
+import { decodeMessage } from 'performance-helpers';
+self.onmessage = (e) => handle(decodeMessage(e.data).value);
+```
+
+`decodeMessage` also accepts a raw `ArrayBuffer` or `DataView`, so a worker that receives a plain
+binary `ArrayBuffer` you posted yourself (not a frame) should branch:
+
+```js
+const isFrame = e.data instanceof Uint8Array && e.data.length >= 6 && e.data[0] === 1;
+const data = isFrame ? decodeMessage(e.data).value : e.data;
+```
+
+A robust worker that must interoperate with both can simply try the frame and fall back, which is
+what `PowerChunker`'s inline worker does internally:
+
+```js
+let data;
+try {
+  data = decodeMessage(e.data).value;
+} catch {
+  data = u82o(e.data); // 1.x peer
+}
+```
+
+> **Your worker must also _reply_ in the shape it received.** This trips people up. A
+> `messageCodec: 'legacy'` pool sniffs its _replies_ with `u82o`, so a framed reply is
+> unreadable to it and a pending `awaitResponse` promise will simply never settle. Track
+> which shape arrived and mirror it:
+>
+> ```js
+> let framed = true;
+> let data;
+> try {
+>   data = decodeMessage(e.data).value;
+> } catch {
+>   framed = false;
+>   data = u82o(e.data);
+> }
+>
+> const body = { correlationId: data.correlationId, result: run(data) };
+> self.postMessage(framed ? encodeMessage(body) : o2u8(body));
+> ```
+
+### What you get in exchange
+
+- **Binary survives.** A `Uint8Array`/`ArrayBuffer` task is framed under the `raw` codec and arrives
+  intact instead of being `JSON.parse`d into nonsense. A binary message passed **without** a
+  `transfer` list is framed like anything else, so a worker always sees one protocol regardless of
+  what it was handed. If you supply your own `transfer` list the pool leaves your buffer completely
+  alone — that is the documented "I am sending this exact buffer, already in the form I want" case,
+  and it is how you post a pre-framed shared buffer.
+- **A version byte.** The protocol can change again without another flag day — `decodeMessage`
+  throws on an unknown version rather than mis-parsing.
+- **Self-delimiting frames.** `decodeMessage` reports `byteLength`, so one receive can carry
+  several messages.
+
+### Escape hatch
+
+Pass `messageCodec: 'legacy'` to restore the 1.x wire format, on a per-pool basis. This is intended
+to let a worker be migrated on its own schedule, not as a permanent setting.
+
+```js
+const pool = new PowerPool(WorkerScript, { messageCodec: 'legacy' });
+```
+
+| `messageCodec`         | Outbound                     | Inbound                       |
+| ---------------------- | ---------------------------- | ----------------------------- |
+| `'framed'` _(default)_ | `PowerMessageCodec` envelope | `decodeMessage` — no sniffing |
+| `'legacy'`             | bare `Uint8Array` of JSON    | `u82o` — sniffed              |
+
+### Sending a pre-encoded buffer
+
+If you pre-encode to share one buffer across many workers, frame it once and reuse the frame.
+Do **not** use `o2u8` on its own any more: an unframed body will fail to decode under the default
+protocol.
+
+```js
+import { encodeMessage } from 'performance-helpers';
+
+const shared = encodeMessage({ big: 'payload', repeated: true });
+const batch = Array.from({ length: 100 }, () => ({ message: shared, transfer: [shared.buffer] }));
+pool.postMessageBatch(batch);
+```
+
 ## Recommendations
 
 - Use `PowerPool` when you need a small, managed pool of Workers with automatic queuing and idle termination.
-- Prefer sending plain objects — `PowerPool` will encode them to `Uint8Array` and mark the underlying `ArrayBuffer` transferable to avoid copies. For broadcasts, each worker receives an independently encoded transferable buffer when no transfer list is provided.
-- Register `error` / `messageerror` listeners to handle and log underlying Worker problems; the pool forwards these events to registered listeners.
+- Prefer sending plain objects — `PowerPool` encodes them into a framed, transferable `Uint8Array` to avoid structured-clone copies. For broadcasts, each worker receives an independently encoded transferable buffer when no transfer list is provided.
 - Register `error` / `messageerror` listeners to handle and log underlying Worker problems; the pool forwards these events to registered listeners.
   Note: Node's `worker_threads` does not emit `messageerror` natively. `PowerPool` normalizes cross-platform behavior: when binary decoding fails the pool will emit a `messageerror` event on the pool-level bus so listeners receive the event even if the underlying worker implementation lacks native `messageerror` support. The pool also still forwards the raw binary payload to `onmessage` so existing consumers receive the data.
 - Tune `size`, `maxSize`, `idleTimeout` and `maxTasksPerWorker` for your workload. When using many short tasks, a small pool with aggressive queuing often performs best.
@@ -336,7 +449,7 @@ Notes:
 ## Complexity & Performance Tips
 
 - **Amortized cost:** `postMessage` and `broadcast` will try direct dispatch first and then queue. Use `postMessageBatch` to amortize per-item overhead when enqueuing many tasks.
-- **Encoding & transfers:** When `transfer` is omitted and you supply a plain object, `PowerPool` encodes the object to a transferable `Uint8Array` (via `o2u8`). This avoids structured-clone copies but does allocate a buffer per encoded item. If you share the same large payload across many workers, consider pre-creating a transferable `ArrayBuffer` and passing it in `transfer` to avoid repeated encoding.
+- **Encoding & transfers:** When `transfer` is omitted and you supply a plain object, `PowerPool` encodes the object to a framed, transferable `Uint8Array`. This avoids structured-clone copies but does allocate a buffer per encoded item. If you share the same large payload across many workers, `encodeMessage` it once and pass the frame in `transfer` to avoid repeated encoding.
 - **Batched enqueue:** `postMessageBatch` prepares each item once and uses `PowerQueue.pushMany` to enqueue remaining items in one operation, reducing O(n) push overhead.
 - **Awaiting responses:** `options.awaitResponse` introduces per-item Promise bookkeeping and correlation ids; for very large batches prefer fire-and-forget and implement separate result aggregation inside workers if possible.
 - **Tuning concurrency:** `maxTasksPerWorker` controls soft saturation per worker. Raising it increases parallelism per worker but can make latency variance higher; use `getStats()` and EWMA metrics to tune the smoothing and thresholds.
@@ -346,7 +459,7 @@ Notes:
 
 ```javascript
 // Efficient batch with pre-encoded transferable buffer (avoid per-item encoding)
-const shared = o2u8({ big: 'payload', repeated: true });
+const shared = encodeMessage({ big: 'payload', repeated: true });
 const batch = Array.from({ length: 100 }, () => ({ message: shared, transfer: [shared.buffer] }));
 // All workers will receive the same transferable buffer (caller responsible for reuse semantics).
 pool.postMessageBatch(batch);

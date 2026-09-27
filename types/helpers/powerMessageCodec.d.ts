@@ -31,6 +31,21 @@ export function encodeMessage(value: any, options?: {
     codec?: "json" | "raw" | undefined;
 }): Uint8Array;
 /**
+ * Frame bytes that are already encoded JSON, under the `json` codec.
+ *
+ * This exists for a caller that caches the *encoded* form of a value - as
+ * `PowerPool` does - and wants to reuse it instead of re-serialising. The bytes
+ * must be the UTF-8 encoding of a JSON document, which is what `o2u8` produces.
+ *
+ * The codec id is `json`, not `raw`: `decodeMessage` will parse the payload,
+ * which is what the sender meant. Framing pre-encoded JSON as `raw` would hand
+ * the receiver a `Uint8Array` and lose the value.
+ *
+ * @param {Uint8Array} jsonBytes - UTF-8 JSON bytes.
+ * @returns {Uint8Array} A framed message with the `json` codec id.
+ */
+export function frameEncodedJson(jsonBytes: Uint8Array): Uint8Array;
+/**
  * Decode a framed message.
  *
  * @param {Uint8Array|ArrayBuffer|DataView} input - The frame.
@@ -121,6 +136,7 @@ export const PowerMessageCodec: Readonly<{
     HEADER_BYTES: 6;
     encodeMessage: typeof encodeMessage;
     decodeMessage: typeof decodeMessage;
+    frameEncodedJson: typeof frameEncodedJson;
     encodeNative: typeof encodeNative;
     canUseNativeClone: typeof canUseNativeClone;
     selectCodec: typeof selectCodec;

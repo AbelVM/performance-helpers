@@ -13,6 +13,7 @@ Encode a value to a `Uint8Array` (UTF-8 JSON).
 Returns: `Uint8Array` — UTF-8 encoded bytes. Throws if no encoder is available in the environment.
 
 Example
+
 ```javascript
 import { o2u8, u82o } from '../src/helpers/powerBuffer.js';
 
@@ -37,11 +38,18 @@ Example — worker receiver
 import { u82o } from '../src/helpers/powerBuffer.js';
 
 self.onmessage = (e) => {
-    // decode transferable Uint8Array back to JS value
-    const obj = u82o(e.data);
-    // process obj
+  // decode transferable Uint8Array back to JS value
+  const obj = u82o(e.data);
+  // process obj
 };
 ```
+
+> **Receiving from `PowerPool`?** These helpers encode and decode a _bare_ JSON body.
+> Since 2.0 `PowerPool` wraps that body in a [`PowerMessageCodec`](powerMessageCodec.md) frame,
+> so a worker should use `decodeMessage(e.data).value` instead of `u82o(e.data)`. `o2u8`/`u82o`
+> remain the right tools for your own transports, and are what the codec's `json` payload codec
+> is built on. See
+> [Migrating to the framed protocol](powerPool.md#migrating-to-the-framed-protocol-breaking-change-in-20).
 
 ## o2b(obj)
 
@@ -72,15 +80,15 @@ self.onmessage(e => {
 ```javascript
 // worker.js
 self.onmessage = (e) => {
-    const jsonInput = u82o(e.data);
-    const result = process(jsonInput);
-    const out = o2u8(result);
-    self.postMessage(out, [out.buffer]);
+  const jsonInput = u82o(e.data);
+  const result = process(jsonInput);
+  const out = o2u8(result);
+  self.postMessage(out, [out.buffer]);
 };
 
 // main thread
 worker.onmessage = (e) => {
-    const jsonOut = u82o(e.data);
-    handleResult(jsonOut);
+  const jsonOut = u82o(e.data);
+  handleResult(jsonOut);
 };
 ```

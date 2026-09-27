@@ -21,6 +21,12 @@ import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
 import { PowerEventBus } from './powerEventBus.js';
 import {
+  frameEncodedJson,
+  decodeMessage,
+  encodeMessage,
+  isRawPayload,
+} from './powerMessageCodec.js';
+import {
   DEFAULT_REAPER_MIN_INTERVAL_MS,
   ENCODE_CACHE_LARGE_KEY_LENGTH,
   DEFAULT_POOL_IDLE_TIMEOUT_MS,
@@ -311,6 +317,21 @@ export class PowerPool {
     this._isIdle = true;
     /** whether queued dispatch is paused */
     this._queuePaused = false;
+    /**
+     * Wire protocol for object messages.
+     *
+     * - `'framed'` (**default since 2.0**) posts a `PowerMessageCodec`
+     *   envelope: `[version][codec][length][payload]`. Workers read
+     *   `decodeMessage(e.data).value` instead of `u82o(e.data)`, binary frames
+     *   survive intact, and the version byte lets the protocol evolve without
+     *   another flag day.
+     * - `'legacy'` restores the 1.x behaviour: a bare `Uint8Array` of JSON,
+     *   sniffed on the way back in. Provided so a worker can be migrated on its
+     *   own schedule. See the migration note in guides/powerPool.md.
+     *
+     * @type {'framed'|'legacy'}
+     */
+    this._messageCodec = options.messageCodec === 'legacy' ? 'legacy' : 'framed';
     /**
      * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
      * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
@@ -924,6 +945,17 @@ export class PowerPool {
    * @param {Object} obj
    * @returns {Uint8Array}
    */
+  /**
+   * Wrap an encoded JSON body in a `PowerMessageCodec` envelope.
+   *
+   * The frame is built over a single `Uint8Array` so the existing transfer and
+   * slicing logic above is unchanged; the header is six bytes, so this is a
+   * `set` rather than a second allocation plus a copy.
+   *
+   * @private
+   * @param {Uint8Array} body - Encoded JSON payload.
+   * @returns {Uint8Array} The framed message.
+   */
   _encodeForTransfer(obj) {
     try {
       const s = JSON.stringify(obj);
@@ -1057,6 +1089,21 @@ export class PowerPool {
     if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer) {
       const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
       if (!tr) {
+        // Binary is framed under the `raw` codec too, so a worker always sees
+        // the same protocol regardless of what it was handed. Without this, an
+        // object message arrived framed and a binary message arrived bare, and
+        // the worker had no way to tell - reintroducing exactly the sniffing
+        // the codec exists to remove. An explicit `transfer` list still means
+        // "I am sending this exact buffer, already in the form I want", so that
+        // path is left alone.
+        if (this._messageCodec === 'framed' && isRawPayload(msg)) {
+          try {
+            const framed = encodeMessage(msg, { codec: 'raw' });
+            return { message: framed, transfer: [framed.buffer] };
+          } catch (err) {
+            this._debugLog?.(err, '_prepareForTransfer: framing binary failed');
+          }
+        }
         if (transferTarget?.byteLength === 0) {
           try {
             const copy = msg instanceof ArrayBuffer ? msg.slice(0) : new Uint8Array(msg);
@@ -1091,7 +1138,11 @@ export class PowerPool {
     if (isPlainObject) {
       if (zeroCopy) return { message: msg, transfer: tr };
       try {
-        const u8 = this._encodeForTransfer(msg);
+        // `_encodeForTransfer` returns the cached JSON body; framing is a cheap
+        // header wrap, so the encode cache is still what absorbs the
+        // stringify/encode cost.
+        const body = this._encodeForTransfer(msg);
+        const u8 = this._messageCodec === 'framed' ? frameEncodedJson(body) : body;
         const buf = u8.slice();
         let transferList = tr;
         if (!transferList || (Array.isArray(transferList) && transferList.length === 0)) {
@@ -1443,7 +1494,13 @@ export class PowerPool {
       let decoded = data;
       if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
         try {
-          decoded = u82o(data);
+          if (this._messageCodec === 'framed') {
+            // No sniffing: the envelope says what the payload is, so a binary
+            // frame is handed over intact instead of being JSON.parse'd.
+            decoded = decodeMessage(data).value;
+          } else {
+            decoded = u82o(data);
+          }
         } catch (err) {
           try {
             _handleMessageError(err);

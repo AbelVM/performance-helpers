@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
-import { PowerPool, PowerCache, PowerTimedCache, preloadNode, u82o } from '../src/index.js';
+import {
+  PowerPool,
+  PowerCache,
+  PowerTimedCache,
+  preloadNode,
+  decodeMessage,
+} from '../src/index.js';
 
 beforeAll(async () => {
   // Pure-ESM Node needs the node:worker_threads require hoisted before any
@@ -18,8 +24,9 @@ class EchoWorker {
   }
   removeEventListener() {}
   postMessage(msg) {
+    // A real worker decodes the pool's envelope.
     let payload = msg;
-    if (msg instanceof Uint8Array) payload = u82o(msg);
+    if (msg instanceof Uint8Array) payload = decodeMessage(msg).value;
     const fn = this._listeners.find(([t]) => t === 'message')?.[1];
     if (!fn) return;
     const echo = (extra) =>
