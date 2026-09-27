@@ -48,6 +48,27 @@ import {
 } from './constants.js';
 
 /**
+ * Underscore-prefixed fields exposed as read/write aliases for backwards
+ * compatibility. `cache.map`, `cache.head` and friends have been public since
+ * 1.0, so they stay accessors rather than plain fields: the state lives in
+ * `_map` and `_head`, and a plain field would shadow it and desynchronise.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+const ALIASED_FIELDS = Object.freeze([
+  'map',
+  'head',
+  'tail',
+  'pool',
+  'currentWeight',
+  'hits',
+  'misses',
+  'evictions',
+  'rejected',
+  'expirations',
+]);
+
+/**
  * PowerCache
  *
  * In-memory cache with weight-aware eviction, TTLs and optional cleanup.
@@ -153,108 +174,23 @@ export class PowerCache {
     this._rejected = 0; // rejected oversized insert attempts
     this._expirations = 0;
 
-    // Backwards-compatible aliases for external access (keep non-underscore
-    // properties available but prefer internal `_`-prefixed fields).
-    Object.defineProperty(this, 'map', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._map;
-      },
-      set(v) {
-        this._map = v;
-      },
-    });
-    Object.defineProperty(this, 'head', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._head;
-      },
-      set(v) {
-        this._head = v;
-      },
-    });
-    Object.defineProperty(this, 'tail', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._tail;
-      },
-      set(v) {
-        this._tail = v;
-      },
-    });
-    Object.defineProperty(this, 'pool', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._pool;
-      },
-      set(v) {
-        this._pool = v;
-      },
-    });
-    Object.defineProperty(this, 'currentWeight', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._currentWeight;
-      },
-      set(v) {
-        this._currentWeight = v;
-      },
-    });
-    Object.defineProperty(this, 'hits', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._hits;
-      },
-      set(v) {
-        this._hits = v;
-      },
-    });
-    Object.defineProperty(this, 'misses', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._misses;
-      },
-      set(v) {
-        this._misses = v;
-      },
-    });
-    Object.defineProperty(this, 'evictions', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._evictions;
-      },
-      set(v) {
-        this._evictions = v;
-      },
-    });
-    Object.defineProperty(this, 'rejected', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._rejected;
-      },
-      set(v) {
-        this._rejected = v;
-      },
-    });
-    Object.defineProperty(this, 'expirations', {
-      configurable: true,
-      enumerable: false,
-      get() {
-        return this._expirations;
-      },
-      set(v) {
-        this._expirations = v;
-      },
-    });
+    // Backwards-compatible aliases for external access. These were ten
+    // copy-pasted `Object.defineProperty` blocks (~110 lines) whose descriptors
+    // are all identical; one loop is equivalent, and keeps the aliased set
+    // reviewable in one place instead of scattered through a constructor.
+    for (const name of ALIASED_FIELDS) {
+      const priv = `_${name}`;
+      Object.defineProperty(this, name, {
+        configurable: true,
+        enumerable: false,
+        get() {
+          return this[priv];
+        },
+        set(v) {
+          this[priv] = v;
+        },
+      });
+    }
 
     this._cleanupTimer = null;
     this._cleanupRunning = false;
@@ -428,12 +364,7 @@ export class PowerCache {
     if (!node.expiresAt || node.expiresAt > now) return false;
     const k = node.key;
     const v = node.value;
-    const next = node.next;
-    this._map.delete(k);
-    this._currentWeight -= node.weight || 0;
-    if (this._cleanupCursor === node) this._cleanupCursor = next;
-    this._cleanupCursorValid = Boolean(this._cleanupCursor);
-    this._remove(node);
+    this._unlinkNode(node);
     try {
       if (this.onExpire) this.onExpire(k, v);
     } catch (err) {
@@ -575,6 +506,34 @@ export class PowerCache {
   }
 
   /**
+   * Unlink a node and update every piece of bookkeeping that depends on it.
+   *
+   * Four call sites - expiry, eviction, `delete()` and the cleanup sweep -
+   * each had their own copy of this sequence, which is exactly the kind of
+   * duplication that lets one path drift. The only difference between them is
+   * that eviction sweeps must also advance `_evictionCandidate`, hence the
+   * flag.
+   *
+   * @private
+   * @param {CacheNode} node - Node to unlink. Must currently be in the list.
+   * @param {Object} [options]
+   * @param {boolean} [options.advanceEvictionCandidate=false] - Also move the
+   *   eviction cursor past the removed node.
+   * @returns {CacheNode|null} The node that followed it, now at this position.
+   */
+  _unlinkNode(node, { advanceEvictionCandidate = false } = {}) {
+    const next = node.next;
+    this._map.delete(node.key);
+    this._currentWeight -= node.weight || 0;
+    // If a cursor pointed at the node being removed, step it past the gap.
+    if (this._cleanupCursor === node) this._cleanupCursor = next;
+    this._cleanupCursorValid = Boolean(this._cleanupCursor);
+    if (advanceEvictionCandidate) this._evictionCandidate = next;
+    this._remove(node);
+    return next;
+  }
+
+  /**
    * Remove a node from the linked list without freeing it. The node's
    * `prev`/`next` references are updated on neighbors and the node's links
    * are nulled. Does not modify `this.map` or bookkeeping counters; callers
@@ -651,17 +610,9 @@ export class PowerCache {
     while (this._map.size > this.maxEntries || this._currentWeight > this.maxWeight) {
       const node = this._evictionCandidate || this._head;
       if (!node) break;
-      const next = node.next;
       const k = node.key;
       const v = node.value;
-      // Advance cleanup cursor if it pointed to the node we're about to evict
-      if (this._cleanupCursor === node) this._cleanupCursor = next;
-      this._cleanupCursorValid = Boolean(this._cleanupCursor);
-      // Advance eviction candidate to the next node (new head after removal)
-      this._evictionCandidate = next;
-      this._remove(node);
-      this._map.delete(k);
-      this._currentWeight -= node.weight || 0;
+      this._unlinkNode(node, { advanceEvictionCandidate: true });
       this._evictions++;
       try {
         if (this.onEvict) this.onEvict(k, v, 'evicted');
@@ -1088,12 +1039,7 @@ export class PowerCache {
   delete(key) {
     const node = this._map.get(key);
     if (!node) return false;
-    const next = node.next;
-    this._map.delete(key);
-    this._currentWeight -= node.weight || 0;
-    if (this._cleanupCursor === node) this._cleanupCursor = next;
-    this._cleanupCursorValid = Boolean(this._cleanupCursor);
-    this._remove(node);
+    this._unlinkNode(node);
     try {
       if (this.onEvict) this.onEvict(node.key, node.value, 'deleted');
     } catch (err) {
@@ -1158,12 +1104,7 @@ export class PowerCache {
       if (node.expiresAt && node.expiresAt <= now) {
         const k = node.key;
         const v = node.value;
-        this._map.delete(k);
-        this._currentWeight -= node.weight || 0;
-        // advance cursor if it pointed to this node
-        if (this._cleanupCursor === node) this._cleanupCursor = next;
-        this._cleanupCursorValid = Boolean(this._cleanupCursor);
-        this._remove(node);
+        this._unlinkNode(node);
         try {
           if (this.onExpire) this.onExpire(k, v);
         } catch (err) {
