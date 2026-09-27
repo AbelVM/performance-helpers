@@ -433,15 +433,25 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `nowMs`: High-resolution current time helper.
 - `measureSync`, `measureAsync`: Small timing helpers for instrumentation.
 
-### Real-time fan-out
+### Realtime: framing and fan-out
 
+These two are a family and compose — see `assets/5_Realtime.md`.
+
+- `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
+  envelope, so a byte-stream transport never has to guess whether it received an object or binary.
+  Use it instead of hand-rolling a JSON protocol, and instead of `PowerPool`'s internal sniffing.
+  Since 2.0 `PowerPool` speaks it by default, so every worker reads
+  `decodeMessage(e.data).value` instead of `u82o(e.data)`.
+- `encodeNative`: for a `MessagePort` or `Worker`, where the platform's structured clone beats any
+  serialization and handles `Map`, `Set`, `Date` and cycles losslessly.
 - `PowerRealtimeHub`: every subscription gets its own bounded queue and a declared slow-consumer
   policy, so a single client that stops reading becomes a bounded, observable problem instead of a
-  process-wide memory leak. Pairs with `PowerMessageCodec` for batched delivery.
-- Reach for this before writing `for (ws of clients) ws.send(...)`. That pattern has no
-  back-pressure and no signal when a client falls behind.
+  process-wide memory leak. Batches over `PowerMessageCodec`.
 
-### Message framing
+Reach for the framed codec when the transport carries bytes (WebSocket, file, HTTP body), and
+`encodeNative` when it is an in-process message port. Reach for the hub before writing
+`for (ws of clients) ws.send(...)`: that pattern has no back-pressure and no signal when a client
+falls behind.
 
 - `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
   envelope, so a byte-stream transport never has to guess whether it received an object or binary.

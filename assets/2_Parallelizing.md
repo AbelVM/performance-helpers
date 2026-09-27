@@ -8,7 +8,6 @@
 - [PowerDeadline: Timeout, retry budget, and cancellation](../guides/powerDeadline.md). Wrap async work with per-attempt timeouts, overall deadlines, and retry policy.
 - [PowerHistogram: Lock-free percentile estimator](../guides/powerHistogram.md). Compact in-process histogram for latency telemetry and estimated percentiles.
 - [PowerBackpressure: Producer-facing backpressure controller](../guides/powerBackpressure.md). Gate producers with adaptive refill and bounded waiting.
-- [PowerRealtimeHub: Topic fan-out with slow-consumer control](../guides/powerRealtimeHub.md). Per-subscriber bounded queues and a declared policy (`drop-oldest` / `drop-newest` / `disconnect`) so one slow consumer cannot stall or OOM the process. Transport-agnostic via a `send` adapter; batches over `PowerMessageCodec`.
 - [PowerBatch: Microtask coalescing dispatcher](../guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](../guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
 - [PowerThrottle: A token-bucket limiter](../guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.

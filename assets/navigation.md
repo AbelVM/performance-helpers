@@ -4,6 +4,7 @@
 [Parallelizing](assets/2_Parallelizing.md)
 [Logging](assets/3_Logging.md)
 [Utils](assets/4_Utils.md)
+[Realtime](assets/5_Realtime.md)
 [API](docs/README.md)
 [Benchmark](bench/results.md)
 [Contributing](CONTRIBUTING.md)

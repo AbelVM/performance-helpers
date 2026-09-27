@@ -46,7 +46,6 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerDeadline: Timeout, retry budget, and cancellation](guides/powerDeadline.md). Wrap async work with per-attempt timeouts, overall deadlines, and retry policy.
 - [PowerHistogram: Lock-free percentile estimator](guides/powerHistogram.md). Compact in-process histogram for latency telemetry and estimated percentiles.
 - [PowerBackpressure: Producer-facing backpressure controller](guides/powerBackpressure.md). Gate producers with adaptive refill and bounded waiting.
-- [PowerRealtimeHub: Topic fan-out with slow-consumer control](guides/powerRealtimeHub.md). Per-subscriber bounded queues and a declared policy (`drop-oldest` / `drop-newest` / `disconnect`) so one slow consumer cannot stall or OOM the process. Transport-agnostic via a `send` adapter; batches over `PowerMessageCodec`.
 - [PowerBatch: Microtask coalescing dispatcher](guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
 - [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.
@@ -57,6 +56,13 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerSemaphore: Async concurrency gate](guides/powerSemaphore.md). Lightweight semaphore for limiting concurrent I/O and fan-out workloads.
 - [PowerEventBus: Typed micro event bus](guides/powerEventBus.md). Lightweight pub/sub for intra-process coordination between helpers.
 
+## Realtime
+
+Transport framing and real-time fan-out. These compose: the hub delivers over whatever transport you supply, and the codec is what makes a batch of messages legible to the receiver. Full index: [assets/5_Realtime.md](assets/5_Realtime.md).
+
+- [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` envelope so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`. This is the protocol `PowerPool` speaks by default since 2.0.
+- [PowerRealtimeHub: Topic fan-out with slow-consumer control](guides/powerRealtimeHub.md). Per-subscriber bounded queues and a declared policy (`drop-oldest` / `drop-newest` / `disconnect`) so one slow consumer cannot stall or OOM the process. Transport-agnostic via a `send` adapter; batches over `PowerMessageCodec`.
+
 ## Logging
 
 - [PowerLogger: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
@@ -64,7 +70,6 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 ## Utils
 
 - [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
-- [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` framing so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`.
 - [PowerDefer: Deferred promise primitive](guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
 - [PowerPermitGate: Permit queue helper](guides/powerPermitGate.md). Low-level concurrency gate that manages permits and FIFO waiters for building semaphore or backpressure primitives.
 - [PowerScheduler: Work coalescing scheduler](guides/powerScheduler.md). Lightweight scheduler for batching deferred work into a single microtask or macrotask flush.
