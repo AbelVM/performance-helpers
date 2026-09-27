@@ -35,7 +35,7 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel Vázquez Montoro",
+  "author": "Abel V\u00e1zquez Montoro",
   "type": "module",
   "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
@@ -105,6 +105,11 @@
       "types": "./types/helpers/powerEventBus.d.ts",
       "import": "./src/helpers/powerEventBus.js",
       "default": "./src/helpers/powerEventBus.js"
+    },
+    "./powerGCRA": {
+      "types": "./types/helpers/powerGCRA.d.ts",
+      "import": "./src/helpers/powerGCRA.js",
+      "default": "./src/helpers/powerGCRA.js"
     },
     "./powerHistogram": {
       "types": "./types/helpers/powerHistogram.d.ts",

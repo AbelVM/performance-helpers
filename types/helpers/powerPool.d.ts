@@ -109,7 +109,7 @@ export class PowerPool {
         backoffMaxMultiplier: number;
         backoffResetMs: number;
     } | null;
-    _autoScaleInterval: number | null;
+    _autoScaleInterval: any;
     _lastAutoScaleAt: number;
     _terminatedWorkerTaskCountsTotal: number;
     _terminatedWorkerTaskCountsCount: number;
@@ -132,11 +132,26 @@ export class PowerPool {
     _isIdle: boolean;
     /** whether queued dispatch is paused */
     _queuePaused: boolean;
+    /**
+     * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
+     * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
+     * resurrect it (which previously created a worker with no reaper
+     * interval, pinning the Node.js process).
+     * @type {boolean}
+     */
+    _terminated: boolean;
+    /**
+     * Monotonic token per dispatched task, used to make `_activeTasks`
+     * accounting idempotent: a late `message` from a worker terminated by
+     * `resize()`/`removeWorker()` no longer double-decrements the counter.
+     * @type {number}
+     */
+    _taskTokenSeq: number;
     _logger: PowerLogger;
     _pendingResponses: Map<any, any>;
     _underlyingToWorkerObj: Map<any, any>;
     _defaultAwaitResponseTimeout: number;
-    _reaperInterval: number;
+    _reaperInterval: any;
     _encodeCache: Map<any, any>;
     _encodeCacheLimit: number;
     _encodeCacheByteLimit: number;
@@ -174,6 +189,34 @@ export class PowerPool {
      */
     private _enqueueOrReject;
     /**
+     * Single choke point for retiring a worker from the pool.
+     *
+     * Every removal path - `shutdown()`, `removeWorker()`, `resize()`,
+     * `_autoScaleTick()`, `_reapIdleWorkers()` and `_resetPoolForStopThePress()`
+     * - routes through here so the active-task accounting, the terminated-worker
+     * statistics and the underlying-worker mapping can no longer drift apart
+     * between paths (the idle reaper previously skipped the statistics
+     * entirely, inflating `getStats().performance.timePerTask` over time).
+     *
+     * Note: this deliberately does **not** remove the entry from `this.workers`;
+     * callers own the array bookkeeping (some paths pop, some swap-remove, the
+     * shutdown path clears the whole list).
+     *
+     * @param {WorkerObj|null} workerObj - Worker entry to retire.
+     * @param {string} [reason] - Why the worker is being removed, used for
+     *   debug logging only.
+     * @returns {number|null} The retired worker id, or `null` when nothing was
+     *   retired.
+     * @private
+     */
+    private _terminateWorker;
+    /**
+     * Throws when the pool has been shut down. Called from every public entry
+     * point that would otherwise dispatch, enqueue or grow workers.
+     * @private
+     */
+    private _assertNotTerminated;
+    /**
      * Clear lifecycle timer intervals used by the pool.
      * @private
      */
@@ -182,6 +225,13 @@ export class PowerPool {
      * Shutdown the pool: clear timers, reject pending responses, terminate workers,
      * and clear internal queues. This is a full stop that prevents background
      * timers from keeping the process alive.
+     *
+     * Shutdown is **final**: the pool refuses every subsequent `postMessage()`,
+     * `postMessageBatch()`, `addWorker()` and `resize()` with an
+     * `ERR_POOL_TERMINATED` error rather than silently recreating workers.
+     * Create a new `PowerPool` to start again.
+     *
+     * @returns {void}
      */
     shutdown(): void;
     /**

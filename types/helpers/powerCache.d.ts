@@ -41,7 +41,7 @@ export class PowerCache {
      * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
      * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, }?: {
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, }?: {
         maxEntries?: number | undefined;
         maxWeight?: number | undefined;
         weightFn?: ((arg0: any) => number) | undefined;
@@ -54,19 +54,23 @@ export class PowerCache {
         maxCleanupPerTick?: number | undefined;
         eagerCleanupOnRead?: boolean | undefined;
     }, ...args: any[]);
-    maxEntries: number;
-    maxWeight: number;
+    maxEntries: any;
+    maxWeight: any;
+    maxPoolSize: any;
     weightFn: (arg0: any) => number;
     defaultTTL: number;
-    maxPoolSize: number;
     rejectOversized: boolean;
     onEvict: ((arg0: any, arg1: any, arg2: string) => void) | null;
+    onError: any;
+    /** number of times `weightFn` threw; a non-zero value means `maxWeight`
+     *  could not be enforced and should be surfaced by the caller. */
+    _weightErrors: number;
     onExpire: ((arg0: any, arg1: any) => void) | null;
     maxCleanupPerTick: number;
     eagerCleanupOnRead: boolean;
     _map: Map<any, any>;
     _head: import("./jsdoc-types.js").CacheNode | null;
-    _tail: import("./jsdoc-types.js").CacheNode | null;
+    _tail: any;
     _pool: {
         key: null;
         value: null;
@@ -81,7 +85,7 @@ export class PowerCache {
     _evictions: number;
     _rejected: number;
     _expirations: number;
-    _cleanupTimer: number | null;
+    _cleanupTimer: any;
     _cleanupRunning: boolean;
     _cleanupParams: {
         interval: number;
@@ -90,6 +94,25 @@ export class PowerCache {
     _cleanupCursor: any;
     _cleanupCursorValid: boolean;
     _evictionCandidate: any;
+    /**
+     * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
+     * behaviour. `'slru'` splits the list into a probation segment and a
+     * protected segment and promotes on access, which makes the cache far more
+     * resistant to a one-off sequential scan evicting the working set.
+     */
+    _policy: string;
+    /**
+     * MRU end of the probation segment. With `policy: 'slru'` the list is
+     * ordered:
+     *
+     *   head (probation LRU) ... _probationEnd (probation MRU)
+     *        -> protected LRU ... tail (protected MRU)
+     *
+     * New entries are spliced in at the probation/protected boundary and a hit
+     * promotes a node to the tail. `null` when the list is empty.
+     * @type {CacheNode|null}
+     */
+    _probationEnd: CacheNode | null;
     _inflightPromises: Map<any, any>;
     _defaultAsyncTimeout: number;
     /**
@@ -118,6 +141,21 @@ export class PowerCache {
      * @returns {number}
      */
     private _computeWeight;
+    /**
+     * Report an internal failure (a throwing user callback, a failing
+     * `weightFn`, ...) exactly once, through the configured `onError` handler
+     * when present and otherwise to `console.error`.
+     *
+     * Every catch site in this class funnels through here, so a swallowed
+     * failure is consistent and observable rather than invisible in some paths
+     * and logged in others.
+     *
+     * @param {any} err - The thrown value.
+     * @param {string} msg - Human-readable context.
+     * @returns {void}
+     * @private
+     */
+    private _notifyError;
     /**
      * Reset and return a node to the pool for reuse.
      *
@@ -182,6 +220,19 @@ export class PowerCache {
      * @returns {void}
      */
     private _append;
+    /**
+     * Splice `node` in as the new MRU of the probation segment (SLRU only).
+     *
+     * The list puts probation at the front and protected behind it, so a new
+     * entry goes immediately *before* the protected LRU rather than at the tail.
+     * The head-splice case (no probation segment exists yet) is what stops a
+     * freshly-emptied cache from growing its probation at the wrong end.
+     *
+     * @private
+     * @param {CacheNode} node
+     * @returns {void}
+     */
+    private _insertIntoProbation;
     /**
      * Remove a node from the linked list without freeing it. The node's
      * `prev`/`next` references are updated on neighbors and the node's links
@@ -503,6 +554,8 @@ export class PowerMemoizer {
     _defaultMemoizeOptions: {};
     run: (...args: any[]) => any;
     _originalFn: Function | null;
+    _receiverIds: WeakMap<object, any>;
+    _nextReceiverId: number;
     _fnWrapper: Function | undefined;
     /**
      * Wrap a function with memoization.
@@ -513,7 +566,23 @@ export class PowerMemoizer {
      * @param {number} [options.weight] - Optional explicit weight for the entry
      * @returns {Function} Memoized function
      */
-    private _memoize;
+    /**
+     * Build a cache key that includes the receiver's identity, so memoizing a
+     * method keeps one entry per object instead of collapsing every caller's
+     * result into a single shared entry.
+     *
+     * Object and function receivers get a monotonic id from a per-instance
+     * `WeakMap`. Primitive receivers (`memoized.call(5, x)`) fall back to their
+     * string form, which is still correct because the same primitive receiver
+     * necessarily has the same state.
+     *
+     * @param {any} receiver - The `this` value the wrapper was called with.
+     * @param {any[]} args - The call arguments.
+     * @returns {string} Cache key scoped to `receiver`.
+     * @private
+     */
+    private _receiverKey;
+    _memoize(fn: any, { ttl, weight }?: {}): (...args: any[]) => any;
     /**
      * Public API to memoize an arbitrary function using this PowerMemoizer instance's cache.
      * Mirrors the behavior used by the constructor when a function is supplied —

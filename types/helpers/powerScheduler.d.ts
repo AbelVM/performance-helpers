@@ -41,4 +41,12 @@ export class PowerScheduler {
      */
     cancel(): void;
     _run(): void;
+    /**
+     * Route an error to the configured `onError` handler without ever letting a
+     * throwing user handler escape.
+     * @param {any} err
+     * @private
+     * @returns {void}
+     */
+    private _notifyError;
 }

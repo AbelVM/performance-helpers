@@ -8,6 +8,7 @@
  * @public
  */
 export class PowerBulkhead {
+    [x: number]: () => void;
     /**
      * @param {Object} [options]
      * @param {number} [options.partitions=4] Number of isolated execution partitions.
@@ -21,6 +22,7 @@ export class PowerBulkhead {
         queueCapacity?: number | undefined;
         partitioner?: Function | undefined;
     });
+    _onError: any;
     _partitions: number;
     _maxConcurrency: number;
     _queueCapacity: number;
@@ -69,6 +71,47 @@ export class PowerBulkhead {
      * @returns {Promise<void>}
      */
     drain(): Promise<void>;
+    /**
+     * Snapshot of the bulkhead's counters.
+     * @returns {{active:number, pending:number, queueCapacity:number, partitions:number, maxConcurrency:number, saturated:boolean}}
+     */
+    stats(): {
+        active: number;
+        pending: number;
+        queueCapacity: number;
+        partitions: number;
+        maxConcurrency: number;
+        saturated: boolean;
+    };
+    /**
+     * Reject every queued waiter across all partitions and return the bulkhead
+     * to a fully idle state.
+     *
+     * `PowerBulkhead` was the only gate/queue/limit class in the library with no
+     * disposal path, so a bulkhead that saturated (`queueCapacity` reached, all
+     * permits held by tasks that never settle) could not be recovered: its
+     * queued waiters were retained forever and `drain()` never resolved.
+     *
+     * Tasks that are already *running* are not cancelled - JavaScript cannot
+     * interrupt them - but they no longer block a subsequent `drain()` from
+     * resolving once they settle.
+     *
+     * @param {Object} [options] - Reset options.
+     * @param {number} [options.available] - Permits to restore per partition.
+     *   Defaults to `maxConcurrency`.
+     * @param {string|Error} [options.reason] - Rejection reason for queued waiters.
+     * @returns {void}
+     */
+    reset(options?: {
+        available?: number | undefined;
+        reason?: string | Error | undefined;
+    }): void;
+    /**
+     * Alias for {@link PowerBulkhead#reset}.
+     * @param {Object} [options] - Reset options.
+     * @returns {void}
+     */
+    dispose(options?: Object): void;
     _choosePartition(key: any): number;
     _hashKey(value: any): number;
     _resolveDrainWaitersIfIdle(): void;

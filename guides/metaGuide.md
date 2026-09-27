@@ -24,23 +24,23 @@ If you already know the exact helper you want, go straight to its dedicated guid
 
 ## Quick chooser
 
-| If your problem is... | Start here | Add these when needed | Do not start with |
-| --- | --- | --- | --- |
-| Cache expensive values by key | `PowerCache` | `PowerPool`, `PowerEventBus`, `PowerDeadline` | `PowerMemoizer` if you are not memoizing a function |
-| Memoize a function call | `PowerMemoizer` | `PowerRetry`, `PowerDeadline` | `PowerCache` unless you need direct cache control |
-| Expire keys after a fixed TTL | `PowerTimedCache` or `PowerTTLMap` | `PowerLogger` | `PowerCache` unless you also need LRU or weights |
-| Offload CPU-heavy or blocking work | `PowerPool` | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control |
-| Process a very large iterable in parallel | `PowerChunker` | `PowerLogger`, `PowerHistogram` | `PowerPool` unless you need custom worker lifecycle |
-| Smooth bursts from producers | `PowerQueue` | `PowerBackpressure`, `PowerBatch`, `PowerPool` | `PowerSemaphore` alone |
-| Limit concurrent async work globally | `PowerSemaphore` | `PowerBulkhead`, `PowerHistogram` | `PowerPermitGate` unless you need a building block |
-| Isolate noisy workloads from critical ones | `PowerBulkhead` | `PowerCircuit`, `PowerHistogram`, `PowerLogger` | `PowerSemaphore` if isolation matters |
-| Enforce burst and sustained API quotas | `PowerThrottle`, `PowerSlidingWindow` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit` | `PowerRetry` alone |
-| Retry flaky work safely | `PowerRetry` | `PowerDeadline`, `PowerCircuit`, `PowerLogger` | infinite custom retry loops |
-| Put a hard time budget on work | `PowerDeadline` | `PowerRetry`, `PowerCircuit` | ad hoc `Promise.race` everywhere |
-| Broadcast events across components | `PowerEventBus` | `PowerObserver`, `PowerLogger` | `PowerSubscriberSet` unless you are building infrastructure |
-| Expose a single changing value reactively | `PowerObserver` | `PowerEventBus` | a full event bus |
-| Coordinate callbacks or multi-step async completion | `PowerDefer`, `PowerLatch` | `PowerLogger` | hand-rolled promise state |
-| Batch near-synchronous calls into one flush | `PowerBatch` | `PowerScheduler`, `PowerQueue` | `PowerQueue` alone |
+| If your problem is...                               | Start here                                         | Add these when needed                                      | Do not start with                                           |
+| --------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
+| Cache expensive values by key                       | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function         |
+| Memoize a function call                             | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control           |
+| Expire keys after a fixed TTL                       | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights            |
+| Offload CPU-heavy or blocking work                  | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control              |
+| Process a very large iterable in parallel           | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle         |
+| Smooth bursts from producers                        | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                      |
+| Limit concurrent async work globally                | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block          |
+| Isolate noisy workloads from critical ones          | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                       |
+| Enforce burst and sustained API quotas              | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                          |
+| Retry flaky work safely                             | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                 |
+| Put a hard time budget on work                      | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                            |
+| Broadcast events across components                  | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure |
+| Expose a single changing value reactively           | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                            |
+| Coordinate callbacks or multi-step async completion | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                   |
+| Batch near-synchronous calls into one flush         | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                          |
 
 ---
 
@@ -95,7 +95,14 @@ Use `PowerThrottle` for smoothing bursty traffic with token-bucket behavior.
 
 Use `PowerSlidingWindow` for strict rolling-window quotas.
 
-Use `PowerRateLimit` when you need both burst and sustained rules to pass at once.
+Use `PowerGCRA` when you need an **exact** `retryAfter()` rather than an estimate — it is a
+cell-based limiter (the ATM Forum's algorithm, behind `redis-cell` and Go's
+`x/time/rate`) that keeps all of its state in one number. Reach for it when the wait time is
+handed to a caller, a backoff, or a `Retry-After` header and a guess is not good enough.
+
+Use `PowerRateLimit` when you need both burst and sustained rules to pass at once. All three
+limiters share the `tryConsume()` / `available()` shape and compose in it; the combined limit
+is the strictest component.
 
 Use `PowerRetry` when retry policy is the main concern.
 
@@ -144,11 +151,11 @@ const bus = new PowerEventBus();
 async function getDecodedTile(tileId, rawTileBytes) {
   const decoded = await cache.getOrSetAsync(
     tileId,
-    () => pool.postMessage(
-      { op: 'decode-tile', tileId, rawTileBytes },
-      undefined,
-      { awaitResponse: true, timeout: 5000 }
-    ),
+    () =>
+      pool.postMessage({ op: 'decode-tile', tileId, rawTileBytes }, undefined, {
+        awaitResponse: true,
+        timeout: 5000,
+      }),
     { ttl: 60_000 }
   );
 
@@ -194,9 +201,12 @@ const backpressure = new PowerBackpressure({
   refillInterval: 100,
 });
 
-const writer = new PowerBatch(async (events) => {
-  await sendBulk(events);
-}, { maxSize: 500 });
+const writer = new PowerBatch(
+  async (events) => {
+    await sendBulk(events);
+  },
+  { maxSize: 500 }
+);
 
 async function ingestEvent(event) {
   const release = await backpressure.acquire();
@@ -238,6 +248,7 @@ Recommended helpers:
 
 - `PowerThrottle` for burst smoothing
 - `PowerSlidingWindow` for strict quotas
+- `PowerGCRA` for cell-based limiting with an exact `retryAfter()`
 - `PowerRateLimit` to combine them
 - `PowerDeadline` for per-call and total time budgets
 - `PowerCircuit` to fail fast when the dependency is unhealthy
@@ -256,15 +267,12 @@ async function callBackend(request) {
   }
 
   return circuit.call(() =>
-    PowerDeadline.run(
-      () => fetch(request),
-      {
-        maxAttempts: 3,
-        attemptTimeout: 3000,
-        retryDelay: 200,
-        totalTimeout: 10_000,
-      }
-    )
+    PowerDeadline.run(() => fetch(request), {
+      maxAttempts: 3,
+      attemptTimeout: 3000,
+      retryDelay: 200,
+      totalTimeout: 10_000,
+    })
   );
 }
 ```
@@ -296,10 +304,7 @@ const bulkhead = new PowerBulkhead({
 });
 
 function handleTask(tenantId, task) {
-  return bulkhead.run(
-    () => processTask(task),
-    { partitionKey: tenantId }
-  );
+  return bulkhead.run(() => processTask(task), { partitionKey: tenantId });
 }
 ```
 

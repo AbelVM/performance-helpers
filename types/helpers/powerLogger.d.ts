@@ -84,6 +84,18 @@ export class PowerLogger {
      * @param {...any} args
      * @returns {void}
      */
+    /**
+     * Report a failure raised by a user-supplied log sink.
+     *
+     * A sink that throws must not be able to take the logger - and therefore the
+     * pool, cache or circuit that owns it - down with it, but the failure still
+     * has to be visible somewhere. Escalate to `console.error` once, guarded, and
+     * give up if that fails too.
+     *
+     * @param {any} err - The value thrown by the sink.
+     * @returns {void}
+     */
+    _emitSinkError(err: any): void;
     error(...args: any[]): void;
     /**
      * Log a warning-level message when debug level is >= 2.

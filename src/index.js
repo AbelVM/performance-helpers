@@ -27,3 +27,4 @@ export { PowerBatch } from './helpers/powerBatch.js';
 export { PowerLatch } from './helpers/powerLatch.js';
 export { PowerObserver } from './helpers/powerObserver.js';
 export { PowerEventBus } from './helpers/powerEventBus.js';
+export { PowerGCRA } from './helpers/powerGCRA.js';
