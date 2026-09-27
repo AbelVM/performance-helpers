@@ -6,7 +6,10 @@
   "out": "docs",
   "cleanOutputDir": true,
   "exclude": [
-    "**/tests/**"
+    "**/tests/**",
+    "src/helpers/jsdoc-types.js",
+    "src/utils/options.js",
+    "src/utils/timers.js"
   ],
   "json": "./docs/docs-typedoc.json",
   "readme": "none",

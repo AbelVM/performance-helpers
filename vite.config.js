@@ -12,7 +12,11 @@ export default defineConfig({
       name: 'PerformanceHelpers',
       formats: ['es', 'cjs', 'umd'],
       fileName: (format) => {
+        // Keep the UMD name as `performance-helpers.js`: it is the name the
+        // README and the umd.bundle.* tests use. Previously `cjs` produced
+        // `performance-helpers.cjs.js` (a doubled extension).
         if (format === 'umd') return `${label}.js`;
+        if (format === 'cjs') return `${label}.cjs`;
         return `${label}.${format}.js`;
       },
     },

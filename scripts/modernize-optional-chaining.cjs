@@ -18,14 +18,17 @@ function walk(dir, list = []) {
 
 const files = walk('src');
 
-const propRegex = /([A-Za-z_$][\w$\.]*)\s*&&\s*\1\./g;
-const callRegex = /([A-Za-z_$][\w$\.]*)\s*&&\s*\1\s*\(/g;
-const typeofRegex = /([A-Za-z_$][\w$\.]*)\s*&&\s*typeof\s+\1\./g;
+const propRegex = /([A-Za-z_$][\w$.]*)\s*&&\s*\1\./g;
+const callRegex = /([A-Za-z_$][\w$.]*)\s*&&\s*\1\s*\(/g;
+const typeofRegex = /([A-Za-z_$][\w$.]*)\s*&&\s*typeof\s+\1\./g;
 
-files.forEach(f => {
+files.forEach((f) => {
   try {
     let s = fs.readFileSync(f, 'utf8');
-    let t = s.replace(propRegex, '$1?.').replace(callRegex, '$1?.(').replace(typeofRegex, 'typeof $1?.');
+    let t = s
+      .replace(propRegex, '$1?.')
+      .replace(callRegex, '$1?.(')
+      .replace(typeofRegex, 'typeof $1?.');
     if (t !== s) {
       fs.writeFileSync(f, t, 'utf8');
       console.log('patched', f);

@@ -25,7 +25,11 @@
  * @private
  */
 function _canUnref() {
-  return typeof setTimeout === 'function' && typeof setTimeout(() => {}, 0)?.unref === 'function';
+  // `setTimeout` resolves to a DOM `number` in a browser type environment and
+  // to a Node.js `Timeout` in Node, so the capability is probed at runtime
+  // rather than asserted through a type that only holds in one of them.
+  const probe = /** @type {any} */ (setTimeout(() => {}, 0));
+  return typeof probe === 'object' && typeof probe?.unref === 'function';
 }
 
 /**
@@ -38,7 +42,7 @@ function _canUnref() {
  *   in browsers). Usable with `clearTimeout`.
  */
 export function setSafeTimeout(fn, ms, options = {}) {
-  const t = setTimeout(fn, ms);
+  const t = /** @type {any} */ (setTimeout(fn, ms));
   if (!options.keepProcessAlive && _canUnref()) t.unref();
   return t;
 }
@@ -52,7 +56,7 @@ export function setSafeTimeout(fn, ms, options = {}) {
  * @returns {any} The underlying timer handle. Usable with `clearInterval`.
  */
 export function setSafeInterval(fn, ms, options = {}) {
-  const t = setInterval(fn, ms);
+  const t = /** @type {any} */ (setInterval(fn, ms));
   if (!options.keepProcessAlive && _canUnref()) t.unref();
   return t;
 }

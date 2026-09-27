@@ -1993,59 +1993,6 @@ function formatMd(report, filename, prevDeltaMap = new Map()) {
       .replace(/^./, (s) => s.toUpperCase());
   }
 
-  function renderPoolSection(lines, poolItems) {
-    if (!poolItems || !poolItems.length) {
-      lines.push('- No pool results');
-      return;
-    }
-
-    const perfKeys = new Set();
-    for (const pr of poolItems) {
-      const p = pr.stats || {};
-      for (const k of Object.keys(p)) {
-        if (p[k] && typeof p[k] === 'object' && !Array.isArray(p[k])) {
-          for (const sub of Object.keys(p[k])) perfKeys.add(`${k}.${sub}`);
-        } else {
-          perfKeys.add(k);
-        }
-      }
-    }
-    perfKeys.delete('totalWorkersCreated');
-    perfKeys.delete('totalTasksPerformed');
-    perfKeys.delete('averageTasksPerWorkerUntilTermination');
-
-    const keys = ['size', 'totalMs', ...Array.from(perfKeys)];
-    lines.push('');
-    lines.push(`| ${keys.map((k) => headerLabel(k)).join(' | ')} |`);
-    lines.push(
-      `| ${keys.map((k) => (k === 'size' ? '----------:' : '-----------:')).join(' | ')} |`
-    );
-
-    for (const pr of poolItems) {
-      const p = pr.stats || {};
-      const row = [];
-      for (const k of keys) {
-        if (k === 'size') {
-          row.push(String(pr.size));
-          continue;
-        }
-        if (k === 'totalMs') {
-          row.push(pr.totalMs == null ? '' : pr.totalMs.toFixed(2));
-          continue;
-        }
-        if (k.includes('.')) {
-          const [a, b] = k.split('.');
-          const v = p[a] && typeof p[a] === 'object' ? p[a][b] : undefined;
-          row.push(v == null ? '' : typeof v === 'number' ? v.toFixed(2) : String(v));
-        } else {
-          const v = p[k];
-          row.push(v == null ? '' : typeof v === 'number' ? v.toFixed(2) : String(v));
-        }
-      }
-      lines.push(`| ${row.join(' | ')} |`);
-    }
-  }
-
   lines.push('# Benchmark Results');
   lines.push(`\nGenerated: ${report.timestamp}\n`);
   lines.push('## Configuration\n');

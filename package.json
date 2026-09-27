@@ -35,12 +35,13 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel Vázquez Montoro",
+  "author": "Abel V\u00e1zquez Montoro",
   "type": "module",
-  "main": "src/index.js",
+  "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
   "types": "types/index.d.ts",
   "files": [
+    "dist",
     "src",
     "types",
     "README.md",
@@ -52,7 +53,7 @@
     ".": {
       "types": "./types/index.d.ts",
       "import": "./src/index.js",
-      "require": "./src/index.js",
+      "require": "./dist/performance-helpers.cjs",
       "default": "./src/index.js"
     },
     "./powerBackpressure": {
@@ -200,22 +201,25 @@
   "scripts": {
     "build": "vite build",
     "test": "vitest run",
-    "lint": "eslint \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.js\"",
-    "lint:fix": "eslint --fix \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.js\"",
-    "format": "prettier --write \"src/**/*.js\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.js\" \"*.md\"",
+    "lint": "eslint \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
+    "lint:fix": "eslint --fix \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
+    "format": "prettier --write \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"*.md\"",
     "test:coverage": "vitest run --coverage --reporter=verbose",
+    "typecheck": "tsc --noEmit --project tsconfig.check.json",
     "docs": "typedoc",
     "bench": "node bench/run.js",
     "bench:pool": "node bench/run.js pool",
     "bench:cache": "node bench/run.js cache",
     "types:generate": "tsc --project tsconfig.json --emitDeclarationOnly --declaration --allowJs --outDir types --declarationMap false",
-    "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs"
+    "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs",
+    "prepublishOnly": "npm run lint && npm run test && npm run build && npm run types:generate"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^5.0.2",
     "@vitest/web-worker": "^5.0.2",
     "eslint": "^10.11.0",

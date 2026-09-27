@@ -35,7 +35,7 @@ This folder contains a small harness (`bench/run.js`) that measures:
   - `PowerDeadline`: success path overhead and abort-path cost when task exceeds deadline
   - `PowerSlidingWindow`: `tryConsume` throughput under capacity and at capacity
   - `PowerQueue`: bulk push+shift and interleaved (ring-buffer steady state)
-- **historical delta comparison**: on each run, results are compared against the previous `results.json` and regressions/improvements > 5% are highlighted in the markdown
+- **historical delta comparison**: on each run, results are compared against the previous `results.json` and regressions/improvements beyond the configured thresholds are highlighted in the markdown (35% + 50ms absolute for pool scenarios, 20% + 8ms absolute for helper micro-benchmarks; see `POOL_PCT_THRESHOLD` / `HELPER_PCT_THRESHOLD` in `run.js`)
 
 Quick usage
 

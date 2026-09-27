@@ -25,7 +25,11 @@ function listAllJsFiles(dir) {
   for (const name of entries) {
     const p = path.join(dir, name);
     let st;
-    try { st = fs.statSync(p); } catch (e) { continue; }
+    try {
+      st = fs.statSync(p);
+    } catch (e) {
+      continue;
+    }
     if (st.isDirectory()) {
       if (name === 'node_modules' || name === 'coverage' || name === '.git') continue;
       out.push(...listAllJsFiles(p));
@@ -48,14 +52,26 @@ function extractExports(content) {
   while ((m = varRx.exec(content))) symbols.push(m[1]);
   while ((m = defaultRx.exec(content))) symbols.push(m[1]);
   while ((m = namedRx.exec(content))) {
-    const list = m[1].split(',').map(s => s.trim().split(/\s+as\s+/)[0].trim()).filter(Boolean);
+    const list = m[1]
+      .split(',')
+      .map((s) =>
+        s
+          .trim()
+          .split(/\s+as\s+/)[0]
+          .trim()
+      )
+      .filter(Boolean);
     for (const s of list) symbols.push(s);
   }
   return Array.from(new Set(symbols));
 }
 
 function readFileSafe(p) {
-  try { return fs.readFileSync(p, 'utf8'); } catch (e) { return null; }
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch (e) {
+    return null;
+  }
 }
 
 const helperFiles = listJsFiles(srcHelpers);
@@ -85,9 +101,13 @@ for (const [sym, info] of Object.entries(symbolMap)) {
 }
 
 for (const [sym, info] of Object.entries(symbolMap)) {
-  report.push({ symbol: sym, definedIn: path.relative(root, info.def), referencedIn: Array.from(info.refs).map(f => path.relative(root, f)) });
+  report.push({
+    symbol: sym,
+    definedIn: path.relative(root, info.def),
+    referencedIn: Array.from(info.refs).map((f) => path.relative(root, f)),
+  });
 }
 
 const out = { generatedAt: new Date().toISOString(), report };
-fs.writeFileSync(path.join('scripts','static-audit-exports.json'), JSON.stringify(out, null, 2));
+fs.writeFileSync(path.join('scripts', 'static-audit-exports.json'), JSON.stringify(out, null, 2));
 console.log(JSON.stringify(out, null, 2));

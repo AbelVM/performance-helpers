@@ -174,7 +174,7 @@ Or using jsDelivr:
 
 ```html
 <script type="module">
-  import { PowerCache } from 'https://cdn.jsdelivr.net/npm/performance-helpers@latest/dist/index.js';
+  import { PowerCache } from 'https://cdn.jsdelivr.net/npm/performance-helpers@latest/dist/performance-helpers.es.js';
   const cache = new PowerCache();
   cache.set('a', 1);
   console.log(cache.get('a'));
@@ -184,7 +184,7 @@ Or using jsDelivr:
 UMD example (script tag):
 
 ```html
-<script src="https://unpkg.com/performance-helpers@latest/dist/performance-helpers.umd.js"></script>
+<script src="https://unpkg.com/performance-helpers@latest/dist/performance-helpers.js"></script>
 <script>
   // UMD builds attach a global. Use the global that your build exposes.
   const lib = window.PerformanceHelpers;

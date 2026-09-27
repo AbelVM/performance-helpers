@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Matches `engines`. 22.12 is the floor because the CommonJS entry
+        # point relies on `require(esm)`.
+        node: ['22.12', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # Validates the JSDoc that backs the published `types/*.d.ts`. The
+      # `types:generate` script only *emits* declarations (`checkJs: false`),
+      # so before this step existed the shipped types were never checked.
+      #
+      # NOTE: non-blocking. `tsconfig.check.json` turns on `checkJs` and
+      # currently reports ~494 pre-existing errors spread across every module
+      # (the JSDoc has never been type-checked). It runs on every build so the
+      # count is visible and ratcheting is possible, but it must not block
+      # unrelated work until the debt is cleared. Flip `continue-on-error` to
+      # false once it reaches zero.
+      - name: Typecheck (non-blocking, see comment)
+        continue-on-error: true
+        run: npm run typecheck
+
+      # `test` alone does not enforce the thresholds configured in
+      # vitest.config.js - they only apply under `--coverage`.
+      - name: Test with coverage
+        run: npm run test:coverage
+
+      - name: Build
+        run: npm run build
+
+      # The `require` condition now points at the CJS bundle rather than ESM
+      # source, so a broken bundle would only surface for CommonJS consumers.
+      - name: Smoke-test the CJS bundle
+        run: node -e "const l=require('./dist/performance-helpers.cjs');if(typeof l.PowerCache!=='function'||typeof l.PowerPool!=='function')throw new Error('CJS bundle missing exports');const h=new l.PowerHistogram();h.record(1);h.record(1e8);const p=h.percentile(99.9);if(!(p>9e7))throw new Error('histogram clamped out-of-range data: '+p);console.log('cjs ok, p99.9='+p);"
+
+      - name: Verify types are in sync with src
+        run: npm run types:generate && git diff --exit-code -- types
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-helpers-dist-node${{ matrix.node }}
+          path: dist/
+          retention-days: 7

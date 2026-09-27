@@ -8,7 +8,8 @@ Repository: <https://github.com/AbelVM/performance-helpers>
 
 ## Prerequisites
 
-- Node.js 16 or newer
+- Node.js 22.12 or newer (matches `engines`; the code uses explicit resource
+  management and relies on `require(esm)` for the CommonJS entry point)
 - npm
 
 Install dependencies:
