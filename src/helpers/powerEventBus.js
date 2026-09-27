@@ -99,7 +99,7 @@ export class PowerEventBus {
   }
 
   _getBucket(event) {
-    let bucket = this._listeners.get(event);
+    const bucket = this._listeners.get(event);
     if (!bucket) return null;
 
     if (bucket instanceof PowerSubscriberSet) return bucket;

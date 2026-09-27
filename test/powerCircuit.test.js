@@ -9,7 +9,7 @@ describe('PowerCircuit', () => {
 
   it('opens after threshold failures and short-circuits', async () => {
     const cb = new PowerCircuit({ threshold: 2, timeout: 50 });
-    let fail = true;
+    const fail = true;
     const f = async () => {
       if (fail) throw new Error('boom');
       return 'ok';

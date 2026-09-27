@@ -186,7 +186,7 @@ describe('PowerQueue ordering invariants', () => {
         fc.array(fc.boolean(), { minLength: 1, maxLength: 200 }),
         (pushed, ops) => {
           const q = new PowerQueue();
-          let model = [];
+          const model = [];
           let cursor = 0;
           for (const shift of ops) {
             if (cursor < pushed.length) {

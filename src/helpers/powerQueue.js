@@ -103,7 +103,7 @@ export class PowerQueue {
    * @returns {Iterator<any>}
    */
   *[Symbol.iterator]() {
-    let i = this._head;
+    const i = this._head;
     for (let n = 0; n < this._size; n++) {
       yield this._buffer[(i + n) & this._mask];
     }
@@ -242,7 +242,7 @@ export class PowerQueue {
     while (this._capacity < need) this._grow();
 
     // compute new head index where items[0] will be placed
-    let start = (this._head - items.length) & this._mask;
+    const start = (this._head - items.length) & this._mask;
     for (let i = 0; i < items.length; i++) {
       this._buffer[(start + i) & this._mask] = items[i];
     }
