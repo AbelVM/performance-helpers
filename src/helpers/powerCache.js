@@ -90,6 +90,8 @@ export class PowerCache {
     // invoked as onError(err, message) whenever an internal failure is
     // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
     onError = null,
+    /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
+    policy = 'lru',
   } = {}) {
     // Basic options validation: when an explicit options argument is provided it must be an object
     if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
@@ -266,6 +268,25 @@ export class PowerCache {
     // Eviction candidate pointer to avoid repeated head lookups during large
     // eviction sweeps. Kept in sync with head mutations.
     this._evictionCandidate = null;
+    /**
+     * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
+     * behaviour. `'slru'` splits the list into a probation segment and a
+     * protected segment and promotes on access, which makes the cache far more
+     * resistant to a one-off sequential scan evicting the working set.
+     */
+    this._policy = policy === 'slru' ? 'slru' : 'lru';
+    /**
+     * MRU end of the probation segment. With `policy: 'slru'` the list is
+     * ordered:
+     *
+     *   head (probation LRU) ... _probationEnd (probation MRU)
+     *        -> protected LRU ... tail (protected MRU)
+     *
+     * New entries are spliced in at the probation/protected boundary and a hit
+     * promotes a node to the tail. `null` when the list is empty.
+     * @type {CacheNode|null}
+     */
+    this._probationEnd = null;
     // Track in-flight async factories for `getOrSetAsync` to dedupe concurrent callers
     this._inflightPromises = new Map();
     this._defaultAsyncTimeout = Number.isFinite(Number(defaultAsyncTimeout))
@@ -502,12 +523,55 @@ export class PowerCache {
     if (!this._tail) {
       this._head = this._tail = node;
       this._evictionCandidate = this._head;
+      if (this._policy === 'slru') this._probationEnd = node;
+      return;
+    }
+    if (this._policy === 'slru') {
+      this._insertIntoProbation(node);
       return;
     }
     node.prev = this._tail;
     node.next = null;
     this._tail.next = node;
     this._tail = node;
+  }
+
+  /**
+   * Splice `node` in as the new MRU of the probation segment (SLRU only).
+   *
+   * The list puts probation at the front and protected behind it, so a new
+   * entry goes immediately *before* the protected LRU rather than at the tail.
+   * The head-splice case (no probation segment exists yet) is what stops a
+   * freshly-emptied cache from growing its probation at the wrong end.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @returns {void}
+   */
+  _insertIntoProbation(node) {
+    const boundary = this._probationEnd;
+    if (!boundary) {
+      // No probation segment: the whole list is protected, so the new entry
+      // becomes the sole probation node at the very front.
+      node.next = this._head;
+      node.prev = null;
+      if (this._head) this._head.prev = node;
+      this._head = node;
+      this._evictionCandidate = node;
+    } else if (boundary === this._tail) {
+      // The whole list is still probation: a plain append extends it.
+      node.prev = this._tail;
+      node.next = null;
+      this._tail.next = node;
+      this._tail = node;
+    } else {
+      const after = boundary.next;
+      node.prev = boundary;
+      node.next = after;
+      boundary.next = node;
+      after.prev = node;
+    }
+    this._probationEnd = node;
   }
 
   /**
@@ -529,6 +593,7 @@ export class PowerCache {
     if (!p) this._evictionCandidate = this._head;
     if (n) n.prev = p;
     else this._tail = p;
+    if (this._probationEnd === node) this._probationEnd = p;
     node.prev = node.next = null;
   }
 
@@ -542,6 +607,30 @@ export class PowerCache {
    * @returns {void}
    */
   _moveToTail(node) {
+    if (this._policy === 'slru') {
+      // A hit promotes the node out of probation into the protected MRU. This
+      // must NOT go through `_append`, which would re-insert at the probation
+      // boundary and undo the promotion.
+      // The predecessor has to be captured *before* `_remove`, which nulls the
+      // node's links, and before `node.prev` is repurposed for the tail splice.
+      const wasProbationEnd = this._probationEnd === node;
+      const prevProbation = node.prev;
+      if (this._tail === node) {
+        // Already at the tail. The early-out below would skip the promotion and
+        // leave the boundary pointing at a node that is now protected, which
+        // corrupts the segment order on the next insert. Close the probation
+        // segment behind it instead.
+        if (wasProbationEnd) this._probationEnd = prevProbation;
+        return;
+      }
+      this._remove(node);
+      node.prev = this._tail;
+      node.next = null;
+      if (this._tail) this._tail.next = node;
+      this._tail = node;
+      if (wasProbationEnd) this._probationEnd = prevProbation;
+      return;
+    }
     if (this._tail === node) return;
     this._remove(node);
     this._append(node);
@@ -1030,6 +1119,7 @@ export class PowerCache {
     this._cleanupCursor = null;
     this._cleanupCursorValid = false;
     this._evictionCandidate = null;
+    this._probationEnd = null;
     // Abandon in-flight dedupe entries. They cannot be cancelled (JS cannot
     // interrupt a running factory), but dropping the map means a `getOrSetAsync`
     // started *after* the clear is not deduped into a pre-clear request, and

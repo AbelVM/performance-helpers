@@ -4,19 +4,20 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 ## PowerCache
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `maxEntries` | `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded. |
-| `maxWeight` | `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded. |
-| `weightFn` | `function(value):number` | `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`. |
-| `defaultTTL` | `number` | `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration. |
-| `maxPoolSize` | `number` | `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC. |
-| `rejectOversized` | `boolean` | `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected. |
-| `onEvict` | `function(key,value,reason)` | `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'|'deleted'|'rejected-oversized'`. |
-| `onExpire` | `function(key,value)` | `null` | Callback invoked when an entry expires due to TTL. |
-| `initialPoolSize` | `number` | `0` | Prefill the internal node pool to reduce early allocations. |
-| `maxCleanupPerTick` | `number` | `100` | Max nodes scanned per cleanup tick for `startCleanup()`.
-| `eagerCleanupOnRead` | `boolean` | `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior). |
+| option               |                         type |    default | description                                                                                             |
+| -------------------- | ---------------------------: | ---------: | ------------------------------------------------------------------------------------------------------- |
+| `maxEntries`         |                     `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                           |
+| `maxWeight`          |                     `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                 |
+| `weightFn`           |     `function(value):number` |  `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                            |
+| `defaultTTL`         |                     `number` |    `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                     |
+| `maxPoolSize`        |                     `number` |     `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                               |
+| `rejectOversized`    |                    `boolean` |    `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                           |
+| `onEvict`            | `function(key,value,reason)` |     `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                           | 'deleted' | 'rejected-oversized'`. |
+| `onExpire`           |        `function(key,value)` |     `null` | Callback invoked when an entry expires due to TTL.                                                      |
+| `initialPoolSize`    |                     `number` |        `0` | Prefill the internal node pool to reduce early allocations.                                             |
+| `maxCleanupPerTick`  |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                |
+| `eagerCleanupOnRead` |                    `boolean` |    `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior).              |
+| `policy`             |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`. |
 
 ### API
 
@@ -122,21 +123,21 @@ async function fetchUserProfileFromNetwork(id) {
 // High-level cached accessor using getOrSetAsync (inflight dedupe + caching)
 async function fetchUserProfile(id) {
   const key = `user:${id}`;
-  return cache.getOrSetAsync(
-    key,
-    () => fetchUserProfileFromNetwork(id),
-    { ttl: 30_000 }
-  );
+  return cache.getOrSetAsync(key, () => fetchUserProfileFromNetwork(id), { ttl: 30_000 });
 }
 
 // Concurrent callers for the same key share the inflight request (deduped)
 const [p1, p2] = await Promise.all([fetchUserProfile('alice'), fetchUserProfile('alice')]);
 
 // Stale-while-revalidate: return expired value immediately and refresh in background
-const profile = await cache.getOrSetAsync('user:alice', () => fetchUserProfileFromNetwork('alice'), {
-  staleWhileRevalidate: true,
-  ttl: 30_000,
-});
+const profile = await cache.getOrSetAsync(
+  'user:alice',
+  () => fetchUserProfileFromNetwork('alice'),
+  {
+    staleWhileRevalidate: true,
+    ttl: 30_000,
+  }
+);
 console.log('profile', profile);
 
 // The cache will not store rejected promises; handle network errors explicitly
@@ -148,6 +149,53 @@ try {
 }
 ```
 
+## Eviction policy: `lru` vs `slru`
+
+Plain LRU is **scan-hostile**: one sequential pass over a set of unique keys
+evicts the entire working set, because every scanned key is, momentarily, the
+most recently used. `policy: 'slru'` (segmented LRU) fixes that by splitting the
+list in two:
+
+```
+head (probation LRU) … probation-MRU → protected LRU … tail (protected MRU)
+```
+
+- A **new** entry lands in the **probation** segment, at its MRU end.
+- An **accessed** entry is **promoted** to the **protected** segment.
+- Eviction always takes the **probation LRU** first, and only reaches protected
+  once probation is drained.
+
+So a key must be touched twice to earn protection, and a one-off scan churns
+only in probation.
+
+```javascript
+const cache = new PowerCache({ maxEntries: 100, policy: 'slru' });
+```
+
+### Measured effect
+
+Establishing a 40-key hot working set and then scanning 500 distinct keys once:
+
+| policy          | hot keys retained after the scan |
+| --------------- | -------------------------------: |
+| `lru` (default) |                       **0** / 40 |
+| `slru`          |                      **40** / 40 |
+
+That comparison is asserted in `test/powerCache.slru.test.js`, so it is enforced
+on every CI run rather than being a one-off measurement.
+
+### Trade-offs
+
+- Slightly more work per `get` (one extra pointer comparison per promotion) and
+  one extra pointer to maintain on `set`/`delete`.
+- `entries('LRU')` still returns a single global order (probation then
+  protected); the segment split is an implementation detail, not a change to the
+  public ordering.
+- **There is deliberately no `protectedRatio` knob.** The split here is decided
+  by access history, not by a fixed ratio, so exposing a ratio would be an
+  option that does nothing. A ratio only becomes meaningful with an admission
+  filter in front of it (a W-TinyLFU style policy), which would be the next
+  step up from this one.
 
 ## PowerMemoizer
 
@@ -157,21 +205,21 @@ The constructor always returns a `PowerMemoizer` instance. Use the instance meth
 
 #### Memoizer constructor params
 
-| param | type | default | description |
-|---|---:|---:|---|
-| `fn` | `Function?` | — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied). |
-| `options.keyResolver` | `function(...args):string` | `(...args)=>JSON.stringify(args)` | Function mapping call args to a stable cache key. |
-| `options.cacheOptions` | `Object` | `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`). |
-| `options.ttl` | `number?` | `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor. |
-| `options.weight` | `number?` | `undefined` | Default weight used when caching results for the `fn` passed to the constructor. |
+| param                  |                       type |                           default | description                                                                                                                                                                                                                                            |
+| ---------------------- | -------------------------: | --------------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fn`                   |                `Function?` |                                 — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied). |
+| `options.keyResolver`  | `function(...args):string` | `(...args)=>JSON.stringify(args)` | Function mapping call args to a stable cache key.                                                                                                                                                                                                      |
+| `options.cacheOptions` |                   `Object` |                              `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                            |
+| `options.ttl`          |                  `number?` |                       `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                     |
+| `options.weight`       |                  `number?` |                       `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                       |
 
 You can create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
 
 ```javascript
 // share a single cache across multiple functions
-const pm = new PowerMemoizer()
-const memoA = pm.memoize(fnA)
-const memoB = pm.memoize(fnB, { ttl: 5000 })
+const pm = new PowerMemoizer();
+const memoA = pm.memoize(fnA);
+const memoB = pm.memoize(fnB, { ttl: 5000 });
 ```
 
 ### Memoizer API
@@ -193,13 +241,13 @@ const memoB = pm.memoize(fnB, { ttl: 5000 })
 ### Example
 
 ```javascript
-const fetchUserFn = async (id) => fetch(`/users/${id}`).then(r => r.json())
+const fetchUserFn = async (id) => fetch(`/users/${id}`).then((r) => r.json());
 // when constructing without an immediate function you must pass the
 // options as the *second* argument (first arg is the optional `fn`):
-const pm = new PowerMemoizer(undefined, { cacheOptions: { defaultTTL: 10_000 } })
-const memo = pm.memoize(fetchUserFn)
+const pm = new PowerMemoizer(undefined, { cacheOptions: { defaultTTL: 10_000 } });
+const memo = pm.memoize(fetchUserFn);
 // call the memoized function directly
-await memo(1)
+await memo(1);
 ```
 
 ### Fast key resolver
@@ -208,14 +256,14 @@ For hot paths where most calls use simple scalar arguments (ids, numbers, short 
 use the built-in `simpleArgsKey` helper as a faster alternative to `JSON.stringify`:
 
 ```javascript
-import { PowerMemoizer, simpleArgsKey } from '../src/helpers/powerCache.js'
+import { PowerMemoizer, simpleArgsKey } from '../src/helpers/powerCache.js';
 
-const fetchUserFn = async (id) => fetch(`/users/${id}`).then(r => r.json())
+const fetchUserFn = async (id) => fetch(`/users/${id}`).then((r) => r.json());
 // use the fast resolver for simple scalar args
 // when a function is supplied to the constructor the instance provides a
 // convenience `run()` alias that invokes the memoized wrapper:
-const pm = new PowerMemoizer(fetchUserFn, { keyResolver: simpleArgsKey })
-await pm.run(1)
+const pm = new PowerMemoizer(fetchUserFn, { keyResolver: simpleArgsKey });
+await pm.run(1);
 ```
 
 `simpleArgsKey` performs a cheap, deterministic encoding for primitive args
@@ -234,16 +282,16 @@ one-line construction pattern.
 Constructor signature
 
 ```javascript
-new PowerTimedCache(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions })
+new PowerTimedCache(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions });
 ```
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `ttl` | `number` | — | Required. Default TTL (ms) for entries stored in the cache. |
-| `maxEntries` | `number` | `undefined` | Optional: forwarded to the underlying `PowerCache` constructor. |
-| `interval` | `number` | `undefined` | Optional cleanup interval (ms). When provided it is forwarded to `startCleanup()`; otherwise `startCleanup()` uses its own computed default. |
-| `maxCleanupPerTick` | `number` | `undefined` | Optional: when provided forwarded to `startCleanup()` to control nodes scanned per tick. |
-| `cacheOptions` | `Object` | `{}` | Additional options forwarded to `PowerCache` (e.g. `weightFn`, `maxWeight`, `rejectOversized`). |
+| option              |     type |     default | description                                                                                                                                  |
+| ------------------- | -------: | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttl`               | `number` |           — | Required. Default TTL (ms) for entries stored in the cache.                                                                                  |
+| `maxEntries`        | `number` | `undefined` | Optional: forwarded to the underlying `PowerCache` constructor.                                                                              |
+| `interval`          | `number` | `undefined` | Optional cleanup interval (ms). When provided it is forwarded to `startCleanup()`; otherwise `startCleanup()` uses its own computed default. |
+| `maxCleanupPerTick` | `number` | `undefined` | Optional: when provided forwarded to `startCleanup()` to control nodes scanned per tick.                                                     |
+| `cacheOptions`      | `Object` |        `{}` | Additional options forwarded to `PowerCache` (e.g. `weightFn`, `maxWeight`, `rejectOversized`).                                              |
 
 ### Example
 
