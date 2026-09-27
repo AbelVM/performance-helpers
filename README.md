@@ -13,7 +13,7 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 
 ## Parallelizing
 
-- [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances.
+- [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling can use the latency-threshold heuristic or an adaptive concurrency controller (`policy: 'aimd' | 'vegas' | 'gradient2'`).
 - [PowerChunker: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerBulkhead: Partitioned executor](guides/powerBulkhead.md). Isolate noisy workloads into separate lanes so one hot partition cannot starve the rest.
 - [PowerCircuit: Circuit breaker](guides/powerCircuit.md). Small circuit breaker to protect external services from cascading failures.

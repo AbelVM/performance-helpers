@@ -20,7 +20,10 @@ export default [
     },
     rules: {
       semi: ['error', 'always'],
-      quotes: ['error', 'single'],
+      // `avoidEscape` is required to agree with eslint-plugin-prettier, which
+      // prefers double quotes for a string that contains single quotes. Without
+      // it the two rules contradict each other and --fix oscillates.
+      quotes: ['error', 'single', { avoidEscape: true }],
       // 'none' keeps the previous behaviour: unused catch bindings are allowed,
       // the codebase uses `catch (e)` purely for the debug-log side channel.
       'no-unused-vars': ['error', { caughtErrors: 'none' }],

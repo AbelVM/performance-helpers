@@ -4,21 +4,21 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
 ## Constructor
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `workerSource` | `Function \| string` | — | Either a Worker factory/constructor (callable) or a relative path string passed to `new Worker(new URL(path, import.meta.url))`. |
-| `options.size` | `number` | `min(navigator.hardwareConcurrency \|\| 2, 2)` | Initial number of workers to spawn. |
-| `options.minSize` | `number` | `1` | Minimum workers to keep alive. |
-| `options.maxSize` | `number` | `Math.max(size, hwConcurrency)` | Maximum workers allowed in the pool. |
-| `options.workerOptions` | `Object` | `{}` | Options forwarded to the Worker constructor when using a string `workerSource`. |
-| `options.maxTasksPerWorker` | `number` | `Infinity` | Soft capacity per worker before it is considered busy. |
-| `options.idleTimeout` | `number` | `60000` | Milliseconds after which idle workers (beyond `minSize`) are terminated. |
-| `options.taskQueue` | `boolean` | `true` | Whether to queue tasks when pool is saturated. |
-| `options.queuePolicy` | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` | `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below. |
-| `options.lazy` | `boolean` | `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost. |
-| `options.listenerMaxListeners` / `options.maxListeners` | `number` | `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit. |
-| `options.weakListeners` | `boolean` | `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests). |
-| `options.autoScale` | `boolean \| Object` | `false` | When provided (or `true`), enables autoscaling. Supply `true` to use defaults, or an object to tune behavior. See the **Autoscaling** section below for properties and tuning recommendations. |
+| option                                                  |                                                type |                                        default | description                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------- | --------------------------------------------------: | ---------------------------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workerSource`                                          |                                `Function \| string` |                                              — | Either a Worker factory/constructor (callable) or a relative path string passed to `new Worker(new URL(path, import.meta.url))`.                                                                                                                                                                                                   |
+| `options.size`                                          |                                            `number` | `min(navigator.hardwareConcurrency \|\| 2, 2)` | Initial number of workers to spawn.                                                                                                                                                                                                                                                                                                |
+| `options.minSize`                                       |                                            `number` |                                            `1` | Minimum workers to keep alive.                                                                                                                                                                                                                                                                                                     |
+| `options.maxSize`                                       |                                            `number` |                `Math.max(size, hwConcurrency)` | Maximum workers allowed in the pool.                                                                                                                                                                                                                                                                                               |
+| `options.workerOptions`                                 |                                            `Object` |                                           `{}` | Options forwarded to the Worker constructor when using a string `workerSource`.                                                                                                                                                                                                                                                    |
+| `options.maxTasksPerWorker`                             |                                            `number` |                                     `Infinity` | Soft capacity per worker before it is considered busy.                                                                                                                                                                                                                                                                             |
+| `options.idleTimeout`                                   |                                            `number` |                                        `60000` | Milliseconds after which idle workers (beyond `minSize`) are terminated.                                                                                                                                                                                                                                                           |
+| `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                     |
+| `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                 |
+| `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                      |
+| `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                               |
+| `options.weakListeners`                                 |                                           `boolean` |                                        `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests). |
+| `options.autoScale`                                     |                                 `boolean \| Object` |                                        `false` | When provided (or `true`), enables autoscaling. Supply `true` to use defaults, or an object to tune behavior. See the **Autoscaling** section below for properties and tuning recommendations.                                                                                                                                     |
 
 ## API
 
@@ -31,8 +31,8 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
     - `'drop-newest'` drops the newest incoming task when there is already queued backlog.
     - `'reject'` rejects new overflow tasks immediately instead of queueing.
 
-	- Note: `options.awaitResponse` requires the outgoing `message` to be a plain-object (not a TypedArray/ArrayBuffer). The implementation augments the object with a `correlationId` and will throw if a non-plain-object is supplied when `awaitResponse` is requested.
-	- `options.workerId` may be a `number` or `string` (the pool coerces ids to strings internally for correlation handling).
+    - Note: `options.awaitResponse` requires the outgoing `message` to be a plain-object (not a TypedArray/ArrayBuffer). The implementation augments the object with a `correlationId` and will throw if a non-plain-object is supplied when `awaitResponse` is requested.
+    - `options.workerId` may be a `number` or `string` (the pool coerces ids to strings internally for correlation handling).
 
 - `broadcast(message, transfer)` — Send `message` to every worker in the pool. Each worker receives either the provided transferable or an independently encoded `Uint8Array` when `transfer` is omitted and a plain object is provided. Broadcasting increments each worker's `tasks` counter.
 
@@ -84,15 +84,15 @@ When `autoScale` is a boolean `true` the pool uses sensible defaults. For produc
 
 ```js
 const pool = new PowerPool(WorkerScript, {
-	minSize: 1,
-	maxSize: 16,
-	autoScale: {
-		intervalMs: 1000,   // evaluation interval (ms)
-		targetMs: 50,       // target per-task latency (ms)
-		alpha: 0.2,         // EWMA smoothing factor (0..1)
-		cooldownMs: 5000,   // minimum time between scale actions (ms)
-		hysteresis: 0.2     // fractional hysteresis (0..1) to avoid flapping
-	}
+  minSize: 1,
+  maxSize: 16,
+  autoScale: {
+    intervalMs: 1000, // evaluation interval (ms)
+    targetMs: 50, // target per-task latency (ms)
+    alpha: 0.2, // EWMA smoothing factor (0..1)
+    cooldownMs: 5000, // minimum time between scale actions (ms)
+    hysteresis: 0.2, // fractional hysteresis (0..1) to avoid flapping
+  },
 });
 ```
 
@@ -100,8 +100,8 @@ Behavior summary:
 
 - The pool maintains a pool-level EWMA of recent task durations.
 - Every `intervalMs` the pool evaluates scaling decisions:
-	- Scale up when EWMA exceeds `targetMs * (1 + hysteresis)` or when queue pressure is high.
-	- Scale down when EWMA falls below `targetMs * (1 - hysteresis)` and the queue is empty.
+  - Scale up when EWMA exceeds `targetMs * (1 + hysteresis)` or when queue pressure is high.
+  - Scale down when EWMA falls below `targetMs * (1 - hysteresis)` and the queue is empty.
 - `cooldownMs` prevents rapid oscillation by requiring a minimum delay between scale actions.
 
 Tuning tips:
@@ -113,6 +113,48 @@ Tuning tips:
 
 See [autoscale guide](autoscale.md) for more details and examples.
 
+### Adaptive concurrency policies
+
+The default controller above is a **latency-threshold heuristic**: it compares one EWMA against a fixed `targetMs`. That is a reasonable first cut, but it is a guess about the right fleet size rather than a measurement of it.
+
+`autoScale.policy` swaps in a real feedback loop — a concurrency controller that treats the worker count as a congestion window. The pool already tracks every signal these need, so nothing new has to be instrumented:
+
+| policy        | behaviour                                                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `'ewma'`      | _(default, unchanged)_ the `targetMs` heuristic above. Reports `concurrencyLimit: null`.                                                                                             |
+| `'aimd'`      | Additive increase while healthy, multiplicative decrease (`aimdBeta`, default `0.7`) on a congestion signal. Simplest and most robust.                                               |
+| `'vegas'`     | Estimates the bottleneck queue as `limit * (1 - minRtt / currentRtt)` and moves by `alpha`/`beta` (`3*log10(limit)` / `6*log10(limit)`), as in the reference implementation.         |
+| `'gradient2'` | `gradient = clamp(longRtt / currentRtt, 0.5, 1)`, then `limit = gradient * limit + queueSize`. Unlike Vegas it does not use the window _minimum_ latency, which biases the estimate. |
+
+```js
+const pool = new PowerPool(WorkerScript, {
+  minSize: 1,
+  maxSize: 16,
+  autoScale: {
+    policy: 'gradient2',
+    limitMin: 1,
+    limitMax: 16,
+    longWindowAlpha: 0.05,
+  },
+});
+```
+
+Extra options: `policy` (`'ewma'|'aimd'|'vegas'|'gradient2'`), `limitMin`, `limitMax`, `longWindowAlpha` (smoothing for the long-window RTT EWMA, default `0.05`), `aimdBeta`.
+
+Observability — `getStats().performance` gains:
+
+- `concurrencyLimit` — the controller's current limit, or `null` for the `ewma` policy.
+- `autoScalePolicy` — the active policy name, or `null` when autoscaling is off.
+- `congestion` — whether the controller currently believes it is over-provisioned.
+
+Notes:
+
+- `'aimd'` and `'vegas'` only move the limit once there is at least one latency sample. A pool that has never completed a task holds its seed value rather than guessing.
+- Vegas's `alpha`/`beta` scale with `log10(limit)`, so at small limits the queue estimate lands in a neutral band and the limit holds steady. It needs a limit above roughly 3 before it will step down. That is the algorithm's behaviour, not a stall.
+- `'gradient2'` has no queue-pressure term to grow from, so an idle pool with an empty queue correctly holds its limit steady. Depth is what drives it up.
+- The limit is a **float**, smoothed by 0.2 each tick so a single noisy sample cannot swing the fleet. `getStats()` rounds it to two decimals.
+- This is a separate signal from the worker add/remove step, which still runs the existing `cooldown`/`backoff` logic. The controller steers; the existing machinery applies.
+
 ## Events and handlers
 
 `onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive events with `data.type === 'pool:idle'` and `data.stats` containing `{ status, performance }` where `status` is the per-worker snapshot and `performance` is aggregated metrics.
@@ -121,6 +163,7 @@ See [autoscale guide](autoscale.md) for more details and examples.
 `pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
 
 ## Example
+
 ## Realistic Example — image thumbnail worker
 
 This example shows a common pattern: a pool of workers that produce thumbnail images from large binary blobs. The pool dispatches work, awaits per-task responses, and drains before graceful shutdown.
@@ -136,32 +179,32 @@ const pool = new PowerPool(ImageWorker, { size: 2, maxSize: 4, idleTimeout: 30_0
 
 // Helper to post a job and await the worker's response
 async function makeThumbnail(imageBuffer) {
-	// workers are expected to echo back { correlationId, response }
-	const req = { op: 'thumbnail', payload: imageBuffer };
-	return pool.postMessage(req, undefined, { awaitResponse: true, timeout: 10_000 });
+  // workers are expected to echo back { correlationId, response }
+  const req = { op: 'thumbnail', payload: imageBuffer };
+  return pool.postMessage(req, undefined, { awaitResponse: true, timeout: 10_000 });
 }
 
 // Process a batch of images concurrently but with backpressure from the pool
 async function processImages(images) {
-	const tasks = images.map((img) => makeThumbnail(img));
-	// await all thumbnails (each item may be a Promise)
-	const thumbs = await Promise.all(tasks);
-	console.log('generated', thumbs.length, 'thumbnails');
+  const tasks = images.map((img) => makeThumbnail(img));
+  // await all thumbnails (each item may be a Promise)
+  const thumbs = await Promise.all(tasks);
+  console.log('generated', thumbs.length, 'thumbnails');
 }
 
 // On shutdown ensure all inflight work completes
 async function shutdown() {
-	// Option A: graceful shutdown — wait for in-flight work to complete then stop the pool
-	await pool.drain(); // wait until queue empty and workers idle
-	// `terminate()` now delegates to `shutdown()` internally, but you can call either.
-	pool.terminate();
+  // Option A: graceful shutdown — wait for in-flight work to complete then stop the pool
+  await pool.drain(); // wait until queue empty and workers idle
+  // `terminate()` now delegates to `shutdown()` internally, but you can call either.
+  pool.terminate();
 }
 
 // Example usage
 (async () => {
-	const images = await loadManyImages(); // user-defined helper
-	await processImages(images);
-	await shutdown();
+  const images = await loadManyImages(); // user-defined helper
+  await processImages(images);
+  await shutdown();
 })();
 ```
 
@@ -194,18 +237,17 @@ Handling shutdown rejections (when callers previously awaited a response):
 
 ```javascript
 try {
-	const p = pool.postMessage({ op: 'work' }, undefined, { awaitResponse: true });
-	// somewhere else: pool.shutdown() or pool.terminate() may be called
-	const resp = await p;
+  const p = pool.postMessage({ op: 'work' }, undefined, { awaitResponse: true });
+  // somewhere else: pool.shutdown() or pool.terminate() may be called
+  const resp = await p;
 } catch (err) {
-	if (err && err.name === 'PowerPoolShutdownError') {
-		// pool was shut down while awaiting response
-	} else {
-		// other error
-	}
+  if (err && err.name === 'PowerPoolShutdownError') {
+    // pool was shut down while awaiting response
+  } else {
+    // other error
+  }
 }
 ```
-
 
 ## Batch examples
 
@@ -225,10 +267,10 @@ responses.forEach((resp, index) => {
 // results: [ true, true ] — dispatched or queued
 
 // Await per-item responses (each entry returns a Promise)
-const r = pool.postMessageBatch(
-	[{ message: { req: 'a' } }, { message: { req: 'b' } }],
-	{ awaitResponse: true, timeout: 5000 }
-);
+const r = pool.postMessageBatch([{ message: { req: 'a' } }, { message: { req: 'b' } }], {
+  awaitResponse: true,
+  timeout: 5000,
+});
 // r is an array like [ Promise, Promise ] — await as needed
 const responses = await Promise.all(r.map((p) => (p instanceof Promise ? p : Promise.resolve(p))));
 console.log('batch responses', responses);
@@ -243,8 +285,8 @@ Example — pre-encode a large shared payload and send cloned transferable buffe
 ```javascript
 // Pre-encode 100 items (clone=true makes each returned buffer safe to transfer)
 const prepared = pool.prepareBuffers(
-	Array.from({ length: 100 }, () => ({ message: { big: 'payload', repeated: true } })),
-	{ clone: true }
+  Array.from({ length: 100 }, () => ({ message: { big: 'payload', repeated: true } })),
+  { clone: true }
 );
 // prepared is an array of { message: Uint8Array, transfer: [ArrayBuffer] }
 const res = pool.postMessageBatch(prepared);
@@ -278,6 +320,7 @@ pool.postMessageBatch(batch, { zeroCopy: true });
 ```
 
 Notes:
+
 - `zeroCopy: true` only affects `ArrayBuffer`/TypedArray messages — plain objects cannot be forwarded zero-copy and will be encoded as before.
 - When using cached buffers via `prepareBuffer(..., { clone: false })`, do NOT transfer the cached buffer itself; clone it first via `slice()` if you need a transferable copy.
 
@@ -286,8 +329,8 @@ Notes:
 - Use `PowerPool` when you need a small, managed pool of Workers with automatic queuing and idle termination.
 - Prefer sending plain objects — `PowerPool` will encode them to `Uint8Array` and mark the underlying `ArrayBuffer` transferable to avoid copies. For broadcasts, each worker receives an independently encoded transferable buffer when no transfer list is provided.
 - Register `error` / `messageerror` listeners to handle and log underlying Worker problems; the pool forwards these events to registered listeners.
- - Register `error` / `messageerror` listeners to handle and log underlying Worker problems; the pool forwards these events to registered listeners.
-	 Note: Node's `worker_threads` does not emit `messageerror` natively. `PowerPool` normalizes cross-platform behavior: when binary decoding fails the pool will emit a `messageerror` event on the pool-level bus so listeners receive the event even if the underlying worker implementation lacks native `messageerror` support. The pool also still forwards the raw binary payload to `onmessage` so existing consumers receive the data.
+- Register `error` / `messageerror` listeners to handle and log underlying Worker problems; the pool forwards these events to registered listeners.
+  Note: Node's `worker_threads` does not emit `messageerror` natively. `PowerPool` normalizes cross-platform behavior: when binary decoding fails the pool will emit a `messageerror` event on the pool-level bus so listeners receive the event even if the underlying worker implementation lacks native `messageerror` support. The pool also still forwards the raw binary payload to `onmessage` so existing consumers receive the data.
 - Tune `size`, `maxSize`, `idleTimeout` and `maxTasksPerWorker` for your workload. When using many short tasks, a small pool with aggressive queuing often performs best.
 
 ## Complexity & Performance Tips
@@ -312,10 +355,10 @@ pool.postMessageBatch(batch);
 pool.stopThePress({ command: 'flush-and-run' }, null, { recreateWorkers: true });
 
 // Await responses for a small batch (per-item Promises)
-const r = pool.postMessageBatch(
-	[{ message: { req: 'a' } }, { message: { req: 'b' } }],
-	{ awaitResponse: true, timeout: 5000 }
-);
+const r = pool.postMessageBatch([{ message: { req: 'a' } }, { message: { req: 'b' } }], {
+  awaitResponse: true,
+  timeout: 5000,
+});
 const responses = await Promise.all(r.map((p) => (p instanceof Promise ? p : Promise.resolve(p))));
 console.log('batch responses', responses);
 ```

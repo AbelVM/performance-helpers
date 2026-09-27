@@ -108,6 +108,11 @@ export class PowerPool {
         backoffFactor: number;
         backoffMaxMultiplier: number;
         backoffResetMs: number;
+        policy: any;
+        limitMin: number;
+        limitMax: number;
+        longWindowAlpha: number;
+        aimdBeta: number;
     } | null;
     _autoScaleInterval: any;
     _lastAutoScaleAt: number;
@@ -157,6 +162,11 @@ export class PowerPool {
     _encodeCacheByteLimit: number;
     _encodeCacheBytes: number;
     _autoScaleBackoffMultiplier: number | undefined;
+    _adaptiveLimit: number | undefined;
+    _longEwmaLatency: any;
+    _minLatencyWindow: number | undefined;
+    _lastAdaptiveLimit: number | undefined;
+    _congestion: boolean | undefined;
     /**
      * Log debug information about swallowed errors when debug logging is enabled.
      * @private
@@ -463,6 +473,33 @@ export class PowerPool {
      * @returns {void}
      */
     private _reapIdleWorkers;
+    /**
+     * Update the adaptive concurrency limit for this tick.
+     *
+     * The limit is a float in `[limitMin, limitMax]`, smoothed with
+     * `smoothedLimit` below. These are the concurrency-control algorithms from
+     * Netflix's `concurrency-limits`, which ports TCP congestion control to a
+     * request concurrency window. The pool already tracks exactly the signals
+     * they need, so this replaces guesswork with a feedback loop.
+     *
+     * - `aimd` — additive increase while healthy, multiplicative decrease on a
+     *   congestion signal. Simplest and most robust.
+     * - `vegas` — estimates the bottleneck queue as
+     *   `limit * (1 - minRtt / currentRtt)`, increasing by `alpha` when that is
+     *   below a threshold and decreasing by `beta` when above it. The reference
+     *   implementation uses `alpha = 3*log10(limit)` and `beta = 6*log10(limit)`.
+     * - `gradient2` — the divergence between a long- and a short-window RTT EWMA,
+     *   `gradient = clamp(longRtt / currentRtt, 0.5, 1)`, then
+     *   `limit = gradient * limit + queueSize`, smoothed. Unlike Vegas it does
+     *   not use the window *minimum* latency, which biases the estimate.
+     *
+     * `ewma` (the default) does nothing here: it keeps the original
+     * target-latency-threshold behaviour in `_autoScaleTick` unchanged.
+     *
+     * @returns {number} The updated limit.
+     * @private
+     */
+    private _updateAdaptiveLimit;
     /**
      * Autoscale tick: simple policy that grows/shrinks by one worker based on
      * pool-level EWMA latency and queue pressure. Runs only when `autoScale`

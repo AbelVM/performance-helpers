@@ -29,6 +29,8 @@ import {
   DEFAULT_AUTOSCALE_INTERVAL_MS,
   DEFAULT_AUTOSCALE_COOLDOWN_MS,
   DEFAULT_AUTOSCALE_BACKOFF_MAX_MULTIPLIER,
+  DEFAULT_AUTOSCALE_LONG_WINDOW_ALPHA,
+  DEFAULT_AUTOSCALE_AIMD_BETA,
 } from './constants.js';
 
 // Module-level tuning constants (imported from shared constants.js)
@@ -428,6 +430,29 @@ export class PowerPool {
         ? Math.max(0, Math.floor(Number(as.backoffResetMs)))
         : cooldownMs * 4;
 
+      // Which controller drives the adaptive concurrency limit.
+      //   'ewma'      - the original target-latency heuristic (default, unchanged)
+      //   'aimd'      - additive increase, multiplicative decrease
+      //   'vegas'     - Vegas: infer bottleneck queue from min vs current RTT
+      //   'gradient2' - Netflix Gradient2: long/short RTT EWMA divergence
+      // See `_updateAdaptiveLimit`.
+      const AUTOSCALE_POLICIES = ['ewma', 'aimd', 'vegas', 'gradient2'];
+      const policy = AUTOSCALE_POLICIES.includes(as.policy) ? as.policy : 'ewma';
+
+      // Concurrency-limit controller tuning.
+      const limitMin = Number.isFinite(Number(as.limitMin))
+        ? Math.max(1, Math.floor(Number(as.limitMin)))
+        : 1;
+      const limitMax = Number.isFinite(Number(as.limitMax))
+        ? Math.max(limitMin, Math.floor(Number(as.limitMax)))
+        : Math.max(this.maxSize, limitMin);
+      const longWindowAlpha = Number.isFinite(Number(as.longWindowAlpha))
+        ? Math.max(0.001, Math.min(1, Number(as.longWindowAlpha)))
+        : DEFAULT_AUTOSCALE_LONG_WINDOW_ALPHA;
+      const aimdBeta = Number.isFinite(Number(as.aimdBeta))
+        ? Math.max(0.1, Math.min(0.99, Number(as.aimdBeta)))
+        : DEFAULT_AUTOSCALE_AIMD_BETA;
+
       this._autoScale = {
         enabled: true,
         intervalMs,
@@ -440,9 +465,25 @@ export class PowerPool {
         backoffFactor,
         backoffMaxMultiplier,
         backoffResetMs,
+        policy,
+        limitMin,
+        limitMax,
+        longWindowAlpha,
+        aimdBeta,
       };
       // runtime backoff multiplier (starts at 1)
       this._autoScaleBackoffMultiplier = 1;
+      /*
+       * Adaptive concurrency state. `_adaptiveLimit` is the controller's
+       * current belief about how many workers the pool should run, and is what
+       * the 'aimd' / 'vegas' / 'gradient2' policies steer. The EWMA policy
+       * ignores it and keeps the original latency-threshold behaviour.
+       */
+      this._adaptiveLimit = Math.max(limitMin, Math.min(limitMax, this.minSize || limitMin));
+      this._longEwmaLatency = null;
+      this._minLatencyWindow = Number.POSITIVE_INFINITY;
+      this._lastAdaptiveLimit = this._adaptiveLimit;
+      this._congestion = false;
       // start periodic autoscale tick
       try {
         this._autoScaleInterval = setSafeInterval(() => this._autoScaleTick(), intervalMs);
@@ -1303,6 +1344,15 @@ export class PowerPool {
           if (x != null) {
             // smoothing factor for per-worker EWMA; allow pool-level alpha when configured
             const alpha = this._autoScale?.alpha || 0.2;
+            // Long-window RTT EWMA and a windowed minimum, for the
+            // 'gradient2' and 'vegas' adaptive policies respectively. Both are
+            // only maintained when one of those policies is active.
+            if (this._autoScale && this._autoScale.policy !== 'ewma') {
+              const longAlpha = this._autoScale.longWindowAlpha;
+              if (this._longEwmaLatency == null) this._longEwmaLatency = x;
+              else this._longEwmaLatency = longAlpha * x + (1 - longAlpha) * this._longEwmaLatency;
+              if (x < this._minLatencyWindow) this._minLatencyWindow = x;
+            }
             if (workerObj.latencyEwma == null) workerObj.latencyEwma = x;
             else workerObj.latencyEwma = alpha * x + (1 - alpha) * workerObj.latencyEwma;
 
@@ -2415,6 +2465,102 @@ export class PowerPool {
   }
 
   /**
+   * Update the adaptive concurrency limit for this tick.
+   *
+   * The limit is a float in `[limitMin, limitMax]`, smoothed with
+   * `smoothedLimit` below. These are the concurrency-control algorithms from
+   * Netflix's `concurrency-limits`, which ports TCP congestion control to a
+   * request concurrency window. The pool already tracks exactly the signals
+   * they need, so this replaces guesswork with a feedback loop.
+   *
+   * - `aimd` — additive increase while healthy, multiplicative decrease on a
+   *   congestion signal. Simplest and most robust.
+   * - `vegas` — estimates the bottleneck queue as
+   *   `limit * (1 - minRtt / currentRtt)`, increasing by `alpha` when that is
+   *   below a threshold and decreasing by `beta` when above it. The reference
+   *   implementation uses `alpha = 3*log10(limit)` and `beta = 6*log10(limit)`.
+   * - `gradient2` — the divergence between a long- and a short-window RTT EWMA,
+   *   `gradient = clamp(longRtt / currentRtt, 0.5, 1)`, then
+   *   `limit = gradient * limit + queueSize`, smoothed. Unlike Vegas it does
+   *   not use the window *minimum* latency, which biases the estimate.
+   *
+   * `ewma` (the default) does nothing here: it keeps the original
+   * target-latency-threshold behaviour in `_autoScaleTick` unchanged.
+   *
+   * @returns {number} The updated limit.
+   * @private
+   */
+  _updateAdaptiveLimit() {
+    const cfg = this._autoScale;
+    if (!cfg || cfg.policy === 'ewma') return this._adaptiveLimit;
+
+    const min = cfg.limitMin;
+    const max = cfg.limitMax;
+    const shortRtt = this._ewmaLatency;
+    const longRtt = this._longEwmaLatency;
+    const queueSize = this.queue.length;
+    const current = this._adaptiveLimit;
+
+    // Without any latency sample there is nothing to steer on. Seed the limit
+    // at the current worker count so the controller starts from reality.
+    if (shortRtt == null) return current;
+
+    let next = current;
+    switch (cfg.policy) {
+      case 'aimd': {
+        // Congestion = short RTT has risen meaningfully above the long RTT,
+        // which means the extra concurrency is buying queueing, not throughput.
+        const congested = longRtt != null && shortRtt > longRtt * 1.25;
+        this._congestion = congested;
+        next = congested ? current * cfg.aimdBeta : current + 1;
+        break;
+      }
+      case 'vegas': {
+        const minRtt = this._minLatencyWindow;
+        // A minimum RTT estimate is required; without one the queue estimate
+        // is meaningless, so grow cautiously instead of dividing by zero.
+        if (!Number.isFinite(minRtt) || minRtt <= 0) {
+          next = current + 1;
+          break;
+        }
+        const alpha = 3 * Math.log10(Math.max(2, current));
+        const beta = 6 * Math.log10(Math.max(2, current));
+        const diff = current * (1 - minRtt / Math.max(shortRtt, minRtt));
+        if (diff < alpha) {
+          this._congestion = false;
+          next = current + alpha;
+        } else if (diff > beta) {
+          this._congestion = true;
+          next = current - beta;
+        } else {
+          this._congestion = false;
+        }
+        break;
+      }
+      case 'gradient2': {
+        if (longRtt == null || longRtt <= 0) {
+          next = current + 1;
+          break;
+        }
+        const gradient = Math.max(0.5, Math.min(1, longRtt / shortRtt));
+        // queueSize term: work still waiting is evidence the limit is too low.
+        next = gradient * current + queueSize;
+        this._congestion = gradient < 1;
+        break;
+      }
+      default:
+        return current;
+    }
+
+    if (!Number.isFinite(next)) return current;
+    // Smooth so a single noisy tick cannot swing the fleet.
+    const smoothed = current * 0.8 + Math.max(min, Math.min(max, next)) * 0.2;
+    this._adaptiveLimit = Math.max(min, Math.min(max, smoothed));
+    this._lastAdaptiveLimit = current;
+    return this._adaptiveLimit;
+  }
+
+  /**
    * Autoscale tick: simple policy that grows/shrinks by one worker based on
    * pool-level EWMA latency and queue pressure. Runs only when `autoScale`
    * is configured on the pool.
@@ -2443,6 +2589,11 @@ export class PowerPool {
         (cfg.cooldownMs || 0) * (this._autoScaleBackoffMultiplier || 1)
       );
       if (this._lastAutoScaleAt && now - this._lastAutoScaleAt < effectiveCooldown) return;
+
+      // Feedback loop: let the configured controller move the concurrency
+      // limit before the step logic below reads it. Returns unchanged for the
+      // default 'ewma' policy, which keeps the original behaviour intact.
+      this._updateAdaptiveLimit();
 
       const target = cfg.targetMs;
       const hysteresis = cfg.hysteresis || 0.2;
@@ -2715,6 +2866,14 @@ export class PowerPool {
         averageTasksPerWorkerUntilTermination: avgTasksPerWorkerUntilTermination,
         timePerTask: { max, min, average, stddev },
         percentSlowTasks,
+        // Adaptive concurrency controller. `null` when autoScale is off or
+        // running the default 'ewma' policy, which has no concurrency limit.
+        concurrencyLimit:
+          this._autoScale && this._autoScale.policy !== 'ewma'
+            ? Math.round(this._adaptiveLimit * 100) / 100
+            : null,
+        autoScalePolicy: this._autoScale ? this._autoScale.policy : null,
+        congestion: this._autoScale ? Boolean(this._congestion) : null,
       },
       queueLength: this.queue.length,
       activeTasks: this._activeTasks,

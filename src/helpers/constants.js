@@ -50,3 +50,7 @@ export const DEFAULT_AUTOSCALE_MIN_INTERVAL_MS = 100;
 export const DEFAULT_AUTOSCALE_INTERVAL_MS = 1000;
 export const DEFAULT_AUTOSCALE_COOLDOWN_MS = 5000;
 export const DEFAULT_AUTOSCALE_BACKOFF_MAX_MULTIPLIER = 8;
+/** Smoothing factor for the long-window RTT EWMA used by the `gradient2` policy. */
+export const DEFAULT_AUTOSCALE_LONG_WINDOW_ALPHA = 0.05;
+/** Multiplicative decrease factor for the `aimd` policy. */
+export const DEFAULT_AUTOSCALE_AIMD_BETA = 0.7;
