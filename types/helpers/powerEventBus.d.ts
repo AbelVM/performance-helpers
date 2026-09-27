@@ -20,10 +20,10 @@ export class PowerEventBus {
     _listeners: Map<any, any>;
     _maxListeners: number;
     _weak: boolean;
-    _fr: any;
+    _fr: FinalizationRegistry<any> | null;
     _finalizationRefs: WeakMap<object, any>;
     _eventFinalizationRefs: Map<any, any>;
-    _ensureFinalizationRegistry(): any;
+    _ensureFinalizationRegistry(): FinalizationRegistry<any> | null;
     /**
      * Cleanup dead weak refs from internal listener sets.
      * Useful in tests or environments where FinalizationRegistry/GC is unavailable.

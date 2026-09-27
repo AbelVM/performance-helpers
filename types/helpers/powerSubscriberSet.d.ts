@@ -28,7 +28,7 @@ export class PowerSubscriberSet {
     _maxListeners: number;
     _listeners: Set<any>;
     _onceMap: WeakMap<object, any>;
-    _finalization: any;
+    _finalization: FinalizationRegistry<any> | null;
     /** Number of currently live listeners. */
     get size(): number;
     /**
@@ -36,7 +36,7 @@ export class PowerSubscriberSet {
      * @param {Function|WeakRef} fn Listener function or WeakRef when `weak` mode is enabled.
      * @returns {() => boolean} Unsubscribe function that removes the listener.
      */
-    add(fn: Function | WeakRef): () => boolean;
+    add(fn: Function | WeakRef<any>): () => boolean;
     /**
      * Add a once listener and return an unsubscribe function.
      * The original listener will be removed after the first invocation.
@@ -49,7 +49,7 @@ export class PowerSubscriberSet {
      * @param {Function|WeakRef} fn Original listener function or its WeakRef wrapper.
      * @returns {boolean} `true` if a listener was removed, otherwise `false`.
      */
-    delete(fn: Function | WeakRef): boolean;
+    delete(fn: Function | WeakRef<any>): boolean;
     /**
      * Iterate live listeners in insertion order and invoke a callback.
      * @param {(listener: Function) => void} fn Callback invoked for each live listener.

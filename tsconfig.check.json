@@ -4,7 +4,17 @@
     "checkJs": true,
     "noEmit": true,
     "emitDeclarationOnly": false,
-    "declaration": false
+    "declaration": false,
+    "declarationDir": null,
+    // `lib` must be explicit: the code uses explicit resource management
+    // (`Symbol.dispose` / `Symbol.asyncDispose`), `structuredClone`,
+    // `performance.now` and `Object.hasOwn`-era builtins, none of which are in
+    // the ES2020 default lib. Without this the run reported ~60 phantom
+    // "cannot find name" errors for things the runtime definitely has.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // @types/node supplies `process`, `Buffer` and the Worker types. Without it
+    // `src/utils/now.js` alone produced 8 "Cannot find name 'process'" errors.
+    "types": ["node"]
   },
   "include": ["src/**/*.js", "types/**/*.d.ts"]
 }

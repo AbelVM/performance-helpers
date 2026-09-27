@@ -194,6 +194,12 @@ export {};
  * @property {number} [initialPoolSize]
  * @property {number} [maxCleanupPerTick]
  * @property {boolean} [eagerCleanupOnRead]
+ * @property {function(*, string):void} [onError] - Invoked as `onError(err, message)`
+ *   whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`
+ *   callback, or a failing `weightFn`.
+ * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits
+ *   the list into probation and protected segments and promotes on access, which
+ *   resists a one-off sequential scan. Defaults to `'lru'`.
  */
 
 /**

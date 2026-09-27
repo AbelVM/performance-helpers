@@ -232,7 +232,7 @@
     "bench:cache": "node bench/run.js cache",
     "types:generate": "tsc --project tsconfig.json --emitDeclarationOnly --declaration --allowJs --outDir types --declarationMap false",
     "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs",
-    "prepublishOnly": "npm run lint && npm run test && npm run build && npm run types:generate"
+    "prepublishOnly": "npm run lint && npm run test && npm run test:types && npm run build && npm run types:generate"
   },
   "engines": {
     "node": ">=22.12.0"

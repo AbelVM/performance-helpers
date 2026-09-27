@@ -8,6 +8,7 @@
  * @public
  */
 export class PowerPoolShutdownError extends Error {
+    constructor(message?: string);
 }
 /**
  * @typedef {import('./jsdoc-types.js').WorkerObj} WorkerObj

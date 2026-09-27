@@ -59,7 +59,27 @@ jobs:
       # The `require` condition now points at the CJS bundle rather than ESM
       # source, so a broken bundle would only surface for CommonJS consumers.
       - name: Smoke-test the CJS bundle
-        run: node -e "const l=require('./dist/performance-helpers.cjs');if(typeof l.PowerCache!=='function'||typeof l.PowerPool!=='function')throw new Error('CJS bundle missing exports');const h=new l.PowerHistogram();h.record(1);h.record(1e8);const p=h.percentile(99.9);if(!(p>9e7))throw new Error('histogram clamped out-of-range data: '+p);console.log('cjs ok, p99.9='+p);"
+        # A block scalar, not an inline `node -e "..."`: the script contains
+        # colons, which made this file invalid YAML - GitHub Actions would have
+        # rejected the whole workflow.
+        run: |
+          node -e "
+            const l = require('./dist/performance-helpers.cjs');
+            if (typeof l.PowerCache !== 'function' || typeof l.PowerPool !== 'function')
+              throw new Error('CJS bundle missing exports');
+            const h = new l.PowerHistogram();
+            h.record(1); h.record(1e8);
+            const p = h.percentile(99.9);
+            if (!(p > 9e7)) throw new Error('histogram clamped out-of-range data: ' + p);
+            console.log('cjs ok, p99.9=' + p);
+          "
+
+      # Compiles test/types.test-d.ts against the generated declarations, as a
+      # downstream TypeScript consumer would. This is what actually protects the
+      # shipped .d.ts: `types:generate` only emits them.
+      - name: Consumer type test
+        continue-on-error: true
+        run: npm run test:types
 
       - name: Verify types are in sync with src
         run: npm run types:generate && git diff --exit-code -- types

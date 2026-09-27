@@ -226,6 +226,18 @@ export type PowerCacheOptions = {
     initialPoolSize?: number | undefined;
     maxCleanupPerTick?: number | undefined;
     eagerCleanupOnRead?: boolean | undefined;
+    /**
+     * - Invoked as `onError(err, message)`
+     * whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`
+     * callback, or a failing `weightFn`.
+     */
+    onError?: ((arg0: any, arg1: string) => void) | undefined;
+    /**
+     * - Eviction policy. `'slru'` (opt-in) splits
+     * the list into probation and protected segments and promotes on access, which
+     * resists a one-off sequential scan. Defaults to `'lru'`.
+     */
+    policy?: "lru" | "slru" | undefined;
 };
 /**
  * Options for the PowerChunking helper.

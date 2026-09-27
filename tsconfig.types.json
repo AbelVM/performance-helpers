@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+    "declaration": false,
+    "declarationDir": null,
+    "allowJs": false,
+    "checkJs": false,
+    // The consumer's view, not the library's: only ES2022 + DOM, no @types/node.
+    // A published package must type-check for someone who never installed it.
+    "lib": ["ES2023", "ESNext.Disposable", "DOM", "DOM.Iterable"],
+    "types": [],
+    // The consumer program spans `types/` and `test/`, so the inherited
+    // `rootDir: "src"` no longer applies.
+    "rootDir": ".",
+    "strict": true,
+    "skipLibCheck": false
+  },
+  "include": ["types/**/*.d.ts", "test/types.test-d.ts"]
+}
