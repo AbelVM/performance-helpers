@@ -28,3 +28,16 @@ export { PowerLatch } from './helpers/powerLatch.js';
 export { PowerObserver } from './helpers/powerObserver.js';
 export { PowerEventBus } from './helpers/powerEventBus.js';
 export { PowerGCRA } from './helpers/powerGCRA.js';
+export {
+  PowerMessageCodec,
+  MESSAGE_PROTOCOL_VERSION,
+  CODECS,
+  HEADER_BYTES,
+  encodeMessage,
+  decodeMessage,
+  encodeNative,
+  canUseNativeClone,
+  selectCodec,
+  isRawPayload,
+  frameTransferList,
+} from './helpers/powerMessageCodec.js';

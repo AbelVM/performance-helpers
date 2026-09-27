@@ -1,6 +1,7 @@
 # Utils
 
 - [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](../guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
+- [PowerMessageCodec: Versioned binary message framing](../guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` framing so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`.
 - [PowerDefer: Deferred promise primitive](../guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
 - [PowerPermitGate: Permit queue helper](../guides/powerPermitGate.md). Low-level concurrency gate that manages permits and FIFO waiters for building semaphore or backpressure primitives.
 - [PowerScheduler: Work coalescing scheduler](../guides/powerScheduler.md). Lightweight scheduler for batching deferred work into a single microtask or macrotask flush.

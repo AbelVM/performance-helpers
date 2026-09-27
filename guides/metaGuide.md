@@ -24,23 +24,24 @@ If you already know the exact helper you want, go straight to its dedicated guid
 
 ## Quick chooser
 
-| If your problem is...                               | Start here                                         | Add these when needed                                      | Do not start with                                           |
-| --------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
-| Cache expensive values by key                       | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function         |
-| Memoize a function call                             | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control           |
-| Expire keys after a fixed TTL                       | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights            |
-| Offload CPU-heavy or blocking work                  | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control              |
-| Process a very large iterable in parallel           | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle         |
-| Smooth bursts from producers                        | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                      |
-| Limit concurrent async work globally                | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block          |
-| Isolate noisy workloads from critical ones          | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                       |
-| Enforce burst and sustained API quotas              | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                          |
-| Retry flaky work safely                             | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                 |
-| Put a hard time budget on work                      | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                            |
-| Broadcast events across components                  | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure |
-| Expose a single changing value reactively           | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                            |
-| Coordinate callbacks or multi-step async completion | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                   |
-| Batch near-synchronous calls into one flush         | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                          |
+| If your problem is...                                 | Start here                                         | Add these when needed                                      | Do not start with                                           |
+| ----------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
+| Cache expensive values by key                         | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function         |
+| Memoize a function call                               | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control           |
+| Expire keys after a fixed TTL                         | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights            |
+| Offload CPU-heavy or blocking work                    | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control              |
+| Move structured values across a byte-stream transport | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary              |
+| Process a very large iterable in parallel             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle         |
+| Smooth bursts from producers                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                      |
+| Limit concurrent async work globally                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block          |
+| Isolate noisy workloads from critical ones            | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                       |
+| Enforce burst and sustained API quotas                | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                          |
+| Retry flaky work safely                               | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                 |
+| Put a hard time budget on work                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                            |
+| Broadcast events across components                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure |
+| Expose a single changing value reactively             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                            |
+| Coordinate callbacks or multi-step async completion   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                   |
+| Batch near-synchronous calls into one flush           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                          |
 
 ---
 
@@ -430,6 +431,17 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `u82o`, `b2o`: Decode transferable binary back to values.
 - `nowMs`: High-resolution current time helper.
 - `measureSync`, `measureAsync`: Small timing helpers for instrumentation.
+
+### Message framing
+
+- `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
+  envelope, so a byte-stream transport never has to guess whether it received an object or binary.
+  Use it instead of hand-rolling a JSON protocol, and instead of `PowerPool`'s internal sniffing.
+- `encodeNative`: for a `MessagePort` or `Worker`, where the platform's structured clone beats any
+  serialization and handles `Map`, `Set`, `Date` and cycles losslessly.
+
+Reach for the framed codec when the transport carries bytes (WebSocket, file, HTTP body), and
+`encodeNative` when it is an in-process message port.
 
 ---
 

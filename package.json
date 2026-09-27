@@ -111,6 +111,11 @@
       "import": "./src/helpers/powerGCRA.js",
       "default": "./src/helpers/powerGCRA.js"
     },
+    "./powerMessageCodec": {
+      "types": "./types/helpers/powerMessageCodec.d.ts",
+      "import": "./src/helpers/powerMessageCodec.js",
+      "default": "./src/helpers/powerMessageCodec.js"
+    },
     "./powerHistogram": {
       "types": "./types/helpers/powerHistogram.d.ts",
       "import": "./src/helpers/powerHistogram.js",
