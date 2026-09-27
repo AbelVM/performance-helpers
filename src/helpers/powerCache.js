@@ -477,7 +477,9 @@ export class PowerCache {
       .then((value) => {
         try {
           this.set(key, value, { ttl, weight });
-        } catch (err) {}
+        } catch (err) {
+          this._notifyError(err, 'PowerCache: storing a refreshed value threw');
+        }
         return value;
       })
       .catch(() => undefined)
@@ -725,7 +727,9 @@ export class PowerCache {
         return res.then((value) => {
           try {
             this.set(key, value, { ttl, weight });
-          } catch (err) {}
+          } catch (err) {
+            this._notifyError(err, 'PowerCache: storing an async value threw');
+          }
           return value;
         });
       }
@@ -890,13 +894,17 @@ export class PowerCache {
           (v) => {
             try {
               clearTimeout(timer);
-            } catch (e) {}
+            } catch (e) {
+              this._notifyError(e, 'PowerCache: clearTimeout threw');
+            }
             resolve(v);
           },
           (err) => {
             try {
               clearTimeout(timer);
-            } catch (e) {}
+            } catch (e) {
+              this._notifyError(e, 'PowerCache: clearTimeout threw');
+            }
             reject(err);
           }
         );
@@ -1068,7 +1076,9 @@ export class PowerCache {
         this._remove(node);
         try {
           if (this.onExpire) this.onExpire(k, v);
-        } catch (err) {}
+        } catch (err) {
+          this._notifyError(err, 'PowerCache onExpire callback threw');
+        }
         this._freeNode(node);
         this._expirations++;
       }

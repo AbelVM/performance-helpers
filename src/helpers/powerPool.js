@@ -352,13 +352,11 @@ export class PowerPool {
         this._addWorkerInstance();
       } catch (err) {
         // If the error signals an invalid workerSource type, rethrow so
-        // callers (and tests) can observe the contract violation.
-        try {
-          const msg = err?.message ? String(err.message) : '';
-          if (msg.includes('Invalid workerSource')) throw err;
-        } catch (re) {
-          throw re;
-        }
+        // callers (and tests) can observe the contract violation. Reading
+        // `.message` can itself throw for a hostile object; letting that
+        // propagate is the honest outcome, since we cannot classify the error.
+        const msg = typeof err?.message === 'string' ? err.message : '';
+        if (msg.includes('Invalid workerSource')) throw err;
         try {
           this._logger.error(err, 'Initial worker creation failed');
         } catch (e) {
@@ -468,7 +466,9 @@ export class PowerPool {
       try {
         if (typeof console !== 'undefined' && typeof console.debug === 'function')
           console.debug(e, msg || 'swallowed error');
-      } catch (_) {}
+      } catch (_) {
+        // Last-resort sink failed too; there is nowhere left to report this.
+      }
     }
   }
 
@@ -1389,7 +1389,7 @@ export class PowerPool {
      */
     const _handleMessage = (e) => {
       // support both browser-like MessageEvent (with .data) and Node 'message' callbacks (data passed directly)
-      let data = e?.data !== undefined ? e.data : e;
+      const data = e?.data !== undefined ? e.data : e;
       let decoded = data;
       if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
         try {
@@ -2180,10 +2180,14 @@ export class PowerPool {
           } catch (err) {
             try {
               this._logger.error(err, 'postMessageBatch: add worker failed');
-            } catch (e) {}
+            } catch (e) {
+              this._debugLog?.(e, 'postMessageBatch: logger.error failed');
+            }
             try {
               this._bus.emit('pool:error', { phase: 'postMessageBatch', error: err });
-            } catch (e) {}
+            } catch (e) {
+              this._debugLog?.(e, 'postMessageBatch: bus.emit failed');
+            }
             results[i] = false;
             dispatched = true;
           }

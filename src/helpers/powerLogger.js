@@ -193,7 +193,10 @@ export class PowerLogger {
             if (this._output) {
               try {
                 this._output(formatted);
-              } catch (e) {}
+              } catch (e) {
+                // A throwing sink must not take the logger down with it.
+                this._emitSinkError(e);
+              }
               return;
             }
             // No output transport: write string directly to the root console.
@@ -247,6 +250,27 @@ export class PowerLogger {
    * @param {...any} args
    * @returns {void}
    */
+  /**
+   * Report a failure raised by a user-supplied log sink.
+   *
+   * A sink that throws must not be able to take the logger - and therefore the
+   * pool, cache or circuit that owns it - down with it, but the failure still
+   * has to be visible somewhere. Escalate to `console.error` once, guarded, and
+   * give up if that fails too.
+   *
+   * @param {any} err - The value thrown by the sink.
+   * @returns {void}
+   */
+  _emitSinkError(err) {
+    try {
+      if (typeof console !== 'undefined' && typeof console.error === 'function') {
+        console.error('PowerLogger: log sink threw', err);
+      }
+    } catch (_) {
+      // Both sinks failed; there is nowhere left to report this.
+    }
+  }
+
   error(...args) {
     const formatted = args.map((a) => {
       try {

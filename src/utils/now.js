@@ -92,7 +92,10 @@ export function measureSync(fn) {
     // attach duration to the thrown error for caller diagnostics
     try {
       e.durationMs = end - start;
-    } catch (_) {}
+    } catch (_) {
+      // `e` may be a frozen primitive or a non-extensible object; the duration
+      // annotation is a diagnostic nicety, not the caller's result.
+    }
     throw e;
   }
 }
@@ -123,7 +126,10 @@ export async function measureAsync(fn) {
     const end = nowMs();
     try {
       e.durationMs = end - start;
-    } catch (_) {}
+    } catch (_) {
+      // `e` may be a frozen primitive or a non-extensible object; the duration
+      // annotation is a diagnostic nicety, not the caller's result.
+    }
     throw e;
   }
 }
