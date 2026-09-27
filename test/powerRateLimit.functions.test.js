@@ -80,15 +80,17 @@ describe('PowerRateLimit functions and undo paths', () => {
     expect(rs.reset).toHaveBeenCalled();
   });
 
-  it('throws TypeError and rolls back when atomic fallback limiter missing tryConsume or reserve', () => {
+  it('throws TypeError before mutating any limiter when one lacks tryConsume/reserve', () => {
     // first limiter reserves successfully
     const l1 = { reserve: () => ({ t: true }), release: vi.fn() };
-    // second limiter lacks reserve and tryConsume but has addTokens (pre-check passes)
+    // second limiter lacks reserve and tryConsume but has addTokens
     const l2 = { addTokens: () => {} /* no tryConsume or reserve */ };
     const r = new PowerRateLimit([l1, l2], { atomic: true });
+    // The capability check runs up front, so nothing is committed and there is
+    // nothing to roll back. Previously the throw happened mid-loop, *after*
+    // l1 had already reserved, which left the caller's limiter set mutated.
     expect(() => r.tryConsume(1)).toThrow(TypeError);
-    // ensure rollback attempted for l1
-    expect(l1.release).toHaveBeenCalled();
+    expect(l1.release).not.toHaveBeenCalled();
   });
 
   it('calls limiter.reset via _undoCommit and reset()', async () => {

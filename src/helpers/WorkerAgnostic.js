@@ -77,8 +77,9 @@ function getNodeWorkerCtor() {
   if (req) return req('worker_threads').Worker;
   throw new Error(
     'WorkerAgnostic: Node worker_threads is not available synchronously in pure ESM. ' +
-      'Call `await WorkerAgnostic.preloadNode()` once before constructing a string-source ' +
-      'worker, set globalThis.Worker, or pass a factory function instead of a path string.'
+      'Call `await preloadNode()` (imported from `performance-helpers` or ' +
+      '`performance-helpers/WorkerAgnostic`) once before constructing a string-source ' +
+      'worker, or set globalThis.Worker. A factory function does not need this preload.'
   );
 }
 
@@ -117,13 +118,18 @@ function resolveWorker(workerSource, options, env) {
   }
 
   if (env === 'node' || env === 'browser' || env === 'webworker') {
-    const Worker = env === 'node' ? getNodeWorkerCtor() : undefined;
     if (typeof workerSource === 'function') {
-      return createFromFunction(workerSource, Worker, options, env);
+      // Resolve the Node.js `Worker` constructor *lazily*: the factory path
+      // below only needs it if the factory returns a string, so calling
+      // `getNodeWorkerCtor()` up front made `new PowerPool(() => new MyWorker())`
+      // throw in pure-ESM Node even though no `Worker` was ever required.
+      // This matches the documented contract that `preloadNode()` is *not*
+      // needed when passing a factory function.
+      return createFromFunction(workerSource, () => getNodeWorkerCtor(), options, env);
     }
     if (typeof workerSource === 'string') {
       return env === 'node'
-        ? new Worker(workerSource, options)
+        ? new (getNodeWorkerCtor())(workerSource, options)
         : createWebWorkerFromString(workerSource, options);
     }
     throw new Error('Invalid workerSource: expected Worker factory or path string');
@@ -177,8 +183,15 @@ function coerceFactoryResult(result, WorkerCtor, options, env) {
     return result;
   }
   if (typeof result === 'string') {
+    // An `async` factory resolves to a Promise, which `typeof` reports as
+    // 'object' - it must not be mistaken for a worker instance.
+    if (result && typeof result.then === 'function') {
+      throw new TypeError(
+        'WorkerAgnostic: an async worker factory was passed. Construct the worker synchronously, or await the factory yourself and pass the instance.'
+      );
+    }
     return env === 'node'
-      ? new WorkerCtor(result, options)
+      ? new (typeof WorkerCtor === 'function' ? WorkerCtor() : WorkerCtor)(result, options)
       : createWebWorkerFromString(result, options);
   }
   return result && typeof result === 'object' ? result : {};

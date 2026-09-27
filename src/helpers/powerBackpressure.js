@@ -6,6 +6,7 @@
  * pressure is high.
  */
 import { PowerPermitGate } from './powerPermitGate.js';
+import { setSafeTimeout } from '../utils/timers.js';
 import {
   DEFAULT_QUEUE_CAPACITY,
   DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
@@ -147,7 +148,7 @@ export class PowerBackpressure extends PowerPermitGate {
 
   _scheduleRefill() {
     if (this._refillTimer || this.pending === 0) return;
-    this._refillTimer = setTimeout(() => {
+    this._refillTimer = setSafeTimeout(() => {
       this._refillTimer = null;
       this._performRefill();
     }, this._refillInterval);

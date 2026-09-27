@@ -36,6 +36,11 @@ export const DEFAULT_BACKPRESSURE_QUEUE_CAPACITY = 1000;
 // Histogram defaults
 export const DEFAULT_HISTOGRAM_MAX_VALUE = 10000;
 export const DEFAULT_HISTOGRAM_BUCKET_COUNT = 128;
+/**
+ * Target relative error for `PowerHistogram` quantile estimates, in `(0, 1)`.
+ * `0.01` is 1%, the same default OpenTelemetry's DDSketch aggregator uses.
+ */
+export const DEFAULT_HISTOGRAM_RELATIVE_ACCURACY = 0.01;
 
 // Batch/defaults
 export const DEFAULT_BATCH_MAX_SIZE = 100;

@@ -16,6 +16,7 @@
 import { o2u8, u82o } from './powerBuffer.js';
 import WorkerAgnostic from './WorkerAgnostic.js';
 import { nowMs } from '../utils/now.js';
+import { setSafeInterval } from '../utils/timers.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
 import { PowerEventBus } from './powerEventBus.js';
@@ -308,6 +309,21 @@ export class PowerPool {
     this._isIdle = true;
     /** whether queued dispatch is paused */
     this._queuePaused = false;
+    /**
+     * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
+     * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
+     * resurrect it (which previously created a worker with no reaper
+     * interval, pinning the Node.js process).
+     * @type {boolean}
+     */
+    this._terminated = false;
+    /**
+     * Monotonic token per dispatched task, used to make `_activeTasks`
+     * accounting idempotent: a late `message` from a worker terminated by
+     * `resize()`/`removeWorker()` no longer double-decrements the counter.
+     * @type {number}
+     */
+    this._taskTokenSeq = 0;
 
     // Create a per-instance logger. Allow callers to override via options.debugLevel (default 1).
     const dbg = typeof options?.debugLevel === 'number' ? options.debugLevel : 1;
@@ -358,7 +374,7 @@ export class PowerPool {
     }
 
     // reaper checks periodically and terminates idle workers
-    this._reaperInterval = setInterval(
+    this._reaperInterval = setSafeInterval(
       () => this._reapIdleWorkers(),
       Math.max(DEFAULT_REAPER_MIN_INTERVAL_MS, Math.floor(this.idleTimeout / 2))
     );
@@ -431,7 +447,7 @@ export class PowerPool {
       this._autoScaleBackoffMultiplier = 1;
       // start periodic autoscale tick
       try {
-        this._autoScaleInterval = setInterval(() => this._autoScaleTick(), intervalMs);
+        this._autoScaleInterval = setSafeInterval(() => this._autoScaleTick(), intervalMs);
       } catch (e) {
         this._debugLog?.(e, 'autoScale: interval setup failed');
       }
@@ -460,7 +476,7 @@ export class PowerPool {
   _ensureReaper() {
     try {
       if (!this._reaperInterval) {
-        this._reaperInterval = setInterval(
+        this._reaperInterval = setSafeInterval(
           () => this._reapIdleWorkers(),
           Math.max(DEFAULT_REAPER_MIN_INTERVAL_MS, Math.floor(this.idleTimeout / 2))
         );
@@ -481,6 +497,24 @@ export class PowerPool {
     const correlationKey = correlationId != null ? String(correlationId) : correlationId;
     let entry = null;
     const pendingPromise = new Promise((resolve, reject) => {
+      // Reject (and clean up) any entry already registered under this key.
+      // Overwriting it used to orphan the previous promise forever: its
+      // `resolve`/`reject` closures became unreachable and its timer was
+      // never cleared, so the caller hung with no diagnostic.
+      const previous = this._pendingResponses.get(correlationKey);
+      if (previous) {
+        this._debugLog?.(
+          null,
+          'createPendingResponsePromise: duplicate correlationId, rejecting previous waiter'
+        );
+        this._cleanupPendingResponse(correlationKey, {
+          rejectWith: (() => {
+            const err = new Error(`duplicate correlationId: ${correlationKey}`);
+            err.code = 'ERR_POOL_DUPLICATE_CORRELATION_ID';
+            return err;
+          })(),
+        });
+      }
       entry = { resolve, reject, timer: null };
       const perCallTimeout = Number.isFinite(Number(options?.timeout))
         ? Math.max(0, Math.floor(Number(options?.timeout)))
@@ -690,6 +724,58 @@ export class PowerPool {
   }
 
   /**
+   * Single choke point for retiring a worker from the pool.
+   *
+   * Every removal path - `shutdown()`, `removeWorker()`, `resize()`,
+   * `_autoScaleTick()`, `_reapIdleWorkers()` and `_resetPoolForStopThePress()`
+   * - routes through here so the active-task accounting, the terminated-worker
+   * statistics and the underlying-worker mapping can no longer drift apart
+   * between paths (the idle reaper previously skipped the statistics
+   * entirely, inflating `getStats().performance.timePerTask` over time).
+   *
+   * Note: this deliberately does **not** remove the entry from `this.workers`;
+   * callers own the array bookkeeping (some paths pop, some swap-remove, the
+   * shutdown path clears the whole list).
+   *
+   * @param {WorkerObj|null} workerObj - Worker entry to retire.
+   * @param {string} [reason] - Why the worker is being removed, used for
+   *   debug logging only.
+   * @returns {number|null} The retired worker id, or `null` when nothing was
+   *   retired.
+   * @private
+   */
+  _terminateWorker(workerObj, reason = 'unknown') {
+    if (!workerObj) return null;
+    const id = workerObj.id ?? null;
+    // Tasks the pool believed were in flight on this worker are no longer
+    // tracked: `resize()`/`removeWorker()` terminate busy workers too, and the
+    // response that would normally settle them will never arrive.
+    if (workerObj.tasks > 0) this._decrementActiveTasks(workerObj.tasks);
+    workerObj.tasks = 0;
+    try {
+      workerObj.worker?.terminate();
+    } catch (err) {
+      this._debugLog?.(err, `_terminateWorker(${reason}): worker.terminate failed`);
+    }
+    this._deleteWorkerUnderlyingMapping(workerObj);
+    this._terminatedWorkerTaskCountsTotal += workerObj.completedTasks || 0;
+    this._terminatedWorkerTaskCountsCount += 1;
+    return id;
+  }
+
+  /**
+   * Throws when the pool has been shut down. Called from every public entry
+   * point that would otherwise dispatch, enqueue or grow workers.
+   * @private
+   */
+  _assertNotTerminated() {
+    if (!this._terminated) return;
+    const err = new Error('PowerPool has been shut down');
+    err.code = 'ERR_POOL_TERMINATED';
+    throw err;
+  }
+
+  /**
    * Clear lifecycle timer intervals used by the pool.
    * @private
    */
@@ -716,8 +802,17 @@ export class PowerPool {
    * Shutdown the pool: clear timers, reject pending responses, terminate workers,
    * and clear internal queues. This is a full stop that prevents background
    * timers from keeping the process alive.
+   *
+   * Shutdown is **final**: the pool refuses every subsequent `postMessage()`,
+   * `postMessageBatch()`, `addWorker()` and `resize()` with an
+   * `ERR_POOL_TERMINATED` error rather than silently recreating workers.
+   * Create a new `PowerPool` to start again.
+   *
+   * @returns {void}
    */
   shutdown() {
+    if (this._terminated) return;
+    this._terminated = true;
     this._clearLifecycleIntervals();
 
     // reject pending responses (centralized to avoid races)
@@ -742,13 +837,11 @@ export class PowerPool {
     }
 
     // terminate workers
+    const _terminated = [];
     try {
       for (const w of this.workers) {
-        try {
-          w.worker.terminate();
-        } catch (e) {
-          this._debugLog?.(e, 'shutdown: terminate worker');
-        }
+        const id = this._terminateWorker(w, 'shutdown');
+        if (id != null) _terminated.push(id);
       }
     } catch (e) {
       this._debugLog?.(e, 'shutdown: terminate workers loop');
@@ -762,11 +855,10 @@ export class PowerPool {
     }
 
     // emit pool:scale for shutdown removals
-    // compute a snapshot of terminated worker ids for reporting
-    const _terminated = this.workers.map((w) => w?.id).filter((x) => x != null);
-    if (_terminated?.length) {
+    if (_terminated.length) {
       this._bus.emit('pool:scale', {
         action: 'remove',
+        reason: 'shutdown',
         terminated: _terminated,
         count: _terminated.length,
       });
@@ -1061,19 +1153,8 @@ export class PowerPool {
     const terminatedIds = [];
     while (this.workers.length > this.maxSize) {
       const w = this.workers.pop();
-      if (w) {
-        // adjust active task counter if worker had inflight tasks
-        this._decrementActiveTasks(w.tasks || 0);
-        try {
-          w.worker.terminate();
-        } catch (e) {
-          this._debugLog?.(e, 'resize: worker.terminate failed');
-        }
-        this._deleteWorkerUnderlyingMapping(w);
-        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-        this._terminatedWorkerTaskCountsCount += 1;
-        terminatedIds.push(w.id);
-      }
+      const id = this._terminateWorker(w, 'resize');
+      if (id != null) terminatedIds.push(id);
     }
 
     // emit resize event/callback when workers were terminated or added
@@ -1348,6 +1429,16 @@ export class PowerPool {
           this._logger.error(err, 'worker wrapper onerror error');
         }
       }
+      // Pool-level `onerror` handler (see the `onerror` accessor). Kept in
+      // step with `onmessage`/`onidle`: called for every worker error and
+      // fully isolated so a throwing user handler cannot break the pool.
+      if (typeof this._onerror === 'function') {
+        try {
+          this._onerror(e);
+        } catch (err) {
+          this._logger.error(err, 'pool onerror handler error');
+        }
+      }
       this._bus.emit('error', e);
     };
 
@@ -1474,6 +1565,10 @@ export class PowerPool {
    * @throws {Error} When `options.awaitResponse` is used but the provided `message` is not a plain object.
    */
   postMessage(message, transfer, options) {
+    // A shut-down pool is final: refuse to dispatch rather than silently
+    // re-growing the pool (which previously created a worker with no reaper
+    // interval, pinning the Node.js process forever).
+    this._assertNotTerminated();
     // support optional third-argument `options` for Promise-based responses
     options = options || undefined;
     // capture a single timestamp for this dispatch to avoid multiple syscalls
@@ -1830,14 +1925,8 @@ export class PowerPool {
     try {
       for (let i = workersList.length - 1; i >= 0; i--) {
         const w = workersList[i];
-        this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-        this._terminatedWorkerTaskCountsCount += 1;
-        try {
-          w.worker.terminate();
-        } catch (e) {
-          this._debugLog?.(e, '_resetPoolForStopThePress: worker.terminate failed');
-        }
-        this._deleteWorkerUnderlyingMapping(w);
+        const id = this._terminateWorker(w, `${scope}:reset`);
+        if (id != null) terminatedIds.push(id);
       }
       this.workers.length = 0;
       this._activeTasks = 0;
@@ -1915,7 +2004,24 @@ export class PowerPool {
       this._logger.error(e, 'pool scale stopThePress listener error');
     }
 
-    // 4) finally forward the provided message using normal dispatch
+    // 4) finally forward the provided message using normal dispatch.
+    //    When the caller explicitly opted out of worker recreation there is
+    //    nothing to dispatch to: forwarding would immediately grow the pool
+    //    again and defeat `recreateWorkers: false`, so only the queue is
+    //    restored (and the message enqueued for a future `addWorker()`).
+    if (!recreate) {
+      try {
+        this._enqueueOrReject({
+          message,
+          transfer,
+          correlationId: null,
+          reject: false,
+        });
+      } catch (e) {
+        this._logger.error(e, 'stopThePress: enqueue after reset failed');
+      }
+      return true;
+    }
     return this.postMessage(message, transfer, fwdOptions);
   }
 
@@ -1930,6 +2036,7 @@ export class PowerPool {
    * @throws {Error} When `items` is not an array.
    */
   postMessageBatch(items, options) {
+    this._assertNotTerminated();
     if (!Array.isArray(items))
       throw new Error('postMessageBatch expects an array of {message, transfer?}');
 
@@ -2213,8 +2320,13 @@ export class PowerPool {
    * @returns {WorkerObj} The newly created worker entry.
    */
   addWorker() {
+    if (this._terminated) {
+      this._debugLog?.(null, 'addWorker: pool terminated, ignoring');
+      return null;
+    }
+    let created;
     try {
-      return this._addWorkerInstance();
+      created = this._addWorkerInstance();
     } catch (err) {
       try {
         this._logger.error(err, 'addWorker: failed');
@@ -2228,6 +2340,10 @@ export class PowerPool {
       }
       return null;
     }
+    // A new worker changes the idle/busy verdict (a previously idle pool that
+    // had its last worker removed must be re-evaluated for `drain()`).
+    if (created) this._updateIdleState();
+    return created;
   }
 
   /**
@@ -2236,18 +2352,10 @@ export class PowerPool {
    */
   removeWorker() {
     const w = this.workers.pop();
-    if (w) {
-      // adjust global active task counter if worker had inflight tasks
-      this._decrementActiveTasks(w.tasks || 0);
-      try {
-        w.worker.terminate();
-      } catch (err) {
-        this._debugLog?.(err, 'removeWorker: worker.terminate failed');
-      }
-      this._deleteWorkerUnderlyingMapping(w);
-      this._terminatedWorkerTaskCountsTotal += w.completedTasks || 0;
-      this._terminatedWorkerTaskCountsCount += 1;
-    }
+    if (!w) return;
+    this._terminateWorker(w, 'removeWorker');
+    // Terminating the last busy worker can make the pool idle.
+    this._updateIdleState();
   }
 
   /**
@@ -2265,21 +2373,13 @@ export class PowerPool {
     if (this.idleTimeout <= 0) return;
     const now = nowMs();
     // keep at least minSize workers
+    const reaped = [];
     for (let i = this.workers.length - 1; i >= 0; i--) {
       const w = this.workers[i];
       if (this.workers.length <= this.minSize) break;
       if (w.tasks === 0 && now - (w.lastActive || 0) > this.idleTimeout) {
-        try {
-          w.worker.terminate();
-        } catch (err) {
-          this._debugLog?.(err, '_reapIdleWorkers: worker.terminate failed');
-        }
-        try {
-          const u = w.worker?._underlying;
-          if (u && this._underlyingToWorkerObj) this._underlyingToWorkerObj.delete(u);
-        } catch (e) {
-          this._debugLog?.(e, '_reapIdleWorkers: underlyingToWorkerObj.delete failed');
-        }
+        const id = this._terminateWorker(w, 'idle-reap');
+        if (id != null) reaped.push(id);
         // Remove the worker without O(n) splice by swapping with the last
         // element and popping. This keeps removal O(1) and avoids shifting
         // the remaining array entries.
@@ -2290,6 +2390,20 @@ export class PowerPool {
           // Move last into position i and pop the tail.
           this.workers[i] = this.workers.pop();
         }
+      }
+    }
+    // Report reaps on the same channel as every other scaling action, so
+    // observers do not have to poll `getStats()` to notice idle shrinkage.
+    if (reaped.length) {
+      try {
+        this._bus.emit('pool:scale', {
+          action: 'remove',
+          reason: 'idle-reap',
+          terminated: reaped,
+          count: reaped.length,
+        });
+      } catch (e) {
+        this._debugLog?.(e, '_reapIdleWorkers: bus.emit failed');
       }
     }
     // re-evaluate idle state after pruning
@@ -2382,14 +2496,7 @@ export class PowerPool {
               if (!candidate) continue;
               // skip busy workers to avoid losing in-flight tasks
               if (candidate.tasks > 0) continue;
-              try {
-                candidate.worker.terminate();
-              } catch (e) {
-                this._debugLog?.(e, 'autoScale: terminate worker');
-              }
-              this._deleteWorkerUnderlyingMapping(candidate);
-              this._terminatedWorkerTaskCountsTotal += candidate.completedTasks || 0;
-              this._terminatedWorkerTaskCountsCount += 1;
+              this._terminateWorker(candidate, 'autoscale');
               // remove candidate by swapping with last element and popping
               const lastIndex = this.workers.length - 1;
               if (idx === lastIndex) {

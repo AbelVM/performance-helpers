@@ -37,10 +37,30 @@ describe('PowerMemoizer.memoize', () => {
     expect(calls).toBe(2);
   });
 
-  it('memoized function is instanceof PowerMemoizer', () => {
+  it('memoized function is a real Function with a working prototype chain', () => {
     const pm = new PowerMemoizer();
     const memo = pm.memoize((x) => x);
-    expect(memo instanceof PowerMemoizer).toBe(true);
+    // The memoized wrapper used to be re-prototyped onto
+    // `PowerMemoizer.prototype`, whose chain ends at `Object.prototype`. That
+    // removed `Function.prototype` and silently stripped `.call`/`.apply`/
+    // `.bind` from the returned function. Brand via the own properties
+    // instead of prototype surgery.
+    expect(typeof memo).toBe('function');
+    expect(typeof memo.call).toBe('function');
+    expect(typeof memo.apply).toBe('function');
+    expect(typeof memo.bind).toBe('function');
+    expect(memo.call(null, 7)).toBe(7);
+    expect(memo(7)).toBe(7);
+    expect(memo.original).toBe(pm._fn ?? memo.original);
+  });
+
+  it('memoized function supports .call with a custom receiver and binding', () => {
+    const pm = new PowerMemoizer();
+    const memo = pm.memoize(function (x) {
+      return x + (this?.offset ?? 0);
+    });
+    expect(memo.call({ offset: 10 }, 5)).toBe(15);
+    expect(memo.apply({ offset: 2 }, [5])).toBe(7);
   });
 
   it('honors per-wrapper ttl and weight options', async () => {

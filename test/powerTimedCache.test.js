@@ -68,6 +68,25 @@ describe('simpleArgsKey', () => {
 
   it('falls back to JSON for non-scalar arguments', () => {
     expect(simpleArgsKey({ a: 1 })).toBe(JSON.stringify([{ a: 1 }]));
-    expect(simpleArgsKey(Symbol.for('x'))).toBe(JSON.stringify([Symbol.for('x')]));
+  });
+
+  it('handles bigint arguments instead of throwing', () => {
+    // `JSON.stringify` throws on BigInt, so the previous "fast scalar path"
+    // blew up on an entirely ordinary argument type (64-bit ids, etc.).
+    expect(simpleArgsKey(10n)).toBe('g:10');
+    expect(simpleArgsKey(1n, 2n)).toBe('g:1|g:2');
+    expect(simpleArgsKey(10n)).not.toBe(simpleArgsKey(11n));
+    expect(simpleArgsKey(10n)).toBe(simpleArgsKey(10n));
+  });
+
+  it('normalises -0 to 0 so both share one cache entry', () => {
+    expect(simpleArgsKey(-0)).toBe(simpleArgsKey(0));
+  });
+
+  it('throws on symbol arguments rather than aliasing them all to one key', () => {
+    // `JSON.stringify` maps every Symbol to `null`, so every symbol argument
+    // used to produce the same key `'[null]'` - silent cache poisoning.
+    expect(() => simpleArgsKey(Symbol.for('x'))).toThrow(TypeError);
+    expect(() => simpleArgsKey('a', Symbol('y'))).toThrow(/symbol/);
   });
 });

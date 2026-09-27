@@ -67,7 +67,20 @@ export class PowerRateLimit {
     if (want === 0) return true;
     const atomic = options.atomic == null ? this.atomicDefault : Boolean(options.atomic);
 
-    // Fast non-mutating check when available() exists on all limiters
+    // Validate every limiter up front. Previously the capability check lived
+    // *inside* the commit loop, so a limiter without `tryConsume` threw only
+    // after the earlier limiters had already consumed - leaving the caller's
+    // limiter set mutated and the "returns a boolean" contract broken.
+    for (const l of this.limiters) {
+      if (typeof l.tryConsume !== 'function' && typeof l.reserve !== 'function') {
+        throw new TypeError('limiter must implement tryConsume or reserve');
+      }
+    }
+
+    // Fast non-mutating check when available() exists on all limiters.
+    // NB: `available()` is not required to be side-effect free (PowerThrottle's
+    // refill is), it is only a cheap pre-flight that keeps the common
+    // all-satisfied case on the fast path.
     let allHaveAvailable = true;
     for (const l of this.limiters) {
       if (typeof l.available === 'function') {
@@ -82,10 +95,11 @@ export class PowerRateLimit {
     }
 
     if (!atomic || allHaveAvailable) {
-      // Non-atomic or safe fast-path: commit directly
+      // Non-atomic, or a pre-flight that all limiters satisfied. Commit
+      // directly; a mid-way failure returns `false` and the already-consumed
+      // limiters keep their tokens, which is the documented non-atomic
+      // contract.
       for (const l of this.limiters) {
-        if (typeof l.tryConsume !== 'function')
-          throw new TypeError('limiter must implement tryConsume');
         const ok = l.tryConsume(want);
         if (!ok) return false;
       }
@@ -134,13 +148,9 @@ export class PowerRateLimit {
         }
       }
 
-      // fallback: call tryConsume (we checked undo capability earlier)
-      if (typeof l.tryConsume !== 'function') {
-        for (let i = committed.length - 1; i >= 0; i--) {
-          this._undoCommit(committed[i], want).catch(() => {});
-        }
-        throw new TypeError('limiter must implement tryConsume or reserve');
-      }
+      // fallback: call tryConsume. The capability check at the top of this
+      // method guarantees one of the two exists, so reaching here means
+      // `tryConsume` is present and safe to call.
       try {
         const ok = l.tryConsume(want);
         if (!ok) {

@@ -36,6 +36,8 @@
  * @public
  */
 import { nowMs } from '../utils/now.js';
+import { assertFunction, assertLimit } from '../utils/options.js';
+import { setSafeTimeout } from '../utils/timers.js';
 import {
   DEFAULT_MAX_CLEANUP_PER_TICK,
   DEFAULT_CACHE_DEFAULT_TTL_MS,
@@ -85,18 +87,48 @@ export class PowerCache {
     eagerCleanupOnRead = false,
     // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
     defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
+    // invoked as onError(err, message) whenever an internal failure is
+    // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
+    onError = null,
   } = {}) {
     // Basic options validation: when an explicit options argument is provided it must be an object
     if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
       throw new TypeError('PowerCache options must be an object');
     }
-    this.maxEntries = maxEntries;
-    this.maxWeight = maxWeight;
-    this.weightFn = weightFn;
+    // Validate limits. `Infinity` is a legitimate "no limit" and is the
+    // documented default for `maxEntries`/`maxWeight`, so it stays allowed.
+    // What is *not* allowed is a `NaN` (which made `size > NaN` always false,
+    // so eviction silently never ran and the cache grew without bound) or a
+    // negative bound (which emptied the cache and kept it empty). Both are
+    // configuration errors, so fail loudly.
+    this.maxEntries = assertLimit(maxEntries, {
+      name: 'maxEntries',
+      className: 'PowerCache',
+      min: 0,
+      allowInfinity: true,
+    });
+    this.maxWeight = assertLimit(maxWeight, {
+      name: 'maxWeight',
+      className: 'PowerCache',
+      min: 0,
+      allowInfinity: true,
+    });
+    this.maxPoolSize = assertLimit(maxPoolSize, {
+      name: 'maxPoolSize',
+      className: 'PowerCache',
+      min: 0,
+      allowInfinity: true,
+    });
+    this.weightFn = assertFunction(weightFn, { name: 'weightFn', className: 'PowerCache' })
+      ? weightFn
+      : () => 1;
     this.defaultTTL = defaultTTL;
-    this.maxPoolSize = maxPoolSize;
     this.rejectOversized = Boolean(rejectOversized);
     this.onEvict = typeof onEvict === 'function' ? onEvict : null;
+    this.onError = typeof onError === 'function' ? onError : null;
+    /** number of times `weightFn` threw; a non-zero value means `maxWeight`
+     *  could not be enforced and should be surfaced by the caller. */
+    this._weightErrors = 0;
     this.onExpire = typeof onExpire === 'function' ? onExpire : null;
     this.maxCleanupPerTick = Number.isFinite(+maxCleanupPerTick)
       ? Math.max(1, +maxCleanupPerTick)
@@ -293,7 +325,44 @@ export class PowerCache {
       const n = +w;
       return Number.isFinite(n) ? Math.max(0, n) : 0;
     } catch (err) {
+      // Previously this returned 0 in silence, which quietly voided the whole
+      // `maxWeight` budget: every entry looked weightless so nothing was ever
+      // evicted. Surface it and count it.
+      this._weightErrors++;
+      this._notifyError(err, 'PowerCache weightFn threw');
       return 0;
+    }
+  }
+
+  /**
+   * Report an internal failure (a throwing user callback, a failing
+   * `weightFn`, ...) exactly once, through the configured `onError` handler
+   * when present and otherwise to `console.error`.
+   *
+   * Every catch site in this class funnels through here, so a swallowed
+   * failure is consistent and observable rather than invisible in some paths
+   * and logged in others.
+   *
+   * @param {any} err - The thrown value.
+   * @param {string} msg - Human-readable context.
+   * @returns {void}
+   * @private
+   */
+  _notifyError(err, msg) {
+    try {
+      if (typeof this.onError === 'function') {
+        this.onError(err, msg);
+        return;
+      }
+    } catch (_) {
+      /* a failing error handler must never break the cache */
+    }
+    try {
+      if (typeof console !== 'undefined' && typeof console.error === 'function') {
+        console.error(msg, err);
+      }
+    } catch (_) {
+      /* ignore console failures */
     }
   }
 
@@ -347,12 +416,7 @@ export class PowerCache {
     try {
       if (this.onExpire) this.onExpire(k, v);
     } catch (err) {
-      try {
-        if (typeof this._logger?.error === 'function')
-          this._logger.error(err, 'PowerCache onExpire callback threw');
-        else if (typeof console !== 'undefined' && typeof console.error === 'function')
-          console.error('PowerCache onExpire callback threw', err);
-      } catch (_) {}
+      this._notifyError(err, 'PowerCache onExpire callback threw');
     }
     this._freeNode(node);
     this._expirations++;
@@ -511,12 +575,7 @@ export class PowerCache {
       try {
         if (this.onEvict) this.onEvict(k, v, 'evicted');
       } catch (err) {
-        try {
-          if (typeof this._logger?.error === 'function')
-            this._logger.error(err, 'PowerCache onEvict callback threw');
-          else if (typeof console !== 'undefined' && typeof console.error === 'function')
-            console.error('PowerCache onEvict callback threw', err);
-        } catch (_) {}
+        this._notifyError(err, 'PowerCache onEvict callback threw');
       }
       this._freeNode(node);
     }
@@ -546,7 +605,9 @@ export class PowerCache {
       this._rejected++;
       try {
         if (this.onEvict) this.onEvict(key, value, 'rejected-oversized');
-      } catch (err) {}
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw (rejected-oversized)');
+      }
       return false;
     }
 
@@ -842,17 +903,31 @@ export class PowerCache {
       });
     }
 
-    // Store in inflight map to dedupe concurrent callers
-    const tracked = timed
-      .then((value) => {
+    // Store in inflight map to dedupe concurrent callers.
+    //
+    // The cache write is deliberately attached to the *factory* promise `p`
+    // rather than to `timed` (the timeout race). `timed` rejects as soon as
+    // the client's timeout elapses, so a successful-but-late factory result
+    // was thrown away and the next caller had to pay the full cost again.
+    // Writing on `p` keeps the expensive computation, while `tracked` (what
+    // the caller awaits) still settles on the timeout. Only *fulfilments* are
+    // cached, so a factory rejection is never cached.
+    p.then(
+      (value) => {
         try {
           this.set(key, value, { ttl, weight });
-        } catch (err) {}
-        return value;
-      })
-      .finally(() => {
-        this._inflightPromises.delete(key);
-      });
+        } catch (err) {
+          this._notifyError(err, 'PowerCache getOrSetAsync: storing a late value threw');
+        }
+      },
+      () => {
+        /* factory rejected: nothing to cache */
+      }
+    );
+
+    const tracked = timed.finally(() => {
+      this._inflightPromises.delete(key);
+    });
 
     this._inflightPromises.set(key, tracked);
     return tracked;
@@ -924,7 +999,9 @@ export class PowerCache {
     this._remove(node);
     try {
       if (this.onEvict) this.onEvict(node.key, node.value, 'deleted');
-    } catch (err) {}
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onEvict callback threw (deleted)');
+    }
     this._freeNode(node);
     return true;
   }
@@ -945,6 +1022,13 @@ export class PowerCache {
     this._cleanupCursor = null;
     this._cleanupCursorValid = false;
     this._evictionCandidate = null;
+    // Abandon in-flight dedupe entries. They cannot be cancelled (JS cannot
+    // interrupt a running factory), but dropping the map means a `getOrSetAsync`
+    // started *after* the clear is not deduped into a pre-clear request, and
+    // `stats().inflight` stops reporting work the caller has discarded.
+    // The `p.then(...)` late-write hook deliberately still populates the cache
+    // with a value computed before the clear, which is the useful behaviour.
+    this._inflightPromises.clear();
   }
 
   /**
@@ -1028,7 +1112,7 @@ export class PowerCache {
     this.stopCleanup();
     this._cleanupParams = { interval, maxCleanupPerTick };
     // start loop using prototype cleanup tick method
-    this._cleanupTimer = setTimeout(() => this._cleanupTick(), interval);
+    this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), interval);
   }
 
   /**
@@ -1089,7 +1173,7 @@ export class PowerCache {
     if (this._cleanupTimer == null) return; // stopped
     if (this._cleanupRunning) {
       // schedule next run
-      this._cleanupTimer = setTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+      this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
       return;
     }
     this._cleanupRunning = true;
@@ -1098,7 +1182,7 @@ export class PowerCache {
     } finally {
       this._cleanupRunning = false;
     }
-    this._cleanupTimer = setTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+    this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
   }
 
   /**
@@ -1446,6 +1530,11 @@ export class PowerMemoizer {
       );
     };
     this._originalFn = null;
+    // Per-instance receiver identity table used to build cache keys for
+    // memoized *methods* (see `_receiverKey`). WeakMap so a receiver that
+    // becomes unreachable cannot leak an entry.
+    this._receiverIds = new WeakMap();
+    this._nextReceiverId = 0;
 
     // If a function was provided at construction time, keep it as the
     // original function and create a memoized wrapper available via
@@ -1476,17 +1565,55 @@ export class PowerMemoizer {
    * @param {number} [options.weight] - Optional explicit weight for the entry
    * @returns {Function} Memoized function
    */
+  /**
+   * Build a cache key that includes the receiver's identity, so memoizing a
+   * method keeps one entry per object instead of collapsing every caller's
+   * result into a single shared entry.
+   *
+   * Object and function receivers get a monotonic id from a per-instance
+   * `WeakMap`. Primitive receivers (`memoized.call(5, x)`) fall back to their
+   * string form, which is still correct because the same primitive receiver
+   * necessarily has the same state.
+   *
+   * @param {any} receiver - The `this` value the wrapper was called with.
+   * @param {any[]} args - The call arguments.
+   * @returns {string} Cache key scoped to `receiver`.
+   * @private
+   */
+  _receiverKey(receiver, args) {
+    let id;
+    if (receiver !== null && (typeof receiver === 'object' || typeof receiver === 'function')) {
+      id = this._receiverIds.get(receiver);
+      if (id === undefined) {
+        id = this._nextReceiverId++;
+        this._receiverIds.set(receiver, id);
+      }
+    } else {
+      id = `p${String(receiver)}`;
+    }
+    return `r${id}:${this.keyResolver(...args)}`;
+  }
+
   _memoize(fn, { ttl, weight } = {}) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
     const self = this;
     return function memoized(...args) {
-      const key = self.keyResolver(...args);
+      // Memoizing a *method* must not lose the receiver. The wrapper is a
+      // plain `function` (not an arrow) precisely so `this` is observable.
+      // Two things follow from that:
+      //   1. `this` has to be forwarded to `fn`, and
+      //   2. `this` has to be part of the cache key, or `objA.m(1)` and
+      //      `objB.m(1)` would share one entry and return each other's value.
+      // A plain `fn(1)` call (no meaningful receiver) keeps the original key
+      // space so existing cache entries and key expectations are unchanged.
+      const receiver = this === undefined || this === null ? null : this;
+      const key = receiver === null ? self.keyResolver(...args) : self._receiverKey(receiver, args);
       // return cached value if present (use has() to allow caching `undefined`)
       if (self.cache.has(key)) return self.cache.get(key);
       // if there is an inflight Promise, return it to dedupe
       if (self._inflight.has(key)) return self._inflight.get(key);
 
-      const res = fn(...args);
+      const res = receiver === null ? fn(...args) : fn.apply(receiver, args);
       // Promise-like
       if (typeof res?.then === 'function') {
         // Wrap the incoming thenable/promise in an async wrapper so we can
@@ -1544,12 +1671,10 @@ export class PowerMemoizer {
     memoizedFn.stats = () => this.stats();
     memoizedFn.cache = this.cache;
     memoizedFn.original = fn;
-    try {
-      Object.setPrototypeOf(memoizedFn, PowerMemoizer.prototype);
-      memoizedFn.constructor = PowerMemoizer;
-    } catch (err) {
-      // ignore environments that forbid prototype mutation
-    }
+    // NB: do not call `Object.setPrototypeOf(memoizedFn, PowerMemoizer.prototype)`.
+    // `PowerMemoizer.prototype` chains to `Object.prototype`, so the mutation
+    // removes `Function.prototype` from the chain and the returned function
+    // loses `.call`/`.apply`/`.bind`. Use the own-properties above instead.
     return memoizedFn;
   }
 
@@ -1723,7 +1848,8 @@ export function simpleArgsKey(...args) {
       continue;
     }
     if (t === 'number') {
-      parts[i] = 'd:' + String(v);
+      // Normalise -0 to 0 so the two do not produce distinct cache entries.
+      parts[i] = 'd:' + String(v === 0 ? 0 : v);
       continue;
     }
     if (t === 'boolean') {
@@ -1734,7 +1860,19 @@ export function simpleArgsKey(...args) {
       parts[i] = 'u:';
       continue;
     }
-    // non-scalar (object, function, symbol) — fall back to JSON stringify
+    if (t === 'bigint') {
+      // `JSON.stringify` throws on BigInt, which made this "fast scalar path"
+      // throw for a perfectly ordinary argument type.
+      parts[i] = 'g:' + v.toString();
+      continue;
+    }
+    if (t === 'symbol') {
+      // `JSON.stringify` maps every Symbol to `null`, so falling through
+      // would alias *all* Symbol arguments onto the single key `'[null]'` -
+      // silent cache poisoning. Symbols are not serialisable by design.
+      throw new TypeError('simpleArgsKey() does not support symbol arguments');
+    }
+    // non-scalar (object, function) — fall back to JSON stringify
     sawNonScalar = true;
     break;
   }

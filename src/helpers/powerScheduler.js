@@ -77,15 +77,33 @@ export class PowerScheduler {
     this._scheduled = false;
     this._timer = null;
     try {
-      this._flushFn();
+      // `flushFn` is very often `async`. A bare `try/catch` only catches a
+      // *synchronous* throw, so an async rejection used to escape as an
+      // unhandled rejection and `onError` never fired. Normalise the result
+      // to a promise and funnel both paths through one handler.
+      const result = this._flushFn();
+      if (result && typeof result.then === 'function') {
+        Promise.resolve(result).catch((err) => this._notifyError(err));
+      }
     } catch (err) {
       // Swallow flush errors to keep scheduler mechanics intact.
-      if (!this._onError) return;
-      try {
-        this._onError(err);
-      } catch {
-        // ignore logger failures
-      }
+      this._notifyError(err);
+    }
+  }
+
+  /**
+   * Route an error to the configured `onError` handler without ever letting a
+   * throwing user handler escape.
+   * @param {any} err
+   * @private
+   * @returns {void}
+   */
+  _notifyError(err) {
+    if (!this._onError) return;
+    try {
+      this._onError(err);
+    } catch {
+      // ignore logger failures
     }
   }
 }
