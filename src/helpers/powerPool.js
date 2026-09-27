@@ -1810,8 +1810,8 @@ export class PowerPool {
       this._logger.error(err, `${scope}: failed to cancel pending responses`);
     }
 
-    let currentCount = 0;
-    let workersList = [];
+    let currentCount;
+    let workersList;
     try {
       const workersRef = this.workers;
       currentCount = Number(workersRef?.length) || 0;
@@ -2005,7 +2005,7 @@ export class PowerPool {
     }
 
     const isTargeted = targetWorkerId != null;
-    let chosen = null;
+    let chosen;
     if (isTargeted) {
       chosen = this.workers.find((w) => w.id === targetWorkerId);
       if (!chosen) return items.map(() => false);

@@ -934,7 +934,7 @@ export class PowerCache {
    * @returns {void}
    */
   clear() {
-    for (let node = this._head; node; ) {
+    for (let node = this._head; node;) {
       const next = node.next;
       this._freeNode(node);
       node = next;

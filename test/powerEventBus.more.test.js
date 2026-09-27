@@ -5,7 +5,6 @@ describe('PowerEventBus additional branches', () => {
   it('constructor handles missing FinalizationRegistry when weak true', () => {
     const origFR = global.FinalizationRegistry;
     // simulate environment without FinalizationRegistry
-    // eslint-disable-next-line no-undef
     global.FinalizationRegistry = undefined;
     const bus = new PowerEventBus({ weak: true });
     expect(bus._fr).toBeNull();

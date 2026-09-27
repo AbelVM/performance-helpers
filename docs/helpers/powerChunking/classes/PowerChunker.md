@@ -30,27 +30,41 @@ Notes:
 
 ## Param
 
+**iterable**
+
 Input iterable of items to process.
 
 ## Param
+
+**fn**
 
 Function to call for each item: `(item, index?, chunk?) => void`.
 
 ## Param
 
+**options**
+
 ## Param
+
+**options.poolOptions**
 
 Options forwarded to `PowerPool` constructor.
 
 ## Param
 
+**options.postOptions**
+
 Options forwarded to `postMessageBatch`.
 
 ## Param
 
+**options.chunkSize**
+
 Explicit chunk size to use. When omitted a heuristic is used.
 
 ## Param
+
+**options.fnComplexity**
 
 Hint about `fn` complexity to bias chunking.
  PowerChunker

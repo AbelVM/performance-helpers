@@ -8,7 +8,7 @@ export default defineConfig({
   worker: { format: 'es', inline: true },
   build: {
     lib: {
-      entry: resolve(__dirname, 'src/index.js'),
+      entry: resolve(import.meta.dirname, 'src/index.js'),
       name: 'PerformanceHelpers',
       formats: ['es', 'cjs', 'umd'],
       fileName: (format) => {

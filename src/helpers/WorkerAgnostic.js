@@ -34,7 +34,6 @@ function _loadNodeRequire() {
   if (!_nodeRequirePromise) {
     // Opaque dynamic import so bundlers do not try to resolve the Node
     // builtin at build time. Only ever runs in a Node environment.
-    // eslint-disable-next-line no-new-func
     _nodeRequirePromise = new Function('return import("node:module")')().then((m) => {
       let base;
       try {
@@ -195,7 +194,6 @@ function createWebWorkerFromString(workerSource, options) {
   try {
     // Read `import.meta.url` at runtime via a dynamic function so bundlers do
     // not statically parse (and thus externalize) `import.meta`.
-    // eslint-disable-next-line no-new-func
     baseUrl = new Function('try { return import.meta?.url } catch (e) { return undefined }')();
   } catch (e) {
     baseUrl = undefined;

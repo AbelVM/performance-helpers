@@ -3,13 +3,13 @@ import { PowerEventBus } from '../src/helpers/powerEventBus.js';
 
 describe('PowerEventBus uncovered branches', () => {
   it('stores raw functions when WeakRef is unavailable and weak=true', () => {
+    // built while WeakRef is still present: vi.fn() relies on it internally
+    const fn = vi.fn();
     const origWR = global.WeakRef;
     try {
       // simulate environment without WeakRef
-      // eslint-disable-next-line no-undef
       global.WeakRef = undefined;
       const bus = new PowerEventBus({ weak: true });
-      const fn = vi.fn();
       const unsub = bus.on('evt', fn);
       const listeners = bus.listeners('evt');
       expect(listeners.length).toBe(1);

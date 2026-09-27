@@ -134,8 +134,8 @@ export class PowerThrottle {
    * throttle.release(1); // add one token back directly
    */
   release(tokenOrN) {
-    let n = 0;
     if (tokenOrN == null) return;
+    let n;
     if (typeof tokenOrN === 'object' && tokenOrN !== null) n = Number(tokenOrN.n) || 0;
     else n = Math.max(0, Math.floor(+tokenOrN) || 0);
     if (n === 0) return;
