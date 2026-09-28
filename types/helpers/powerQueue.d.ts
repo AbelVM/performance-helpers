@@ -78,9 +78,9 @@ export class PowerQueue {
      * Consuming drain iterator: yields items in FIFO order and removes them
      * from the queue as they are iterated.
      * Useful for streaming/processing and emptying the queue without manual loops.
-     * @returns {Iterator<any>}
+     * @returns {IterableIterator<any>}
      */
-    drain(): Iterator<any>;
+    drain(): IterableIterator<any>;
     /**
      * Return a shallow array snapshot of the queue contents in FIFO order.
      * This is a convenience helper that does not consume the queue.

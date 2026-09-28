@@ -286,7 +286,23 @@ export {};
 /**
  * Batch options for `PowerBatch`.
  * @typedef {Object} PowerBatchOptions
- * @property {number} [maxSize]
+ * @property {number} [maxSize] Flush as soon as this many items are queued.
+ * @property {'microtask'|'macrotask'} [scheduling] How the batch is scheduled.
+ */
+
+/**
+ * The promise `PowerBatch` hands back to every `add()`/`flush()` caller in a
+ * batch, plus the handles that settle it once the handler has run.
+ *
+ * Named so the field is `BatchPending | null` rather than the comment
+ * `{ promise, resolve, reject }` it used to carry - a comment is not a type, so
+ * `this._pending` was inferred from its initialiser alone and every
+ * `this._pending.resolve()` was an error.
+ *
+ * @typedef {Object} BatchPending
+ * @property {Promise<void>} promise
+ * @property {(value?: any) => void} resolve
+ * @property {(reason?: any) => void} reject
  */
 
 /**

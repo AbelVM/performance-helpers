@@ -10,29 +10,21 @@
 export class PowerBatch {
     /**
      * @typedef {import('./jsdoc-types.js').PowerBatchOptions} PowerBatchOptions
+     * @typedef {import('./jsdoc-types.js').BatchPending} BatchPending
      */
     /**
-     * @param {Function} handler - Function called with an array of collected items.
-     * @param {Object} [options]
-     * @param {number} [options.maxSize=Infinity] - When reached, flush immediately.
-     * @param {'microtask'|'macrotask'} [options.scheduling='microtask'] - How the batch is scheduled.
+     * @param {(items:any[])=>Promise<void>|void} handler - Called with the whole
+     *   collected array each time the batch flushes. A rejection rejects every
+     *   promise handed out by `add()`/`flush()` in that batch.
+     * @param {PowerBatchOptions} [options] - `maxSize` defaults to unbounded and
+     *   `scheduling` to `'microtask'`.
      */
-    constructor(handler: Function, options?: {
-        maxSize?: number | undefined;
-        scheduling?: "microtask" | "macrotask" | undefined;
-    });
-    _handler: Function;
+    constructor(handler: (items: any[]) => Promise<void> | void, options?: import("./jsdoc-types.js").PowerBatchOptions);
+    _handler: (items: any[]) => Promise<void> | void;
     _maxSize: number;
     _queue: PowerQueue;
-    _pending: {
-        promise: Promise<any>;
-        resolve: undefined;
-        reject: undefined;
-    } | {
-        promise: Promise<any>;
-        resolve: undefined;
-        reject: undefined;
-    } | null;
+    /** @type {?BatchPending} */
+    _pending: import("./jsdoc-types.js").BatchPending | null;
     _scheduler: PowerScheduler;
     /**
      * Add an item to the current batch. Returns a Promise that resolves
@@ -51,6 +43,16 @@ export class PowerBatch {
      * @returns {Promise<void>}
      */
     flush(): Promise<void>;
+    /**
+     * The pending entry for the batch being assembled, created on first use.
+     *
+     * Extracted because `add()` and `flush()` both needed it, and duplicating the
+     * `let resolve, reject` dance meant the uninitialised `undefined` was
+     * assignable to the handles at one site and not the other.
+     *
+     * @returns {BatchPending}
+     */
+    _ensurePending(): import("./jsdoc-types.js").BatchPending;
     /**
      * Internal: run the queued batch and call the handler.
      * @private

@@ -29,12 +29,14 @@ import { PowerScheduler } from './powerScheduler.js';
 export class PowerBatch {
   /**
    * @typedef {import('./jsdoc-types.js').PowerBatchOptions} PowerBatchOptions
+   * @typedef {import('./jsdoc-types.js').BatchPending} BatchPending
    */
   /**
-   * @param {Function} handler - Function called with an array of collected items.
-   * @param {Object} [options]
-   * @param {number} [options.maxSize=Infinity] - When reached, flush immediately.
-   * @param {'microtask'|'macrotask'} [options.scheduling='microtask'] - How the batch is scheduled.
+   * @param {(items:any[])=>Promise<void>|void} handler - Called with the whole
+   *   collected array each time the batch flushes. A rejection rejects every
+   *   promise handed out by `add()`/`flush()` in that batch.
+   * @param {PowerBatchOptions} [options] - `maxSize` defaults to unbounded and
+   *   `scheduling` to `'microtask'`.
    */
   constructor(handler, options = {}) {
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
@@ -49,7 +51,8 @@ export class PowerBatch {
       allowInfinity: true,
     });
     this._queue = new PowerQueue(16);
-    this._pending = null; // { promise, resolve, reject }
+    /** @type {?BatchPending} */
+    this._pending = null;
     this._scheduler = new PowerScheduler(() => this._runBatch(), {
       scheduling: scheduling === 'macrotask' ? 'macrotask' : 'microtask',
     });
@@ -65,16 +68,9 @@ export class PowerBatch {
    */
   add(item) {
     this._queue.push(item);
-    if (!this._pending) {
-      let resolve, reject;
-      const p = new Promise((r, rej) => {
-        resolve = r;
-        reject = rej;
-      });
-      this._pending = { promise: p, resolve, reject };
-    }
+    const pending = this._ensurePending();
     if (this._queue.length >= this._maxSize) {
-      const prom = this._pending.promise;
+      const prom = pending.promise;
       this._scheduler.cancel();
       this._runBatch();
       return prom;
@@ -83,7 +79,7 @@ export class PowerBatch {
     if (!this._scheduler.scheduled) {
       this._scheduler.schedule();
     }
-    return this._pending.promise;
+    return pending.promise;
   }
 
   /**
@@ -95,18 +91,36 @@ export class PowerBatch {
    */
   flush() {
     if (this._queue.length === 0 && !this._scheduler.scheduled) return Promise.resolve();
-    if (!this._pending) {
-      let resolve, reject;
-      const p = new Promise((r, rej) => {
-        resolve = r;
-        reject = rej;
-      });
-      this._pending = { promise: p, resolve, reject };
-    }
+    const pending = this._ensurePending();
     if (!this._scheduler.scheduled) {
       this._scheduler.schedule();
     }
-    return this._pending.promise;
+    return pending.promise;
+  }
+
+  /**
+   * The pending entry for the batch being assembled, created on first use.
+   *
+   * Extracted because `add()` and `flush()` both needed it, and duplicating the
+   * `let resolve, reject` dance meant the uninitialised `undefined` was
+   * assignable to the handles at one site and not the other.
+   *
+   * @returns {BatchPending}
+   */
+  _ensurePending() {
+    if (this._pending) return this._pending;
+    /** @type {(value?: any) => void} */
+    let resolve = () => {};
+    /** @type {(reason?: any) => void} */
+    let reject = () => {};
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    /** @type {BatchPending} */
+    const pending = { promise, resolve, reject };
+    this._pending = pending;
+    return pending;
   }
 
   /**

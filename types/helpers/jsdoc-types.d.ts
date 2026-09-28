@@ -365,7 +365,28 @@ export type PowerThrottleToken = {
  * Batch options for `PowerBatch`.
  */
 export type PowerBatchOptions = {
+    /**
+     * Flush as soon as this many items are queued.
+     */
     maxSize?: number | undefined;
+    /**
+     * How the batch is scheduled.
+     */
+    scheduling?: "microtask" | "macrotask" | undefined;
+};
+/**
+ * The promise `PowerBatch` hands back to every `add()`/`flush()` caller in a
+ * batch, plus the handles that settle it once the handler has run.
+ *
+ * Named so the field is `BatchPending | null` rather than the comment
+ * `{ promise, resolve, reject }` it used to carry - a comment is not a type, so
+ * `this._pending` was inferred from its initialiser alone and every
+ * `this._pending.resolve()` was an error.
+ */
+export type BatchPending = {
+    promise: Promise<void>;
+    resolve: (value?: any) => void;
+    reject: (reason?: any) => void;
 };
 /**
  * Queue options for `PowerQueue`.
