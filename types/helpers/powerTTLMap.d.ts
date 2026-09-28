@@ -16,12 +16,15 @@ export class PowerTTLMap {
      */
     /**
      * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
+     * @typedef {import('./jsdoc-types.js').TTLMapEntry} TTLMapEntry
      */
     constructor(defaultTTL?: number, options?: {});
     _defaultTTL: number;
-    _onExpire: any;
-    _map: Map<any, any>;
-    _expirations: Map<any, any>;
+    _onExpire: ((key: any, value: any) => void) | null;
+    /** @type {Map<any, TTLMapEntry>} */
+    _map: Map<any, import("./jsdoc-types.js").TTLMapEntry>;
+    /** @type {Map<any, number>} */
+    _expirations: Map<any, number>;
     _nextExpiryAt: number;
     _nextExpiryDirty: boolean;
     /**
@@ -45,18 +48,31 @@ export class PowerTTLMap {
         ttl?: number;
     }): this;
     /**
-     * Internal: remove entry if expired; returns true if removed or missing.
+     * Internal: remove an entry, invoking `onExpire` for its value.
      *
-     * This helper centralizes expiry checks for `get`, `has`, and iteration
-     * paths. When an entry is expired it is removed from the underlying map.
+     * This helper centralizes expiry removal for `get`, `has`, `touch`, the
+     * iterators and the size sweep. When the entry is expired it is removed from
+     * the underlying map.
+     *
+     * Note it returns nothing. The JSDoc claimed `@returns {boolean} "true when
+     * the entry is missing or expired"`, which has never been true - and no caller
+     * reads a result, because the callers that need to know use `_checkExpire`,
+     * which answers separately.
      *
      * @private
      * @param {any} key - Map key to check
-     * @param {{value:any,expiresAt:number}|undefined} entry - Stored entry or undefined
-     * @returns {boolean} true when the entry is missing or expired (and removed)
+     * @param {TTLMapEntry} [entry] - Stored entry, or `undefined` when the key is
+     *   absent.
+     * @returns {void}
      */
     private _expireKey;
-    _checkExpire(key: any, entry: any): boolean;
+    /**
+     * Whether a key needs removing: absent, or present and past its expiry.
+     * @param {any} key
+     * @param {TTLMapEntry} [entry]
+     * @returns {boolean}
+     */
+    _checkExpire(key: any, entry?: import("./jsdoc-types.js").TTLMapEntry): boolean;
     /**
      * Get a value, returning `undefined` when missing or expired.
      * @param {any} key
@@ -94,8 +110,23 @@ export class PowerTTLMap {
      * @returns {number}
      */
     get size(): number;
-    _updateNextExpiryOnWrite(prevExpiry: any, nextExpiry: any): void;
-    _sweepExpirations(now: any): void;
+    /**
+     * Keep `_nextExpiryAt` pointing at the soonest live expiry, invalidating the
+     * cached `size` shortcut when the entry that held it is gone or replaced.
+     *
+     * @param {number} prevExpiry - The key's expiry before this write, `0` if none.
+     * @param {number} nextExpiry - The key's expiry after this write, `0` if none.
+     * @returns {void}
+     */
+    _updateNextExpiryOnWrite(prevExpiry: number, nextExpiry: number): void;
+    /**
+     * Drop every expired entry the expiration index knows about, then recompute
+     * the soonest remaining expiry.
+     *
+     * @param {number} now
+     * @returns {void}
+     */
+    _sweepExpirations(now: number): void;
     /**
      * Iterate entries [key, value] skipping expired entries.
      * @returns {IterableIterator<[any, any]>}
@@ -113,10 +144,11 @@ export class PowerTTLMap {
     values(): IterableIterator<any>;
     /**
      * Call `cb` for each non-expired entry.
-     * @param {Function} cb
+     * @param {(value:any, key:any, map:PowerTTLMap)=>void} cb
      * @param {any} [thisArg]
+     * @returns {void}
      */
-    forEach(cb: Function, thisArg?: any): void;
+    forEach(cb: (value: any, key: any, map: PowerTTLMap) => void, thisArg?: any): void;
     /**
      * Release every resource this instance holds.
      *

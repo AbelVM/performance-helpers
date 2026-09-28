@@ -23,19 +23,27 @@ export class PowerTTLMap {
    */
   /**
    * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
+   * @typedef {import('./jsdoc-types.js').TTLMapEntry} TTLMapEntry
    */
   constructor(defaultTTL = 0, options = {}) {
     // Allow `new PowerTTLMap({ defaultTTL, onExpire })` (options-object convention).
+    // Reassigning the parameter lost the declared options type at the two reads
+    // below, so the normalised value gets its own binding instead.
+    /** @type {PowerTTLMapOptions} */
+    let opts = options;
+    let ttl = defaultTTL;
     if (defaultTTL != null && typeof defaultTTL === 'object') {
-      options = defaultTTL;
-      defaultTTL = 0;
+      opts = defaultTTL;
+      ttl = 0;
     }
-    this._defaultTTL = Number(options?.defaultTTL ?? defaultTTL) || 0; // ms; 0 = no expiry
-    this._onExpire = typeof options?.onExpire === 'function' ? options.onExpire : null;
-    this._map = new Map(); // key -> { value, expiresAt }
+    this._defaultTTL = Number(opts?.defaultTTL ?? ttl) || 0; // ms; 0 = no expiry
+    this._onExpire = typeof opts?.onExpire === 'function' ? opts.onExpire : null;
+    /** @type {Map<any, TTLMapEntry>} */
+    this._map = new Map();
     // Track keys that have an expiry to allow faster purging of expired
     // entries without scanning the entire map on each `size` access.
-    this._expirations = new Map(); // key -> expiresAt (ms)
+    /** @type {Map<any, number>} */
+    this._expirations = new Map();
     this._nextExpiryAt = 0;
     this._nextExpiryDirty = false;
   }
@@ -74,15 +82,22 @@ export class PowerTTLMap {
   }
 
   /**
-   * Internal: remove entry if expired; returns true if removed or missing.
+   * Internal: remove an entry, invoking `onExpire` for its value.
    *
-   * This helper centralizes expiry checks for `get`, `has`, and iteration
-   * paths. When an entry is expired it is removed from the underlying map.
+   * This helper centralizes expiry removal for `get`, `has`, `touch`, the
+   * iterators and the size sweep. When the entry is expired it is removed from
+   * the underlying map.
+   *
+   * Note it returns nothing. The JSDoc claimed `@returns {boolean} "true when
+   * the entry is missing or expired"`, which has never been true - and no caller
+   * reads a result, because the callers that need to know use `_checkExpire`,
+   * which answers separately.
    *
    * @private
    * @param {any} key - Map key to check
-   * @param {{value:any,expiresAt:number}|undefined} entry - Stored entry or undefined
-   * @returns {boolean} true when the entry is missing or expired (and removed)
+   * @param {TTLMapEntry} [entry] - Stored entry, or `undefined` when the key is
+   *   absent.
+   * @returns {void}
    */
   _expireKey(key, entry) {
     if (!entry) return;
@@ -104,6 +119,12 @@ export class PowerTTLMap {
     }
   }
 
+  /**
+   * Whether a key needs removing: absent, or present and past its expiry.
+   * @param {any} key
+   * @param {TTLMapEntry} [entry]
+   * @returns {boolean}
+   */
   _checkExpire(key, entry) {
     if (!entry) return true;
     if (entry.expiresAt && nowMs() > entry.expiresAt) {
@@ -120,7 +141,9 @@ export class PowerTTLMap {
    */
   get(key) {
     const entry = this._map.get(key);
-    if (this._checkExpire(key, entry)) return undefined;
+    // `_checkExpire` already reports a missing entry as expired, but it is not
+    // a type guard, so the narrowing is stated here as well.
+    if (entry === undefined || this._checkExpire(key, entry)) return undefined;
     return entry.value;
   }
 
@@ -200,6 +223,14 @@ export class PowerTTLMap {
     return this._map.size;
   }
 
+  /**
+   * Keep `_nextExpiryAt` pointing at the soonest live expiry, invalidating the
+   * cached `size` shortcut when the entry that held it is gone or replaced.
+   *
+   * @param {number} prevExpiry - The key's expiry before this write, `0` if none.
+   * @param {number} nextExpiry - The key's expiry after this write, `0` if none.
+   * @returns {void}
+   */
   _updateNextExpiryOnWrite(prevExpiry, nextExpiry) {
     if (prevExpiry && this._nextExpiryAt === prevExpiry && prevExpiry !== nextExpiry) {
       this._nextExpiryDirty = true;
@@ -210,6 +241,13 @@ export class PowerTTLMap {
     }
   }
 
+  /**
+   * Drop every expired entry the expiration index knows about, then recompute
+   * the soonest remaining expiry.
+   *
+   * @param {number} now
+   * @returns {void}
+   */
   _sweepExpirations(now) {
     let nextExpiryAt = 0;
     for (const [k, exp] of this._expirations) {
@@ -257,8 +295,9 @@ export class PowerTTLMap {
 
   /**
    * Call `cb` for each non-expired entry.
-   * @param {Function} cb
+   * @param {(value:any, key:any, map:PowerTTLMap)=>void} cb
    * @param {any} [thisArg]
+   * @returns {void}
    */
   forEach(cb, thisArg) {
     for (const [k, v] of this.entries()) cb.call(thisArg, v, k, this);

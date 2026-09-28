@@ -210,10 +210,39 @@ export {};
  */
 
 /**
+ * A listener callback, as `PowerEventBus` and `PowerSubscriberSet` call it.
+ *
+ * Spelled as a rest signature rather than `(payload:any)=>void` because
+ * `PowerSubscriberSet.addOnce` forwards whatever it was called with, so the
+ * set cannot promise the bus's single-payload shape to its own callers.
+ *
+ * @typedef {(...args:any[])=>void} SubscriberListener
+ */
+
+/**
+ * What a `PowerSubscriberSet` actually stores: the listener itself in strong
+ * mode, a `WeakRef` to it in weak mode. Every read goes through `_deref`,
+ * which is why the stored and yielded shapes differ.
+ *
+ * @typedef {SubscriberListener|WeakRef<SubscriberListener>} SubscriberEntry
+ */
+
+/**
  * Event bus options for `PowerEventBus`.
  * @typedef {Object} PowerEventBusOptions
- * @property {number} [maxListeners]
- * @property {boolean} [weak]
+ * @property {number} [maxListeners] Cap on listeners per event; `0` (the
+ *   default) is unlimited.
+ * @property {boolean} [weak] Store listeners behind `WeakRef`, so a listener
+ *   that is no longer referenced elsewhere can be collected.
+ */
+
+/**
+ * The token `PowerEventBus` hands its `FinalizationRegistry`: the event whose
+ * bucket held the listener, plus the ref to unregister when it dies.
+ *
+ * @typedef {Object} EventBusWeakToken
+ * @property {string} event
+ * @property {WeakRef<SubscriberListener>} ref
  */
 
 /**
@@ -256,10 +285,20 @@ export {};
  */
 
 /**
- * Options for `PowerTTLMap`.
+ * Queue options for `PowerTTLMap`.
  * @typedef {Object} PowerTTLMapOptions
  * @property {number} [defaultTTL] Default TTL in ms (0 = no expiry).
  * @property {(key:any,value:any)=>void} [onExpire]
+ */
+
+/**
+ * What `PowerTTLMap` stores per key: the value plus the absolute `nowMs()` at
+ * which it lapses. `expiresAt` is `0`, not `Infinity`, for a key with no TTL -
+ * the falsy value is the "never expires" test at every read site.
+ *
+ * @typedef {Object} TTLMapEntry
+ * @property {any} value
+ * @property {number} expiresAt
  */
 
 /**

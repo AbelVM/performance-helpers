@@ -16,46 +16,50 @@ export function cleanupWeakRefs(bucket: any): void;
  */
 export class PowerSubscriberSet {
     /**
-     * @param {Object} [options]
-     * @param {boolean} [options.weak=false]
-     * @param {number} [options.maxListeners=0]
+     * @param {{weak?: boolean, maxListeners?: number}} [options] - `weak` stores
+     *   listeners behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
      */
     constructor(options?: {
-        weak?: boolean | undefined;
-        maxListeners?: number | undefined;
+        weak?: boolean;
+        maxListeners?: number;
     });
     _weak: boolean;
     _maxListeners: number;
-    _listeners: Set<any>;
-    _onceMap: WeakMap<WeakKey, any>;
-    _finalization: FinalizationRegistry<any> | null;
+    /** @type {Set<SubscriberEntry>} */
+    _listeners: Set<SubscriberEntry>;
+    /** @type {WeakMap<SubscriberListener, SubscriberListener>} original -> once-wrapper */
+    _onceMap: WeakMap<SubscriberListener, SubscriberListener>;
+    /** @type {?(FinalizationRegistry<{ref: WeakRef<SubscriberListener>}>)} */
+    _finalization: (FinalizationRegistry<{
+        ref: WeakRef<SubscriberListener>;
+    }>) | null;
     /** Number of currently live listeners. */
     get size(): number;
     /**
      * Add a listener and return an unsubscribe function.
-     * @param {Function|WeakRef} fn Listener function or WeakRef when `weak` mode is enabled.
+     * @param {SubscriberListener|WeakRef<SubscriberListener>} fn Listener function, or its WeakRef when `weak` mode is enabled.
      * @returns {() => boolean} Unsubscribe function that removes the listener.
      */
-    add(fn: Function | WeakRef<any>): () => boolean;
+    add(fn: SubscriberListener | WeakRef<SubscriberListener>): () => boolean;
     /**
      * Add a once listener and return an unsubscribe function.
      * The original listener will be removed after the first invocation.
-     * @param {Function} fn Listener function.
+     * @param {SubscriberListener} fn Listener function.
      * @returns {() => boolean} Unsubscribe function.
      */
-    addOnce(fn: Function): () => boolean;
+    addOnce(fn: SubscriberListener): () => boolean;
     /**
      * Delete a listener by original function or once-wrapper.
-     * @param {Function|WeakRef} fn Original listener function or its WeakRef wrapper.
+     * @param {SubscriberListener|WeakRef<SubscriberListener>} fn Original listener function or its WeakRef wrapper.
      * @returns {boolean} `true` if a listener was removed, otherwise `false`.
      */
-    delete(fn: Function | WeakRef<any>): boolean;
+    delete(fn: SubscriberListener | WeakRef<SubscriberListener>): boolean;
     /**
      * Iterate live listeners in insertion order and invoke a callback.
-     * @param {(listener: Function) => void} fn Callback invoked for each live listener.
+     * @param {(listener: SubscriberListener) => void} fn Callback invoked for each live listener.
      * @returns {void}
      */
-    forEach(fn: (listener: Function) => void): void;
+    forEach(fn: (listener: SubscriberListener) => void): void;
     /**
      * Clear all listeners.
      * @returns {void}
@@ -63,13 +67,27 @@ export class PowerSubscriberSet {
     clear(): void;
     /**
      * Return a safe array copy of live listeners.
-     * @returns {Function[]} Array of live listener functions.
+     * @returns {SubscriberListener[]} Array of live listener functions.
      */
-    values(): Function[];
+    values(): SubscriberListener[];
     /** Remove dead weak refs from the set. */
     _cleanup(): void;
-    _makeEntry(fn: any): any;
-    _deref(entry: any): any;
+    /**
+     * Wrap a listener for storage: a `WeakRef` in weak mode, the function itself
+     * otherwise. Undefined when weak mode is on but the runtime has no `WeakRef`.
+     *
+     * @param {SubscriberListener} fn
+     * @returns {SubscriberEntry}
+     */
+    _makeEntry(fn: SubscriberListener): SubscriberEntry;
+    /**
+     * Resolve a stored entry to the live listener, or `undefined` when the weak
+     * target has been collected.
+     *
+     * @param {SubscriberEntry} entry
+     * @returns {SubscriberListener|undefined}
+     */
+    _deref(entry: SubscriberEntry): SubscriberListener | undefined;
     /**
      * Release every resource this instance holds: the listener registry is
      * emptied and the `FinalizationRegistry` is replaced, so its retained
@@ -83,9 +101,9 @@ export class PowerSubscriberSet {
     dispose(): void;
     /**
      * Iterate live listeners in insertion order.
-     * @yields {Function}
+     * @yields {SubscriberListener}
      */
-    [Symbol.iterator](): Generator<any, void, unknown>;
+    [Symbol.iterator](): Generator<import("./jsdoc-types.js").SubscriberListener, void, unknown>;
     /**
      * Alias for {@link dispose}, so `using set = new PowerSubscriberSet()`
      * releases the listeners at scope exit.
@@ -93,3 +111,5 @@ export class PowerSubscriberSet {
      */
     [Symbol.dispose](): void;
 }
+export type SubscriberListener = import("./jsdoc-types.js").SubscriberListener;
+export type SubscriberEntry = import("./jsdoc-types.js").SubscriberEntry;

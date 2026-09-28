@@ -272,11 +272,41 @@ export type PowerLatchWaitOptions = {
     signal?: AbortSignal | undefined;
 };
 /**
+ * A listener callback, as `PowerEventBus` and `PowerSubscriberSet` call it.
+ *
+ * Spelled as a rest signature rather than `(payload:any)=>void` because
+ * `PowerSubscriberSet.addOnce` forwards whatever it was called with, so the
+ * set cannot promise the bus's single-payload shape to its own callers.
+ */
+export type SubscriberListener = (...args: any[]) => void;
+/**
+ * What a `PowerSubscriberSet` actually stores: the listener itself in strong
+ * mode, a `WeakRef` to it in weak mode. Every read goes through `_deref`,
+ * which is why the stored and yielded shapes differ.
+ */
+export type SubscriberEntry = SubscriberListener | WeakRef<SubscriberListener>;
+/**
  * Event bus options for `PowerEventBus`.
  */
 export type PowerEventBusOptions = {
+    /**
+     * Cap on listeners per event; `0` (the
+     * default) is unlimited.
+     */
     maxListeners?: number | undefined;
+    /**
+     * Store listeners behind `WeakRef`, so a listener
+     * that is no longer referenced elsewhere can be collected.
+     */
     weak?: boolean | undefined;
+};
+/**
+ * The token `PowerEventBus` hands its `FinalizationRegistry`: the event whose
+ * bucket held the listener, plus the ref to unregister when it dies.
+ */
+export type EventBusWeakToken = {
+    event: string;
+    ref: WeakRef<SubscriberListener>;
 };
 /**
  * Throttle options for `PowerThrottle`.
@@ -331,7 +361,7 @@ export type PowerQueueOptions = {
     initialCapacity?: number | undefined;
 };
 /**
- * Options for `PowerTTLMap`.
+ * Queue options for `PowerTTLMap`.
  */
 export type PowerTTLMapOptions = {
     /**
@@ -339,6 +369,15 @@ export type PowerTTLMapOptions = {
      */
     defaultTTL?: number | undefined;
     onExpire?: ((key: any, value: any) => void) | undefined;
+};
+/**
+ * What `PowerTTLMap` stores per key: the value plus the absolute `nowMs()` at
+ * which it lapses. `expiresAt` is `0`, not `Infinity`, for a key with no TTL -
+ * the falsy value is the "never expires" test at every read site.
+ */
+export type TTLMapEntry = {
+    value: any;
+    expiresAt: number;
 };
 /**
  * Sliding-window options for `PowerSlidingWindow`.

@@ -9,25 +9,47 @@ import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
  * @class PowerEventBus
  */
 /**
+ * A bucket of listeners as the bus stores them. Always a `PowerSubscriberSet`
+ * in practice - the plain-`Set` arm is the shape a bucket has to be before
+ * `_getBucket` has migrated it, and `emit()`/`emitAsync()` still recognise it
+ * so a bus that was poked from outside degrades instead of throwing.
+ *
+ * @typedef {PowerSubscriberSet|Set<SubscriberListener|WeakRef<SubscriberListener>>} EventBusBucket
+ */
+
+/**
  * @typedef {import('./jsdoc-types.js').PowerEventBusOptions} PowerEventBusOptions
+ * @typedef {import('./jsdoc-types.js').SubscriberListener} SubscriberListener
+ * @typedef {import('./jsdoc-types.js').EventBusWeakToken} EventBusWeakToken
  */
 export class PowerEventBus {
   /**
-   * @param {{maxListeners?: number, weak?: boolean}=} options
+   * @param {PowerEventBusOptions} [options] - `maxListeners` caps listeners per
+   *   event (`0`, the default, is unlimited); `weak` stores them behind
+   *   `WeakRef`.
    */
   constructor(options = {}) {
+    /** @type {Map<string, EventBusBucket>} */
     this._listeners = new Map();
     this._maxListeners = Number.isFinite(Number(options.maxListeners))
       ? Math.max(0, Number(options.maxListeners))
       : 0; // 0 means unlimited
     this._weak = Boolean(options.weak);
+    /** @type {?(FinalizationRegistry<EventBusWeakToken>)} */
     this._fr = null;
-    // fn -> Map<event, Set<WeakRef>>
+    /** @type {WeakMap<SubscriberListener, Map<string, Set<WeakRef<SubscriberListener>>>>} */
     this._finalizationRefs = new WeakMap();
-    // event -> Set<WeakRef>
+    /** @type {Map<string, Set<WeakRef<SubscriberListener>>>} */
     this._eventFinalizationRefs = new Map();
   }
 
+  /**
+   * Lazily build the `FinalizationRegistry` that prunes collected weak
+   * listeners. Returns `null` when weak mode is off or the runtime has no
+   * `FinalizationRegistry`, which is the signal to skip registration entirely.
+   *
+   * @returns {?(FinalizationRegistry<EventBusWeakToken>)}
+   */
   _ensureFinalizationRegistry() {
     if (!this._weak || typeof FinalizationRegistry === 'undefined') return null;
     if (this._fr) return this._fr;
@@ -98,39 +120,52 @@ export class PowerEventBus {
     return unsubscribe;
   }
 
+  /**
+   * The live bucket for an event, migrating a legacy plain `Set` of listeners
+   * into a `PowerSubscriberSet` the first time it is read.
+   *
+   * Nothing in this module writes a plain `Set`, so the migration branch is not
+   * reachable from here - but `_listeners` is a public-ish field on a
+   * long-lived object and the bus is documented as tolerant of a set that was
+   * replaced externally, so it stays.
+   *
+   * @param {string} event
+   * @returns {PowerSubscriberSet|null}
+   */
   _getBucket(event) {
     const bucket = this._listeners.get(event);
     if (!bucket) return null;
-
     if (bucket instanceof PowerSubscriberSet) return bucket;
-    if (typeof bucket?.[Symbol.iterator] === 'function') {
-      const migrated = new PowerSubscriberSet({
-        maxListeners: this._maxListeners,
-        weak: this._weak,
-      });
-      for (const entry of bucket) {
-        const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
-        if (fn) migrated.add(fn);
-      }
-      this._listeners.set(event, migrated);
-      return migrated;
-    }
 
-    return null;
+    const migrated = new PowerSubscriberSet({
+      maxListeners: this._maxListeners,
+      weak: this._weak,
+    });
+    for (const entry of bucket) {
+      const fn = 'deref' in entry ? entry.deref() : entry;
+      if (fn) migrated.add(fn);
+    }
+    this._listeners.set(event, migrated);
+    return migrated;
   }
 
   /**
-   * Subscribe to an event.
+   * Track a weak listener with the bus's `FinalizationRegistry`, so the
+   * bookkeeping sets can drop it when it is collected.
+   *
+   * @param {SubscriberListener} fn
    * @param {string} event
-   * @param {(payload:any)=>void} fn
-   * @returns {() => void} unsubscribe
+   * @returns {?WeakRef<SubscriberListener>} The registered ref, or `null` when
+   *   weak mode is off or registration failed.
    */
   _registerWeakListener(fn, event) {
     const fr = this._ensureFinalizationRegistry();
     if (!fr || typeof WeakRef === 'undefined') return null;
     const ref = new WeakRef(fn);
     try {
-      fr.register(fn, { event, ref }, ref);
+      /** @type {EventBusWeakToken} */
+      const token = { event, ref };
+      fr.register(fn, token, ref);
       let perFn = this._finalizationRefs.get(fn);
       if (!perFn) {
         perFn = new Map();
@@ -156,6 +191,14 @@ export class PowerEventBus {
     return ref;
   }
 
+  /**
+   * Drop a weak listener's bookkeeping. With no `event`, every event it was
+   * registered against is cleared.
+   *
+   * @param {SubscriberListener} fn
+   * @param {string} [event]
+   * @returns {void}
+   */
   _unregisterWeakListener(fn, event) {
     if (!this._fr || !this._finalizationRefs.has(fn)) return;
     const perFn = this._finalizationRefs.get(fn);
@@ -190,6 +233,12 @@ export class PowerEventBus {
     if (perFn.size === 0) this._finalizationRefs.delete(fn);
   }
 
+  /**
+   * Unregister every weak ref held for one event, and forget the event.
+   *
+   * @param {string} event
+   * @returns {void}
+   */
   _clearWeakListenerEvent(event) {
     if (!this._fr) return;
     const refs = this._eventFinalizationRefs.get(event);
@@ -276,7 +325,7 @@ export class PowerEventBus {
 
     const hadEntries = bucket.size > 0;
     for (const entry of bucket) {
-      const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
+      const fn = 'deref' in entry ? entry.deref() : entry;
       if (!fn) {
         bucket.delete(entry);
         continue;
@@ -297,7 +346,8 @@ export class PowerEventBus {
   /**
    * Iterate live listener functions from a bucket without allocating snapshots.
    * @private
-   * @param {PowerSubscriberSet|Set<any>} bucket
+   * @param {EventBusBucket} bucket
+   * @yields {SubscriberListener}
    */
   *_iterBucketListeners(bucket) {
     if (bucket instanceof PowerSubscriberSet) {
@@ -306,7 +356,7 @@ export class PowerEventBus {
     }
 
     for (const entry of bucket) {
-      const fn = typeof entry?.deref === 'function' ? entry.deref() : entry;
+      const fn = 'deref' in entry ? entry.deref() : entry;
       if (!fn) {
         bucket.delete(entry);
         continue;
@@ -322,8 +372,8 @@ export class PowerEventBus {
    * Errors thrown or rejected by listeners are swallowed.
    * @param {string} event
    * @param {any} [payload]
-   * @param {Object} [options]
-   * @param {number} [options.concurrency=Infinity]
+   * @param {{concurrency?: number}} [options] - `concurrency` caps how many
+   *   listeners are awaited at once (`Infinity`, the default, is unbounded).
    * @returns {Promise<boolean>}
    */
   async emitAsync(event, payload, { concurrency = Infinity } = {}) {
@@ -335,6 +385,7 @@ export class PowerEventBus {
         ? Math.max(1, Math.floor(+concurrency))
         : Infinity;
 
+    /** @param {SubscriberListener} fn */
     const invoke = async (fn) => {
       try {
         await fn(payload);
@@ -374,14 +425,14 @@ export class PowerEventBus {
   /**
    * Return array of listeners for an event (copy).
    * @param {string} event
-   * @returns {Function[]}
+   * @returns {SubscriberListener[]}
    */
   listeners(event) {
     const bucket = this._listeners.get(event);
     if (!bucket) return [];
     if (bucket instanceof PowerSubscriberSet) return bucket.values();
     return Array.from(bucket)
-      .map((entry) => (typeof entry?.deref === 'function' ? entry.deref() : entry))
+      .map((entry) => ('deref' in entry ? entry.deref() : entry))
       .filter(Boolean);
   }
 

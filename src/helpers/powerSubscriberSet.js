@@ -6,6 +6,27 @@
 const ORIGINAL = Symbol('PowerSubscriberSet.original');
 
 /**
+ * @typedef {import('./jsdoc-types.js').SubscriberListener} SubscriberListener
+ * @typedef {import('./jsdoc-types.js').SubscriberEntry} SubscriberEntry
+ */
+
+/**
+ * Whether a stored entry is a weak reference rather than the listener itself.
+ *
+ * Exists as a named type guard so the union can be narrowed at each read
+ * site. Written with `in` plus a `typeof` check because the original test was
+ * `typeof entry?.deref === 'function'`, and the two agree for every entry this
+ * set stores: `WeakRef.deref` is on the prototype, so `in` finds it, and a
+ * plain listener has no `deref` at all.
+ *
+ * @param {SubscriberEntry} entry
+ * @returns {entry is WeakRef<SubscriberListener>}
+ */
+function isWeakEntry(entry) {
+  return 'deref' in entry && typeof entry.deref === 'function';
+}
+
+/**
  * PowerSubscriberSet
  *
  * Shared subscriber set helper used by event buses and observable stores.
@@ -16,9 +37,8 @@ const ORIGINAL = Symbol('PowerSubscriberSet.original');
  */
 export class PowerSubscriberSet {
   /**
-   * @param {Object} [options]
-   * @param {boolean} [options.weak=false]
-   * @param {number} [options.maxListeners=0]
+   * @param {{weak?: boolean, maxListeners?: number}} [options] - `weak` stores
+   *   listeners behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
    */
   constructor(options = {}) {
     const { weak = false, maxListeners = 0 } = options || {};
@@ -26,8 +46,11 @@ export class PowerSubscriberSet {
     this._maxListeners = Number.isFinite(Number(maxListeners))
       ? Math.max(0, Math.floor(Number(maxListeners)))
       : 0;
+    /** @type {Set<SubscriberEntry>} */
     this._listeners = new Set();
+    /** @type {WeakMap<SubscriberListener, SubscriberListener>} original -> once-wrapper */
     this._onceMap = new WeakMap();
+    /** @type {?(FinalizationRegistry<{ref: WeakRef<SubscriberListener>}>)} */
     this._finalization = null;
     if (
       this._weak &&
@@ -48,7 +71,7 @@ export class PowerSubscriberSet {
 
   /**
    * Add a listener and return an unsubscribe function.
-   * @param {Function|WeakRef} fn Listener function or WeakRef when `weak` mode is enabled.
+   * @param {SubscriberListener|WeakRef<SubscriberListener>} fn Listener function, or its WeakRef when `weak` mode is enabled.
    * @returns {() => boolean} Unsubscribe function that removes the listener.
    */
   add(fn) {
@@ -78,18 +101,23 @@ export class PowerSubscriberSet {
   /**
    * Add a once listener and return an unsubscribe function.
    * The original listener will be removed after the first invocation.
-   * @param {Function} fn Listener function.
+   * @param {SubscriberListener} fn Listener function.
    * @returns {() => boolean} Unsubscribe function.
    */
   addOnce(fn) {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
-    const wrapped = (...args) => {
-      try {
-        fn(...args);
-      } finally {
-        this.delete(fn);
-      }
-    };
+    // The wrapper is tagged with the original listener under a module-private
+    // symbol so a caller holding the wrapper can recover what it wraps.
+    const wrapped =
+      /** @type {((...args:any[])=>void) & {[ORIGINAL]?: SubscriberListener}} */ (
+        (...args) => {
+          try {
+            fn(...args);
+          } finally {
+            this.delete(fn);
+          }
+        }
+      );
     try {
       wrapped[ORIGINAL] = fn;
     } catch (e) {
@@ -111,21 +139,27 @@ export class PowerSubscriberSet {
 
   /**
    * Delete a listener by original function or once-wrapper.
-   * @param {Function|WeakRef} fn Original listener function or its WeakRef wrapper.
+   * @param {SubscriberListener|WeakRef<SubscriberListener>} fn Original listener function or its WeakRef wrapper.
    * @returns {boolean} `true` if a listener was removed, otherwise `false`.
    */
   delete(fn) {
+    // `_onceMap` is keyed by the original *function*, so a WeakRef argument -
+    // which `add` accepts in weak mode, and hands straight back to `delete` -
+    // never has an entry there and must not be looked up.
+    /** @type {SubscriberEntry} */
     let target = fn;
-    const wrapped = this._onceMap.get(fn);
-    if (wrapped) {
-      target = wrapped;
-      this._onceMap.delete(fn);
+    if (!isWeakEntry(fn)) {
+      const wrapped = this._onceMap.get(fn);
+      if (wrapped) {
+        target = wrapped;
+        this._onceMap.delete(fn);
+      }
     }
 
     for (const entry of this._listeners) {
       if (entry === target) {
         this._listeners.delete(entry);
-        if (this._finalization && typeof entry.deref === 'function') {
+        if (this._finalization && isWeakEntry(entry)) {
           this._finalization.unregister(entry);
         }
         return true;
@@ -137,7 +171,7 @@ export class PowerSubscriberSet {
       }
       if (listener === target) {
         this._listeners.delete(entry);
-        if (this._finalization && typeof entry.deref === 'function') {
+        if (this._finalization && isWeakEntry(entry)) {
           this._finalization.unregister(entry);
         }
         return true;
@@ -148,7 +182,7 @@ export class PowerSubscriberSet {
 
   /**
    * Iterate live listeners in insertion order and invoke a callback.
-   * @param {(listener: Function) => void} fn Callback invoked for each live listener.
+   * @param {(listener: SubscriberListener) => void} fn Callback invoked for each live listener.
    * @returns {void}
    */
   forEach(fn) {
@@ -173,7 +207,7 @@ export class PowerSubscriberSet {
 
   /**
    * Return a safe array copy of live listeners.
-   * @returns {Function[]} Array of live listener functions.
+   * @returns {SubscriberListener[]} Array of live listener functions.
    */
   values() {
     this._cleanup();
@@ -187,7 +221,7 @@ export class PowerSubscriberSet {
 
   /**
    * Iterate live listeners in insertion order.
-   * @yields {Function}
+   * @yields {SubscriberListener}
    */
   *[Symbol.iterator]() {
     for (const entry of this._listeners) {
@@ -204,12 +238,19 @@ export class PowerSubscriberSet {
   _cleanup() {
     if (!this._weak || typeof WeakRef === 'undefined') return;
     for (const entry of this._listeners) {
-      if (typeof entry?.deref === 'function' && !entry.deref()) {
+      if (isWeakEntry(entry) && !entry.deref()) {
         this._listeners.delete(entry);
       }
     }
   }
 
+  /**
+   * Wrap a listener for storage: a `WeakRef` in weak mode, the function itself
+   * otherwise. Undefined when weak mode is on but the runtime has no `WeakRef`.
+   *
+   * @param {SubscriberListener} fn
+   * @returns {SubscriberEntry}
+   */
   _makeEntry(fn) {
     if (this._weak && typeof WeakRef !== 'undefined') {
       const ref = new WeakRef(fn);
@@ -225,8 +266,15 @@ export class PowerSubscriberSet {
     return fn;
   }
 
+  /**
+   * Resolve a stored entry to the live listener, or `undefined` when the weak
+   * target has been collected.
+   *
+   * @param {SubscriberEntry} entry
+   * @returns {SubscriberListener|undefined}
+   */
   _deref(entry) {
-    return typeof entry?.deref === 'function' ? entry.deref() : entry;
+    return isWeakEntry(entry) ? entry.deref() : entry;
   }
 
   /**
