@@ -19,7 +19,7 @@ export { normalizeError, formatErrorObj } from './utils/errors.js';
 export { nowMs, measureSync, measureAsync } from './utils/now.js';
 export { PowerCircuit } from './helpers/powerCircuit.js';
 export { PowerCron } from './helpers/powerCron.js';
-export { PowerRetry } from './helpers/powerRetry.js';
+export { PowerRetry, PowerRetryBudget } from './helpers/powerRetry.js';
 export { PowerDeadline } from './helpers/powerDeadline.js';
 export { PowerHistogram } from './helpers/powerHistogram.js';
 export { PowerBackpressure } from './helpers/powerBackpressure.js';

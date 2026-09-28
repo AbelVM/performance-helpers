@@ -103,6 +103,43 @@ export const DEFAULT_RETRY_BASE_DELAY_MS = 100;
 export const DEFAULT_RETRY_MAX_DELAY_MS = 10000;
 
 /**
+ * The growth factor for the decorrelated-jitter backoff.
+ *
+ * AWS, *Exponential Backoff and Jitter* (2015): the next sleep is drawn from
+ * `random(base, previous * 3)`. The three is the paper's, and it is the whole
+ * reason the strategy decorrelates: each attempt randomises against the
+ * *actual* previous sleep rather than against a formula, so two clients that
+ * started together drift apart instead of marching in step.
+ */
+export const DECORRELATED_JITTER_FACTOR = 3;
+
+/**
+ * Default retry-budget ratio: the fraction of ordinary requests that may be
+ * retried before the budget refuses more.
+ *
+ * Google SRE Workbook, *Handling Overload* (2018) puts the recommended band at
+ * 10-20 % of total requests; the top of that band is the default because a
+ * budget exists to stop an amplification loop, not to ration retries in normal
+ * operation. Every retry is a request the dependency did not ask for, and at
+ * 5 % the protection would start refusing retries while the dependency is
+ * merely degraded rather than down.
+ */
+export const DEFAULT_RETRY_BUDGET_RATIO = 0.2;
+
+/**
+ * Default retry-budget capacity, in retry tokens.
+ *
+ * This is a *burst* allowance, not the steady-state rate - the steady state is
+ * `ratio` tokens per original request, so a budget of ratio 0.2 that refills
+ * to 10 permits ten consecutive retries before it throttles to one per five
+ * requests. Sized so a short blip is absorbed without a budget check, and so
+ * the cap on the token count is not what decides when protection engages: a
+ * capacity of 1 would refuse the first retry of a fresh budget, because one
+ * request funds 0.2 of a token and a retry costs a whole one.
+ */
+export const DEFAULT_RETRY_BUDGET_CAPACITY = 10;
+
+/**
  * How many times a circuit's open window may double before it is capped.
  *
  * `PowerCircuit` opens for `baseTimeout`, then `2x`, then `4x`… up to

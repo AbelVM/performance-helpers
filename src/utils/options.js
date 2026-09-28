@@ -57,6 +57,12 @@ export function intAtLeast(value, min = 0, fallback = min) {
  * @param {number|null|undefined} [spec.fallback] - Value used when
  *   `undefined`/`null` is passed. When omitted the value passes through
  *   unchanged (BUG-024).
+ * @param {string} [spec.invalidMessage] - Overrides the non-finite message.
+ *   Exists for options whose pre-existing error text is part of the public
+ *   contract, so migrating them onto this helper does not silently restyle a
+ *   message users may be grepping for.
+ * @param {string} [spec.minMessage] - Overrides the below-minimum message, for
+ *   the same reason.
  * @returns {number|null|undefined} The validated number, `spec.fallback`, or the
  *   original value. Wide on purpose: the passthrough branch really can return
  *   `null`/`undefined`. Constructors should use {@link assertLimitRequired}.
@@ -83,7 +89,15 @@ export function intAtLeast(value, min = 0, fallback = min) {
  * @private
  */
 export function assertLimit(value, spec) {
-  const { name, className, min = 0, allowInfinity = false, fallback } = spec;
+  const {
+    name,
+    className,
+    min = 0,
+    allowInfinity = false,
+    fallback,
+    invalidMessage,
+    minMessage,
+  } = spec;
   if (value === undefined || value === null) {
     if (fallback !== undefined) return fallback;
     return value;
@@ -92,12 +106,15 @@ export function assertLimit(value, spec) {
   if (n === Number.POSITIVE_INFINITY && allowInfinity) return n;
   if (!Number.isFinite(n)) {
     throw new TypeError(
-      `${className}: \`${name}\` must be a finite number (received ${String(value)}). ` +
-        'A non-finite limit would silently disable the check it guards.'
+      invalidMessage ??
+        `${className}: \`${name}\` must be a finite number (received ${String(value)}). ` +
+          'A non-finite limit would silently disable the check it guards.'
     );
   }
   if (n < min) {
-    throw new TypeError(`${className}: \`${name}\` must be >= ${min} (received ${n}).`);
+    throw new TypeError(
+      minMessage ?? `${className}: \`${name}\` must be >= ${min} (received ${n}).`
+    );
   }
   return n;
 }
@@ -123,6 +140,8 @@ export function assertLimit(value, spec) {
  * @param {number} [spec.min=0] - Smallest acceptable value.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
  * @param {number} [spec.fallback] - Value used when `undefined`/`null` is passed.
+ * @param {string} [spec.invalidMessage] - Overrides the non-finite message.
+ * @param {string} [spec.minMessage] - Overrides the below-minimum message.
  * @returns {number}
  * @private
  */

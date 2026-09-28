@@ -71,6 +71,7 @@ describe('package entry point', () => {
       // resilience
       'PowerCircuit',
       'PowerRetry',
+      'PowerRetryBudget',
       'PowerDeadline',
       'PowerHistogram',
       // eventing
@@ -121,6 +122,7 @@ describe('package entry point', () => {
       'PowerScheduler',
       'PowerCircuit',
       'PowerRetry',
+      'PowerRetryBudget',
       'PowerDeadline',
       'PowerHistogram',
       'PowerEventBus',

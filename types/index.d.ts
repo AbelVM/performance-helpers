@@ -13,7 +13,6 @@ export { PowerDefer } from "./helpers/powerDefer.js";
 export { PowerTTLMap } from "./helpers/powerTTLMap.js";
 export { PowerCircuit } from "./helpers/powerCircuit.js";
 export { PowerCron } from "./helpers/powerCron.js";
-export { PowerRetry } from "./helpers/powerRetry.js";
 export { PowerDeadline } from "./helpers/powerDeadline.js";
 export { PowerHistogram } from "./helpers/powerHistogram.js";
 export { PowerBackpressure } from "./helpers/powerBackpressure.js";
@@ -30,5 +29,6 @@ export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./hel
 export { default as WorkerAgnostic, detectEnv, preloadNode } from "./helpers/WorkerAgnostic.js";
 export { normalizeError, formatErrorObj } from "./utils/errors.js";
 export { nowMs, measureSync, measureAsync } from "./utils/now.js";
+export { PowerRetry, PowerRetryBudget } from "./helpers/powerRetry.js";
 export { PowerWebSocketClient, READY_STATE } from "./helpers/powerWebSocketClient.js";
 export { PowerMessageCodec, MESSAGE_PROTOCOL_VERSION, CODECS, HEADER_BYTES, encodeMessage, decodeMessage, frameEncodedJson, encodeNative, canUseNativeClone, selectCodec, isRawPayload, frameTransferList } from "./helpers/powerMessageCodec.js";

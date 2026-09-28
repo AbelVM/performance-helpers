@@ -40,6 +40,8 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Isolate noisy workloads from critical ones                            | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                        |
 | Enforce burst and sustained API quotas                                | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                           |
 | Retry flaky work safely                                               | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                  |
+| Stop retries amplifying an outage                                     | `PowerRetry` with a shared `PowerRetryBudget`      | `PowerCircuit`, `PowerDeadline`                            | `maxAttempts` alone, which caps nothing across traffic       |
+| Cut a p99 far above your p50                                          | `PowerRetry` with `hedgeDelay`                     | `PowerDeadline`                                            | raising `maxAttempts`, which costs retries, not tail latency |
 | Put a hard time budget on work                                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                             |
 | Broadcast events across components                                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure  |
 | Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                             |
@@ -110,7 +112,13 @@ Use `PowerRateLimit` when you need both burst and sustained rules to pass at onc
 limiters share the `tryConsume()` / `available()` shape and compose in it; the combined limit
 is the strictest component.
 
-Use `PowerRetry` when retry policy is the main concern.
+Use `PowerRetry` when retry policy is the main concern. It offers three
+independent mechanisms, and it is worth naming which one you actually want:
+the backoff curve (including AWS **decorrelated jitter**, which decorrelates a
+fleet instead of re-synchronising it), a **retry budget** that bounds retry
+traffic across calls so retries cannot amplify an outage, and **hedged
+attempts**, which send a duplicate of the first request if it is slow and take
+the first success — trading average load for a cut p99.
 
 Use `PowerDeadline` when timeout, abort, total budget, or retry budget matter.
 
@@ -420,7 +428,7 @@ which is the most likely first-run problem and is specific to one environment.
 - `PowerThrottle`: Token-bucket style rate limiter.
 - `PowerSlidingWindow`: Strict rolling-window quota limiter.
 - `PowerRateLimit`: Compose multiple limiter strategies.
-- `PowerRetry`: Retry with backoff and jitter.
+- `PowerRetry`: Retry with backoff, jitter, a retry budget, and hedged attempts.
 - `PowerDeadline`: Attempt timeout, total deadline, abort, and retry budget wrapper.
 - `PowerCircuit`: Circuit breaker for unhealthy downstream dependencies.
 

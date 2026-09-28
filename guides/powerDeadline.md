@@ -3,6 +3,7 @@
 Deadline-aware async helper for timeouts, retry budgets, and cancellation metadata.
 
 Use `PowerDeadline` when you want to wrap a promise-producing operation with:
+
 - an optional per-attempt timeout
 - an overall deadline for the entire operation
 - retry/backoff behavior and retry policy
@@ -44,15 +45,15 @@ const data = await deadline.run(() => fetch('/api/data').then((r) => r.json()));
 
 ## Options
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `maxAttempts` | `number` | `1` | Maximum attempts, including the initial try. |
-| `attemptTimeout` | `number` | `undefined` | Per-attempt timeout in milliseconds. If exceeded, the attempt rejects with `code === 'ETIMEOUT'`. |
-| `totalTimeout` | `number` | `undefined` | Overall deadline in milliseconds for the complete operation. If exceeded, the run rejects with `code === 'EDEADLINE'`. |
-| `retryDelay` | `number` | `0` | Delay in milliseconds before retrying after a failed attempt. |
-| `retryIf` | `Function` | `() => true` | Predicate `(err) => boolean` to determine whether a failed attempt should be retried. |
-| `signal` | `AbortSignal` | `undefined` | Optional signal that cancels the run with `code === 'EABORT'`. |
-| `onRetry` | `Function` | `undefined` | Callback `(attempt, err, delay) => void` invoked before waiting the retry delay. |
+| Option           |          Type |      Default | Description                                                                                                            |
+| ---------------- | ------------: | -----------: | ---------------------------------------------------------------------------------------------------------------------- |
+| `maxAttempts`    |      `number` |          `1` | Maximum attempts, including the initial try.                                                                           |
+| `attemptTimeout` |      `number` |  `undefined` | Per-attempt timeout in milliseconds. If exceeded, the attempt rejects with `code === 'ETIMEOUT'`.                      |
+| `totalTimeout`   |      `number` |  `undefined` | Overall deadline in milliseconds for the complete operation. If exceeded, the run rejects with `code === 'EDEADLINE'`. |
+| `retryDelay`     |      `number` |          `0` | Delay in milliseconds before retrying after a failed attempt.                                                          |
+| `retryIf`        |    `Function` | `() => true` | Predicate `(err) => boolean` to determine whether a failed attempt should be retried.                                  |
+| `signal`         | `AbortSignal` |  `undefined` | Optional signal that cancels the run with `code === 'EABORT'`.                                                         |
+| `onRetry`        |    `Function` |  `undefined` | Callback `(attempt, err, delay) => void` invoked before waiting the retry delay.                                       |
 
 ## API
 
@@ -97,3 +98,11 @@ try {
 - `totalTimeout` governs the entire operation, including retries and retry delays.
 - If `retryIf` returns `false`, the helper rejects immediately without retrying.
 - Aborted runs reject with `code === 'EABORT'` and include the signal reason if provided.
+- A timed-out attempt is a **failed attempt**, not a terminal error, so it is retried
+  like any other. `maxAttempts: 3` with `attemptTimeout: 2000` means "up to 3 attempts,
+  each bounded at 2s" — not "2s in total, tried once".
+- `backoff`, `baseDelay`, `maxDelay`, `jitter`, `attemptTimeout` and `retryIf` are
+  forwarded to [`PowerRetry`](powerRetry.md), which owns the retry policy. `PowerDeadline`
+  adds the total budget and the external abort on top. `PowerRetry`'s `budget` and
+  `hedgeDelay` are **not** forwarded: a retry budget is a per-client, cross-traffic
+  concern that should be constructed once and passed to `PowerRetry` directly.

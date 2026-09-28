@@ -106,6 +106,35 @@ pipeline.
   existing `ewma` default.
 - Every resource-owning class gained `dispose()` and `[Symbol.dispose]`, so
   `using` and `await using` work throughout.
+- **`PowerRetry` gained three independent mechanisms**, because the backoff
+  curve alone does not address the two retry failure modes that actually hurt
+  in production — a retry storm amplifying load on a failing dependency, and a
+  p99 orders of magnitude above the p50.
+  - **`backoff: 'decorrelated'`** implements AWS, _Exponential Backoff and
+    Jitter_ (2015): each delay is drawn against the **previous** delay
+    (`min(cap, random_between(base, prev*3))`) rather than recomputed from a
+    formula. The existing `2^attempt * random()` re-derives the same curve every
+    time, so a fleet that failed together keeps re-synchronising. Being a random
+    walk, it rejects `jitter: false` rather than silently ignoring it.
+    **A `backoff` outside the four supported strategies now throws** — the
+    implementation was `linear | fixed | else exponential`, so `'exp'`
+    silently produced an exponential curve the caller never asked for.
+  - **`PowerRetryBudget`** (new export) bounds **retry traffic** by the Google
+    SRE Workbook's _Handling Overload_ rule: each request funds the bucket,
+    each retry spends from it, so retries throttle exactly when the dependency
+    can least afford them. It starts **full** — a bucket starting empty would
+    refuse the first retry of a fresh budget (one request funds 0.2 of a token,
+    a retry costs a whole one), engaging the protection on a _healthy_
+    dependency and disengaging on the sick one. Accepts a `PowerRetryBudget`, a
+    `{ ratio, capacity }` object, or a bare ratio; a ratio above 1 throws. **It
+    only binds if it outlives a single call**, so the `PowerRetry` constructor
+    builds one that every `run()` shares.
+  - **`hedgeDelay`** sends a duplicate of the _first_ attempt if it has not
+    returned in time; the first to succeed wins and the loser is aborted. Only
+    attempt 1 is hedged — hedging every attempt would turn `maxAttempts: 3` into
+    6 requests on the wire — and a hedge draws a budget token like any retry.
+    Off by default because it raises average load and only pays off if `fn`
+    honours its `AbortSignal`.
 
 **Fixed**
 

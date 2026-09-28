@@ -174,14 +174,56 @@ export {};
 /**
  * Retry helper options used by `PowerRetry`.
  * @typedef {Object} PowerRetryOptions
- * @property {number} [maxAttempts=3]
- * @property {'exponential'|'linear'|'fixed'} [backoff='exponential']
+ * @property {number} [maxAttempts=3] - Total attempts, including the first.
+ *   Must be `>= 1`; a `0` or negative value throws rather than resolving to 1.
+ * @property {'exponential'|'linear'|'fixed'|'decorrelated'} [backoff='exponential'] -
+ *   The delay curve. `decorrelated` is the AWS random-walk form, where each
+ *   delay is drawn against the *previous* delay rather than a formula. An
+ *   unrecognised value throws.
  * @property {number} [baseDelay=100]
  * @property {number} [maxDelay=10000]
- * @property {boolean} [jitter=true]
+ * @property {boolean} [jitter=true] - Randomise within `[0.5 * delay, delay]`.
+ *   Rejected at `false` when `backoff` is `decorrelated`, which is defined as
+ *   randomised.
  * @property {(err:any)=>boolean} [retryIf]
  * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
- * @property {number} [attemptTimeout]
+ * @property {number} [attemptTimeout] - Per-attempt timeout in ms. When set,
+ *   `fn` receives the attempt's `AbortSignal`, and a timed-out attempt is
+ *   **not** retried: the caller asked for that bound, and retrying would
+ *   multiply it by `maxAttempts`.
+ * @property {import('./powerRetry.js').PowerRetryBudget|number} [budget] - A
+ *   retry budget. A `PowerRetryBudget` bounds retry traffic across calls; a
+ *   number is a ratio, which builds a bucket scoped to this call only. `0.2`
+ *   permits retries up to 20 % of request volume.
+ * @property {number} [hedgeDelay=0] - Milliseconds to wait on the **first**
+ *   attempt before sending a duplicate. The first to succeed wins and the
+ *   loser is aborted. `0` disables hedging. Only a hedge draws the budget a
+ *   token; a refused budget means no hedge rather than a failed attempt.
+ */
+
+/**
+ * Options for `PowerRetryBudget`.
+ *
+ * @typedef {Object} PowerRetryBudgetOptions
+ * @property {number} [ratio=0.2] - Retry tokens granted per request, in
+ *   `(0, 1]`. 0.2 is the top of the 10-20 % band the Google SRE *Handling
+ *   Overload* chapter recommends. Values above 1 throw: a budget permitting
+ *   more retries than requests is the amplification it exists to prevent.
+ * @property {number} [capacity=10] - Ceiling on stored tokens, which is the
+ *   burst allowance. A capacity of 1 would refuse the first retry of a fresh
+ *   budget, engaging the protection on a healthy dependency.
+ */
+
+/**
+ * A snapshot of a `PowerRetryBudget`.
+ *
+ * @typedef {Object} PowerRetryBudgetStats
+ * @property {number} ratio
+ * @property {number} capacity
+ * @property {number} available - Retry tokens left right now.
+ * @property {number} requests - Requests recorded via `recordRequest()`.
+ * @property {number} retries - Tokens actually spent on retries and hedges.
+ * @property {number} refused - Retries and hedges the budget denied.
  */
 
 /**

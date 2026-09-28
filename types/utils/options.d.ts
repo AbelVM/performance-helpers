@@ -36,6 +36,12 @@ export function intAtLeast(value: any, min?: number, fallback?: number): number;
  * @param {number|null|undefined} [spec.fallback] - Value used when
  *   `undefined`/`null` is passed. When omitted the value passes through
  *   unchanged (BUG-024).
+ * @param {string} [spec.invalidMessage] - Overrides the non-finite message.
+ *   Exists for options whose pre-existing error text is part of the public
+ *   contract, so migrating them onto this helper does not silently restyle a
+ *   message users may be grepping for.
+ * @param {string} [spec.minMessage] - Overrides the below-minimum message, for
+ *   the same reason.
  * @returns {number|null|undefined} The validated number, `spec.fallback`, or the
  *   original value. Wide on purpose: the passthrough branch really can return
  *   `null`/`undefined`. Constructors should use {@link assertLimitRequired}.
@@ -67,6 +73,8 @@ export function assertLimit(value: any, spec: {
     min?: number | undefined;
     allowInfinity?: boolean | undefined;
     fallback?: number | null | undefined;
+    invalidMessage?: string | undefined;
+    minMessage?: string | undefined;
 }): number | null | undefined;
 /**
  * Validate a numeric limit that must resolve to a `number`.
@@ -89,6 +97,8 @@ export function assertLimit(value: any, spec: {
  * @param {number} [spec.min=0] - Smallest acceptable value.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
  * @param {number} [spec.fallback] - Value used when `undefined`/`null` is passed.
+ * @param {string} [spec.invalidMessage] - Overrides the non-finite message.
+ * @param {string} [spec.minMessage] - Overrides the below-minimum message.
  * @returns {number}
  * @private
  */
@@ -98,6 +108,8 @@ export function assertLimitRequired(value: any, spec: {
     min?: number | undefined;
     allowInfinity?: boolean | undefined;
     fallback?: number | undefined;
+    invalidMessage?: string | undefined;
+    minMessage?: string | undefined;
 }): number;
 /**
  * Validate an option that must be a function (or explicitly null/undefined).
