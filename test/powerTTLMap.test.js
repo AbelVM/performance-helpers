@@ -2,39 +2,48 @@ import { describe, it, expect } from 'vitest';
 import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
 
 describe('PowerTTLMap', () => {
+  // The margins in these four are deliberately wide. They were 2-10ms against
+  // real wall-clock sleeps, which passed on an idle machine and failed
+  // whenever `verify` happened to be running a fresh `vite build` first: a
+  // 10ms TTL asserted after an 8ms sleep is a 2ms race against the scheduler.
+  // `PowerTTLMap` reads `nowMs()` rather than anything injectable, so the
+  // honest options are fake timers or a wide margin; wide margin chosen here
+  // because the whole file still finishes in well under half a second.
+
   it('set/get respects TTL and returns undefined after expiry', async () => {
     const m = new PowerTTLMap();
-    m.set('a', 1, 20);
+    m.set('a', 1, 60);
     expect(m.get('a')).toBe(1);
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 120));
     expect(m.get('a')).toBeUndefined();
   });
 
   it('has() returns false after expiry', async () => {
     const m = new PowerTTLMap();
-    m.set('b', 2, 10);
+    m.set('b', 2, 60);
     expect(m.has('b')).toBe(true);
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 120));
     expect(m.has('b')).toBe(false);
   });
 
   it('size reflects active entries and purges expired', async () => {
     const m = new PowerTTLMap();
-    m.set('x', 'x', 10);
-    m.set('y', 'y', 50);
+    m.set('x', 'x', 60);
+    m.set('y', 'y', 300);
     expect(m.size).toBe(2);
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 120));
     // one expired
     expect(m.size).toBe(1);
     expect([...m.keys()]).toEqual(['y']);
   });
 
   it('touch refreshes TTL', async () => {
-    const m = new PowerTTLMap(10);
-    m.set('t', 123); // defaultTTL 10
-    await new Promise((r) => setTimeout(r, 8));
+    const m = new PowerTTLMap(60);
+    m.set('t', 123); // defaultTTL 60
+    await new Promise((r) => setTimeout(r, 20));
     expect(m.touch('t')).toBe(true);
-    await new Promise((r) => setTimeout(r, 8));
+    // Only 20ms of the refreshed 60ms has elapsed, so the value must survive.
+    await new Promise((r) => setTimeout(r, 20));
     expect(m.get('t')).toBe(123);
   });
 
