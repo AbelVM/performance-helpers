@@ -70,6 +70,23 @@ const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.c
 // multi-line diagnostic do not match, so counting matches counts diagnostics.
 const DIAGNOSTIC = /^\S.*\(\d+,\d+\): error TS\d+:/;
 
+// Grammar-level diagnostics. If any of these appear, tsc could not *parse* the
+// file, and a file that does not parse produces no semantic errors either - so
+// the count falls without anything having been fixed. This is not theoretical:
+// while landing the WorkerLike typedef, an inserted JSDoc block swallowed the
+// `/**` opener of the next one, `jsdoc-types.js` stopped parsing, and the
+// reported total dropped from 515 to 62. That looked like a 453-error win and
+// was entirely fake. A count that can go *down* for the wrong reason is the
+// only way this gate can lie, so it refuses to.
+const SYNTAX =
+  /error TS(1002|1003|1005|1006|1010|1011|1109|1128|1131|1135|1136|1160|1161|1206|1243|1244|1245|1258|1358|1434|1435):/;
+
+// A large drop without a matching reduction elsewhere is also suspicious, but it
+// cannot be detected from a single run - `previousCount` below is only a
+// threshold on the same run, not history. Kept deliberately conservative.
+const implausibleDropFraction = 0.5;
+const implausibleDropFloor = 50;
+
 const repoRoot = path.resolve(__dirname, '..');
 const tsc = require.resolve('typescript/bin/tsc');
 const verbose = process.argv.includes('--verbose');
@@ -79,6 +96,16 @@ function countDiagnostics(output) {
   let n = 0;
   for (const line of output.split('\n')) if (DIAGNOSTIC.test(line)) n += 1;
   return n;
+}
+
+function findSyntaxErrors(output) {
+  const found = [];
+  for (const line of output.split('\n')) {
+    if (DIAGNOSTIC.test(line) && SYNTAX.test(line)) {
+      found.push(line.trim());
+    }
+  }
+  return found;
 }
 
 const results = [];
@@ -98,8 +125,9 @@ for (const { label, project } of PROJECTS) {
 
   const output = `${run.stdout || ''}${run.stderr || ''}`;
   const count = countDiagnostics(output);
+  const syntax = findSyntaxErrors(output);
   total += count;
-  results.push({ label, project, count, output });
+  results.push({ label, project, count, syntax, output });
 
   if (verbose) {
     process.stdout.write(output);
@@ -122,6 +150,23 @@ for (const { label, project, count } of results) {
 }
 process.stdout.write(`  ${String(total).padStart(4)}  total, ceiling ${BASELINE}\n`);
 
+// A file that does not parse reports no semantic errors, so the count *falls*
+// while the file is actually more broken than it was. Fail before the count is
+// believed.
+const syntaxErrors = results.flatMap((r) => r.syntax);
+if (syntaxErrors.length) {
+  process.stderr.write(
+    `\nType-debt ratchet FAILED: ${syntaxErrors.length} syntax/parse error(s). A file that\n` +
+      'does not parse reports no semantic errors either, so the diagnostic count\n' +
+      'above is understated and must not be used to lower the ceiling:\n\n'
+  );
+  for (const line of syntaxErrors.slice(0, 20)) process.stderr.write(`    ${line}\n`);
+  if (syntaxErrors.length > 20) {
+    process.stderr.write(`    ... and ${syntaxErrors.length - 20} more\n`);
+  }
+  process.exit(1);
+}
+
 if (total > BASELINE) {
   process.stderr.write(
     `\nType-debt ratchet FAILED: ${total} errors, ceiling is ${BASELINE} (+${total - BASELINE}).\n` +
@@ -139,8 +184,21 @@ if (update) {
 } else if (total < BASELINE) {
   // Not a failure - the debt went down and the ceiling should follow it, or the
   // ratchet slowly stops being a ratchet.
+  const drop = BASELINE - total;
+  const fraction = drop / BASELINE;
+  if (drop >= implausibleDropFloor && fraction >= implausibleDropFraction) {
+    // Half the debt vanishing in one run is almost always a broken parse, a
+    // mis-measured project, or a `types/` regeneration that changed which
+    // files are included - not a good afternoon. Make a human look.
+    process.stderr.write(
+      `\nHeads up: the count fell by ${drop} (${(fraction * 100) | 0}%) in one run.\n` +
+        'That is a large enough jump to be worth confirming against the diff\n' +
+        'before re-baselining. Check `git diff --stat -- types` and that no file\n' +
+        'was left unparseable.\n'
+    );
+  }
   process.stdout.write(
-    `\nType debt fell by ${BASELINE - total} (${BASELINE} -> ${total}).\n` +
+    `\nType debt fell by ${drop} (${BASELINE} -> ${total}).\n` +
       'Re-baseline with: npm run typecheck:ratchet -- --update\n'
   );
 }
