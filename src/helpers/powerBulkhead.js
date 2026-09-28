@@ -230,7 +230,7 @@ export class PowerBulkhead {
     const coded = reason;
     coded.code = coded.code || 'ERR_BULKHEAD_RESET';
     for (const bucket of this._buckets) {
-      bucket.gate.reset({ available: this._maxConcurrency, reason: coded });
+      bucket.gate.reset({ available, reason: coded });
     }
     this._pendingCount = 0;
     this._resolveDrainWaitersIfIdle();
@@ -238,7 +238,7 @@ export class PowerBulkhead {
 
   /**
    * Alias for {@link PowerBulkhead#reset}.
-   * @param {Object} [options] - Reset options.
+   * @param {PowerBulkheadResetOptions} [options] - Reset options.
    * @returns {void}
    */
   dispose(options) {
@@ -249,6 +249,14 @@ export class PowerBulkhead {
     this.reset();
   }
 
+  /**
+   * The partition a key belongs to: the explicit `partitioner` when given,
+   * otherwise a hash of the key, and otherwise round-robin so keys spread
+   * evenly when there is nothing to hash.
+   *
+   * @param {any} key
+   * @returns {number} An index in `[0, partitions)`.
+   */
   _choosePartition(key) {
     if (this._partitioner) {
       const index = this._partitioner(key);
@@ -262,6 +270,13 @@ export class PowerBulkhead {
     return partition;
   }
 
+  /**
+   * djb2 hash, kept unsigned so the modulo below cannot produce a negative
+   * index.
+   *
+   * @param {string} value
+   * @returns {number}
+   */
   _hashKey(value) {
     let hash = 5381;
     for (let i = 0; i < value.length; i += 1) {

@@ -97,12 +97,27 @@ export class PowerBulkhead {
     reset(options?: PowerBulkheadResetOptions): void;
     /**
      * Alias for {@link PowerBulkhead#reset}.
-     * @param {Object} [options] - Reset options.
+     * @param {PowerBulkheadResetOptions} [options] - Reset options.
      * @returns {void}
      */
-    dispose(options?: Object): void;
+    dispose(options?: PowerBulkheadResetOptions): void;
+    /**
+     * The partition a key belongs to: the explicit `partitioner` when given,
+     * otherwise a hash of the key, and otherwise round-robin so keys spread
+     * evenly when there is nothing to hash.
+     *
+     * @param {any} key
+     * @returns {number} An index in `[0, partitions)`.
+     */
     _choosePartition(key: any): number;
-    _hashKey(value: any): number;
+    /**
+     * djb2 hash, kept unsigned so the modulo below cannot produce a negative
+     * index.
+     *
+     * @param {string} value
+     * @returns {number}
+     */
+    _hashKey(value: string): number;
     _resolveDrainWaitersIfIdle(): void;
     [Symbol.dispose](): void;
 }

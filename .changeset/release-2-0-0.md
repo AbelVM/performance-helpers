@@ -94,6 +94,19 @@ The ones that could bite an existing user:
 `PowerPool` remains backwards compatible at the API level; the only migration
 required is the worker reply shape.
 
+**Added**
+
+- **`PowerEventLoopMonitor`** — a latency number going up does not tell you
+  whether *your* code got slower or the host was busy, and the two need
+  different fixes. It measures timer drift (a probe scheduled `intervalMs` out;
+  the gap when it actually runs is the loop having been unavailable) into a
+  [`PowerHistogram`](./guides/powerEventLoopMonitor.md), and reports Node's
+  `eventLoopUtilization()` where the runtime has it. `utilization()` returns
+  `null` — never `0` — where it cannot be measured, and Node's `perf_hooks` is
+  reached through an opaque dynamic import so a browser bundle never tries to
+  resolve a Node builtin. Internal timer is `unref()`d, so a monitor you forget
+  to dispose cannot hang a CLI.
+
 **Types**
 
 The shipped `types/*.d.ts` are what TypeScript consumers actually compile, and

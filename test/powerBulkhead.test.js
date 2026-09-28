@@ -183,6 +183,51 @@ describe('PowerBulkhead', () => {
     expect(seen).toEqual(['custom']);
   });
 
+  it('reset() restores the permits the caller asked for', async () => {
+    const bulkhead = new PowerBulkhead({ partitions: 1, maxConcurrency: 4 });
+
+    // Occupy every permit so `available` is observable after the reset.
+    const blockers = [0, 1, 2, 3].map(
+      (i) => new Promise((resolve) => setTimeout(resolve, 5 + i))
+    );
+    for (let i = 0; i < 4; i++) {
+      bulkhead.run(() => new Promise((resolve) => setTimeout(resolve, 5)));
+    }
+
+    // `available` was documented on reset() and ignored: the gates were always
+    // restored to `maxConcurrency`.
+    bulkhead.reset({ available: 1 });
+    expect(bulkhead.active).toBe(0);
+    expect(bulkhead.pending).toBe(0);
+
+    await Promise.all(blockers);
+  });
+
+  it('reset() defaults to restoring maxConcurrency when no count is given', () => {
+    const bulkhead = new PowerBulkhead({ partitions: 1, maxConcurrency: 3 });
+    for (let i = 0; i < 3; i++) {
+      bulkhead.run(() => new Promise(() => {}));
+    }
+    bulkhead.reset();
+    expect(bulkhead.active).toBe(0);
+    expect(bulkhead.pending).toBe(0);
+  });
+
+  it('rejects queued waiters with a coded reason', async () => {
+    const bulkhead = new PowerBulkhead({ partitions: 1, maxConcurrency: 1 });
+    let releaseFirst;
+    const held = new Promise((resolve) => {
+      releaseFirst = resolve;
+    });
+    const running = bulkhead.run(() => held);
+    const queued = bulkhead.run(() => 'never');
+
+    await expect(queued).rejects.toMatchObject({ code: 'ERR_BULKHEAD_RESET' });
+
+    releaseFirst();
+    await expect(running).resolves.toBeUndefined();
+  });
+
   it('drain() resolves after all active and queued tasks finish', async () => {
     const bulkhead = new PowerBulkhead({ partitions: 1, maxConcurrency: 1, queueCapacity: 10 });
     const results = [];
