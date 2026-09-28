@@ -184,6 +184,9 @@ export class PowerPool {
     _congestion: boolean | undefined;
     /**
      * Log debug information about swallowed errors when debug logging is enabled.
+     * @param {*} err - The swallowed error, or falsy when the call is informational.
+     * @param {string} [msg]
+     * @returns {void}
      * @private
      */
     private _debugLog;
@@ -198,12 +201,27 @@ export class PowerPool {
      * Returns the `pendingPromise` when `wantResponse` is true, otherwise `true` on success.
      * On failure, rejects/cleans up the pending response when applicable and
      * returns `pendingPromise` (when awaiting) or `false`.
+     * @param {import('./jsdoc-types.js').WorkerObj} obj
+     * @param {{message: *, transfer: (TransferList|undefined)}} prepared
+     * @param {number} startTime
+     * @param {boolean} wantResponse
+     * @param {string|undefined} correlationKey
+     * @param {Promise<any>} pendingPromise
+     * @returns {Promise<any>|boolean}
      * @private
      */
     private _postToWorkerObj;
     /**
      * Attempt to grow the pool by adding a worker and dispatching the message.
      * Preserves the same pending-response cleanup semantics as inline logic.
+     * @param {*} message
+     * @param {TransferList} [transfer]
+     * @param {Object} [options]
+     * @param {number} startTime
+     * @param {boolean} [wantResponse]
+     * @param {string} [correlationId]
+     * @param {number} [timeout]
+     * @returns {Promise<any>|boolean}
      * @private
      */
     private _tryGrowPool;
@@ -687,6 +705,7 @@ export class PowerPool {
      */
     [Symbol.asyncDispose](): Promise<void>;
 }
+export type WorkerLike = import("./jsdoc-types.js").WorkerLike;
 export type WorkerObj = import("./jsdoc-types.js").WorkerObj;
 /**
  * PostMessage and pending-response typedefs are defined centrally to avoid

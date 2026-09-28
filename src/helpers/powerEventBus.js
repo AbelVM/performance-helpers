@@ -406,7 +406,7 @@ export class PowerEventBus {
    * registry's retained callbacks become garbage.
    *
    * Idempotent, and safe to call while the bus is idle. Exists so a bus works
-   * with `using` / `await using` (see {@link PowerEventBus.[Symbol.dispose]})
+   * with `using` / `await using` (see the `Symbol.dispose` alias below)
    * and gives callers an explicit name to call.
    *
    * @returns {void}

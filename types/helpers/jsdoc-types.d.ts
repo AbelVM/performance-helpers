@@ -79,6 +79,21 @@ export type PowerPoolOptions = {
      */
     autoScale?: boolean | AutoScaleOptions | undefined;
     /**
+     * - Default timeout (ms) for
+     * `awaitResponse` when a call does not pass its own.
+     */
+    awaitResponseTimeout?: number | undefined;
+    /**
+     * - Tasks slower than this (ms) are
+     * counted for the slow-task / `pool:slow` signal.
+     */
+    slowTaskThreshold?: number | undefined;
+    /**
+     * - Cap on registered pool listeners before
+     * the `MaxListenersExceededWarning` path is taken.
+     */
+    maxListeners?: number | undefined;
+    /**
      * - Wire protocol for
      * object messages. `'framed'` (default since 2.0) posts a `PowerMessageCodec`
      * envelope; `'legacy'` restores the 1.x bare-JSON framing for a worker that
@@ -108,6 +123,45 @@ export type AutoScaleOptions = {
     aimdBeta?: number | undefined;
 };
 /**
+ * /**
+ *  A worker-like object: the intersection of what a browser `Worker`, a Node
+ *  `worker_threads.Worker`, and this library's own `WorkerAgnostic` expose.
+ *
+ *  Typed because the worker was previously just `object`, which made
+ *  `addEventListener`, `onmessage` and `terminate` non-existent properties
+ *  wherever a worker was held - and made every assignment to a worker field
+ *  unchecked, so handing a plain `{}` to a pool would type-check and then fail
+ *  at the first message.
+ *
+ *  Every member is optional except `postMessage`: a real worker always has it,
+ *  while the event API is present on some shapes and not others, and a property
+ *  assignment (`worker.onmessage = ...`) is how the oldest of them are wired.
+ */
+export type WorkerLike = {
+    postMessage: (arg0: any, arg1: (ArrayBuffer[] | ArrayBufferView[] | Object) | undefined) => any;
+    terminate?: (() => (Promise<void> | void)) | undefined;
+    addEventListener?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
+    removeEventListener?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
+    on?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
+    off?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
+    onmessage?: ((...arg0: any[]) => void) | undefined;
+    onerror?: ((...arg0: any[]) => void) | undefined;
+    onmessageerror?: ((...arg0: any[]) => void) | undefined;
+    importScripts?: ((...arg0: any[]) => void) | undefined;
+};
+/**
+ * /**
+ *  A transferable list: an array of buffers/views, or any array-like of them.
+ *
+ *  Spelled without a bare `Object` member on purpose - the pool reads `.length`
+ *  off the transfer list, and a `Object` in the union makes that an error at
+ *  every call site. An array-like is the honest widening: the code also accepts
+ *  iterables and converts them once.
+ */
+export type TransferList = ArrayBuffer[] | ArrayBufferView[] | {
+    length: number;
+};
+/**
  * Worker object shape used internally by `PowerPool`.
  */
 export type WorkerObj = {
@@ -118,7 +172,7 @@ export type WorkerObj = {
     /**
      * - The underlying Worker instance or worker-like object.
      */
-    worker: Worker;
+    worker: WorkerLike;
     /**
      * - Number of active tasks currently assigned.
      */

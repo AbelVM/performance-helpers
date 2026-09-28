@@ -60,6 +60,12 @@
  *   it. Typed as `AutoScaleOptions` rather than `Object` because the pool reads
  *   `aimdBeta`, `backoffFactor`, `cooldownMs` and friends straight off it, and a
  *   bare `Object` turned every one of those into an error at the use site.
+ * @property {number} [awaitResponseTimeout] - Default timeout (ms) for
+ *   `awaitResponse` when a call does not pass its own.
+ * @property {number} [slowTaskThreshold] - Tasks slower than this (ms) are
+ *   counted for the slow-task / `pool:slow` signal.
+ * @property {number} [maxListeners] - Cap on registered pool listeners before
+ *   the `MaxListenersExceededWarning` path is taken.
  * @property {'framed'|'legacy'} [messageCodec='framed'] - Wire protocol for
  *   object messages. `'framed'` (default since 2.0) posts a `PowerMessageCodec`
  *   envelope; `'legacy'` restores the 1.x bare-JSON framing for a worker that
@@ -89,10 +95,50 @@
  */
 
 /**
+/**
+ * A worker-like object: the intersection of what a browser `Worker`, a Node
+ * `worker_threads.Worker`, and this library's own `WorkerAgnostic` expose.
+ *
+ * Typed because the worker was previously just `object`, which made
+ * `addEventListener`, `onmessage` and `terminate` non-existent properties
+ * wherever a worker was held - and made every assignment to a worker field
+ * unchecked, so handing a plain `{}` to a pool would type-check and then fail
+ * at the first message.
+ *
+ * Every member is optional except `postMessage`: a real worker always has it,
+ * while the event API is present on some shapes and not others, and a property
+ * assignment (`worker.onmessage = ...`) is how the oldest of them are wired.
+ *
+ * @typedef {Object} WorkerLike
+ * @property {function(*, (ArrayBuffer[]|ArrayBufferView[]|Object)=): *} postMessage
+ * @property {function(): (Promise<void>|void)} [terminate]
+ * @property {function(string, function(...*):void): *} [addEventListener]
+ * @property {function(string, function(...*):void): *} [removeEventListener]
+ * @property {function(string, function(...*):void): *} [on]
+ * @property {function(string, function(...*):void): *} [off]
+ * @property {function(...*):void} [onmessage]
+ * @property {function(...*):void} [onerror]
+ * @property {function(...*):void} [onmessageerror]
+ * @property {function(...*):void} [importScripts]
+ */
+
+/**
+/**
+ * A transferable list: an array of buffers/views, or any array-like of them.
+ *
+ * Spelled without a bare `Object` member on purpose - the pool reads `.length`
+ * off the transfer list, and a `Object` in the union makes that an error at
+ * every call site. An array-like is the honest widening: the code also accepts
+ * iterables and converts them once.
+ *
+ * @typedef {ArrayBuffer[]|ArrayBufferView[]|{length: number}} TransferList
+ */
+
+/**
  * Worker object shape used internally by `PowerPool`.
  * @typedef {Object} WorkerObj
  * @property {number} id - Numeric id for the worker entry.
- * @property {Worker} worker - The underlying Worker instance or worker-like object.
+ * @property {WorkerLike} worker - The underlying Worker instance or worker-like object.
  * @property {number} tasks - Number of active tasks currently assigned.
  * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
  * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).

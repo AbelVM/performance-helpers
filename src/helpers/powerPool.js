@@ -39,6 +39,8 @@ import {
   DEFAULT_AUTOSCALE_AIMD_BETA,
 } from './constants.js';
 
+/** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
+
 // Module-level tuning constants (imported from shared constants.js)
 
 // Lightweight stable-shape wrapper for underlying worker-like objects.
@@ -46,15 +48,29 @@ import {
 // `_addWorkerInstance()` call which reduces per-worker allocation cost
 // and improves hidden-class stability in V8.
 class WorkerWrapper {
+  /**
+   * @param {WorkerLike} _underlying - The worker this wrapper forwards to.
+   * @param {import('./powerLogger.js').PowerLogger} _logger
+   * @param {PowerPool} _pool
+   */
   constructor(_underlying, _logger, _pool) {
     this._underlying = _underlying;
     this._logger = _logger;
     this._pool = _pool;
+    /** @type {?(function(...*):void)} */
     this.onmessage = null;
+    /** @type {?(function(...*):void)} */
     this.onerror = null;
+    /** @type {?(function(...*):void)} */
     this.onmessageerror = null;
   }
 
+  /**
+   * @param {*} message
+   * @param {TransferList} [transfer] - Transferable
+   *   list, or an iterable/array-like of one. `undefined` means "no transfer".
+   * @returns {*}
+   */
   postMessage(message, transfer) {
     let msg = message;
     let tr = transfer;
@@ -516,6 +532,9 @@ export class PowerPool {
 
   /**
    * Log debug information about swallowed errors when debug logging is enabled.
+   * @param {*} err - The swallowed error, or falsy when the call is informational.
+   * @param {string} [msg]
+   * @returns {void}
    * @private
    */
   _debugLog(err, msg) {
@@ -553,6 +572,9 @@ export class PowerPool {
    * Returns `{ pendingPromise, correlationKey }` where `pendingPromise` is
    * the Promise that will be resolved/rejected when the response arrives
    * or when the per-call/pool timeout elapses.
+   * @param {*} correlationId
+   * @param {{wantResponse?: boolean, timeout?: number, correlationKey?: string}} [options]
+   * @returns {{pendingPromise: Promise<any>, correlationKey: string|undefined}}
    * @private
    */
   _createPendingResponsePromise(correlationId, options) {
@@ -608,6 +630,13 @@ export class PowerPool {
    * Returns the `pendingPromise` when `wantResponse` is true, otherwise `true` on success.
    * On failure, rejects/cleans up the pending response when applicable and
    * returns `pendingPromise` (when awaiting) or `false`.
+   * @param {import('./jsdoc-types.js').WorkerObj} obj
+   * @param {{message: *, transfer: (TransferList|undefined)}} prepared
+   * @param {number} startTime
+   * @param {boolean} wantResponse
+   * @param {string|undefined} correlationKey
+   * @param {Promise<any>} pendingPromise
+   * @returns {Promise<any>|boolean}
    * @private
    */
   _postToWorkerObj(obj, prepared, startTime, wantResponse, correlationKey, pendingPromise) {
@@ -671,6 +700,14 @@ export class PowerPool {
   /**
    * Attempt to grow the pool by adding a worker and dispatching the message.
    * Preserves the same pending-response cleanup semantics as inline logic.
+   * @param {*} message
+   * @param {TransferList} [transfer]
+   * @param {Object} [options]
+   * @param {number} startTime
+   * @param {boolean} [wantResponse]
+   * @param {string} [correlationId]
+   * @param {number} [timeout]
+   * @returns {Promise<any>|boolean}
    * @private
    */
   _tryGrowPool(
