@@ -450,9 +450,10 @@ export class PowerCache {
      * to avoid long event-loop stalls.
      * Note: call `stopCleanup()` to stop the periodic timer (for example, on application shutdown)
      * to ensure the internal timer is cleared and resources can be reclaimed.
-     * @param {number|Object} [intervalOrOptions]
-     * @param {number} [intervalOrOptions.interval] Interval between cleanup passes in ms.
-     * @param {number} [intervalOrOptions.maxCleanupPerTick] Max nodes to scan per pass.
+     * @param {number|Object} [intervalOrOptions] - Cleanup interval in ms, or an
+     *   options object `{ interval, maxCleanupPerTick }`. The nested tags were
+     *   removed because a qualified `@param` is only valid when the parent is a
+     *   bare `{Object}`; against `number|Object` it is rejected with TS8032.
      * @returns {void}
      */
     startCleanup(intervalOrOptions?: number | Object): void;

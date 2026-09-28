@@ -36,21 +36,47 @@ export class PowerRateLimit {
  * one of those calls an error and, worse, meant a limiter that only had
  * `tryConsume` would still be accepted.
  *
- * @typedef {Object} RateLimiterLike
- * @property {function(number=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume
- * @property {function(number=): (number|boolean)} [reserve]
- * @property {number} [available]
+/**
+ * Options for `PowerRateLimit`.
+ *
+ * @typedef {Object} PowerRateLimitOptions
+ * @property {boolean} [atomic=false] Attempt all-or-nothing semantics across the
+ *   composed limiters. Requires each to expose `available()`.
  */
 
   /**
-   * @param {Array<Object>} limiters - Array of limiter instances implementing
-   *   `tryConsume(n)` and preferably `available()`.
-   * @param {Object} [options]
-   * @param {boolean} [options.atomic=false] - When `true` attempt to provide
-   *   atomic semantics: either all limiters allow consumption or none will be
-   *   left mutated. This requires underlying limiters to expose `available()`
-   *   or an undo primitive (e.g. `reserve`/`release` or `addTokens`). If a
-   *   safe rollback cannot be guaranteed the call will return `false`.
+   * The slice of a limiter's surface that `PowerRateLimit` composes.
+   *
+   * Declared as an interface rather than `Object` because the composer's whole
+   * job is calling these members; typing the array as `Object[]` made every one
+   * of those calls an error and, worse, meant a limiter that only had
+   * `tryConsume` would still be accepted.
+   *
+   * @typedef {Object} RateLimiterLike
+   * @property {function(number=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume
+   * @property {function(number=): {n: number}|number|boolean|null} [reserve]
+   *   A token to pass to `release` when it reserves a slot, `false` when it
+   *   cannot, `null` when it has no reservation concept. `PowerGCRA` returns a
+   *   number; `PowerThrottle` returns `{ n }`.
+   * @property {function(*):void} [release]
+   * @property {function(number):void} [addTokens]
+   * @property {function(number):void} [rollback]
+   * @property {number|function(): number} [available] A count, or a method that
+   *   returns one. Both `PowerGCRA` and `PowerThrottle` expose `available()` as
+   *   a *method* - the first draft of this typedef said `number`, and the
+   *   consumer type test caught it by refusing to accept either helper as a
+   *   limiter.
+   */
+
+  /**
+   * @param {RateLimiterLike[]} limiters - Limiter instances to compose. Each
+   *   must provide `tryConsume(n)`; `reserve`, `release`, `addTokens`,
+   *   `rollback` and `available` are used when present.
+   * @param {PowerRateLimitOptions} [options] - `atomic` attempts all-or-nothing
+   *   semantics: either every limiter allows the consumption or none is left
+   *   mutated. That requires each to expose `available()` or an undo primitive
+   *   (`reserve`/`release`, or `addTokens`). When a safe rollback cannot be
+   *   guaranteed the call returns `false`.
    */
   constructor(limiters = [], options = {}) {
     if (!Array.isArray(limiters)) throw new TypeError('limiters must be an array');
@@ -80,8 +106,10 @@ export class PowerRateLimit {
    * if other limiters subsequently fail. Prefer limiters that implement
    * `available()` for atomic semantics.
    *
-   * @param {number} [n=1]
-   * @returns {boolean}
+   * @param {number} [n=1] - Tokens to consume.
+   * @param {PowerRateLimitOptions} [options] - Per-call overrides; `atomic`
+   *   defaults to the instance setting.
+   * @returns {boolean} `true` only when every composed limiter allowed it.
    */
   tryConsume(n = 1, options = {}) {
     const want = Math.max(0, Math.floor(+n) || 0);

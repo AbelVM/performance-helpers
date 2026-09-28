@@ -43,7 +43,7 @@ const path = require('node:path');
  * The ceiling this repository is allowed to reach. Lower it whenever you fix
  * some. `scripts/typecheck-ratchet.cjs --update` prints the replacement line.
  *
- * 453 = `tsconfig.check.json`, internal `checkJs` debt, all pre-existing.
+ * 437 = `tsconfig.check.json`, internal `checkJs` debt, all pre-existing.
  *
  * The history of this number is worth keeping, because the wrong move was
  * available three times and taken none of them.
@@ -62,7 +62,7 @@ const path = require('node:path');
  * below the 593 this started at, and the consumer column is no longer here at
  * all.
  */
-const BASELINE = 453;
+const BASELINE = 437;
 
 const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' }];
 
