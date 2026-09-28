@@ -39,7 +39,7 @@ export class PowerLogger {
     constructor(level?: number, options?: PowerLoggerOptions);
     _debugLevel: number;
     _counters: any;
-    _format: "text" | "json";
+    _format: "json" | "text";
     name: string | null;
     _formatter: ((payload: import("./jsdoc-types.js").PowerLoggerPayload) => string | import("./jsdoc-types.js").PowerLoggerPayload | null) | null;
     _output: ((payload: import("./jsdoc-types.js").PowerLoggerPayload | string) => void) | null;

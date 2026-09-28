@@ -32,6 +32,7 @@ export { PowerGCRA } from './helpers/powerGCRA.js';
 export { PowerEventLoopMonitor } from './helpers/powerEventLoopMonitor.js';
 export { PowerRealtimeHub } from './helpers/powerRealtimeHub.js';
 export { PowerWebSocketClient, READY_STATE } from './helpers/powerWebSocketClient.js';
+export { PowerSocketAdapter, detectSocketKind } from './helpers/powerSocketAdapter.js';
 export {
   PowerMessageCodec,
   MESSAGE_PROTOCOL_VERSION,

@@ -19,6 +19,7 @@ import {
   PowerGCRA,
   PowerRealtimeHub,
   PowerWebSocketClient,
+  PowerSocketAdapter,
   preloadNode,
 } from '../src/index.js';
 
@@ -58,6 +59,25 @@ const RESOURCE_OWNERS = [
   ['PowerRealtimeHub', () => new PowerRealtimeHub({ send: () => {} })],
   ['PowerBulkhead', () => new PowerBulkhead({ maxConcurrency: 1 })],
   ['PowerWebSocketClient', () => new PowerWebSocketClient({ url: 'ws://x' })],
+  [
+    'PowerSocketAdapter',
+    // The adapter owns a heartbeat timer and five socket listeners, so leaving
+    // it undisposed pins both the timer and the socket for the life of the
+    // process - one leak per connection on a server.
+    () =>
+      new PowerSocketAdapter(
+        {
+          readyState: 1,
+          bufferedAmount: 0,
+          on() {},
+          off() {},
+          send() {},
+          ping() {},
+          close() {},
+        },
+        { heartbeatIntervalMs: 1000 }
+      ),
+  ],
   [
     'PowerPool',
     () =>

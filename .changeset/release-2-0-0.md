@@ -135,6 +135,37 @@ pipeline.
     6 requests on the wire — and a hedge draws a budget token like any retry.
     Off by default because it raises average load and only pays off if `fn`
     honours its `AbortSignal`.
+- **`PowerSocketAdapter`** (new export) normalises the three socket models a server actually
+  receives — Node `ws` (EventEmitter), browser `WebSocket` (EventTarget) and `WebSocketStream`
+  (streams) — behind one interface, and adds socket-level liveness, per-message rate limiting and
+  a graceful `drain()`. **There is no WebSocket server in this package, and there deliberately is
+  not one** (REJ-007): RFC 6455 is a security liability to reimplement and `ws` already does it.
+  What was missing is the layer either side of one. The models are genuinely incompatible and the
+  mismatches fail _silently_ — a `message` handler written for `ws` receives `(data, isBinary)`
+  and never fires against an `EventTarget` socket, `addEventListener` throws against a `ws`
+  socket, and a `WebSocketStream` has neither `on`, `readyState` nor `bufferedAmount`, so the
+  MDN-recommended `bufferedAmount` pause loop cannot be written against it at all. This is the
+  same normalisation `WorkerAgnostic` already does for `Worker` constructors, applied to sockets.
+  Transport is detected by **capability, not constructor name** — the same class is reachable as
+  `ws` in Node, `undici`'s `WebSocket` in newer Node, and the browser global, and the last two are
+  different objects sharing a name. An unrecognised object throws rather than defaulting, because
+  a silent default attaches no listeners and looks healthy while receiving nothing.
+  **Three things the first draft got wrong, each caught by writing the test before the claim:**
+  the heartbeat listened for `ws`'s `ping` event instead of `pong` — `ping` is what a _server_
+  receives from its clients, so every client's ping would have read as a liveness answer while the
+  server's own probes read as dead, inverted in both directions; stream detection required
+  `getWriter` on the socket rather than on `socket.writable`, so every `WebSocketStream` was
+  misdetected; and `send()` took a fresh `getWriter()` per call, but `getWriter()` _locks_ a
+  stream, so the second send on a stream adapter would have thrown and the stream would have
+  stayed locked for the life of the object. The writer is now acquired once and released on
+  `dispose()`. `drain()` resolves **`false`** on timeout rather than `true`, because pretending a
+  drain finished cleanly is how a deploy silently drops work. On transports with no `ping()` the
+  adapter reports `canPing === false` in `stats()` and does not pretend to be heartbeating.
+  **Two deliberate scope boundaries:** the adapter exposes `bufferedAmount` as a getter for a
+  caller to poll but does not implement producer-side pause/resume (a `WebSocketStream` has no
+  such signal, and the outbound watermark loop belongs to the client, which is
+  `PowerWebSocketClient`'s job); and `send()` on a stream is synchronous-and-refusing rather than
+  queued, so a caller wanting fire-and-forget there must await `drain()` and retry.
 
 **Fixed**
 

@@ -519,10 +519,117 @@ export type PowerSlidingWindowOptions = {
     windowMs?: number | undefined;
 };
 /**
+ * A normalised inbound socket message, identical across all three transport
+ * models.
+ *
+ * This is the whole point of `PowerSocketAdapter`: Node `ws` hands a handler
+ * `(data, isBinary)`, a browser `WebSocket` hands it an event object, and a
+ * `WebSocketStream` hands it the bare written value. Without normalisation,
+ * every consumer needs all three branches.
+ */
+export type PowerSocketAdapterMessage = {
+    /**
+     * - The payload, as the transport delivered it.
+     */
+    data: any;
+    /**
+     * - `false` only for a text frame. For a
+     * `WebSocketStream` this is inferred, since the stream carries no frame type.
+     */
+    isBinary: boolean;
+    /**
+     * -
+     * The adapter that received it, for `send()` from inside a handler.
+     */
+    adapter: import("./powerSocketAdapter.js").PowerSocketAdapter;
+};
+/**
+ * Called when an inbound message is refused by `PowerSocketAdapter`'s rate
+ * limit, with the running count of refusals.
+ *
+ * Named rather than inlined because the JSDoc parser mis-associates an inline
+ * `{function(count:number): void}` property that follows a multi-line
+ * description: it absorbed the following `@property` line into its own
+ * parameter list and emitted a property literally named `""`. An inline type
+ * that parses wrongly is worse than no type, because it looks present.
+ */
+export type PowerSocketAdapterRateLimited = (count: number) => void;
+/**
+ * Options for `PowerSocketAdapter`.
+ */
+export type PowerSocketAdapterOptions = {
+    /**
+     * - Transport family. Detected
+     * from the socket's capabilities by default; pass it only to override a
+     * misdetection.
+     */
+    kind?: "ws" | "websocket" | "stream" | undefined;
+    /**
+     * -
+     * Called for each accepted inbound message. A returned promise is awaited
+     * for {@link PowerSocketAdapter#drain}, and a rejection is routed to
+     * `onError`.
+     */
+    onMessage?: ((arg0: PowerSocketAdapterMessage) => (void | Promise<void>)) | undefined;
+    /**
+     * - Socket opened.
+     */
+    onOpen?: ((arg0: import("./powerSocketAdapter.js").PowerSocketAdapter) => void) | undefined;
+    /**
+     * - Socket closed, for any reason including a heartbeat or idle timeout.
+     */
+    onClose?: ((arg0: {
+        code: number;
+        reason: string;
+        adapter: import("./powerSocketAdapter.js").PowerSocketAdapter;
+    }) => void) | undefined;
+    /**
+     * - A transport, handler, or send error. A throwing `onError` is swallowed.
+     */
+    onError?: ((arg0: any, arg1: import("./powerSocketAdapter.js").PowerSocketAdapter) => void) | undefined;
+    /**
+     * - An inbound message was refused by the rate limit. Called with the running count of refusals.
+     */
+    onRateLimited?: PowerSocketAdapterRateLimited | undefined;
+    /**
+     * - Send a ping at this interval. `0` disables. Requires a transport that exposes `ping()` (Node `ws`); on others the adapter reports `canPing === false` and does not pretend to be heartbeating.
+     */
+    heartbeatIntervalMs?: number | undefined;
+    /**
+     * - Declare the socket dead if no
+     * pong or message arrives in this long. `0` disables.
+     */
+    heartbeatTimeoutMs?: number | undefined;
+    /**
+     * - Declare the socket dead if nothing at
+     * all arrives for this long. `0` disables. This is the liveness signal
+     * available on transports with no `ping()`.
+     */
+    idleTimeoutMs?: number | undefined;
+    /**
+     * - Per-socket inbound
+     * rate limit. Omitted means no limit.
+     */
+    rateLimit?: {
+        limit: number;
+        windowMs: number;
+    } | undefined;
+    /**
+     * - What to do with a
+     * rate-limited message. `close` uses code 1008 (policy violation).
+     */
+    rateLimitAction?: "close" | "drop" | undefined;
+    /**
+     * - How long `drain()` waits for
+     * in-flight handlers before closing anyway. `0` waits indefinitely.
+     */
+    drainTimeoutMs?: number | undefined;
+};
+/**
  * Logger options for `PowerLogger`.
  */
 export type PowerLoggerOptions = {
-    format?: "text" | "json" | undefined;
+    format?: "json" | "text" | undefined;
     name?: string | undefined;
     formatter?: ((payload: PowerLoggerPayload) => string | PowerLoggerPayload | null) | undefined;
     output?: ((payload: PowerLoggerPayload | string) => void) | undefined;

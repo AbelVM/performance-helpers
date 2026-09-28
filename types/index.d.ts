@@ -31,4 +31,5 @@ export { normalizeError, formatErrorObj } from "./utils/errors.js";
 export { nowMs, measureSync, measureAsync } from "./utils/now.js";
 export { PowerRetry, PowerRetryBudget } from "./helpers/powerRetry.js";
 export { PowerWebSocketClient, READY_STATE } from "./helpers/powerWebSocketClient.js";
+export { PowerSocketAdapter, detectSocketKind } from "./helpers/powerSocketAdapter.js";
 export { PowerMessageCodec, MESSAGE_PROTOCOL_VERSION, CODECS, HEADER_BYTES, encodeMessage, decodeMessage, frameEncodedJson, encodeNative, canUseNativeClone, selectCodec, isRawPayload, frameTransferList } from "./helpers/powerMessageCodec.js";

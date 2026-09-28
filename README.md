@@ -67,6 +67,8 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 - [PowerWebSocketClient: Reconnecting client with back-pressure](guides/powerWebSocketClient.md). `WebSocket` has no back-pressure, so this adds it two ways: `bufferedAmount` watermarks (universal, with a backing-off poll and `onPause`/`onResume`) and `WebSocketStream` where available (awaits `writer.ready`). Plus heartbeats with RTT, decorrelated-jitter reconnects, and a connect timeout. Pairs with `PowerRealtimeHub` via `sendFrame`.
 
+- [PowerSocketAdapter: One interface over three socket models](guides/powerSocketAdapter.md). Normalise a Node `ws` socket, a browser `WebSocket`, or a `WebSocketStream` behind one API. They are genuinely incompatible — a `ws` `message` handler receives `(data, isBinary)`, an `EventTarget` one receives an event object, and a `WebSocketStream` has neither `on`, `readyState`, nor `bufferedAmount` — and the mismatches fail silently. Adds socket-level liveness, per-message rate limiting, and a graceful `drain()` for shutdown. The server-side counterpart to the client above; there is no WebSocket server here, and there should not be.
+
 ## Logging
 
 - [PowerLogger: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.

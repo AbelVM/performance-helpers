@@ -99,6 +99,29 @@ export const MIN_HISTOGRAM_BUCKETS = 4;
 export const MAX_DEEP_EQUAL_NODES = 10_000;
 
 // Retry/backoff defaults
+/**
+ * The four states of a socket's lifecycle, as constants.
+ *
+ * Defined here, in the one module every helper may import, so that
+ * `PowerWebSocketClient` and `PowerSocketAdapter` hand back the *same* frozen
+ * object. They are separate helpers for separate directions - one dials out,
+ * one wraps a socket somebody else accepted - and the adapter deliberately does
+ * not import the client, because doing so would pull the whole reconnect
+ * machinery into a server bundle. Duplicating the constant instead would have
+ * been free of that cost and wrong in a subtler way: a user comparing the two
+ * with `===` would get `false` for two identical-looking frozen objects, and the
+ * only symptom would be a state check that silently never matches.
+ *
+ * The values are the WebSocket standard's, so a socket's own `readyState` can be
+ * compared against them directly.
+ */
+export const READY_STATE = Object.freeze({
+  CONNECTING: 0,
+  OPEN: 1,
+  CLOSING: 2,
+  CLOSED: 3,
+});
+
 export const DEFAULT_RETRY_BASE_DELAY_MS = 100;
 export const DEFAULT_RETRY_MAX_DELAY_MS = 10000;
 

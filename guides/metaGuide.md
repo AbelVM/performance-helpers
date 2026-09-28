@@ -34,6 +34,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Move structured values across a byte-stream transport                 | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary               |
 | Fan out to many subscribers without one slow client stalling the rest | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                           |
 | Push to a socket without unbounded client-side buffering              | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                      |
+| Handle an accepted socket without knowing which library produced it   | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler      |
 | Process a very large iterable in parallel                             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle          |
 | Smooth bursts from producers                                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                       |
 | Limit concurrent async work globally                                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block           |
@@ -441,6 +442,17 @@ which is the most likely first-run problem and is specific to one environment.
 - `PowerHistogram`: In-process latency and percentile-style telemetry.
 - `PowerEventLoopMonitor`: Event-loop delay histogram and `eventLoopUtilization()`.
 
+### Realtime: framing, fan-out, and transports
+
+- `PowerMessageCodec`: Versioned `[version][codec][length][payload]` framing; `encodeNative` for
+  in-process `MessagePort`/`Worker` traffic.
+- `PowerRealtimeHub`: Topic fan-out with a per-subscriber bounded queue and a declared
+  slow-consumer policy.
+- `PowerWebSocketClient`: Client side. Back-pressure (watermarks or Streams), heartbeats with RTT,
+  decorrelated-jitter reconnects, connect timeout.
+- `PowerSocketAdapter`: Server side. One interface over a Node `ws` socket, a browser `WebSocket`
+  or a `WebSocketStream`, plus liveness, per-message rate limiting and a graceful `drain()`.
+
 ### Coordination and async building blocks
 
 - `PowerDefer`: External resolve/reject promise primitive.
@@ -455,7 +467,9 @@ which is the most likely first-run problem and is specific to one environment.
 
 ### Realtime: framing and fan-out
 
-These two are a family and compose — see `assets/5_Realtime.md`.
+These four are a family and compose — see `assets/5_Realtime.md`. The split is
+client vs. server: `PowerWebSocketClient` dials out, `PowerSocketAdapter` wraps
+a socket somebody else accepted, and the other two sit between them.
 
 - `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
   envelope, so a byte-stream transport never has to guess whether it received an object or binary.
@@ -471,6 +485,13 @@ These two are a family and compose — see `assets/5_Realtime.md`.
 - `PowerRealtimeHub`: every subscription gets its own bounded queue and a declared slow-consumer
   policy, so a single client that stops reading becomes a bounded, observable problem instead of a
   process-wide memory leak. Batches over `PowerMessageCodec`.
+- `PowerSocketAdapter`: the **server-side** counterpart to the client. A Node `ws` socket, a browser
+  `WebSocket` and a `WebSocketStream` are genuinely incompatible — `ws` calls a `message` handler
+  with `(data, isBinary)`, an `EventTarget` with one event object, and a `WebSocketStream` has
+  neither `on` nor `readyState` nor `bufferedAmount` — and the mismatches fail _silently_, so a
+  handler written for one transport simply never fires against another. Wrap the accepted socket
+  once and add liveness, per-message rate limiting, and a graceful `drain()`. There is no WebSocket
+  server in this package, and there should not be — use `ws`.
 
 Reach for the framed codec when the transport carries bytes (WebSocket, file, HTTP body), and
 `encodeNative` when it is an in-process message port. Reach for the hub before writing

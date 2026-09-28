@@ -1,11 +1,4 @@
-/** @typedef {'connecting'|'open'|'closing'|'closed'} WebSocketReadyState */
-/** The four states of a socket's lifecycle, as constants. */
-export const READY_STATE: Readonly<{
-    CONNECTING: 0;
-    OPEN: 1;
-    CLOSING: 2;
-    CLOSED: 3;
-}>;
+export { READY_STATE };
 /** @typedef {'watermark'|'streams'|'none'} BackpressureMode */
 /**
  * @typedef {object} WebSocketClientOptions
@@ -465,4 +458,5 @@ export type WebSocketClientOptions = {
      */
     rtt?: PowerHistogram | undefined;
 };
+import { READY_STATE } from './constants.js';
 import { PowerHistogram } from './powerHistogram.js';

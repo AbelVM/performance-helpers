@@ -39,16 +39,19 @@ import { decodeMessage, encodeMessage } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
+import { READY_STATE } from './constants.js';
 
 /** @typedef {'connecting'|'open'|'closing'|'closed'} WebSocketReadyState */
 
-/** The four states of a socket's lifecycle, as constants. */
-export const READY_STATE = Object.freeze({
-  CONNECTING: 0,
-  OPEN: 1,
-  CLOSING: 2,
-  CLOSED: 3,
-});
+/**
+ * The four states of a socket's lifecycle, as constants.
+ *
+ * Re-exported from `constants.js` so it stays a public export of this module
+ * while being the *same* frozen object `PowerSocketAdapter` uses - a caller
+ * comparing the two with `===` must get `true`. See the definition for why it
+ * lives in the shared module rather than being written out twice.
+ */
+export { READY_STATE };
 
 /** @typedef {'watermark'|'streams'|'none'} BackpressureMode */
 

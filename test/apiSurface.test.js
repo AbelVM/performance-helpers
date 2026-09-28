@@ -84,6 +84,8 @@ describe('API surface', () => {
         'PowerThrottle',
         'PowerTimedCache',
         'PowerWebSocketClient',
+        'PowerSocketAdapter',
+        'detectSocketKind',
         'READY_STATE',
         'WorkerAgnostic',
         'b2o',
@@ -156,6 +158,7 @@ describe('API surface', () => {
       'MS_PER_MIN',
       'MS_PER_SEC',
       'POWER_QUEUE_INITIAL_CAPACITY',
+      'READY_STATE',
     ]);
   });
 
@@ -165,7 +168,7 @@ describe('API surface', () => {
     // The pre-existing test covered 3 of these. If this count changes, a
     // subpath was added or removed and this file needs updating deliberately -
     // the count is here so that cannot happen by accident.
-    expect(subpaths.length).toBe(35);
+    expect(subpaths.length).toBe(36);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];
