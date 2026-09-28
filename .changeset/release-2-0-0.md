@@ -93,3 +93,41 @@ The ones that could bite an existing user:
 
 `PowerPool` remains backwards compatible at the API level; the only migration
 required is the worker reply shape.
+
+**Types**
+
+The shipped `types/*.d.ts` are what TypeScript consumers actually compile, and
+they had drifted from `src/`. All of the following were wrong in 1.0.3 and are
+now correct — if you have a `skipLibCheck: false` consumer, or work around any
+of these with `as any`, you can delete the workaround:
+
+- **The package no longer requires `@types/node`.** `u82o`/`b2o` were declared
+  with `TypedArray` and `Buffer`, both Node global aliases, so the published
+  types could not compile for a consumer who had not installed them. They are
+  `ArrayBufferView` now, which is a TypeScript built-in. `Buffer` needs no
+  mention at all: it extends `Uint8Array`.
+- `PowerPoolOptions` was missing `autoScale` and `messageCodec` — both of which
+  the pool reads.
+- `PowerBulkhead` never documented its `onError` option, which has existed
+  since 2.0. It is now in the published options type.
+- `PowerSemaphore.acquire()` returned `Promise<Function>`. `Function` is not
+  assignable to `() => void`, so the documented
+  `acquire().then((release) => release())` did not compile.
+- `PowerMemoizer.memoize()` returned bare `Function`, so `memoized(1)` was not
+  assignable to anything and none of `get`/`has`/`delete`/`clear`/`stats`/
+  `cache`/`original` appeared in the types — even though `original` has worked
+  at runtime for two releases. It now returns a callable-and-augmented type.
+- `PowerTimedCache.set`/`has`/`startCleanup` were declared with *required*
+  parameters, so the two-argument `timed.set(k, v)` failed with "Expected 3
+  arguments, but got 2".
+- `PowerCache` accepted `defaultAsyncTimeout`, `onError` and `policy` at
+  runtime but omitted all three from its options type — a duplicated JSDoc list
+  had drifted from the `PowerCacheOptions` typedef it duplicated. There is now
+  one source of truth.
+- Every class with a disposal method was emitting `[x: number]: () => void;` —
+  a numeric *index signature* — into the shipped declarations, which made
+  `using cache = new PowerCache()` fail to type-check and left `dispose()`
+  missing entirely.
+- `o2u8`'s second parameter is now documented and optional.
+- `PowerWebSocketClient.readyState` is typed `0 | 1 | 2 | 3` rather than
+  depending on the `lib.dom` alias `WebSocketReadyState`.
