@@ -1,0 +1,27 @@
+# Pre-commit: format and lint what changed, and keep the types honest.
+#
+# Deliberately does NOT run the test suite. A pre-commit hook that takes minutes
+# gets bypassed with `--no-verify`, and a bypassed hook protects nothing - which
+# is worse than no hook, because it looks like a safeguard. Tests are
+# `npm run verify`'s job, and that runs in CI.
+#
+# What IS here, and why each one:
+#
+#   1. lint-staged - prettier and eslint over the changed files only. Every
+#      commit in this repo's history that had to be "fixed" for formatting was a
+#      commit that could have been formatted on the way in, and it costs the
+#      reviewer nothing to catch.
+#   2. types:generate - `types/` is committed, and it is the file most likely
+#      to go stale silently, because nothing about editing `src/` mentions it.
+#      Regenerating and staging it here means a commit that changes a JSDoc type
+#      can no longer leave the published `.d.ts` describing the old one.
+npx --no-install lint-staged
+
+# Keep `types/` in step with `src/`. Cheap, and it is the check that is easiest
+# to forget - it only fails at release time, in CI, when it is most expensive.
+npm run --silent types:generate
+
+if ! git diff --quiet -- types; then
+  echo "types/ was out of date; staging the regenerated declarations."
+  git add types
+fi

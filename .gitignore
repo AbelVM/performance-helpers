@@ -147,3 +147,8 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Husky v9 generates this shim directory on `npm install` (via the `prepare`
+# script), so it is not source. The hooks themselves - .husky/pre-commit - are
+# committed.
+.husky/_

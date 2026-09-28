@@ -35,7 +35,7 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel V\u00e1zquez Montoro",
+  "author": "Abel Vázquez Montoro",
   "type": "module",
   "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
@@ -234,6 +234,7 @@
     "lint": "eslint \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
     "lint:fix": "eslint --fix \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
     "format": "prettier --write \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"*.md\"",
+    "prepare": "husky",
     "test:coverage": "vitest run --coverage --reporter=verbose",
     "typecheck": "tsc --noEmit --project tsconfig.check.json",
     "audit:exports": "node scripts/static-audit-exports.cjs",
@@ -268,6 +269,8 @@
     "eslint-plugin-prettier": "^5.5.6",
     "fast-check": "^4.10.2",
     "globals": "^17.12.0",
+    "husky": "9.1.7",
+    "lint-staged": "15.5.2",
     "prettier": "^3.9.9",
     "terser": "^5.51.2",
     "typedoc": "^0.28.20",
@@ -275,5 +278,14 @@
     "typescript": "^6.0.3",
     "vite": "^8.3.1",
     "vitest": "^5.0.2"
+  },
+  "lint-staged": {
+    "*.{js,cjs,mjs}": [
+      "prettier --write",
+      "eslint --fix --max-warnings=0"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }
