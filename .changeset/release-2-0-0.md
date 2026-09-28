@@ -27,6 +27,21 @@ pipeline.
   `PowerCircuit`'s `maxTimeout`, which is derived from `timeout` only when
   omitted so an explicit `maxTimeout: 0` still throws.
 
+- **`PowerPool`'s `minSize`, `maxSize` and `idleTimeout` are now validated too**, and the
+  failure mode they had was worse than a wrong default: `Math.max(0, value)` is
+  silent when `value` is not a number, because the result is `NaN` and **every
+  comparison against NaN is false**. A pool constructed with `minSize: 'lots'` did
+  not complain — its reaper's idle comparison could never be true, so it silently
+  never terminated a worker while reporting a worker count of `NaN`. All three now
+  throw a `TypeError` naming the option.
+
+  **Zero remains legal for every size option**, because "start with nothing and grow
+  on demand" is a real configuration; `idleTimeout: 0` and `Infinity` are likewise
+  both meaningful and both still accepted. `maxTasksPerWorker` is deliberately
+  **un**validated — `0` there means "every worker is immediately full" and is used
+  that way deliberately, and unlike the size options it is always finite, so it never
+  produced the `NaN` this fixes.
+
 - **`PowerMemoizer` keys changed format.** The default `keyResolver` is now
   `simpleArgsKey` rather than `(...args) => JSON.stringify(args)` — ~35%
   cheaper for the scalar arguments memoizers are actually called with, falling

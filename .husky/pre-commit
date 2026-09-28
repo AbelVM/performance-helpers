@@ -11,6 +11,15 @@
 #      commit in this repo's history that had to be "fixed" for formatting was a
 #      commit that could have been formatted on the way in, and it costs the
 #      reviewer nothing to catch.
+#
+#      `eslint` runs without `--max-warnings=0` on purpose. It was tried, and it
+#      made the hook *unusable*: `powerPool.js` carries 11 pre-existing
+#      complexity and max-lines warnings, so any commit touching that file was
+#      rejected outright. A gate that cannot be passed is worse than no gate -
+#      it teaches people to reach for `--no-verify`, and after that it protects
+#      nothing. Errors still fail the commit; warnings are the linter's opinion
+#      about a file this repo has decided to live with, and `npm run lint`
+#      already reports them without failing.
 #   2. types:generate - `types/` is committed, and it is the file most likely
 #      to go stale silently, because nothing about editing `src/` mentions it.
 #      Regenerating and staging it here means a commit that changes a JSDoc type

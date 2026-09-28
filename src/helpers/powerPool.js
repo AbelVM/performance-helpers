@@ -373,10 +373,47 @@ export class PowerPool {
 
     this._workerSource = workerSource;
     this._workerOptions = workerOptions;
+    // These were `Math.max(0, value)`, which is silent about the one input
+    // that matters: a non-numeric value makes the result NaN, and **every
+    // comparison against NaN is false**. So `minSize: 'lots'` did not produce a
+    // pool that complained - it produced a pool whose reaper considered every
+    // worker non-idle, or rather whose idle comparison could never be true, and
+    // which therefore never terminated anything while reporting a worker count
+    // of NaN. `Math.max(0, …)` is the wrong tool for clamping a value you have
+    // not checked is a number.
+    //
+    // Zero stays legal for every size option, because "start with no workers and
+    // scale up on demand" is a real configuration, and clamping it to 1 would
+    // take that option away. Negative and non-numeric values are the mistakes.
+    // `maxTasksPerWorker` is deliberately left unvalidated. `0` is meaningful
+    // here in a way it is not for the size options: it means "every worker is
+    // immediately full", which is how several existing tests force a post down
+    // the queue path. Constraining it to >= 1 would change documented behaviour
+    // to tidy up a coercion that is not actually harmful - `0` is finite, so it
+    // never produces the NaN this section is about.
     this._maxTasksPerWorker = maxTasksPerWorker;
-    this.minSize = Math.max(0, minSize);
-    this.maxSize = Math.max(this.minSize, maxSize);
-    this.idleTimeout = Math.max(0, idleTimeout);
+    this.minSize = assertLimitRequired(minSize, {
+      name: 'minSize',
+      className: 'PowerPool',
+      min: 0,
+      fallback: DEFAULT_POOL_SIZE,
+    });
+    this.maxSize = Math.max(
+      this.minSize,
+      assertLimitRequired(maxSize, {
+        name: 'maxSize',
+        className: 'PowerPool',
+        min: 0,
+        fallback: this.minSize,
+      })
+    );
+    this.idleTimeout = assertLimitRequired(idleTimeout, {
+      name: 'idleTimeout',
+      className: 'PowerPool',
+      min: 0,
+      allowInfinity: true,
+      fallback: DEFAULT_POOL_IDLE_TIMEOUT_MS,
+    });
     this.taskQueueEnabled = Boolean(taskQueue);
     this._queuePolicy = ['enqueue', 'drop-oldest', 'drop-newest', 'reject'].includes(queuePolicy)
       ? queuePolicy

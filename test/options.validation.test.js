@@ -10,6 +10,7 @@ import {
   PowerCircuit,
   PowerPermitGate,
   PowerDeadline,
+  PowerPool,
 } from '../src/index.js';
 
 /**
@@ -300,5 +301,75 @@ describe('PowerDeadline option validation (QUAL-001)', () => {
     await expect(PowerDeadline.run(() => 1, {})).resolves.toBe(1);
     await expect(PowerDeadline.run(() => 1, { totalTimeout: 1000 })).resolves.toBe(1);
     await expect(PowerDeadline.run(() => 1, { attemptTimeout: 50 })).resolves.toBe(1);
+  });
+});
+
+// ─── QUAL-001, part 3: the pool's size family ───────────────────────────────
+//
+// The hazard here is NaN rather than a wrong-but-plausible default.
+// `Math.max(0, value)` is silent when `value` is not a number: the result is
+// NaN, and **every comparison against NaN is false**. A pool constructed with a
+// non-numeric `minSize` therefore does not complain — its reaper's idle
+// comparison can never be true, so it silently never terminates a worker.
+describe('PowerPool size option validation (QUAL-001)', () => {
+  class NullWorker {
+    constructor() {
+      this.onmessage = null;
+      this.postMessage = () => {};
+      this.terminate = () => {};
+    }
+  }
+
+  it('rejects a non-numeric minSize rather than yielding NaN', () => {
+    expect(() => new PowerPool(NullWorker, { minSize: 'lots' })).toThrow(TypeError);
+    expect(() => new PowerPool(NullWorker, { minSize: 'lots' })).toThrow(/minSize/);
+    // The old `Math.max(0, x)` produced NaN here, and every comparison against
+    // NaN is false - so the reaper silently never fired.
+    expect(() => new PowerPool(NullWorker, { minSize: Number.NaN })).toThrow(TypeError);
+  });
+
+  it('rejects a negative minSize or maxSize', () => {
+    expect(() => new PowerPool(NullWorker, { minSize: -1 })).toThrow(TypeError);
+    expect(() => new PowerPool(NullWorker, { maxSize: -4 })).toThrow(TypeError);
+  });
+
+  it('keeps 0 legal for every size option, because scale-from-zero is real', () => {
+    // Clamping these to 1 would take away "start with nothing and grow on
+    // demand", which is a legitimate and useful configuration.
+    const pool = new PowerPool(NullWorker, { size: 0, minSize: 0, maxSize: 0 });
+    expect(pool.minSize).toBe(0);
+    expect(pool.maxSize).toBe(0);
+    pool.terminate();
+  });
+
+  it('still raises maxSize to at least minSize', () => {
+    const pool = new PowerPool(NullWorker, { minSize: 3, maxSize: 1 });
+    expect(pool.maxSize).toBe(3);
+    pool.terminate();
+  });
+
+  it('rejects a non-numeric idleTimeout', () => {
+    expect(() => new PowerPool(NullWorker, { idleTimeout: 'soon' })).toThrow(TypeError);
+    expect(() => new PowerPool(NullWorker, { idleTimeout: Number.NaN })).toThrow(TypeError);
+  });
+
+  it('keeps idleTimeout 0 and Infinity legal, both of which are meaningful', () => {
+    // 0 reaps aggressively; Infinity disables the idle reaper entirely.
+    const aggressive = new PowerPool(NullWorker, { idleTimeout: 0 });
+    expect(aggressive.idleTimeout).toBe(0);
+    aggressive.terminate();
+    const never = new PowerPool(NullWorker, { idleTimeout: Infinity });
+    expect(never.idleTimeout).toBe(Infinity);
+    never.terminate();
+  });
+
+  it('leaves maxTasksPerWorker unvalidated, because 0 is part of its contract', () => {
+    // Unlike the size options, `maxTasksPerWorker: 0` is finite - it never
+    // produces the NaN this guards against - and it means "every worker is
+    // immediately full", which existing tests rely on to force the queue path.
+    // Constraining it would change documented behaviour for tidiness.
+    const pool = new PowerPool(NullWorker, { maxTasksPerWorker: 0 });
+    expect(pool._maxTasksPerWorker).toBe(0);
+    pool.terminate();
   });
 });
