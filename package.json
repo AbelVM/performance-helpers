@@ -35,7 +35,7 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel Vázquez Montoro",
+  "author": "Abel V\u00e1zquez Montoro",
   "type": "module",
   "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
@@ -247,6 +247,7 @@
     "types:drift": "git diff --exit-code -- types",
     "check:bundle": "node scripts/check-bundle-exports.mjs",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.cjs",
+    "review:check": "node scripts/review-row.mjs --check",
     "verify": "npm run lint && npm run test && npm run test:types && npm run typecheck:ratchet && npm run build && npm run check:bundle && npm run types:generate && npm run types:drift",
     "prepublishOnly": "npm run verify",
     "changeset": "changeset",
