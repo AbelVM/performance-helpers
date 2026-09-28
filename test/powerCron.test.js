@@ -165,14 +165,14 @@ describe('PowerCron', () => {
       // not account for them. `fireCount` matching `invocations` is what
       // distinguishes this from 'run-once'.
       expect(fireCount).toBe(2);
-    });
+    }, 30_000); /* real timers: a 200ms event-loop stall plus a 300ms wait, with headroom for a loaded parallel run */
 
     it("'catch-up' replays every missed period, so no window is silently dropped", async () => {
       const { invocations } = await runThroughStall('catch-up');
       // ~STALL/INTERVAL missed periods, replayed, plus the stop. This is the
       // whole point of the policy: a job that must account for each period.
       expect(invocations).toBeGreaterThan(5);
-    });
+    }, 30_000); /* real timers: a 200ms event-loop stall plus a 300ms wait, with headroom for a loaded parallel run */
 
     it("'run-once' invokes the task once but still counts the work it stands in for", async () => {
       const { invocations, fireCount } = await runThroughStall('run-once');
@@ -182,7 +182,7 @@ describe('PowerCron', () => {
       // that work was coalesced rather than assume a clean single run. This is
       // the only observable difference between the two policies.
       expect(fireCount).toBeGreaterThan(5);
-    });
+    }, 30_000); /* real timers: a 200ms event-loop stall plus a 300ms wait, with headroom for a loaded parallel run */
 
     it("'catch-up' replays strictly more often than the other two", async () => {
       const [skip, replay] = await Promise.all([
@@ -190,7 +190,7 @@ describe('PowerCron', () => {
         runThroughStall('catch-up'),
       ]);
       expect(replay.invocations).toBeGreaterThan(skip.invocations * 2);
-    });
+    }, 30_000); /* real timers: a 200ms event-loop stall plus a 300ms wait, with headroom for a loaded parallel run */
 
     it('defaults to skip, accepts each documented policy, and falls back for an unknown one', () => {
       expect(new PowerCron(() => {}, { intervalMs: 100 })._catchUp).toBe('skip');

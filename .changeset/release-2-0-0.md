@@ -166,6 +166,19 @@ required is the worker reply shape.
 
 **Added**
 
+- **`PowerObserver` derived observables** — `derive(fn)`, `filter(predicate)`, `distinct()` and a static
+  `PowerObserver.combineLatest(a, b, …)`. `map()` mutates the observer's mapping and returns nothing, so these are the
+  pure counterparts: chains are built without disturbing the source. The upstream is subscribed **on first subscribe** and
+  released **on last unsubscribe**, so a chain of ten derived observers held by one consumer does not keep all ten upstreams
+  alive, and a consumer that unsubscribes and is collected takes them all with it. While nobody is subscribed a derived value is a
+  **snapshot, not a live value** — the cost of not subscribing, and the reason an unused chain is free. A derived inherits its
+  source's `async` mode, so `derive` on a synchronous observer delivers synchronously.
+
+  ```js
+  const label = user.derive((u) => u.name).filter((name) => name.length > 0);
+  const off = label.subscribe((name) => render(name));
+  ```
+
 - **`PowerCron`** — a drift-free interval scheduler, available from the root and as the
   `./powerCron` subpath for tree shaking. `setInterval` does not mean "every N ms"; it
   means "every N ms after the previous callback returned", so a run that overruns pushes

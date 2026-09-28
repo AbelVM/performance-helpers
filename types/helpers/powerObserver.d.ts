@@ -1,5 +1,20 @@
 export class PowerObserver {
     /**
+     * Combine several observers into one that emits whenever **any** of them
+     * changes, with the latest value of each.
+     *
+     * ```js
+     * const both = PowerObserver.combineLatest(a, b); // [a.value, b.value]
+     * ```
+     *
+     * Like every derived observer, it subscribes upstream on first use and releases
+     * on last unsubscribe.
+     *
+     * @param {...PowerObserver} sources
+     * @returns {PowerObserver}
+     */
+    static combineLatest(...sources: PowerObserver[]): PowerObserver;
+    /**
      * Create a new PowerObserver.
      * @param {*} initial Initial value
      * @param {PowerObserverOptions} options
@@ -39,6 +54,51 @@ export class PowerObserver {
      * @returns {void}
      */
     map(fn: ((value: any) => any) | null): void;
+    /**
+     * Create a **derived** observer: a new observer whose value is recomputed from
+     * this one, and which only exists as long as something subscribes to it.
+     *
+     * `map()` *mutates* this observer's mapping and returns nothing; this is the
+     * pure counterpart, so chains can be built without disturbing the source.
+     *
+     * ```js
+     * const label = user.derive((u) => u.name).filter((n) => n.length > 0);
+     * const off = label.subscribe((name) => render(name));
+     * ```
+     *
+     * **The upstream subscription is created on first subscribe and released on
+     * last unsubscribe.** That is the whole difficulty with derived observables
+     * and the reason a naive version leaks: a chain of ten `derive` calls held by
+     * one consumer keeps all ten upstreams alive, and a consumer that unsubscribes
+     * and is collected leaves every one of them running. Nothing is subscribed
+     * until someone asks, and everything is released when they stop.
+     *
+     * **While nobody is subscribed, the derived value is a snapshot, not a live
+     * value** — the value captured when the chain was built. That is the direct
+     * cost of not subscribing, and it is why a consumer that wants a live value has
+     * to subscribe.
+     *
+     * @param {(value:any, prev:any)=>any} fn - Derive the next value.
+     * @returns {PowerObserver} A new observer, already holding `fn(this.value)`.
+     */
+    derive(fn: (value: any, prev: any) => any): PowerObserver;
+    /**
+     * Only notify subscribers when `predicate` passes. The derived value is the
+     * last value that *passed*, so a filtered stream cannot be read as "the latest
+     * upstream value".
+     *
+     * @param {(value:any, prev:any)=>boolean} predicate
+     * @returns {PowerObserver}
+     */
+    filter(predicate: (value: any, prev: any) => boolean): PowerObserver;
+    /**
+     * Only notify when the value actually changes, using `Object.is` so `NaN`
+     * equals itself and `-0` does not equal `0`. This is per-derived-observer and
+     * does not change the source, unlike the `distinct` constructor option.
+     *
+     * @returns {PowerObserver}
+     */
+    distinct(): PowerObserver;
     /**
      * Flush any pending notification immediately. Useful for tests or shutdown.
      */
