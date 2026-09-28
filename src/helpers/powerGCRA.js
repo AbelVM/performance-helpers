@@ -25,7 +25,7 @@
  * @public
  */
 import { nowMs } from '../utils/now.js';
-import { assertLimit } from '../utils/options.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /**
  * @typedef {object} PowerGCRAOptions
@@ -57,8 +57,8 @@ export class PowerGCRA {
     if (!Number.isFinite(r) || r <= 0) {
       throw new TypeError('PowerGCRA: `rate` must be a finite number greater than 0');
     }
-    assertLimit(per, { name: 'per', className: 'PowerGCRA', min: 1, fallback: 1000 });
-    assertLimit(burst, { name: 'burst', className: 'PowerGCRA', min: 0, fallback: 0 });
+    assertLimitRequired(per, { name: 'per', className: 'PowerGCRA', min: 1, fallback: 1000 });
+    assertLimitRequired(burst, { name: 'burst', className: 'PowerGCRA', min: 0, fallback: 0 });
 
     this.rate = r;
     this.per = Number(per);

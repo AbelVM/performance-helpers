@@ -16,7 +16,7 @@
  * @typedef {import('./jsdoc-types.js').PowerThrottleOptions} PowerThrottleOptions
  */
 import { nowMs } from '../utils/now.js';
-import { assertLimit } from '../utils/options.js';
+import { assertLimitRequired } from '../utils/options.js';
 import { DEFAULT_REFILL_INTERVAL_MS, MS_PER_SEC } from './constants.js';
 
 export class PowerThrottle {
@@ -37,20 +37,20 @@ export class PowerThrottle {
     // `Math.max(0, Number(x) || 0)` accepted `capacity: 0` - a throttle that
     // can never succeed - and coerced NaN to 0 rather than surfacing it. Both
     // are configuration errors, so they throw.
-    this.capacity = assertLimit(capacity, {
+    this.capacity = assertLimitRequired(capacity, {
       name: 'capacity',
       className: 'PowerThrottle',
       min: 1,
       fallback: 1,
     });
     this.tokens = Number.isFinite(tokens) ? Math.min(this.capacity, tokens) : this.capacity;
-    this.refillRate = assertLimit(refillRate, {
+    this.refillRate = assertLimitRequired(refillRate, {
       name: 'refillRate',
       className: 'PowerThrottle',
       min: 0,
       fallback: 0,
     });
-    this.refillInterval = assertLimit(refillInterval, {
+    this.refillInterval = assertLimitRequired(refillInterval, {
       name: 'refillInterval',
       className: 'PowerThrottle',
       min: 1,

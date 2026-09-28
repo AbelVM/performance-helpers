@@ -1,4 +1,4 @@
-import { assertLimit } from '../utils/options.js';
+import { assertLimitRequired } from '../utils/options.js';
 /**
  * PowerQueue
  *
@@ -26,7 +26,7 @@ export class PowerQueue {
     // small request is rounded *up* rather than rejected - 1 and 2 are
     // legitimate hints. A non-finite or negative request is a configuration
     // error and now says so instead of silently becoming 16.
-    const requested = assertLimit(initialCapacity, {
+    const requested = assertLimitRequired(initialCapacity, {
       name: 'initialCapacity',
       className: 'PowerQueue',
       min: 0,

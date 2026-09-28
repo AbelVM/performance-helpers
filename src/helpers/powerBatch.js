@@ -14,7 +14,7 @@
  * // items are coalesced and handler called once in the next tick
  */
 import { PowerQueue } from './powerQueue.js';
-import { assertLimit } from '../utils/options.js';
+import { assertLimitRequired } from '../utils/options.js';
 import { PowerScheduler } from './powerScheduler.js';
 
 /**
@@ -42,7 +42,7 @@ export class PowerBatch {
     this._handler = handler;
     // `Number(maxSize) || Infinity` turned `maxSize: 0` into `Infinity` - a
     // batch that then never flushes, silently. Validate instead.
-    this._maxSize = assertLimit(maxSize, {
+    this._maxSize = assertLimitRequired(maxSize, {
       name: 'maxSize',
       className: 'PowerBatch',
       min: 1,

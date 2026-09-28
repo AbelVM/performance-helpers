@@ -12,10 +12,10 @@ export class PowerThrottle {
         refillRate?: number | undefined;
         refillInterval?: number | undefined;
     });
-    capacity: number | null | undefined;
-    tokens: number | null | undefined;
-    refillRate: number | null | undefined;
-    refillInterval: number | null | undefined;
+    capacity: number;
+    tokens: number;
+    refillRate: number;
+    refillInterval: number;
     _lastRefill: number;
     _tokenRemainder: number;
     /**

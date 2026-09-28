@@ -53,9 +53,9 @@ export class PowerCache {
         maxCleanupPerTick?: number | undefined;
         eagerCleanupOnRead?: boolean | undefined;
     }, ...args: any[]);
-    maxEntries: number | null | undefined;
-    maxWeight: number | null | undefined;
-    maxPoolSize: number | null | undefined;
+    maxEntries: number;
+    maxWeight: number;
+    maxPoolSize: number;
     weightFn: (arg0: any) => number;
     defaultTTL: number;
     rejectOversized: boolean;

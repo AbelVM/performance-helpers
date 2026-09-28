@@ -22,7 +22,7 @@ export class PowerBatch {
         scheduling?: "microtask" | "macrotask" | undefined;
     });
     _handler: Function;
-    _maxSize: number | null | undefined;
+    _maxSize: number;
     _queue: PowerQueue;
     _pending: {
         promise: Promise<any>;

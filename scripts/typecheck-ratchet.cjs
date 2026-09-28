@@ -36,23 +36,27 @@ const path = require('node:path');
  * The ceiling this repository is allowed to reach. Lower it whenever you fix
  * some. `scripts/typecheck-ratchet.cjs --update` prints the replacement line.
  *
- * 587 = `tsconfig.check.json` (internal `checkJs` debt, pre-existing)
+ * 563 = `tsconfig.check.json` (internal `checkJs` debt, pre-existing)
  *  28 = `tsconfig.types.json` (consumer-visible; every one of these is a real
  *       promise the package breaks, so they get fixed first)
  *
- * This ceiling was raised once, from 593, and the reason matters: the +22 were
- * not introduced by the change that raised it. `assertLimit` was declared
- * `@returns {number|any}`, which TypeScript collapses to `any`, and `any`
- * satisfies every downstream use - so it was hiding 25 real null-safety
- * diagnostics across `powerBatch`, `powerCache`, `powerQueue`,
- * `powerSlidingWindow` and `powerThrottle` (QUAL-008). Declaring the truthful
- * `number | null | undefined` made them countable, and it also stopped seven
- * public fields emitting as `any` in the shipped `types/*.d.ts`. The net is
- * worse-looking and better-informed: the debt is now visible and ratchets down
- * from 615. Restoring the `any` to keep the number small would be trading the
- * published types for a prettier metric.
+ * The history of this number is worth keeping, because the wrong move was
+ * available twice and taken neither time.
+ *
+ * It started at 593. Raising the JSDoc return type of `assertLimit` off
+ * `number|any` - which TypeScript collapses to `any`, and `any` satisfies
+ * everything - took it to 615, because it stopped hiding 25 real null-safety
+ * diagnostics (QUAL-009). The tempting response was to put the `any` back and
+ * keep the number small; that trades the published types for a prettier metric,
+ * so instead the ceiling was raised to match reality and the finding was filed.
+ *
+ * QUAL-009 is now fixed - `assertLimitRequired` gives the constructors a
+ * variant that genuinely returns `number` - which brought it to 591: two
+ * *below* where it started, because the `ESNext.Disposable` fix also removed
+ * two consumer-visible errors. Neither the baseline nor the debt is a vanity
+ * metric; they exist to make a regression impossible to miss.
  */
-const BASELINE = 615;
+const BASELINE = 591;
 
 const PROJECTS = [
   { label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' },

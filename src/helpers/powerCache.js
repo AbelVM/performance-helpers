@@ -36,7 +36,7 @@
  * @public
  */
 import { nowMs } from '../utils/now.js';
-import { assertFunction, assertLimit } from '../utils/options.js';
+import { assertFunction, assertLimitRequired } from '../utils/options.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import {
   DEFAULT_MAX_CLEANUP_PER_TICK,
@@ -124,19 +124,19 @@ export class PowerCache {
     // so eviction silently never ran and the cache grew without bound) or a
     // negative bound (which emptied the cache and kept it empty). Both are
     // configuration errors, so fail loudly.
-    this.maxEntries = assertLimit(maxEntries, {
+    this.maxEntries = assertLimitRequired(maxEntries, {
       name: 'maxEntries',
       className: 'PowerCache',
       min: 0,
       allowInfinity: true,
     });
-    this.maxWeight = assertLimit(maxWeight, {
+    this.maxWeight = assertLimitRequired(maxWeight, {
       name: 'maxWeight',
       className: 'PowerCache',
       min: 0,
       allowInfinity: true,
     });
-    this.maxPoolSize = assertLimit(maxPoolSize, {
+    this.maxPoolSize = assertLimitRequired(maxPoolSize, {
       name: 'maxPoolSize',
       className: 'PowerCache',
       min: 0,
