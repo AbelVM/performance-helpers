@@ -71,7 +71,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
 ### Await-response and targeted worker semantics
 
-When `options.awaitResponse` is requested, the pool tracks the outgoing request with a generated or provided `correlationId`. The returned Promise resolves only when a worker replies with a matching response payload. If the response never arrives, the Promise rejects when the optional `timeout` expires, and the internal pending entry is removed.
+When `options.awaitResponse` is requested, the pool tracks the outgoing request with a generated or provided `correlationId`. Generated ids look like `k3f9qz-1a2b` — a process-unique base-36 tag, a dash, and a process-monotonic base-36 sequence. They are unique across every pool in the process, so a shared log or a shared worker cannot confuse two pools' ids, and they carry no timestamp, so they do not leak anything about when a message was sent. **Do not parse them** — pass `options.correlationId` or `options.correlationIdFactory` if you need a shape you control. The returned Promise resolves only when a worker replies with a matching response payload. If the response never arrives, the Promise rejects when the optional `timeout` expires, and the internal pending entry is removed.
 
 When `options.workerId` is supplied, the pool routes the message to that worker only. Targeting a missing or currently saturated worker fails immediately rather than silently queuing the request. For `awaitResponse` callers this means the returned Promise rejects with an immediate failure instead of waiting in the queue.
 

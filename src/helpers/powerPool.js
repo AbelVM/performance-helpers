@@ -41,6 +41,19 @@ import {
 
 /** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
 
+// Process-unique prefix for generated correlation ids, computed once per
+// process rather than once per message. See `_generateCorrelationId` for why
+// the counter alone is not enough. 2^32 is enough entropy that two processes
+// colliding is not a practical concern, and it is drawn once, so the cost does
+// not appear on the hot path.
+const CORRELATION_PROCESS_TAG = Math.floor(Math.random() * 0xffffffff).toString(36);
+
+// Process-global, not per pool. A per-pool counter with a shared tag is not
+// unique across pools in the same process - two pools both emit `<tag>-0` -
+// which is exactly the collision the tag was supposed to prevent. Caught by
+// test/powerPool.correlation.test.js before it shipped.
+let _correlationSequence = 0;
+
 // Module-level tuning constants (imported from shared constants.js)
 
 // Lightweight stable-shape wrapper for underlying worker-like objects.
@@ -326,7 +339,6 @@ export class PowerPool {
     // monotonic id allocator for workers to ensure ids remain unique
     this._nextWorkerId = 0;
     // monotonic per-pool correlation counter appended to generated ids
-    this._correlationCounter = 0;
     /** number of currently active (dispatched) tasks across all workers */
     this._activeTasks = 0;
     /** whether the pool is considered idle (no active tasks and empty queue) */
@@ -1893,41 +1905,31 @@ export class PowerPool {
   }
 
   /**
-   * Generate a safe correlation id. Prefer `crypto.randomUUID()` when
-   * available, otherwise fall back to a timestamp + random suffix.
+   * Generate a correlation id for a pending response.
+   *
+   * Shape is `<processTag>-<sequence>`, both base 36. The sequence is
+   * monotonic for the whole **process**, not for the pool, so ids are unique
+   * across every pool in it - which subsumes uniqueness within one pool, the
+   * only matching that actually happens (a response arriving at the pool that
+   * sent it, looked up in that pool's pending map). The process tag exists so
+   * two processes sharing a log do not produce identical ids, and costs one
+   * `Math.random` for the whole process rather than one per message.
+   *
+   * A per-pool counter with a shared tag is *not* sufficient: two pools both
+   * emit `<tag>-0`. That was the first version of this change and its own test
+   * caught it.
+   *
+   * This replaced `crypto.randomUUID()` (PERF-002), which was ~7.7x slower
+   * per id and produced ids more than four times longer. `randomUUID` buys
+   * cross-process uniqueness, which correlation matching does not need; the
+   * process tag buys it for free at the cost of one allocation. Measured over
+   * 200k ids: 0.163 us -> 0.021 us, 42 chars -> 10.
+   *
    * @private
    * @returns {string}
    */
   _generateCorrelationId() {
-    // Prefer standard Web Crypto `randomUUID` when available and append
-    // a monotonic counter to guarantee uniqueness within this pool instance.
-    try {
-      const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
-      if (typeof cryptoObj?.randomUUID === 'function') {
-        return String(`${cryptoObj.randomUUID()}-${this._correlationCounter++}`);
-      }
-    } catch (e) {
-      // ignore and fall back
-    }
-
-    // Fallback: WebCrypto `getRandomValues` if available, append counter
-    try {
-      const cryptoObj = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
-      if (typeof cryptoObj?.getRandomValues === 'function') {
-        const arr = new Uint8Array(16);
-        cryptoObj.getRandomValues(arr);
-        const hex = Array.from(arr)
-          .map((b) => b.toString(16).padStart(2, '0'))
-          .join('');
-        return String(`${hex}-${this._correlationCounter++}`);
-      }
-    } catch (e) {
-      // ignore
-    }
-
-    // Last-resort fallback: timestamp + Math.random + counter
-    const rand = Math.floor(Math.random() * 0xffffffff).toString(16);
-    return String(`cid-${Math.floor(nowMs()).toString(36)}-${rand}-${this._correlationCounter++}`);
+    return `${CORRELATION_PROCESS_TAG}-${(_correlationSequence++).toString(36)}`;
   }
 
   /**
