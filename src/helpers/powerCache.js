@@ -45,6 +45,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   MS_PER_SEC,
   MAX_DEEP_EQUAL_DEPTH,
+  MAX_DEEP_EQUAL_NODES,
 } from './constants.js';
 
 /**
@@ -1002,7 +1003,8 @@ export class PowerCache {
    *        perform many deep-equality checks and want to avoid per-call allocations.
    * @returns {boolean}
    */
-  hasEqual(key, value, { ignoreExpiry = false, seen = undefined } = {}) {
+  hasEqual(key, value, options = {}) {
+    const { ignoreExpiry = false, seen = undefined } = options || {};
     const node = this._fetchValidNode(key, { ignoreExpiry });
     if (!node) return false;
     const stored = node.value;
@@ -1018,7 +1020,7 @@ export class PowerCache {
 
     // Delegate to module-level deep equality helper to avoid allocating a
     // new closure on every call. The deepEqual helper will handle cycles.
-    return deepEqual(stored, value, seen);
+    return deepEqual(stored, value, makeState({ ...options, seen }));
   }
 
   /**
@@ -1337,28 +1339,103 @@ export class PowerCache {
  * @private
  * @param {*} a
  * @param {*} b
- * @param {WeakMap} [seen]
- * @param {number} [depth=0]
+ * @param {*} state - Comparison state: cycle map, node budget, `compareFn`.
+ * @param {number} [depth=0] - Nesting depth, per *level* - not per element.
  * @returns {boolean}
  */
-function deepEqual(a, b, seen = undefined, depth = 0) {
+/**
+ * One comparison's mutable state: cycle map, depth, node budget and the
+ * caller's `compareFn`.
+ *
+ * A single object rather than the `(seen, depth)` pair it replaced, so a
+ * top-level comparison allocates once instead of threading two parallel
+ * parameters through six recursion sites.
+ *
+ * @param {{compareFn?: ?function(*, *): (boolean|undefined), maxNodes?: number, seen?: WeakMap<object, WeakSet<object>>}|undefined} [options]
+ * @returns {{seen: ?WeakMap<object, WeakSet<object>>, nodes: number, maxNodes: number, compareFn: ?function(*, *): (boolean|undefined), exhausted: boolean}}
+ * @private
+ */
+function makeState(options) {
+  const o = options || {};
+  return {
+    seen: o.seen ?? null,
+    nodes: 0,
+    maxNodes: Number.isFinite(o.maxNodes)
+      ? Math.max(1, Math.floor(Number(o.maxNodes)))
+      : MAX_DEEP_EQUAL_NODES,
+    compareFn: typeof o.compareFn === 'function' ? o.compareFn : null,
+    exhausted: false,
+  };
+}
+
+/**
+ * Deep equality for cache values, with a cycle guard and two explicit limits.
+ *
+ * Module scope so `hasEqual` does not allocate a closure per call.
+ *
+ * @param {*} a
+ * @param {*} b
+ * @param {{seen: ?WeakMap<object, WeakSet<object>>, nodes: number, maxNodes: number, compareFn: ?function(*, *): (boolean|undefined), exhausted: boolean}} state
+ *   Comparison state: cycle map, node budget, `compareFn`, exhaustion flag.
+ * @param {number} [depth=0] - Nesting depth, counted per *level* and not per
+ *   element. Counting per element was a real bug: a flat 101-element array of
+ *   objects exhausted the limit, and every remaining pair fell back to
+ *   reference equality, so two structurally identical copies compared as
+ *   **unequal** and the entry could never be found.
+ * @returns {boolean} `false` if the comparison ran out of budget - the safe
+ *   direction for a cache, where a false negative costs a recompute and a false
+ *   positive returns the wrong value.
+ * @private
+ */
+function deepEqual(a, b, state, depth = 0) {
   if (depth > MAX_DEEP_EQUAL_DEPTH) {
     // Fall back to reference equality when we've recursed too deep.
     return a === b;
   }
+  // Width budget, not just depth (PERF-004). `MAX_DEEP_EQUAL_DEPTH` bounds how
+  // *deep* a comparison goes and says nothing about how *wide* it is: a
+  // one-million-element array of scalars recurses at depth 2 and never trips
+  // the depth limit, and comparing two of them measured 37 ms. `hasEqual` is a
+  // cache lookup, so that is 37 ms of blocked event loop on a path a caller
+  // reaches by accident. The budget bounds the work instead.
+  //
+  // Truncation reports **false**, not `true`. A false negative costs a
+  // recompute; a false positive hands back the wrong value, and this is a
+  // cache. `exhausted` makes the answer sticky so a run that ran out of budget
+  // cannot be rescued by a later leaf that happens to match.
+  if (state.exhausted) return false;
+  if (state.nodes >= state.maxNodes) {
+    state.exhausted = true;
+    return false;
+  }
+  state.nodes += 1;
 
+  // Reference equality, *after* the budget. A width budget that exempts
+  // reference-equal pairs is not a width budget: two equal arrays of a million
+  // scalars are a million reference comparisons, and exempting each one is
+  // exactly the unbounded work the budget exists to stop. Rationing it means
+  // such a pair reports `false` - a cache miss, a recompute - which is the
+  // cheap way to be wrong.
   if (a === b) return true;
+
+  // Escape hatch for values this walk cannot model: classes with private state,
+  // domain objects, anything with its own notion of equality. Returning
+  // `undefined` means "no opinion" and the walk continues.
+  if (state.compareFn) {
+    const verdict = state.compareFn(a, b);
+    if (verdict !== undefined) return Boolean(verdict);
+  }
   if (a == null || b == null) return a === b;
   const ta = typeof a,
     tb = typeof b;
   if (ta !== 'object' || tb !== 'object') return a === b;
 
-  if (!seen) seen = new WeakMap();
-  let mapForA = seen.get(a);
+  if (!state.seen) state.seen = new WeakMap();
+  let mapForA = state.seen.get(a);
   if (mapForA?.has(b)) return true;
   if (!mapForA) {
     mapForA = new WeakSet();
-    seen.set(a, mapForA);
+    state.seen.set(a, mapForA);
   }
   mapForA.add(b);
 
@@ -1375,7 +1452,7 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
   // Arrays
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i], seen, depth + 1)) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i], state, depth + 1)) return false;
     return true;
   }
 
@@ -1414,7 +1491,7 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
     if (!(b instanceof Map) || a.size !== b.size) return false;
     for (const [k, v] of a) {
       if (!b.has(k)) return false;
-      if (!deepEqual(v, b.get(k), seen, depth + 1)) return false;
+      if (!deepEqual(v, b.get(k), state, depth + 1)) return false;
     }
     return true;
   }
@@ -1493,7 +1570,7 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
         const cand = sigMap.get(sigA) || [];
         for (const idx of cand) {
           if (used[idx]) continue;
-          if (deepEqual(itemA, bItems[idx], seen, depth + 1)) {
+          if (deepEqual(itemA, bItems[idx], state, depth + 1)) {
             used[idx] = true;
             found = true;
             break;
@@ -1505,7 +1582,7 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
       // fallback structural scan across any remaining unmatched bItems
       for (let i = 0; i < bItems.length; i++) {
         if (used[i]) continue;
-        if (deepEqual(itemA, bItems[i], seen, depth + 1)) {
+        if (deepEqual(itemA, bItems[i], state, depth + 1)) {
           used[i] = true;
           found = true;
           break;
@@ -1523,7 +1600,7 @@ function deepEqual(a, b, seen = undefined, depth = 0) {
   for (let i = 0; i < keysA.length; i++) {
     const k = keysA[i];
     if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
-    if (!deepEqual(a[k], b[k], seen, depth + 1)) return false;
+    if (!deepEqual(a[k], b[k], state, depth + 1)) return false;
   }
   return true;
 }

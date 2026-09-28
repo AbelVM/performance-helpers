@@ -250,6 +250,42 @@ const memo = pm.memoize(fetchUserFn);
 await memo(1);
 ```
 
+### `hasEqual` and deep comparison limits
+
+`hasEqual(key, value, options)` deep-compares a stored value against an
+incoming one. It has two explicit limits and an escape hatch.
+
+| Option | Type | Default | Description |
+|---|---:|---:|---|
+| `ignoreExpiry` | `boolean` | `false` | Treat an expired entry as present. |
+| `seen` | `WeakMap` | — | Reusable cycle map, for callers doing many comparisons. |
+| `maxNodes` | `number` | `10000` | Ceiling on how many pairs one comparison will examine. |
+| `compareFn` | `function` | `null` | `(a, b) => boolean \| undefined`. Return `undefined` for "no opinion" and the walk continues. |
+
+**Why a node budget, not just a depth limit.** Depth says nothing about width: a
+flat array of 50 000 scalars recurses at *depth 2* and never trips a depth limit,
+and comparing two of them blocked the event loop for tens of milliseconds on what
+a caller expects to be a cache lookup. Measured after the change, that comparison
+is bounded and reports `false`.
+
+**Truncation reports `false`, not `true`.** A false negative costs a recompute; a
+false positive hands back the wrong value, and this is a cache. The same applies
+if you lower `maxNodes` yourself — a value larger than the budget reports "not
+equal", not a guess.
+
+**Reference equality is never rationed.** Passing the *same* object back is
+answered from `a === b` before any budget arithmetic, so storing and re-reading
+a large value by reference is still a hit at any `maxNodes`.
+
+**`compareFn` is for values the walk cannot model** — private fields, domain
+objects, anything with its own notion of equality:
+
+```javascript
+cache.hasEqual('token', incoming, {
+  compareFn: (a, b) => (a instanceof Token && b instanceof Token ? a.id === b.id : undefined),
+});
+```
+
 ### Fast key resolver
 
 For hot paths where most calls use simple scalar arguments (ids, numbers, short strings),

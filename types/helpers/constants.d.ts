@@ -3,6 +3,20 @@ export const MS_PER_MIN: number;
 export const DEFAULT_TIMEOUT_MS: number;
 export const DEFAULT_MAX_CLEANUP_PER_TICK: 100;
 export const MAX_DEEP_EQUAL_DEPTH: 100;
+/**
+ * Ceiling on how many *nodes* one `hasEqual` deep comparison will visit.
+ *
+ * `MAX_DEEP_EQUAL_DEPTH` bounds depth and says nothing about width, so a wide
+ * flat value - an array of a million scalars, say - recurses at depth 2, never
+ * trips the depth limit, and blocks the event loop for tens of milliseconds
+ * on what a caller expects to be a cache lookup. This bounds the work instead.
+ *
+ * Exceeding it degrades to reference equality, which is the same contract the
+ * depth limit already used: the answer becomes less thorough, never wrong.
+ * 10_000 nodes is far beyond any hand-written comparison and well inside a
+ * tick, which is the whole point - a cache lookup should not cost 37 ms.
+ */
+export const MAX_DEEP_EQUAL_NODES: 10000;
 export const DEFAULT_RETRY_BASE_DELAY_MS: 100;
 export const DEFAULT_RETRY_MAX_DELAY_MS: 10000;
 export const DEFAULT_REAPER_MIN_INTERVAL_MS: 1000;

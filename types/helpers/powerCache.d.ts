@@ -402,7 +402,7 @@ export class PowerCache {
      *        perform many deep-equality checks and want to avoid per-call allocations.
      * @returns {boolean}
      */
-    hasEqual(key: any, value: any, { ignoreExpiry, seen }?: {
+    hasEqual(key: any, value: any, options?: {
         ignoreExpiry?: boolean | undefined;
         seen?: WeakMap<any, any> | undefined;
     }): boolean;

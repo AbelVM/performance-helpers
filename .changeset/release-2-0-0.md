@@ -141,6 +141,29 @@ required is the worker reply shape.
   resolve a Node builtin. Internal timer is `unref()`d, so a monitor you forget
   to dispose cannot hang a CLI.
 
+**Fixed**
+
+- **`hasEqual` counted its depth limit per array *element* instead of per nesting
+  *level*.** A flat array of 101 objects exhausted `MAX_DEEP_EQUAL_DEPTH` (100),
+  and every remaining pair fell back to reference equality — so two
+  structurally identical copies compared as **unequal**, and such an entry was
+  unfindable through `hasEqual` for as long as it lived in the cache. For
+  scalars the bug was invisible; for objects it silently disabled the API.
+
+**Added**
+
+- `hasEqual` gains a **width budget** (`maxNodes`, default 10 000) alongside the
+  depth limit, because depth says nothing about width: a flat 50 000-element
+  comparison recurses at depth 2, never trips a depth limit, and blocked the
+  event loop for tens of milliseconds on what a caller expects to be a cache
+  lookup. Truncation reports **false**, never `true` — a false negative costs a
+  recompute, a false positive returns the wrong value, and this is a cache.
+  Reference equality is answered before any budget arithmetic, so passing the
+  same object back is still a hit at any `maxNodes`.
+- `hasEqual` gains a **`compareFn`** escape hatch for values the structural walk
+  cannot model — private fields, domain objects, anything with its own notion of
+  equality. Return `undefined` for "no opinion" and the walk continues.
+
 **Types**
 
 The shipped `types/*.d.ts` are what TypeScript consumers actually compile, and
