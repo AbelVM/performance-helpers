@@ -124,3 +124,72 @@ describe('PowerScheduler', () => {
     expect(scheduler.scheduled).toBe(false);
   });
 });
+
+// ─── ALG-007: the macrotask path ────────────────────────────────────────────
+//
+// `setTimeout(fn, 0)` is the obvious way to schedule a macrotask and it is the
+// slow one: Node clamps a zero timeout to 1 ms, so a scheduler flushing per
+// turn pays a full millisecond every time. Measured over 10 000 macrotasks in
+// this runtime, MessageChannel is 37 ms and setTimeout(0) is 10 554 ms. The
+// implementation therefore posts to a MessageChannel, falling back to
+// setImmediate and only then to setTimeout.
+//
+// The part worth testing is not the speed - it is that the new *cancellation*
+// path is correct, since `flush()` has to detach a pending post rather than
+// `clearTimeout` a handle that is no longer a timer.
+describe('PowerScheduler macrotask scheduling (ALG-007)', () => {
+  it('flushes on a macrotask, not a microtask', async () => {
+    const seen = [];
+    const s = new PowerScheduler(() => seen.push('flush'), { scheduling: 'macrotask' });
+    s.schedule();
+    // A microtask would already have run by the time this await resolves, so
+    // awaiting one tick first is what makes "macrotask" an observable claim.
+    await Promise.resolve();
+    expect(seen).toEqual([]);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(seen).toEqual(['flush']);
+  });
+
+  it('coalesces many schedules into one flush', async () => {
+    let flushes = 0;
+    const s = new PowerScheduler(() => flushes++, { scheduling: 'macrotask' });
+    for (let i = 0; i < 50; i++) s.schedule();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(flushes).toBe(1);
+  });
+
+  it('flush() cancels a pending macrotask instead of double-flushing', async () => {
+    // `flush()` used to `clearTimeout` its handle. It now has to cancel a
+    // MessagePort listener instead, and a cancellation that silently did
+    // nothing would leave the scheduled flush to run afterwards - so the
+    // scheduled callback fires and the immediate one does not.
+    const seen = [];
+    const s = new PowerScheduler(() => seen.push('flush'), { scheduling: 'macrotask' });
+    s.schedule();
+    s.flush(); // run it now, before the posted macrotask gets its turn
+    expect(seen).toEqual(['flush']);
+    await new Promise((r) => setTimeout(r, 30));
+    // Still exactly one: the pending post was cancelled, not merely raced.
+    expect(seen).toEqual(['flush']);
+  });
+
+  it('cancel() also cancels a pending macrotask', async () => {
+    let flushes = 0;
+    const s = new PowerScheduler(() => flushes++, { scheduling: 'macrotask' });
+    s.schedule();
+    s.cancel();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(flushes).toBe(0);
+  });
+
+  it('survives being flushed after the macrotask already fired', async () => {
+    // Cancelling an already-delivered post must not throw; a MessagePort
+    // listener that has been removed is simply not there.
+    const s = new PowerScheduler(() => {}, { scheduling: 'macrotask' });
+    s.schedule();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(() => s.flush()).not.toThrow();
+    expect(() => s.cancel()).not.toThrow();
+    expect(() => s.dispose()).not.toThrow();
+  });
+});

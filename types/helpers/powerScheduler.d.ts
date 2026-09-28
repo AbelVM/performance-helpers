@@ -1,13 +1,3 @@
-/**
- * PowerScheduler
- *
- * Small scheduler helper for coalescing work into a single microtask or macrotask.
- * Useful for batching or debouncing flushes while providing `schedule()`,
- * `flush()` and `cancel()` controls.
- *
- * @class PowerScheduler
- * @public
- */
 export class PowerScheduler {
     /**
      * @param {Function} flushFn Function called when the scheduled work is flushed.
@@ -22,7 +12,7 @@ export class PowerScheduler {
     _scheduling: string;
     _onError: ((error: unknown) => void) | null;
     _scheduled: boolean;
-    _timer: number | null;
+    _timer: MacrotaskHandle | null;
     /** Whether a flush is currently scheduled. */
     get scheduled(): boolean;
     /**
@@ -66,3 +56,6 @@ export class PowerScheduler {
      */
     [Symbol.dispose](): void;
 }
+export type MacrotaskHandle = {
+    cancel: () => void;
+};

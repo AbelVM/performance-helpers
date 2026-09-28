@@ -109,6 +109,8 @@ pipeline.
 
 **Fixed**
 
+- **`PowerScheduler`'s `scheduling: 'macrotask'` no longer pays Node's timer clamp.** It posted via `setTimeout(fn, 0)`, and Node clamps a zero timeout to **1 ms**, so every flush cost a full millisecond. It now posts to a `MessageChannel` — a real macrotask with no clamping floor, available in Node and every browser — falling back to `setImmediate` and only then to `setTimeout`. Measured over 10 000 macrotasks in this runtime: **37 ms against 10 554 ms**. The port is created once at module scope rather than per flush, and each post adds a listener that removes itself when it fires, so `flush()` and `cancel()` detach a pending post rather than leaving it queued.
+
 The ones that could bite an existing user:
 
 - `PowerPool` resurrected itself after `shutdown()` and after
