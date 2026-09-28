@@ -10,6 +10,10 @@
  */
 export function preloadNode(): Promise<void>;
 export default WorkerAgnostic;
+/**
+ * A CommonJS-style `require`, synthesised in pure-ESM Node.
+ */
+export type NodeRequire = (arg0: string) => any;
 declare class WorkerAgnostic {
     /**
      * Transparently create the underlying native worker without wrapping it in a

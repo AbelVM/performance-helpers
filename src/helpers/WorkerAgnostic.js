@@ -22,7 +22,15 @@
 // through an opaque dynamic import cached at module scope. The browser never
 // executes this because `detectEnv()` never returns 'node' there, so the Node
 // builtin is never requested and bundlers never see it.
+/** @type {NodeRequire|null} */
+/**
+ * A CommonJS-style `require`, synthesised in pure-ESM Node.
+ *
+ * @typedef {function(string): *} NodeRequire
+ */
+
 let _nodeRequire = null;
+/** @type {Promise<NodeRequire>|null} */
 let _nodeRequirePromise = null;
 
 function _loadNodeRequire() {
@@ -204,7 +212,13 @@ function coerceFactoryResult(result, WorkerCtor, options, env) {
       ? new (typeof WorkerCtor === 'function' ? WorkerCtor() : WorkerCtor)(result, options)
       : createWebWorkerFromString(result, options);
   }
-  return result && typeof result === 'object' ? result : {};
+  return result && typeof result === 'object'
+    ? /** @type {import('./jsdoc-types.js').WorkerLike} */ (result)
+    : // Nothing usable came back. Deliberately an empty object rather than a
+      // throw, because the caller only reaches this when the environment could
+      // not resolve a worker, and an opaque failure is what it is guarding
+      // against - but it is not a WorkerLike, so it is cast explicitly.
+      /** @type {*} */ ({});
 }
 
 /**
