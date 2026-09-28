@@ -42,7 +42,7 @@ export class PowerCache {
     maxEntries: number;
     maxWeight: number;
     maxPoolSize: number;
-    weightFn: (arg0: any) => number;
+    weightFn: ((arg0: any) => number) | null;
     defaultTTL: number;
     rejectOversized: boolean;
     onEvict: ((arg0: any, arg1: any, arg2: string) => void) | null;

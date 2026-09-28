@@ -268,18 +268,18 @@ export {};
  * @typedef {Object} PowerCacheOptions
  * @property {number} [maxEntries]
  * @property {number} [maxWeight]
- * @property {function(*):number} [weightFn]
+ * @property {?(function(*):number)} [weightFn]
  * @property {number} [defaultTTL]
  * @property {number} [maxPoolSize]
  * @property {boolean} [rejectOversized]
- * @property {function(*, *, string):void} [onEvict]
- * @property {function(*, *):void} [onExpire]
+ * @property {?(function(*, *, string):void)} [onEvict]
+ * @property {?(function(*, *):void)} [onExpire]
  * @property {number} [initialPoolSize]
  * @property {number} [maxCleanupPerTick]
  * @property {boolean} [eagerCleanupOnRead]
  * @property {number} [defaultAsyncTimeout] - Default timeout (ms) applied to
  *   `getOrSetAsync` when a caller omits its own `timeout`.
- * @property {function(*, string):void} [onError] - Invoked as `onError(err, message)`
+ * @property {?(function(*, string):void)} [onError] - Invoked as `onError(err, message)`
  *   whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`
  *   callback, or a failing `weightFn`.
  * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits

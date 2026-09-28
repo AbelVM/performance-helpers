@@ -99,9 +99,7 @@ export class PowerCache {
     defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
     maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
     rejectOversized = false,
-    /** @type {?(function(*, *, string):void)} */
     onEvict = null,
-    /** @type {?(function(*, *):void)} */
     onExpire = null,
     initialPoolSize = 0,
     maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
@@ -110,7 +108,6 @@ export class PowerCache {
     defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
     // invoked as onError(err, message) whenever an internal failure is
     // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
-    /** @type {?(function(*, string):void)} */
     onError = null,
     /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
     policy = 'lru',

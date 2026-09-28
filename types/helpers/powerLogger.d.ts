@@ -28,18 +28,18 @@ export class PowerLogger {
     /**
      * Create a PowerLogger instance.
      * @param {number} [level=0] Initial debug level (0..3)
-     * @param {Object} [options]
-     * @param {'text'|'json'} [options.format='text'] Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format, name }).
+     * @param {PowerLoggerOptions} [options] - The `PowerLoggerOptions` typedef
+     *   already existed and already declared `name`/`formatter`/`output`; the
+     *   constructor was taking a bare `{Object}` instead, which is why reading
+     *   any of them was an error and a custom sink needed a cast.
      */
-    constructor(level?: number, options?: {
-        format?: "text" | "json" | undefined;
-    });
+    constructor(level?: number, options?: PowerLoggerOptions);
     _debugLevel: number;
     _counters: any;
     _format: "text" | "json";
-    name: any;
-    _formatter: any;
-    _output: any;
+    name: string | null;
+    _formatter: ((payload: Object) => string | Object | null) | null;
+    _output: ((payload: Object | string) => void) | null;
     /**
      * Set the global debug level.
      * @param {number} level - Integer in range 0..3

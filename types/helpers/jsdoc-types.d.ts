@@ -313,12 +313,12 @@ export type CacheNode = {
 export type PowerCacheOptions = {
     maxEntries?: number | undefined;
     maxWeight?: number | undefined;
-    weightFn?: ((arg0: any) => number) | undefined;
+    weightFn?: ((arg0: any) => number) | null | undefined;
     defaultTTL?: number | undefined;
     maxPoolSize?: number | undefined;
     rejectOversized?: boolean | undefined;
-    onEvict?: ((arg0: any, arg1: any, arg2: string) => void) | undefined;
-    onExpire?: ((arg0: any, arg1: any) => void) | undefined;
+    onEvict?: ((arg0: any, arg1: any, arg2: string) => void) | null | undefined;
+    onExpire?: ((arg0: any, arg1: any) => void) | null | undefined;
     initialPoolSize?: number | undefined;
     maxCleanupPerTick?: number | undefined;
     eagerCleanupOnRead?: boolean | undefined;
@@ -332,7 +332,7 @@ export type PowerCacheOptions = {
      * whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`
      * callback, or a failing `weightFn`.
      */
-    onError?: ((arg0: any, arg1: string) => void) | undefined;
+    onError?: ((arg0: any, arg1: string) => void) | null | undefined;
     /**
      * - Eviction policy. `'slru'` (opt-in) splits
      * the list into probation and protected segments and promotes on access, which

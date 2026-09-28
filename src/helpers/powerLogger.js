@@ -90,8 +90,10 @@ export class PowerLogger {
   /**
    * Create a PowerLogger instance.
    * @param {number} [level=0] Initial debug level (0..3)
-   * @param {Object} [options]
-   * @param {'text'|'json'} [options.format='text'] Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format, name }).
+   * @param {PowerLoggerOptions} [options] - The `PowerLoggerOptions` typedef
+   *   already existed and already declared `name`/`formatter`/`output`; the
+   *   constructor was taking a bare `{Object}` instead, which is why reading
+   *   any of them was an error and a custom sink needed a cast.
    */
   constructor(level = 0, options = {}) {
     this._debugLevel = 0;
