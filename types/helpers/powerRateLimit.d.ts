@@ -27,6 +27,20 @@
  */
 export class PowerRateLimit {
     /**
+    /**
+   * The slice of a limiter's surface that `PowerRateLimit` composes.
+   *
+   * Declared as an interface rather than `Object` because the composer's whole
+   * job is calling these three members; typing the array as `Object[]` made every
+   * one of those calls an error and, worse, meant a limiter that only had
+   * `tryConsume` would still be accepted.
+   *
+   * @typedef {Object} RateLimiterLike
+   * @property {function(number=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume
+   * @property {function(number=): (number|boolean)} [reserve]
+   * @property {number} [available]
+   */
+    /**
      * @param {Array<Object>} limiters - Array of limiter instances implementing
      *   `tryConsume(n)` and preferably `available()`.
      * @param {Object} [options]
@@ -39,7 +53,15 @@ export class PowerRateLimit {
     constructor(limiters?: Array<Object>, options?: {
         atomic?: boolean | undefined;
     });
-    limiters: Object[];
+    /** @type {RateLimiterLike[]} */
+    limiters: {
+        tryConsume: (arg0: number | undefined) => (boolean | {
+            ok: boolean;
+            retryAfterMs?: number;
+        });
+        reserve?: ((arg0?: number | undefined) => (number | boolean)) | undefined;
+        available?: number | undefined;
+    }[];
     atomicDefault: boolean;
     /**
      * Try to consume `n` tokens across all limiters. Returns true only when

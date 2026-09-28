@@ -47,6 +47,30 @@ import { nowMs } from '../utils/now.js';
  */
 
 /**
+ * A live subscription record, as the hub stores it.
+ *
+ * `SubscriberOptions` describes what a caller may pass; this is what the hub
+ * keeps after merging in the per-hub defaults. The two maps holding them were
+ * typed `object`, so `id`, `topic`, `queue`, `dropped`, `inFlight`, `maxQueue`,
+ * `slowConsumer` and `closed` did not exist at any of the ~30 places the hub
+ * reads them.
+ *
+ * @typedef {object} HubSubscriber
+ * @property {string} id
+ * @property {string} topic
+ * @property {{push: function(*): number, size: number|(() => number)}} queue
+ *   Bounded buffer for this subscriber.
+ * @property {number} dropped - Messages discarded by the slow-consumer policy.
+ * @property {number} inFlight - Sends currently awaiting the transport.
+ * @property {number} maxQueue
+ * @property {number} maxBatch
+ * @property {SlowConsumerPolicy} slowConsumer
+ * @property {boolean} closed
+ * @property {Function} [handler]
+ * @property {Function} [unsubscribe]
+ */
+
+/**
  * @typedef {object} SubscriberOptions
  * @property {number} [maxQueue=64] - Maximum messages buffered for this
  *   subscriber before the slow-consumer policy applies. `0` disables queueing
@@ -129,9 +153,9 @@ export class PowerRealtimeHub {
     this._onError = typeof onError === 'function' ? onError : null;
     this._now = typeof now === 'function' ? now : nowMs;
 
-    /** @type {Map<string, Map<string, object>>} topic -> subscriberId -> sub */
+    /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
     this._topics = new Map();
-    /** @type {Map<string, object>} subscriberId -> sub */
+    /** @type {Map<string, HubSubscriber>} subscriberId -> sub */
     this._subs = new Map();
     /** @type {Map<string, any[]>} topic -> retained messages (bounded) */
     this._retained = new Map();

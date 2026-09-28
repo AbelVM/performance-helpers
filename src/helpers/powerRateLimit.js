@@ -28,6 +28,21 @@
  */
 export class PowerRateLimit {
   /**
+  /**
+ * The slice of a limiter's surface that `PowerRateLimit` composes.
+ *
+ * Declared as an interface rather than `Object` because the composer's whole
+ * job is calling these three members; typing the array as `Object[]` made every
+ * one of those calls an error and, worse, meant a limiter that only had
+ * `tryConsume` would still be accepted.
+ *
+ * @typedef {Object} RateLimiterLike
+ * @property {function(number=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume
+ * @property {function(number=): (number|boolean)} [reserve]
+ * @property {number} [available]
+ */
+
+  /**
    * @param {Array<Object>} limiters - Array of limiter instances implementing
    *   `tryConsume(n)` and preferably `available()`.
    * @param {Object} [options]
@@ -39,6 +54,12 @@ export class PowerRateLimit {
    */
   constructor(limiters = [], options = {}) {
     if (!Array.isArray(limiters)) throw new TypeError('limiters must be an array');
+    // `Array<Object>` was the declared type, and the body then calls
+    // `tryConsume`, `reserve` and reads `available` on each element - none of
+    // which exist on `Object`. Typed as the interface the body actually
+    // uses, so a limiter missing one of them is caught where it is stored
+    // rather than at every call site.
+    /** @type {RateLimiterLike[]} */
     this.limiters = limiters.slice();
     this.atomicDefault = Boolean(options.atomic);
   }

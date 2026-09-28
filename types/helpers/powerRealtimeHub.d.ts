@@ -10,10 +10,10 @@ export class PowerRealtimeHub {
     _codec: "json" | "raw";
     _onError: ((arg0: Error, arg1: object) => void) | null;
     _now: () => number;
-    /** @type {Map<string, Map<string, object>>} topic -> subscriberId -> sub */
-    _topics: Map<string, Map<string, object>>;
-    /** @type {Map<string, object>} subscriberId -> sub */
-    _subs: Map<string, object>;
+    /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
+    _topics: Map<string, Map<string, HubSubscriber>>;
+    /** @type {Map<string, HubSubscriber>} subscriberId -> sub */
+    _subs: Map<string, HubSubscriber>;
     /** @type {Map<string, any[]>} topic -> retained messages (bounded) */
     _retained: Map<string, any[]>;
     _flushScheduled: boolean;
@@ -151,6 +151,40 @@ export default PowerRealtimeHub;
  *   loose so it reconnects with fresh state.
  */
 export type SlowConsumerPolicy = "drop-oldest" | "drop-newest" | "disconnect";
+/**
+ * A live subscription record, as the hub stores it.
+ *
+ * `SubscriberOptions` describes what a caller may pass; this is what the hub
+ * keeps after merging in the per-hub defaults. The two maps holding them were
+ * typed `object`, so `id`, `topic`, `queue`, `dropped`, `inFlight`, `maxQueue`,
+ * `slowConsumer` and `closed` did not exist at any of the ~30 places the hub
+ * reads them.
+ */
+export type HubSubscriber = {
+    id: string;
+    topic: string;
+    /**
+     *   Bounded buffer for this subscriber.
+     */
+    queue: {
+        push: (arg0: any) => number;
+        size: number | (() => number);
+    };
+    /**
+     * - Messages discarded by the slow-consumer policy.
+     */
+    dropped: number;
+    /**
+     * - Sends currently awaiting the transport.
+     */
+    inFlight: number;
+    maxQueue: number;
+    maxBatch: number;
+    slowConsumer: SlowConsumerPolicy;
+    closed: boolean;
+    handler?: Function | undefined;
+    unsubscribe?: Function | undefined;
+};
 export type SubscriberOptions = {
     /**
      * - Maximum messages buffered for this
