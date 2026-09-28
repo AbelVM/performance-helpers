@@ -9,8 +9,36 @@
 import { describe, it, expect } from 'vitest';
 import { SmallLfuSketch } from '../src/utils/smallLfu.js';
 
-/** A sketch large enough that distinct keys do not collide. */
+/**
+ * A sketch with the half-life reset effectively disabled, for tests that assert
+ * exact counter values.
+ *
+ * `sampleSize: 1e9` is the right tool for *counter arithmetic* — a test that
+ * increments 200 times and expects exactly 15 needs the sketch not to have been
+ * halved on the way. It is the wrong tool for anything that asserts a property
+ * the cache actually depends on, because the production half-life is
+ * `200 * maxEntries` and a reset never fires in a test-sized run.
+ *
+ * **This distinction is not cosmetic.** Every test in this file originally used
+ * this one helper, including `distinguishes keys by how often they were seen` —
+ * the headline property, and the one that should have caught the broken
+ * admission rule. A sketch with no reset behaves correctly, so the suite passed
+ * while the shipped feature refused every cold-start admission. Use
+ * `realistic()` for anything about frequency *ranking*; use this only for the
+ * arithmetic.
+ */
 const wide = (opts) => new SmallLfuSketch({ width: 1024, depth: 4, sampleSize: 1e9, ...opts });
+
+/**
+ * A sketch with a production-shaped half-life: wide enough that distinct keys
+ * do not collide, and a `sampleSize` a real cache would use relative to a
+ * realistically-sized working set. Resets fire, as they do in production.
+ *
+ * @param {Object} [opts] - Overrides, e.g. `seed`.
+ * @returns {SmallLfuSketch}
+ */
+const realistic = (opts) =>
+  new SmallLfuSketch({ width: 1024, depth: 4, sampleSize: 200 * 40, ...opts });
 
 describe('SmallLfuSketch', () => {
   it('distinguishes keys by how often they were seen', () => {
@@ -28,6 +56,41 @@ describe('SmallLfuSketch', () => {
     expect(s.estimate('cold')).toBe(1);
     expect(s.estimate('hot')).toBeGreaterThan(s.estimate('warm'));
     expect(s.estimate('warm')).toBeGreaterThan(s.estimate('cold'));
+  });
+
+  it('still ranks a recurring key above a one-shot key once the half-life is live', () => {
+    // The property the *cache* depends on, at a production-shaped half-life.
+    // The test above is arithmetic and needs the reset disabled; this one is the
+    // behaviour, and it is the test whose absence let a broken admission rule
+    // ship behind a fully green suite.
+    const s = realistic({ seed: 3 });
+    const hot = Array.from({ length: 40 }, (_, i) => `hot:${i}`);
+    // Each round: every hot key once, then a burst of one-shot scan keys. The
+    // scan is what a frequency filter exists to reject, so it has to be present
+    // for the ranking to mean anything.
+    for (let round = 0; round < 40; round += 1) {
+      for (const k of hot) s.increment(k);
+      for (let scan = 0; scan < 25; scan += 1) s.increment(`scan:${round}:${scan}`);
+    }
+    const hotEstimates = hot.map((k) => s.estimate(k));
+    const oneShot = [0, 1, 2, 3, 4].map((k) => s.estimate(`scan:39:${k}`));
+    const worstHot = Math.min(...hotEstimates);
+    const bestOneShot = Math.max(...oneShot);
+
+    // The hot set must outrank the scan on *every* key, not on average. A
+    // filter that only gets this right on average still admits one-shots
+    // whenever a single hot key is under-counted, which is the whole decision.
+    expect(worstHot).toBeGreaterThan(bestOneShot);
+  });
+
+  it('the half-life reset actually fires at a production-shaped sampleSize', () => {
+    // Guards the guard: if `realistic()` ever drifts back to a huge sampleSize
+    // the test above silently stops testing anything, exactly as this whole
+    // file did before the helper was split.
+    const s = realistic({ seed: 3 });
+    expect(s.sampleSize).toBeLessThan(1e6);
+    for (let i = 0; i < s.sampleSize + 1; i += 1) s.increment(`k:${i}`);
+    expect(s.resets).toBeGreaterThan(0);
   });
 
   it('reports 0 for a key it has never seen', () => {

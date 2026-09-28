@@ -406,24 +406,9 @@ export class PowerCache {
      * @param {*} value
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
-     * @param {WeakMap} [options.seen] Optional reusable `seen` WeakMap for callers that
-     *        perform many deep-equality checks and want to avoid per-call allocations.
      * @returns {boolean}
      */
     hasEqual(key: any, value: any, options?: {
-        ignoreExpiry?: boolean | undefined;
-        seen?: WeakMap<any, any> | undefined;
-    }): boolean;
-    /**
-     * Variant accepting an explicit `seen` WeakMap for reuse across many checks.
-     * @param {*} key
-     * @param {*} value
-     * @param {WeakMap} seen
-     * @param {Object} [options]
-     * @param {boolean} [options.ignoreExpiry=false]
-     * @returns {boolean}
-     */
-    hasEqualWithSeen(key: any, value: any, seen: WeakMap<any, any>, { ignoreExpiry }?: {
         ignoreExpiry?: boolean | undefined;
     }): boolean;
     /**

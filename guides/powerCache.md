@@ -30,7 +30,7 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `has(key, { ignoreExpiry = false })` — Check whether a key exists and is not expired. When `ignoreExpiry` is true expired entries are considered present. When `eagerCleanupOnRead: true` the call will remove expired entries seen during the check.
 
-- `hasEqual(key, value, { ignoreExpiry = false, seen })` — Deep-equality compare the stored value against `value` using optimized fast paths for primitives, typed arrays, Maps/Sets, and cyclic-safe comparison. Respects the `ignoreExpiry` option. When performing many comparisons, pass a reusable `WeakMap` as `seen` or use `hasEqualWithSeen(key, value, seen)` to avoid per-call WeakMap allocations.
+- `hasEqual(key, value, { ignoreExpiry = false })` — Deep-equality compare the stored value against `value` using optimized fast paths for primitives, typed arrays, Maps/Sets, and cyclic-safe comparison. Respects the `ignoreExpiry` option. **`hasEqualWithSeen` and the `seen` option were removed in 2.0** — the comparison's cycle guard is per-walk state, so a `seen` map reused across two calls made the second return `true` for a pair a previous, unrelated call had recorded, without comparing anything. Pass no `seen`; the primitive and typed-array fast paths never allocate one.
 
 - `delete(key)` — Remove an entry. Returns `true` when a key was removed.
 

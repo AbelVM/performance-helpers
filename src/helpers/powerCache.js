@@ -715,19 +715,42 @@ export class PowerCache {
       // so it needs something to displace.
       if (this._sketch && this._map.size >= this.maxEntries) {
         const incumbent = this._evictionCandidate || this._head;
-        // A key seen for the first time is admitted unconditionally, and that
-        // is the TinyLFU admission window in its simplest form.
+        // A brand-new key is **refused whenever the incumbent's estimate is
+        // greater than or equal to its own**, and a brand-new key's estimate is
+        // 0. In a cold sketch every estimate is 0, so `0 >= 0` holds and the
+        // key is refused. Read that against the comment this block used to
+        // carry, which claimed a first-seen key was "admitted unconditionally
+        // ... the TinyLFU admission window in its simplest form". That was false,
+        // and so was the rest of it, which simultaneously asserted that "only a
+        // *strictly* hotter incumbent may refuse" (which would need `>`) and
+        // that "`>=`, so a tie keeps the incumbent" (which is what the code does,
+        // and which refuses the challenger).
         //
-        // It is also what keeps a decayed incumbent from locking the cache.
-        // The sketch is reset on a half-life, so a working set that has not been
-        // touched for a while sits at estimate 0 alongside a brand-new key's 0,
-        // and a `>=` rule then refuses every insert forever: measured 1/40
-        // surviving, and it broke `policy: 'slru'`'s own scan resistance, which
-        // was 40/40 before. Only a *strictly* hotter incumbent may refuse.
-        // `>=`, so a tie keeps the incumbent. A brand-new key has estimate 0
-        // and the scan's eviction candidate is an earlier scan key also at 0, so
-        // the tie is the signal: neither is wanted, and the incumbent is the
-        // safer of the two to keep because at least it was here first.
+        // **This is a known defect, and the refusal rule above is why
+        // `admission: 'tynilfu'` currently underperforms plain LRU.** Measured on
+        // the paired Zipf + scan workload in `bench/claims.js` (`node bench/claims.js
+        // zipf`): on a cold 40-entry cache preceded by a 460-key scan burst the
+        // working-set hit rate is 2.5% against plain LRU's 66.4%, because the
+        // scan keys fill the cache while it is still below capacity and the
+        // working set is then refused every time. On a sustained Zipf mix,
+        // working-set retention is 15.4/40 against LRU's 17.2/40, with the
+        // worst hot keys sitting at estimate 0 — and a key at 0 can never
+        // re-enter. The release note for this option has been withdrawn; the
+        // measurements live in `review.md` under BENCH-002.
+        //
+        // **The fix is not a comparison operator.** Changing `>=` to `>` admits
+        // the challenger on every tie, which lets a scan walk the working set —
+        // the exact failure this filter exists to prevent. The correct mechanism
+        // is W-TinyLFU's admission *window*: a small region at the MRU end that
+        // accepts new keys unconditionally, so scan traffic is absorbed there
+        // and the frequency filter arbitrates only that window's victim against
+        // a main-space victim. That needs a size choice, its own interaction
+        // rules with `policy: 'slru'` (which currently makes `tynilfu` *worse*),
+        // and its own tests.
+        //
+        // The sketch itself is sound: `test/smallLfu.test.js` asserts at a
+        // production-shaped half-life that a recurring key outranks a one-shot
+        // one on every key, so do not "fix" this by re-tuning the sketch.
         const challenger = this._sketch.estimate(key);
         if (incumbent && this._sketch.estimate(incumbent.key) >= challenger) {
           this._rejectedAdmission += 1;
@@ -1076,12 +1099,10 @@ export class PowerCache {
    * @param {*} value
    * @param {Object} [options]
    * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
-   * @param {WeakMap} [options.seen] Optional reusable `seen` WeakMap for callers that
-   *        perform many deep-equality checks and want to avoid per-call allocations.
    * @returns {boolean}
    */
   hasEqual(key, value, options = {}) {
-    const { ignoreExpiry = false, seen = undefined } = options || {};
+    const { ignoreExpiry = false, maxNodes, compareFn } = options || {};
     const node = this._fetchValidNode(key, { ignoreExpiry });
     if (!node) return false;
     const stored = node.value;
@@ -1097,20 +1118,25 @@ export class PowerCache {
 
     // Delegate to module-level deep equality helper to avoid allocating a
     // new closure on every call. The deepEqual helper will handle cycles.
-    return deepEqual(stored, value, makeState({ ...options, seen }));
-  }
-
-  /**
-   * Variant accepting an explicit `seen` WeakMap for reuse across many checks.
-   * @param {*} key
-   * @param {*} value
-   * @param {WeakMap} seen
-   * @param {Object} [options]
-   * @param {boolean} [options.ignoreExpiry=false]
-   * @returns {boolean}
-   */
-  hasEqualWithSeen(key, value, seen, { ignoreExpiry = false } = {}) {
-    return this.hasEqual(key, value, { ignoreExpiry, seen });
+    //
+    // The comparison state is built from an **allowlist**, not by spreading the
+    // caller's options bag. `makeState` reads `seen` off whatever it is given,
+    // so `{ ...options }` kept the removed `seen` option alive: a caller
+    // passing one still got a stale pair short-circuiting to `true` without
+    // any comparison, which is the whole hazard. An allowlist means a removed
+    // option cannot be reintroduced by a caller who never updated.
+    //
+    // `seen` is deliberately not caller-suppliable. It answers "have I already
+    // compared this exact pair *in this walk*?" by short-circuiting to `true`,
+    // which is correct for a cycle and wrong for a stale pair: reused across
+    // two calls, the second returned `true` for a pair a previous, unrelated
+    // call had recorded. Since the stored value is mutable, that is reachable
+    // in ordinary code, and the failure mode is a cache reporting a hit for a
+    // value that is not in it. The allocation it avoided was one `WeakMap`,
+    // created only when the walk actually reaches object comparison — the
+    // primitive, reference-equality and typed-array fast paths above all return
+    // before touching it.
+    return deepEqual(stored, value, makeState({ maxNodes, compareFn }));
   }
 
   /**

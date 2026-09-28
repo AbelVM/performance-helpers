@@ -9,6 +9,9 @@ export class PowerObserver {
     _subs: PowerSubscriberSet;
     _map: Function | null;
     _distinct: boolean;
+    /** @type {*} */
+    _mapped: any;
+    _mappedValid: boolean;
     _scheduleMode: string;
     _pending: boolean;
     _pendingPrev: any;

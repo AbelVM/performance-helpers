@@ -51,16 +51,7 @@ export class PowerSubscriberSet {
     /** @type {WeakMap<SubscriberListener, SubscriberListener>} original -> once-wrapper */
     this._onceMap = new WeakMap();
     /** @type {?(FinalizationRegistry<{ref: WeakRef<SubscriberListener>}>)} */
-    this._finalization = null;
-    if (
-      this._weak &&
-      typeof WeakRef !== 'undefined' &&
-      typeof FinalizationRegistry !== 'undefined'
-    ) {
-      this._finalization = new FinalizationRegistry((token) => {
-        this._listeners.delete(token.ref);
-      });
-    }
+    this._finalization = this._ensureFinalization();
   }
 
   /** Number of currently live listeners. */
@@ -197,9 +188,46 @@ export class PowerSubscriberSet {
 
   /**
    * Clear all listeners.
+   *
+   * Also unregisters every token from the `FinalizationRegistry` and drops the
+   * registry. Without that, `clear()` emptied `_listeners` while the registry
+   * went on holding a live `FinalizationRegistry` whose held values are
+   * `WeakRef`s to listeners that no longer belong to this set — so a
+   * `dispose()`d subscriber set, released precisely *so it could be collected*,
+   * stayed reachable through its own registry, and a later collection fired a
+   * callback that closed over it. That is the opposite of what disposal is for,
+   * and the `dispose()` JSDoc claimed the registry was replaced when it was not.
+   *
    * @returns {void}
    */
+
+  /**
+   * Alias for {@link PowerSubscriberSet#clear}.
+   *
+   * `clear()` here empties the container, and "reset" is a natural second word
+   * for exactly that - so a caller who reaches for `reset()` on this class gets
+   * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+   * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+   * would read as the opposite, and the two are deliberately not synonyms.
+   *
+   * @returns {void}
+   */
+  reset() {
+    this.clear();
+  }
+
   clear() {
+    if (this._finalization) {
+      // `unregister` needs the exact token, which is the `WeakRef` stored in
+      // `_listeners`, so read the entries *before* dropping them.
+      for (const entry of this._listeners) {
+        if (isWeakEntry(entry)) this._finalization.unregister(entry);
+      }
+      // Drop the registry itself. A set disposed and then reused is a caller
+      // error, but if it happens `add()` rebuilds a fresh registry on its next
+      // weak registration rather than writing into the discarded one.
+      this._finalization = null;
+    }
     this._listeners.clear();
     this._onceMap = new WeakMap();
   }
@@ -253,9 +281,10 @@ export class PowerSubscriberSet {
   _makeEntry(fn) {
     if (this._weak && typeof WeakRef !== 'undefined') {
       const ref = new WeakRef(fn);
-      if (this._finalization) {
+      const fr = this._ensureFinalization();
+      if (fr) {
         try {
-          this._finalization.register(fn, { ref }, ref);
+          fr.register(fn, { ref }, ref);
         } catch (e) {
           // ignore registration failures
         }
@@ -263,6 +292,28 @@ export class PowerSubscriberSet {
       return ref;
     }
     return fn;
+  }
+
+  /**
+   * Lazily build the `FinalizationRegistry` that prunes collected weak
+   * listeners, and return it — or `null` when weak mode is off or the runtime
+   * has no `FinalizationRegistry`, which is the signal to skip registration.
+   *
+   * `clear()` drops the registry (that is the point of BUG-025), so this has to
+   * be able to build a *new* one. Skipping the rebuild instead would silently
+   * downgrade a cleared-and-reused set to GC-agnostic behaviour, where a dead
+   * weak ref survives until some later `size`/iteration happens to sweep it.
+   *
+   * @returns {?(FinalizationRegistry<{ref: WeakRef<SubscriberListener>}>)}
+   */
+  _ensureFinalization() {
+    if (this._finalization) return this._finalization;
+    if (!this._weak || typeof WeakRef === 'undefined') return null;
+    if (typeof FinalizationRegistry === 'undefined') return null;
+    this._finalization = new FinalizationRegistry((token) => {
+      this._listeners.delete(token.ref);
+    });
+    return this._finalization;
   }
 
   /**

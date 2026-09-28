@@ -28,6 +28,16 @@ export class PowerObserver {
     this._map = typeof options.map === 'function' ? options.map : null;
     this._distinct = !!options.distinct;
 
+    // Cached `map(this._value)`, so a `map` on the hot path runs once per set
+    // rather than twice. A dedicated `_mappedValid` flag rather than a sentinel
+    // `undefined`, because `undefined` is a perfectly legal mapped value.
+    // The initial value is deliberately *not* mapped here: calling a user's
+    // mapper from the constructor would be a side effect at construction time
+    // that nobody asked for. The first `set` maps it once, lazily.
+    /** @type {*} */
+    this._mapped = undefined;
+    this._mappedValid = false;
+
     // scheduling: true (microtask) by default, false => sync, or string mode
     if (options.async === undefined) this._scheduleMode = 'microtask';
     else if (options.async === true) this._scheduleMode = 'microtask';
@@ -56,8 +66,17 @@ export class PowerObserver {
     this._value = v;
 
     const mapFn = this._map;
-    const mappedPrev = mapFn ? mapFn(prev) : prev;
+    // `mappedPrev` is `map(prev)`, and `prev` is the value this observer
+    // already held - which is exactly what the last `set` mapped. Reusing that
+    // is the whole point: the old code called the user's mapper on both sides of
+    // every write, so a two-call mapper with a `distinct` check in the middle
+    // meant the mapper was the most-executed code in the class. The first `set`
+    // after construction has nothing cached and maps once, which is the one
+    // unavoidable extra call.
+    const mappedPrev = this._mappedValid ? this._mapped : mapFn ? mapFn(prev) : prev;
     const mappedNext = mapFn ? mapFn(v) : v;
+    this._mapped = mappedNext;
+    this._mappedValid = true;
 
     if (this._distinct && Object.is(mappedPrev, mappedNext)) return;
 
@@ -114,6 +133,11 @@ export class PowerObserver {
    * @returns {void}
    */
   map(fn) {
+    // The cached mapped value belongs to the *previous* mapping function, so
+    // swapping the mapper invalidates it. Forgetting this would make the next
+    // set report a `prev` that no mapper ever produced.
+    this._mappedValid = false;
+    this._mapped = undefined;
     if (fn == null) this._map = null;
     else if (typeof fn !== 'function') throw new TypeError('map must be a function');
     else this._map = fn;

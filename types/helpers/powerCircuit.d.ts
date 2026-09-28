@@ -10,11 +10,28 @@
 export class PowerCircuit {
     /**
      * @param {PowerCircuitOptions} [options] - `threshold` and `timeout` default
-     *   to 5 and 30s; `onStateChange` and `eventBus` are optional sinks.
+     *   to 5 and 30s; `onStateChange` and `eventBus` are optional sinks. `timeout`
+     *   is the *base* open window: consecutive trips grow it exponentially up to
+     *   `maxTimeout` and jitter the result.
      */
     constructor(options?: PowerCircuitOptions);
     _threshold: number;
     _timeout: number;
+    _maxTimeout: number;
+    /**
+     * Consecutive entries into `open`, which drive the exponential growth.
+     * Reset to 0 whenever the circuit proves the dependency is healthy again.
+     * @type {number}
+     */
+    _consecutiveOpens: number;
+    /**
+     * The jittered window for the *current* `open` period, drawn once when the
+     * circuit opened. It must be stored rather than re-drawn: the open check
+     * runs on every `call()` and every `state` read, and a per-call draw would
+     * make the window fluctuate, so the breaker would flap instead of holding.
+     * @type {number}
+     */
+    _openWindowMs: number;
     /** @type {CircuitState} */
     _state: CircuitState;
     _failures: number;
@@ -26,6 +43,23 @@ export class PowerCircuit {
     /** @type {?((state: CircuitState, reason?: string) => void)} */
     onStateChange: ((state: CircuitState, reason?: string) => void) | null;
     _bus: PowerEventBus | null;
+    /**
+     * Draw the open window for a trip: exponential backoff on the base timeout,
+     * capped, then equal jitter.
+     *
+     * The exponential part is what stops a genuinely-down dependency from being
+     * probed at a fixed rate forever; the jitter is what stops a *fleet* of
+     * clients from probing it in lockstep. With a fixed window, every circuit
+     * guarding the same dependency opened on the same tick and retried on the
+     * same tick, so the first post-timeout request arrived as an N-wide burst
+     * that re-tripped the breaker before it had recovered — a self-inflicted
+     * thundering herd, and the exact failure the breaker exists to prevent.
+     *
+     * @returns {number} The window in ms, always at least half the computed
+     *   backoff. See `DEFAULT_CIRCUIT_MIN_JITTER_RATIO` for why this is not full
+     *   jitter.
+     */
+    _drawOpenWindow(): number;
     /**
      * Move to a new state, stamping `_openedAt`, notifying `onStateChange` and
      * emitting on the bus. A no-op when the state is unchanged.

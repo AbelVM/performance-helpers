@@ -62,8 +62,30 @@ export class PowerSubscriberSet {
     forEach(fn: (listener: SubscriberListener) => void): void;
     /**
      * Clear all listeners.
+     *
+     * Also unregisters every token from the `FinalizationRegistry` and drops the
+     * registry. Without that, `clear()` emptied `_listeners` while the registry
+     * went on holding a live `FinalizationRegistry` whose held values are
+     * `WeakRef`s to listeners that no longer belong to this set — so a
+     * `dispose()`d subscriber set, released precisely *so it could be collected*,
+     * stayed reachable through its own registry, and a later collection fired a
+     * callback that closed over it. That is the opposite of what disposal is for,
+     * and the `dispose()` JSDoc claimed the registry was replaced when it was not.
+     *
      * @returns {void}
      */
+    /**
+     * Alias for {@link PowerSubscriberSet#clear}.
+     *
+     * `clear()` here empties the container, and "reset" is a natural second word
+     * for exactly that - so a caller who reaches for `reset()` on this class gets
+     * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+     * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+     * would read as the opposite, and the two are deliberately not synonyms.
+     *
+     * @returns {void}
+     */
+    reset(): void;
     clear(): void;
     /**
      * Return a safe array copy of live listeners.
@@ -80,6 +102,21 @@ export class PowerSubscriberSet {
      * @returns {SubscriberEntry}
      */
     _makeEntry(fn: SubscriberListener): SubscriberEntry;
+    /**
+     * Lazily build the `FinalizationRegistry` that prunes collected weak
+     * listeners, and return it — or `null` when weak mode is off or the runtime
+     * has no `FinalizationRegistry`, which is the signal to skip registration.
+     *
+     * `clear()` drops the registry (that is the point of BUG-025), so this has to
+     * be able to build a *new* one. Skipping the rebuild instead would silently
+     * downgrade a cleared-and-reused set to GC-agnostic behaviour, where a dead
+     * weak ref survives until some later `size`/iteration happens to sweep it.
+     *
+     * @returns {?(FinalizationRegistry<{ref: WeakRef<SubscriberListener>}>)}
+     */
+    _ensureFinalization(): (FinalizationRegistry<{
+        ref: WeakRef<SubscriberListener>;
+    }>) | null;
     /**
      * Resolve a stored entry to the live listener, or `undefined` when the weak
      * target has been collected.

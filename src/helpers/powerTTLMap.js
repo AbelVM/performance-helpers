@@ -173,6 +173,22 @@ export class PowerTTLMap {
    * Remove all entries.
    * @returns {void}
    */
+
+  /**
+   * Alias for {@link PowerTTLMap#clear}.
+   *
+   * `clear()` here empties the container, and "reset" is a natural second word
+   * for exactly that - so a caller who reaches for `reset()` on this class gets
+   * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+   * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+   * would read as the opposite, and the two are deliberately not synonyms.
+   *
+   * @returns {void}
+   */
+  reset() {
+    this.clear();
+  }
+
   clear() {
     this._map.clear();
     this._expirations.clear();
@@ -204,23 +220,70 @@ export class PowerTTLMap {
   }
 
   /**
-   * Number of non-expired entries (purges expired entries lazily).
+   * Number of entries currently resident in the map.
+   *
+   * **This is `Map.size`, not "how many entries are still live".** The two
+   * used to be the same getter, and that was a design smell: reading `.size`
+   * called `_sweepExpirations`, which iterates the expiration index, removes
+   * entries, and fires `onExpire` for each. A property read with a callback
+   * side effect is not a property read — it is an operation wearing a
+   * property's syntax, so `if (map.size)` was a mutation, a `size` check in a
+   * render loop was O(k) per frame, and the cost of the answer was invisible
+   * at the call site.
+   *
+   * Expired-but-not-yet-swept entries are resident and are therefore counted.
+   * That is the honest meaning of the number, it is O(1), and it is what
+   * `Map` users expect. Use {@link PowerTTLMap#expiredCount} when you want the
+   * live count, or {@link PowerTTLMap#purge} to actually collect.
+   *
    * @returns {number}
    */
   get size() {
-    // Purge expired entries lazily, but iterate only the subset of keys
-    // that have expirations recorded. This avoids scanning non-expiring
-    // entries on every `.size` access. When the next known expiry is still
-    // in the future, return immediately without sweeping the expiration index.
-    if (!this._map.size) return 0;
-    if (!this._expirations.size) return this._map.size;
-    const now = nowMs();
-    if (!this._nextExpiryDirty && this._nextExpiryAt && now <= this._nextExpiryAt) {
-      return this._map.size;
-    }
-
-    this._sweepExpirations(now);
     return this._map.size;
+  }
+
+  /**
+   * How many resident entries are past their expiry and awaiting collection.
+   *
+   * The live count is `size - expiredCount`. Read-only: this does not sweep and
+   * does not fire `onExpire`, so it is safe to use as a diagnostic without
+   * changing the map. It does walk the expiration index, so it is O(k) in the
+   * number of entries that *have* an expiry — which is why the hot path reads
+   * {@link PowerTTLMap#size} and this is for reporting.
+   *
+   * @returns {number}
+   */
+  get expiredCount() {
+    if (!this._map.size || !this._expirations.size) return 0;
+    const now = nowMs();
+    let expired = 0;
+    for (const exp of this._expirations.values()) {
+      if (exp && now > exp) expired++;
+    }
+    return expired;
+  }
+
+  /**
+   * Collect every entry that is already past its expiry, firing `onExpire` for
+   * each.
+   *
+   * The explicit spelling of what `size` used to do implicitly. Reads and
+   * `expiredCount` are pure; collection is opt-in.
+   *
+   * @returns {number} How many entries were removed.
+   */
+  purge() {
+    if (!this._map.size || !this._expirations.size) return 0;
+    // One clock read for both the count and the sweep, so an entry that expires
+    // between the two cannot make the returned number disagree with what was
+    // actually removed.
+    const now = nowMs();
+    let removed = 0;
+    for (const exp of this._expirations.values()) {
+      if (exp && now > exp) removed++;
+    }
+    if (removed) this._sweepExpirations(now);
+    return removed;
   }
 
   /**
@@ -264,6 +327,12 @@ export class PowerTTLMap {
 
   /**
    * Iterate entries [key, value] skipping expired entries.
+   *
+   * Expired entries encountered during the walk are **collected** as a side
+   * effect, firing `onExpire`. That is deliberate and is a different situation
+   * from {@link PowerTTLMap#size}: iteration is an operation, so a caller can
+   * see it happen, whereas a property read cannot.
+   *
    * @returns {IterableIterator<[any, any]>}
    */
   *entries() {
