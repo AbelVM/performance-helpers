@@ -66,7 +66,11 @@ describe('PowerThrottle / PowerSlidingWindow rate invariants', () => {
         fc.integer({ min: 1, max: 5 }),
         fc.array(fc.nat({ max: 3000 }), { minLength: 1, maxLength: 60 }),
         (limit, times) => {
-          const win = new PowerSlidingWindow({ limit, windowMs: 1000 });
+          // `limit` is not an option of `PowerSlidingWindow` - it reads
+          // `capacity`, and passing `limit` alone left the limiter at the
+          // default capacity of 1, so this property was only ever checking
+          // capacity 1 regardless of the generated `limit`.
+          const win = new PowerSlidingWindow({ capacity: limit, windowMs: 1000 });
           let clock = 0;
           let model = [];
           for (const t of times) {

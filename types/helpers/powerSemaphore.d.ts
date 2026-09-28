@@ -27,9 +27,9 @@ export class PowerSemaphore {
     acquire(): Promise<() => void>;
     /**
      * Try to acquire a permit without waiting.
-     * @returns {Function|null} Release callback when acquired, otherwise `null`.
+     * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.
      */
-    tryAcquire(): Function | null;
+    tryAcquire(): PowerReleaseFn | null;
     /**
      * Execute a callback while holding a permit.
      * The permit is released after the callback resolves or rejects.
@@ -61,4 +61,5 @@ export class PowerSemaphore {
     [Symbol.dispose](): void;
 }
 export default PowerSemaphore;
+export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
 import { PowerPermitGate } from './powerPermitGate.js';

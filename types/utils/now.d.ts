@@ -31,7 +31,7 @@ export function measureSync(fn: Function | any): {
  * On rejection the thrown error will be augmented with `durationMs` and
  * re-thrown to the caller.
  *
- * @param {Function|Promise|any} fn - Async function, Promise, or direct value.
+ * @param {Function|Promise<any>|any} fn - Async function, Promise, or direct value.
  * @returns {Promise<{result:any, ms:number, start:number, end:number}>} Promise resolving to result and timing.
  * @throws {*} Re-throws any rejection from `fn` after attaching `durationMs`.
  */

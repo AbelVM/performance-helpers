@@ -1,13 +1,9 @@
 export class PowerSlidingWindow {
     /**
-     * @param {Object} [options]
-     * @param {number} [options.capacity=1] Max events allowed in window.
-     * @param {number} [options.windowMs=1000] Window size in milliseconds.
+     * @param {PowerSlidingWindowOptions} [options] - `capacity` defaults to 1
+     *   and `windowMs` to one second.
      */
-    /**
-     * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
-     */
-    constructor(options?: {});
+    constructor(options?: PowerSlidingWindowOptions);
     capacity: number;
     windowMs: number;
     _timestamps: PowerQueue;
@@ -41,4 +37,5 @@ export class PowerSlidingWindow {
      */
     reset(): void;
 }
+export type PowerSlidingWindowOptions = import("./jsdoc-types.js").PowerSlidingWindowOptions;
 import { PowerQueue } from './powerQueue.js';

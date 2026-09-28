@@ -14,6 +14,7 @@
  */
 /**
  * @typedef {import('./jsdoc-types.js').PowerThrottleOptions} PowerThrottleOptions
+ * @typedef {import('./jsdoc-types.js').PowerThrottleToken} PowerThrottleToken
  */
 import { nowMs } from '../utils/now.js';
 import { assertLimitRequired } from '../utils/options.js';
@@ -21,11 +22,11 @@ import { DEFAULT_REFILL_INTERVAL_MS, MS_PER_SEC } from './constants.js';
 
 export class PowerThrottle {
   /**
-   * @param {Object} [options]
-   * @param {number} [options.capacity=1]
-   * @param {number} [options.tokens]
-   * @param {number} [options.refillRate=0]
-   * @param {number} [options.refillInterval=1000]
+   * See {@link PowerThrottleOptions} for the accepted fields; every default is
+   * stated there, because a bare `@param {Object} [options]` here is what let
+   * the published type and the destructuring drift apart in the first place.
+   *
+   * @param {PowerThrottleOptions} [options]
    */
   constructor(options = {}) {
     const {
@@ -43,7 +44,12 @@ export class PowerThrottle {
       min: 1,
       fallback: 1,
     });
-    this.tokens = Number.isFinite(tokens) ? Math.min(this.capacity, tokens) : this.capacity;
+    // `typeof` narrows; `Number.isFinite` is typed `(number: unknown)` and does
+    // not, so `tokens` stayed `number | undefined` at the `Math.min` below.
+    this.tokens =
+      typeof tokens === 'number' && Number.isFinite(tokens)
+        ? Math.min(this.capacity, tokens)
+        : this.capacity;
     this.refillRate = assertLimitRequired(refillRate, {
       name: 'refillRate',
       className: 'PowerThrottle',
@@ -122,7 +128,7 @@ export class PowerThrottle {
    *
    * Returns `null` when the reservation fails due to insufficient tokens.
    * @param {number} [n=1]
-   * @returns {{n:number}|null}
+   * @returns {PowerThrottleToken|null}
    * @example
    * const token = throttle.reserve(1);
    * if (token) {
@@ -145,7 +151,7 @@ export class PowerThrottle {
   /**
    * Release a prior reservation token or add tokens back.
    * Accepts either a token returned from `reserve()` or a numeric count.
-   * @param {object|number} tokenOrN
+   * @param {PowerThrottleToken|number} tokenOrN
    * @returns {void}
    * @example
    * const token = throttle.reserve(2);
@@ -162,6 +168,11 @@ export class PowerThrottle {
   }
 
   // alias for compatibility with undo patterns
+  /**
+   * Alias of {@link PowerThrottle#release}.
+   * @param {PowerThrottleToken|number} nOrToken
+   * @returns {void}
+   */
   rollback(nOrToken) {
     return this.release(nOrToken);
   }

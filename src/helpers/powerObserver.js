@@ -105,7 +105,14 @@ export class PowerObserver {
     return this._subs.size;
   }
 
-  /** Set or replace the mapping function used for notifications */
+  /**
+   * Set or replace the mapping function used for notifications.
+   *
+   * @param {?((value:any)=>any)} fn - `null` clears the mapping. Anything
+   *   that is not a function and not `null` throws rather than silently
+   *   disabling mapping, because a typo'd option is otherwise invisible.
+   * @returns {void}
+   */
   map(fn) {
     if (fn == null) this._map = null;
     else if (typeof fn !== 'function') throw new TypeError('map must be a function');

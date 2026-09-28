@@ -4,6 +4,9 @@
  * This helper manages a finite number of permits and a FIFO queue of waiters.
  * It is intentionally small and internal to avoid duplicating queue/release logic.
  */
+/**
+ * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
+ */
 import { PowerQueue } from './powerQueue.js';
 
 /**
@@ -68,7 +71,7 @@ export class PowerPermitGate {
   /**
    * Acquire a permit asynchronously.
    * Resolves immediately when a permit is available; otherwise waits in FIFO order.
-   * @returns {Promise<Function>} Promise resolving to a release callback.
+   * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
    */
   acquire() {
     if (this._available > 0) {
@@ -84,7 +87,7 @@ export class PowerPermitGate {
 
   /**
    * Try to acquire a permit without waiting.
-   * @returns {Function|null} Release callback when acquired, otherwise `null`.
+   * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.
    */
   tryAcquire() {
     if (this._available > 0) {

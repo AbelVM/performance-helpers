@@ -2,6 +2,9 @@
  * Sliding-window rate limiter: allow up to `capacity` events per `windowMs`.
  * Uses a timestamp queue to track event occurrences.
  */
+/**
+ * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
+ */
 import { nowMs } from '../utils/now.js';
 import { MS_PER_SEC } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
@@ -9,12 +12,8 @@ import { assertLimitRequired } from '../utils/options.js';
 
 export class PowerSlidingWindow {
   /**
-   * @param {Object} [options]
-   * @param {number} [options.capacity=1] Max events allowed in window.
-   * @param {number} [options.windowMs=1000] Window size in milliseconds.
-   */
-  /**
-   * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
+   * @param {PowerSlidingWindowOptions} [options] - `capacity` defaults to 1
+   *   and `windowMs` to one second.
    */
   constructor(options = {}) {
     const { capacity = 1, windowMs = MS_PER_SEC } = options;

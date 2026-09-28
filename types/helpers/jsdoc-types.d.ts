@@ -224,6 +224,54 @@ export type PowerLatchOptions = {
     onAbort?: ((reason: any) => void) | undefined;
 };
 /**
+ * A single pending `wait()` call registered in `PowerLatch`'s waiter map.
+ *
+ * Named rather than inlined so the map value, the object built in `wait()` and
+ * the two teardown paths (`_removeWaiter`, `_settleAll`) are all checked
+ * against the same shape. `timer` and `signalHandler` are nullable because they
+ * are only set when the corresponding option was passed.
+ */
+export type PowerLatchWaiter = {
+    /**
+     * - Monotonic id used as the map key.
+     */
+    token: number;
+    /**
+     * - Holds the waiter's
+     * promise, resolved or rejected when the latch settles.
+     */
+    defer: import("./powerDefer.js").PowerDefer;
+    /**
+     * - Timeout handle, or
+     * `null` when `wait()` was called without a timeout.
+     */
+    timer?: number | null | undefined;
+    /**
+     * - `abort` listener, or `null` when
+     * `wait()` was called without a signal.
+     */
+    signalHandler?: (() => void) | null | undefined;
+    /**
+     * - Signal being watched, or `null`.
+     */
+    signal?: AbortSignal | null | undefined;
+};
+/**
+ * The argument accepted by `PowerLatch.wait()`: a bare timeout in ms, or an
+ * options object. Spelled out instead of `object` so `timeout` and `signal` are
+ * checked where they are read.
+ */
+export type PowerLatchWaitOptions = {
+    /**
+     * - Reject with `code: 'ETIMEOUT'` after this many ms.
+     */
+    timeout?: number | undefined;
+    /**
+     * - Reject with the signal's reason on abort.
+     */
+    signal?: AbortSignal | undefined;
+};
+/**
  * Event bus options for `PowerEventBus`.
  */
 export type PowerEventBusOptions = {
@@ -232,12 +280,43 @@ export type PowerEventBusOptions = {
 };
 /**
  * Throttle options for `PowerThrottle`.
+ *
+ * The defaults live here rather than in a `@param {number} [options.capacity=1]`
+ * line next to the constructor: TypeScript rejects a qualified name in a
+ * `@param` that is not declared as `{object}` in the same block, so those lines
+ * could not coexist with a named options type at all.
  */
 export type PowerThrottleOptions = {
+    /**
+     * Maximum tokens in the bucket.
+     */
     capacity?: number | undefined;
+    /**
+     * Initial tokens. Defaults to `capacity`.
+     */
     tokens?: number | undefined;
+    /**
+     * Tokens added per second.
+     */
     refillRate?: number | undefined;
+    /**
+     * Bookkeeping interval in milliseconds.
+     */
     refillInterval?: number | undefined;
+};
+/**
+ * A reservation returned by `PowerThrottle.reserve()`, and the only thing
+ * `release()` / `rollback()` read off a token-shaped argument.
+ *
+ * Named so `release(tokenOrN)` can declare `PowerThrottleToken | number`
+ * instead of `object | number`: a bare `object` has no `n`, so reading it was
+ * an error at the one place the token is actually used.
+ */
+export type PowerThrottleToken = {
+    /**
+     * - Tokens reserved, to be returned to the bucket.
+     */
+    n: number;
 };
 /**
  * Batch options for `PowerBatch`.
@@ -265,7 +344,13 @@ export type PowerTTLMapOptions = {
  * Sliding-window options for `PowerSlidingWindow`.
  */
 export type PowerSlidingWindowOptions = {
+    /**
+     * Max events allowed in window.
+     */
     capacity?: number | undefined;
+    /**
+     * Window size in milliseconds.
+     */
     windowMs?: number | undefined;
 };
 /**
@@ -277,6 +362,55 @@ export type PowerLoggerOptions = {
     formatter?: ((payload: Object) => string | Object | null) | undefined;
     output?: ((payload: Object | string) => void) | undefined;
 };
+/**
+ * Options for `PowerEventLoopMonitor`.
+ */
+export type EventLoopMonitorOptions = {
+    /**
+     * How often to schedule the probe timer.
+     * Smaller catches shorter blocks and costs more; the drift is recorded per
+     * probe, so 20ms means "worst block seen between two probes 20ms apart".
+     */
+    intervalMs?: number | undefined;
+    /**
+     * Target relative error for the
+     * drift histogram's quantiles. Forwarded to `PowerHistogram`.
+     */
+    relativeAccuracy?: number | undefined;
+    /**
+     * Called with each drift sample
+     * in milliseconds, for hook-based alerting. A throwing hook is swallowed:
+     * it must not be able to stop the monitor.
+     */
+    onDrift?: ((arg0: number) => void) | null | undefined;
+    /**
+     * Passed through to the internal
+     * timer, which is `unref()`d by default. Set `true` to hold the Node process
+     * open while monitoring.
+     */
+    keepProcessAlive?: boolean | undefined;
+    /**
+     * Supplies `utilization()` instead of resolving Node's `perf_hooks`. The
+     * argument exists so a browser build, a bundler, or a test can provide the
+     * reading without this module reaching for a Node built-in.
+     */
+    utilizationProvider?: (() => ({
+        active: number;
+        idle: number;
+        utilization: number;
+    })) | null | undefined;
+};
+/**
+ * The idempotent release callback handed out by the permit-gate family
+ * (`PowerPermitGate`, `PowerSemaphore`, `PowerBackpressure`).
+ *
+ * Named so those helpers can promise a callable. All three previously published
+ * `Function` / `Promise<Function>`, and `Function` carries no call signature, so
+ * it is not assignable to `() => void` - which made `PowerSemaphore.acquire()`
+ * unable to return what its own gate returns, and made the documented
+ * `.then((release) => release())` not type-check for a consumer.
+ */
+export type PowerReleaseFn = () => void;
 /**
  * Circuit options for `PowerCircuit`.
  */

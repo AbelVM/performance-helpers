@@ -7,6 +7,9 @@
  * @class PowerBackpressure
  * @public
  */
+/**
+ * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
+ */
 export class PowerBackpressure extends PowerPermitGate {
     /**
      * @param {Object} [options]
@@ -37,4 +40,5 @@ export class PowerBackpressure extends PowerPermitGate {
     _performRefill(): void;
 }
 export default PowerBackpressure;
+export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
 import { PowerPermitGate } from './powerPermitGate.js';

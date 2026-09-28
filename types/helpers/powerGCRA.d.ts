@@ -18,7 +18,10 @@
  */
 export class PowerGCRA {
     /**
-     * @param {PowerGCRAOptions} options
+     * @param {PowerGCRAOptions} [options] - `rate` is required in practice: the
+     *   constructor throws a `TypeError` without it. The parameter stays optional
+     *   because that throw is the documented way a missing `rate` is reported, and
+     *   `new PowerGCRA()` must stay callable to reach it.
      */
     constructor(options?: PowerGCRAOptions);
     rate: number;
@@ -79,7 +82,15 @@ export class PowerGCRA {
     reset(): void;
     /**
      * Serializable snapshot of the limiter's configuration and state.
-     * @returns {{rate:number, per:number, burst:number, emissionInterval:number, delayTolerance:number, tat:number}}
+     *
+     * `tat` is `null` - not `-Infinity` - when there is no accumulated history
+     * (fresh instance, or after `reset()` / `dispose()`), because `-Infinity` does
+     * not survive a JSON round-trip: `JSON.stringify` turns it into `null`
+     * anyway, so a snapshot that claimed `number` was only true in memory. A
+     * consumer that reads the snapshot back therefore already had to handle
+     * `null`; the declared type now says so.
+     *
+     * @returns {{rate:number, per:number, burst:number, emissionInterval:number, delayTolerance:number, tat:number|null}}
      */
     stats(): {
         rate: number;
@@ -87,7 +98,7 @@ export class PowerGCRA {
         burst: number;
         emissionInterval: number;
         delayTolerance: number;
-        tat: number;
+        tat: number | null;
     };
     /** @returns {void} */
     dispose(): void;

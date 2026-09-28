@@ -6,29 +6,29 @@ export class PowerLatch {
     static one(): PowerLatch;
     /**
      * @typedef {import('./jsdoc-types.js').PowerLatchOptions} PowerLatchOptions
+     * @typedef {import('./jsdoc-types.js').PowerLatchWaiter} PowerLatchWaiter
+     * @typedef {import('./jsdoc-types.js').PowerLatchWaitOptions} PowerLatchWaitOptions
      */
     /**
      * @param {number} [count=1] - initial count required to release the latch
+     * @param {PowerLatchOptions} [options] - `onAbort` is invoked with the
+     *   rejection reason by {@link PowerLatch#abort}.
      */
-    constructor(count?: number, options?: {});
+    constructor(count?: number, options?: import("./jsdoc-types.js").PowerLatchOptions);
     _count: number;
-    /** @type {Map<number, {token:number, defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
-    _waiters: Map<number, {
-        token: number;
-        defer: PowerDefer;
-        timer?: any;
-        signalHandler?: Function;
-        signal?: AbortSignal;
-    }>;
+    /** @type {Map<number, PowerLatchWaiter>} */
+    _waiters: Map<number, import("./jsdoc-types.js").PowerLatchWaiter>;
     _nextWaiterToken: number;
     _aborted: boolean;
+    /** @type {any} */
     _abortReason: any;
-    _onAbort: any;
-    set onAbort(fn: any);
+    /** @type {?((reason:any)=>void)} */
+    _onAbort: ((reason: any) => void) | null;
+    set onAbort(fn: ((reason: any) => void) | null);
     /**
      * Optional callback invoked when `abort()` is called: `(reason) => void`.
      */
-    get onAbort(): any;
+    get onAbort(): ((reason: any) => void) | null;
     /**
      * Decrement the latch by one (or by `n` if provided). When the count
      * reaches zero all pending waiters are resolved.
@@ -50,10 +50,10 @@ export class PowerLatch {
      * Wait until the latch reaches zero.
      * Options: `wait(timeoutMs)` or `wait({ timeout, signal })`.
      * If aborted via `abort()` pending waiters are rejected.
-     * @param {number|object} [opts]
+     * @param {number|PowerLatchWaitOptions} [opts]
      * @returns {Promise<void>}
      */
-    wait(opts?: number | object): Promise<void>;
+    wait(opts?: number | import("./jsdoc-types.js").PowerLatchWaitOptions): Promise<void>;
     /**
      * Reset the latch to a new count. Any existing waiters will be resolved
      * immediately if the new count is zero.
@@ -70,15 +70,30 @@ export class PowerLatch {
      * @returns {boolean}
      */
     get done(): boolean;
-    _removeWaiter(waiterOrToken: any): {
-        token: number;
-        defer: PowerDefer;
-        timer?: any;
-        signalHandler?: Function;
-        signal?: AbortSignal;
-    } | null;
-    _settleAll(settle: any): void;
+    /**
+     * Detach a single waiter, either by token or by the waiter object itself.
+     *
+     * The object form exists because `_settleAll` and `wait`'s timeout path
+     * already hold the waiter; the token form is what the abort listener has.
+     *
+     * @param {number|PowerLatchWaiter} waiterOrToken
+     * @returns {?PowerLatchWaiter} The removed waiter, or `null` if it was already gone.
+     */
+    _removeWaiter(waiterOrToken: number | import("./jsdoc-types.js").PowerLatchWaiter): import("./jsdoc-types.js").PowerLatchWaiter | null;
+    /**
+     * Tear down every registered waiter, clearing its timer and abort listener,
+     * then hand each `PowerDefer` to `settle`. Failures from either teardown are
+     * swallowed so one bad waiter cannot strand the rest.
+     *
+     * @param {(defer: PowerDefer) => void} settle
+     * @returns {void}
+     */
+    _settleAll(settle: (defer: PowerDefer) => void): void;
     _resolveAll(): void;
+    /**
+     * @param {any} err
+     * @returns {void}
+     */
     _rejectAll(err: any): void;
     /**
      * Abort pending waiters. If `reason` provided it will be used to reject waiters.

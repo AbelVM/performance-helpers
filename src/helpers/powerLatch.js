@@ -18,17 +18,23 @@ import { PowerDefer } from './powerDefer.js';
 export class PowerLatch {
   /**
    * @typedef {import('./jsdoc-types.js').PowerLatchOptions} PowerLatchOptions
+   * @typedef {import('./jsdoc-types.js').PowerLatchWaiter} PowerLatchWaiter
+   * @typedef {import('./jsdoc-types.js').PowerLatchWaitOptions} PowerLatchWaitOptions
    */
   /**
    * @param {number} [count=1] - initial count required to release the latch
+   * @param {PowerLatchOptions} [options] - `onAbort` is invoked with the
+   *   rejection reason by {@link PowerLatch#abort}.
    */
   constructor(count = 1, options = {}) {
     this._count = Math.max(0, Number(count) || 0);
-    /** @type {Map<number, {token:number, defer:PowerDefer, timer?:any, signalHandler?:Function, signal?:AbortSignal}>} */
+    /** @type {Map<number, PowerLatchWaiter>} */
     this._waiters = new Map();
     this._nextWaiterToken = 1;
     this._aborted = false;
+    /** @type {any} */
     this._abortReason = null;
+    /** @type {?((reason:any)=>void)} */
     this._onAbort = typeof options.onAbort === 'function' ? options.onAbort : null;
   }
 
@@ -75,7 +81,7 @@ export class PowerLatch {
    * Wait until the latch reaches zero.
    * Options: `wait(timeoutMs)` or `wait({ timeout, signal })`.
    * If aborted via `abort()` pending waiters are rejected.
-   * @param {number|object} [opts]
+   * @param {number|PowerLatchWaitOptions} [opts]
    * @returns {Promise<void>}
    */
   wait(opts) {
@@ -85,7 +91,9 @@ export class PowerLatch {
       );
     if (this._count === 0) return Promise.resolve();
 
+    /** @type {?number} */
     let timeout = null;
+    /** @type {?AbortSignal} */
     let signal = null;
     if (typeof opts === 'number') timeout = opts;
     else if (opts && typeof opts === 'object') {
@@ -101,6 +109,7 @@ export class PowerLatch {
 
     const defer = new PowerDefer();
     const token = this._nextWaiterToken++;
+    /** @type {PowerLatchWaiter} */
     const waiter = { token, defer, timer: null, signalHandler: null, signal };
 
     // register timeout
@@ -154,6 +163,15 @@ export class PowerLatch {
     return this._count === 0;
   }
 
+  /**
+   * Detach a single waiter, either by token or by the waiter object itself.
+   *
+   * The object form exists because `_settleAll` and `wait`'s timeout path
+   * already hold the waiter; the token form is what the abort listener has.
+   *
+   * @param {number|PowerLatchWaiter} waiterOrToken
+   * @returns {?PowerLatchWaiter} The removed waiter, or `null` if it was already gone.
+   */
   _removeWaiter(waiterOrToken) {
     const token =
       waiterOrToken && typeof waiterOrToken === 'object' ? waiterOrToken.token : waiterOrToken;
@@ -179,8 +197,17 @@ export class PowerLatch {
     return waiter;
   }
 
+  /**
+   * Tear down every registered waiter, clearing its timer and abort listener,
+   * then hand each `PowerDefer` to `settle`. Failures from either teardown are
+   * swallowed so one bad waiter cannot strand the rest.
+   *
+   * @param {(defer: PowerDefer) => void} settle
+   * @returns {void}
+   */
   _settleAll(settle) {
     const waiters = this._waiters;
+    /** @type {Map<number, PowerLatchWaiter>} */
     this._waiters = new Map();
     for (const w of waiters.values()) {
       try {
@@ -200,11 +227,19 @@ export class PowerLatch {
   }
 
   _resolveAll() {
-    this._settleAll((defer) => defer.resolve());
+    /** @type {(defer: PowerDefer) => void} */
+    const settle = (defer) => defer.resolve();
+    this._settleAll(settle);
   }
 
+  /**
+   * @param {any} err
+   * @returns {void}
+   */
   _rejectAll(err) {
-    this._settleAll((defer) => defer.reject(err));
+    /** @type {(defer: PowerDefer) => void} */
+    const settle = (defer) => defer.reject(err);
+    this._settleAll(settle);
   }
 
   /**

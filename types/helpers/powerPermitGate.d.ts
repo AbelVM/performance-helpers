@@ -39,14 +39,14 @@ export class PowerPermitGate {
     /**
      * Acquire a permit asynchronously.
      * Resolves immediately when a permit is available; otherwise waits in FIFO order.
-     * @returns {Promise<Function>} Promise resolving to a release callback.
+     * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
      */
-    acquire(): Promise<Function>;
+    acquire(): Promise<PowerReleaseFn>;
     /**
      * Try to acquire a permit without waiting.
-     * @returns {Function|null} Release callback when acquired, otherwise `null`.
+     * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.
      */
-    tryAcquire(): Function | null;
+    tryAcquire(): PowerReleaseFn | null;
     /**
      * Release one or more permits back to the gate.
      * @param {number} [count=1]
@@ -81,4 +81,5 @@ export class PowerPermitGate {
      */
     [Symbol.dispose](): void;
 }
+export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
 import { PowerQueue } from './powerQueue.js';

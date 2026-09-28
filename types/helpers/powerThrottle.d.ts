@@ -1,17 +1,12 @@
 export class PowerThrottle {
     /**
-     * @param {Object} [options]
-     * @param {number} [options.capacity=1]
-     * @param {number} [options.tokens]
-     * @param {number} [options.refillRate=0]
-     * @param {number} [options.refillInterval=1000]
+     * See {@link PowerThrottleOptions} for the accepted fields; every default is
+     * stated there, because a bare `@param {Object} [options]` here is what let
+     * the published type and the destructuring drift apart in the first place.
+     *
+     * @param {PowerThrottleOptions} [options]
      */
-    constructor(options?: {
-        capacity?: number | undefined;
-        tokens?: number | undefined;
-        refillRate?: number | undefined;
-        refillInterval?: number | undefined;
-    });
+    constructor(options?: PowerThrottleOptions);
     capacity: number;
     tokens: number;
     refillRate: number;
@@ -48,7 +43,7 @@ export class PowerThrottle {
      *
      * Returns `null` when the reservation fails due to insufficient tokens.
      * @param {number} [n=1]
-     * @returns {{n:number}|null}
+     * @returns {PowerThrottleToken|null}
      * @example
      * const token = throttle.reserve(1);
      * if (token) {
@@ -56,21 +51,24 @@ export class PowerThrottle {
      *   throttle.release(token);
      * }
      */
-    reserve(n?: number): {
-        n: number;
-    } | null;
+    reserve(n?: number): PowerThrottleToken | null;
     /**
      * Release a prior reservation token or add tokens back.
      * Accepts either a token returned from `reserve()` or a numeric count.
-     * @param {object|number} tokenOrN
+     * @param {PowerThrottleToken|number} tokenOrN
      * @returns {void}
      * @example
      * const token = throttle.reserve(2);
      * if (token) throttle.release(token);
      * throttle.release(1); // add one token back directly
      */
-    release(tokenOrN: object | number): void;
-    rollback(nOrToken: any): void;
+    release(tokenOrN: PowerThrottleToken | number): void;
+    /**
+     * Alias of {@link PowerThrottle#release}.
+     * @param {PowerThrottleToken|number} nOrToken
+     * @returns {void}
+     */
+    rollback(nOrToken: PowerThrottleToken | number): void;
     /**
      * Current available tokens (performs a refill before reporting).
      * @returns {number}
@@ -84,3 +82,4 @@ export class PowerThrottle {
     reset(count?: number): void;
 }
 export type PowerThrottleOptions = import("./jsdoc-types.js").PowerThrottleOptions;
+export type PowerThrottleToken = import("./jsdoc-types.js").PowerThrottleToken;

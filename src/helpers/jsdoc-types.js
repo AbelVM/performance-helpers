@@ -181,6 +181,35 @@ export {};
  */
 
 /**
+ * A single pending `wait()` call registered in `PowerLatch`'s waiter map.
+ *
+ * Named rather than inlined so the map value, the object built in `wait()` and
+ * the two teardown paths (`_removeWaiter`, `_settleAll`) are all checked
+ * against the same shape. `timer` and `signalHandler` are nullable because they
+ * are only set when the corresponding option was passed.
+ *
+ * @typedef {Object} PowerLatchWaiter
+ * @property {number} token - Monotonic id used as the map key.
+ * @property {import('./powerDefer.js').PowerDefer} defer - Holds the waiter's
+ *   promise, resolved or rejected when the latch settles.
+ * @property {?(ReturnType<typeof setTimeout>)} [timer] - Timeout handle, or
+ *   `null` when `wait()` was called without a timeout.
+ * @property {?(() => void)} [signalHandler] - `abort` listener, or `null` when
+ *   `wait()` was called without a signal.
+ * @property {?AbortSignal} [signal] - Signal being watched, or `null`.
+ */
+
+/**
+ * The argument accepted by `PowerLatch.wait()`: a bare timeout in ms, or an
+ * options object. Spelled out instead of `object` so `timeout` and `signal` are
+ * checked where they are read.
+ *
+ * @typedef {Object} PowerLatchWaitOptions
+ * @property {number} [timeout] - Reject with `code: 'ETIMEOUT'` after this many ms.
+ * @property {AbortSignal} [signal] - Reject with the signal's reason on abort.
+ */
+
+/**
  * Event bus options for `PowerEventBus`.
  * @typedef {Object} PowerEventBusOptions
  * @property {number} [maxListeners]
@@ -189,11 +218,29 @@ export {};
 
 /**
  * Throttle options for `PowerThrottle`.
+ *
+ * The defaults live here rather than in a `@param {number} [options.capacity=1]`
+ * line next to the constructor: TypeScript rejects a qualified name in a
+ * `@param` that is not declared as `{object}` in the same block, so those lines
+ * could not coexist with a named options type at all.
+ *
  * @typedef {Object} PowerThrottleOptions
- * @property {number} [capacity]
- * @property {number} [tokens]
- * @property {number} [refillRate]
- * @property {number} [refillInterval]
+ * @property {number} [capacity=1] Maximum tokens in the bucket.
+ * @property {number} [tokens] Initial tokens. Defaults to `capacity`.
+ * @property {number} [refillRate=0] Tokens added per second.
+ * @property {number} [refillInterval=1000] Bookkeeping interval in milliseconds.
+ */
+
+/**
+ * A reservation returned by `PowerThrottle.reserve()`, and the only thing
+ * `release()` / `rollback()` read off a token-shaped argument.
+ *
+ * Named so `release(tokenOrN)` can declare `PowerThrottleToken | number`
+ * instead of `object | number`: a bare `object` has no `n`, so reading it was
+ * an error at the one place the token is actually used.
+ *
+ * @typedef {Object} PowerThrottleToken
+ * @property {number} n - Tokens reserved, to be returned to the bucket.
  */
 
 /**
@@ -218,8 +265,8 @@ export {};
 /**
  * Sliding-window options for `PowerSlidingWindow`.
  * @typedef {Object} PowerSlidingWindowOptions
- * @property {number} [capacity]
- * @property {number} [windowMs]
+ * @property {number} [capacity=1] Max events allowed in window.
+ * @property {number} [windowMs=1000] Window size in milliseconds.
  */
 
 /**
@@ -229,6 +276,40 @@ export {};
  * @property {string} [name]
  * @property {(payload:Object)=>string|Object|null} [formatter]
  * @property {(payload:Object|string)=>void} [output]
+ */
+
+/**
+ * Options for `PowerEventLoopMonitor`.
+ *
+ * @typedef {Object} EventLoopMonitorOptions
+ * @property {number} [intervalMs=20] How often to schedule the probe timer.
+ *   Smaller catches shorter blocks and costs more; the drift is recorded per
+ *   probe, so 20ms means "worst block seen between two probes 20ms apart".
+ * @property {number} [relativeAccuracy=0.01] Target relative error for the
+ *   drift histogram's quantiles. Forwarded to `PowerHistogram`.
+ * @property {?(function(number):void)} [onDrift] Called with each drift sample
+ *   in milliseconds, for hook-based alerting. A throwing hook is swallowed:
+ *   it must not be able to stop the monitor.
+ * @property {boolean} [keepProcessAlive=false] Passed through to the internal
+ *   timer, which is `unref()`d by default. Set `true` to hold the Node process
+ *   open while monitoring.
+ * @property {?(function():({active:number, idle:number, utilization:number}))} [utilizationProvider]
+ *   Supplies `utilization()` instead of resolving Node's `perf_hooks`. The
+ *   argument exists so a browser build, a bundler, or a test can provide the
+ *   reading without this module reaching for a Node built-in.
+ */
+
+/**
+ * The idempotent release callback handed out by the permit-gate family
+ * (`PowerPermitGate`, `PowerSemaphore`, `PowerBackpressure`).
+ *
+ * Named so those helpers can promise a callable. All three previously published
+ * `Function` / `Promise<Function>`, and `Function` carries no call signature, so
+ * it is not assignable to `() => void` - which made `PowerSemaphore.acquire()`
+ * unable to return what its own gate returns, and made the documented
+ * `.then((release) => release())` not type-check for a consumer.
+ *
+ * @typedef {() => void} PowerReleaseFn
  */
 
 /**

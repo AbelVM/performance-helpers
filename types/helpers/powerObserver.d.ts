@@ -27,8 +27,15 @@ export class PowerObserver {
     clear(): void;
     /** Number of subscribers */
     get size(): number;
-    /** Set or replace the mapping function used for notifications */
-    map(fn: any): void;
+    /**
+     * Set or replace the mapping function used for notifications.
+     *
+     * @param {?((value:any)=>any)} fn - `null` clears the mapping. Anything
+     *   that is not a function and not `null` throws rather than silently
+     *   disabling mapping, because a typo'd option is otherwise invisible.
+     * @returns {void}
+     */
+    map(fn: ((value: any) => any) | null): void;
     /**
      * Flush any pending notification immediately. Useful for tests or shutdown.
      */

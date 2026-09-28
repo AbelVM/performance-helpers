@@ -13,6 +13,9 @@
  *   release();
  * }
  */
+/**
+ * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
+ */
 import { PowerPermitGate } from './powerPermitGate.js';
 
 export class PowerSemaphore {
@@ -64,7 +67,7 @@ export class PowerSemaphore {
 
   /**
    * Try to acquire a permit without waiting.
-   * @returns {Function|null} Release callback when acquired, otherwise `null`.
+   * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.
    */
   tryAcquire() {
     return this._gate.tryAcquire();

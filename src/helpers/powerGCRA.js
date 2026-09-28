@@ -48,12 +48,15 @@ import { assertLimitRequired } from '../utils/options.js';
  */
 export class PowerGCRA {
   /**
-   * @param {PowerGCRAOptions} options
+   * @param {PowerGCRAOptions} [options] - `rate` is required in practice: the
+   *   constructor throws a `TypeError` without it. The parameter stays optional
+   *   because that throw is the documented way a missing `rate` is reported, and
+   *   `new PowerGCRA()` must stay callable to reach it.
    */
-  constructor(options = {}) {
-    const { rate, per = 1000, burst = 0, onError = null } = options || {};
+  constructor(options) {
+    const { per = 1000, burst = 0, onError = null } = options || {};
 
-    const r = Number(rate);
+    const r = Number(options?.rate);
     if (!Number.isFinite(r) || r <= 0) {
       throw new TypeError('PowerGCRA: `rate` must be a finite number greater than 0');
     }
@@ -106,7 +109,6 @@ export class PowerGCRA {
    */
   retryAfter(n = 1) {
     const count = Math.max(0, Math.floor(Number(n) || 0));
-    if (count === 0) return 0;
     if (count === 0) return 0;
     const now = nowMs();
     const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
@@ -167,7 +169,15 @@ export class PowerGCRA {
 
   /**
    * Serializable snapshot of the limiter's configuration and state.
-   * @returns {{rate:number, per:number, burst:number, emissionInterval:number, delayTolerance:number, tat:number}}
+   *
+   * `tat` is `null` - not `-Infinity` - when there is no accumulated history
+   * (fresh instance, or after `reset()` / `dispose()`), because `-Infinity` does
+   * not survive a JSON round-trip: `JSON.stringify` turns it into `null`
+   * anyway, so a snapshot that claimed `number` was only true in memory. A
+   * consumer that reads the snapshot back therefore already had to handle
+   * `null`; the declared type now says so.
+   *
+   * @returns {{rate:number, per:number, burst:number, emissionInterval:number, delayTolerance:number, tat:number|null}}
    */
   stats() {
     return {

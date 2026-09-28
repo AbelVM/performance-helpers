@@ -145,7 +145,12 @@ const took: boolean = throttle.tryConsume(1);
 const availableNow: number = throttle.available();
 void [took, availableNow];
 
-const window = new PowerSlidingWindow({ limit: 5, windowMs: 1000 });
+// `limit` here was never an option: `PowerSlidingWindow` reads `capacity` and
+// `windowMs`, so `{ limit: 5 }` silently produced a limiter with the default
+// capacity of 1. The consumer test type-checked only because the constructor
+// took a bare `Object`; with the real options type in place it failed, which is
+// the drift this project keeps finding between JSDoc and the code.
+const window = new PowerSlidingWindow({ capacity: 5, windowMs: 1000 });
 void window.tryConsume();
 
 // Added in 2.0.

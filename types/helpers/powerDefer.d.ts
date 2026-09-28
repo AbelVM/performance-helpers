@@ -8,15 +8,22 @@
  */
 export class PowerDefer {
     _settled: boolean;
-    _status: string;
+    /** @type {'pending'|'fulfilled'|'rejected'} */
+    _status: "pending" | "fulfilled" | "rejected";
     /** @type {Promise<any>} */
     promise: Promise<any>;
     /**
      * Resolve the deferred promise. No-op if already settled.
-     * @param {any} value
+     *
+     * `value` is optional because the common case is a signal rather than a
+     * payload: `PowerLatch` resolves each waiter's deferred with no argument to
+     * fulfil a `Promise<void>`, and requiring `resolve(undefined)` at every such
+     * call site would be noise.
+     *
+     * @param {any} [value]
      * @returns {void}
      */
-    resolve(value: any): void;
+    resolve(value?: any): void;
     /**
      * Reject the deferred promise. No-op if already settled.
      * @param {any} err

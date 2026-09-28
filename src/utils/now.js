@@ -89,12 +89,19 @@ export function measureSync(fn) {
     return { result, ms: end - start, start, end };
   } catch (e) {
     const end = nowMs();
-    // attach duration to the thrown error for caller diagnostics
+    // Attach duration to the thrown error for caller diagnostics.
+    //
+    // The binding of a `catch` clause is `unknown`, and the thrown value really
+    // can be a primitive or a frozen object, so the annotation is written as a
+    // runtime check rather than a cast. Strict mode makes `prim.durationMs = x`
+    // throw, which the previous unconditional assignment relied on its own
+    // `try`/`catch` to swallow - same outcome, without pretending the value is
+    // known to be an object.
     try {
-      e.durationMs = end - start;
+      if (e !== null && typeof e === 'object') Reflect.set(e, 'durationMs', end - start);
     } catch (_) {
-      // `e` may be a frozen primitive or a non-extensible object; the duration
-      // annotation is a diagnostic nicety, not the caller's result.
+      // `e` may be a frozen object or an exotic proxy; the duration annotation
+      // is a diagnostic nicety, not the caller's result.
     }
     throw e;
   }
@@ -111,7 +118,7 @@ export function measureSync(fn) {
  * On rejection the thrown error will be augmented with `durationMs` and
  * re-thrown to the caller.
  *
- * @param {Function|Promise|any} fn - Async function, Promise, or direct value.
+ * @param {Function|Promise<any>|any} fn - Async function, Promise, or direct value.
  * @returns {Promise<{result:any, ms:number, start:number, end:number}>} Promise resolving to result and timing.
  * @throws {*} Re-throws any rejection from `fn` after attaching `durationMs`.
  */
@@ -124,11 +131,13 @@ export async function measureAsync(fn) {
     return { result, ms: end - start, start, end };
   } catch (e) {
     const end = nowMs();
+    // See the note in `measureSync`: the `catch` binding is `unknown` and the
+    // thrown value may be a primitive, so the annotation is a runtime check.
     try {
-      e.durationMs = end - start;
+      if (e !== null && typeof e === 'object') Reflect.set(e, 'durationMs', end - start);
     } catch (_) {
-      // `e` may be a frozen primitive or a non-extensible object; the duration
-      // annotation is a diagnostic nicety, not the caller's result.
+      // `e` may be a frozen object or an exotic proxy; the duration annotation
+      // is a diagnostic nicety, not the caller's result.
     }
     throw e;
   }

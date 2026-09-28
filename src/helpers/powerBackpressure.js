@@ -22,6 +22,9 @@ import {
  * @class PowerBackpressure
  * @public
  */
+/**
+ * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
+ */
 export class PowerBackpressure extends PowerPermitGate {
   /**
    * @param {Object} [options]
@@ -43,12 +46,17 @@ export class PowerBackpressure extends PowerPermitGate {
     } = options || {};
 
     const normalizedCapacity = Math.max(1, Math.floor(Number(capacity) || DEFAULT_QUEUE_CAPACITY));
-    const normalizedLowWaterMark = Number.isFinite(lowWaterMark)
-      ? Math.min(Math.max(1, Math.floor(lowWaterMark)), normalizedCapacity - 1)
-      : Math.max(1, Math.ceil(normalizedCapacity * 0.25));
-    const normalizedRefillAmount = Number.isFinite(refillAmount)
-      ? Math.max(1, Math.min(Math.floor(refillAmount), normalizedCapacity))
-      : Math.max(1, Math.ceil(normalizedCapacity * 0.1));
+    // `typeof` rather than `Number.isFinite` alone: `isFinite` is typed
+    // `(number: unknown)`, so it does not narrow, and the `null` "not supplied"
+    // sentinel would stay in the union at every use below.
+    const normalizedLowWaterMark =
+      typeof lowWaterMark === 'number' && Number.isFinite(lowWaterMark)
+        ? Math.min(Math.max(1, Math.floor(lowWaterMark)), normalizedCapacity - 1)
+        : Math.max(1, Math.ceil(normalizedCapacity * 0.25));
+    const normalizedRefillAmount =
+      typeof refillAmount === 'number' && Number.isFinite(refillAmount)
+        ? Math.max(1, Math.min(Math.floor(refillAmount), normalizedCapacity))
+        : Math.max(1, Math.ceil(normalizedCapacity * 0.1));
     const normalizedRefillInterval = Math.max(
       1,
       Math.floor(Number(refillInterval) || DEFAULT_BACKPRESSURE_REFILL_INTERVAL_MS)
@@ -96,7 +104,7 @@ export class PowerBackpressure extends PowerPermitGate {
    * Acquire a permit asynchronously.
    * Resolves immediately when a permit is available.
    * Otherwise queues the producer until capacity frees.
-   * @returns {Promise<Function>} Promise resolving to a release callback.
+   * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
    */
   acquire() {
     if (this.available > 0) {
@@ -114,7 +122,7 @@ export class PowerBackpressure extends PowerPermitGate {
 
   /**
    * Try to acquire a permit immediately.
-   * @returns {Function|null} Release callback, or `null` if no permit is available.
+   * @returns {PowerReleaseFn|null} Release callback, or `null` if no permit is available.
    */
   tryAcquire() {
     return super.tryAcquire();
