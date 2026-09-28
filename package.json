@@ -35,7 +35,7 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel Vázquez Montoro",
+  "author": "Abel V\u00e1zquez Montoro",
   "type": "module",
   "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
@@ -226,6 +226,7 @@
     "format": "prettier --write \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"*.md\"",
     "test:coverage": "vitest run --coverage --reporter=verbose",
     "typecheck": "tsc --noEmit --project tsconfig.check.json",
+    "audit:exports": "node scripts/static-audit-exports.cjs",
     "docs": "typedoc",
     "bench": "node bench/run.js",
     "bench:pool": "node bench/run.js pool",

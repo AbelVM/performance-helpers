@@ -109,5 +109,10 @@ for (const [sym, info] of Object.entries(symbolMap)) {
 }
 
 const out = { generatedAt: new Date().toISOString(), report };
-fs.writeFileSync(path.join('scripts', 'static-audit-exports.json'), JSON.stringify(out, null, 2));
+// Output goes to stdout on purpose. It used to be written to a committed
+// `static-audit-exports.json`, which went stale (last regenerated 2026-04-09)
+// and was never wired into any script, so nobody read it. A diagnostic that runs
+// on demand is worth more than a snapshot that silently rots. Use
+// `npm run audit:exports > /tmp/exports.json` when a snapshot is actually wanted.
+process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
 console.log(JSON.stringify(out, null, 2));

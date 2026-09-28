@@ -52,6 +52,12 @@ export default [
       complexity: 'off',
       'max-lines-per-function': 'off',
       'no-console': 'off',
+      // The harness accumulates counters that are not always read back - some
+      // benchmarks compute a count the report does not surface yet. Demoted to a
+      // warning rather than an error so `npm run lint` stays usable while those
+      // accumulators are wired up (tracked as BENCH-001). It stays a *warning*
+      // so they remain visible.
+      'no-unused-vars': 'warn',
     },
   },
 ];

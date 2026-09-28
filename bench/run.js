@@ -1034,7 +1034,10 @@ async function runBenchmarkPowerCircuit(ops) {
       await circuit.call(() => {
         throw new Error('trip');
       });
-    } catch (_) {}
+    } catch (_) {
+      // Expected: tripping the circuit is the point of this warm-up, so the
+      // rejection is the success path.
+    }
     const t0 = process.hrtime.bigint();
     let rejections = 0;
     for (let i = 0; i < smallOps; i++) {
@@ -2354,7 +2357,11 @@ async function main() {
     memoizer: null,
     cacheWarmup: null,
     helpers: [],
-    prevDeltaMap: prevDeltaMap ? Object.fromEntries(prevDeltaMap) : null,
+    // `prevDeltaMap` is deliberately NOT serialised into the report. It is an
+    // input, read from the previous run's results.json at startup and used only
+    // to render the delta columns. Writing it back out copied ~13kB of the
+    // previous run into every new results.json, so the committed artefact grew
+    // without bound and produced a large, meaningless diff on every run.
   };
 
   console.log('Bench config:', { mode, TASKS, ITERS, POOL_SIZES, BENCH_RUNS, HELPER_OPS });
