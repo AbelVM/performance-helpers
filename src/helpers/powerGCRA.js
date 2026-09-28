@@ -25,6 +25,7 @@
  * @public
  */
 import { nowMs } from '../utils/now.js';
+import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { assertLimitRequired } from '../utils/options.js';
 
 /**
@@ -34,6 +35,9 @@ import { assertLimitRequired } from '../utils/options.js';
  * @property {number} [burst=0] - Extra tolerance above the steady-state rate, in
  *   operations. `0` allows exactly the steady-state spacing; larger values admit
  *   a short spike of that many extra operations.
+ * @property {function(): number} [now] - Clock override, for tests and for
+ *   compositions that read the clock once. Ignored by a composition that
+ *   threads its own reading, because an injected clock always wins.
  * @property {function(number):void} [onError] - Called when the internal clock
  *   misbehaves (time moving backwards), instead of throwing.
  */
@@ -77,6 +81,16 @@ export class PowerGCRA {
     // Theoretical arrival time of the next conforming operation, in ms since
     // epoch. `-Infinity` means "no history": the very first call is accepted.
     this._tat = Number.NEGATIVE_INFINITY;
+    /**
+     * Clock for this limiter, and whether it was explicitly injected. See
+     * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
+     * must outrank a value threaded in by a composition.
+     * @type {(() => number)}
+     */
+    this._now = nowMs;
+    /** @type {boolean} */
+    this._nowExplicit = false;
+    attachLimiterClock(this, nowMs, /** @type {any} */ (options), 'PowerGCRA');
   }
 
   /**
@@ -84,10 +98,10 @@ export class PowerGCRA {
    * @param {number} [n=1] - Number of operations to consume.
    * @returns {boolean} `true` when the request fits inside the current budget.
    */
-  tryConsume(n = 1) {
+  tryConsume(n = 1, options = {}) {
     const count = Math.max(0, Math.floor(Number(n) || 0));
     if (count === 0) return true;
-    const now = nowMs();
+    const now = resolveLimiterNow(this._now, this._nowExplicit, options);
     const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
     // Admit while the *pre-update* TAT is still inside the tolerance window.
     // Checking the post-update value instead would reserve this request's cost
@@ -107,10 +121,10 @@ export class PowerGCRA {
    * @param {number} [n=1] - Number of operations the next call would consume.
    * @returns {number} Milliseconds to wait; `0` when the call would succeed now.
    */
-  retryAfter(n = 1) {
+  retryAfter(n = 1, options = {}) {
     const count = Math.max(0, Math.floor(Number(n) || 0));
     if (count === 0) return 0;
-    const now = nowMs();
+    const now = resolveLimiterNow(this._now, this._nowExplicit, options);
     const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
     // GCRA admits a whole batch behind a single admission check, so the wait
     // depends on the current TAT alone and not on `count`. Waiting this long
@@ -142,8 +156,8 @@ export class PowerGCRA {
    *
    * @returns {number} A non-negative whole number.
    */
-  available() {
-    const now = nowMs();
+  available(options = {}) {
+    const now = resolveLimiterNow(this._now, this._nowExplicit, options);
     const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
     const remaining = this._delayTolerance - (tat - now);
     if (remaining < 0) return 0;

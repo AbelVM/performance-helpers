@@ -5,6 +5,9 @@
  * @property {number} [burst=0] - Extra tolerance above the steady-state rate, in
  *   operations. `0` allows exactly the steady-state spacing; larger values admit
  *   a short spike of that many extra operations.
+ * @property {function(): number} [now] - Clock override, for tests and for
+ *   compositions that read the clock once. Ignored by a composition that
+ *   threads its own reading, because an injected clock always wins.
  * @property {function(number):void} [onError] - Called when the internal clock
  *   misbehaves (time moving backwards), instead of throwing.
  */
@@ -32,18 +35,27 @@ export class PowerGCRA {
     _delayTolerance: number;
     _tat: number;
     /**
+     * Clock for this limiter, and whether it was explicitly injected. See
+     * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
+     * must outrank a value threaded in by a composition.
+     * @type {(() => number)}
+     */
+    _now: (() => number);
+    /** @type {boolean} */
+    _nowExplicit: boolean;
+    /**
      * Try to consume one operation.
      * @param {number} [n=1] - Number of operations to consume.
      * @returns {boolean} `true` when the request fits inside the current budget.
      */
-    tryConsume(n?: number): boolean;
+    tryConsume(n?: number, options?: {}): boolean;
     /**
      * Exact milliseconds until `tryConsume()` would succeed.
      *
      * @param {number} [n=1] - Number of operations the next call would consume.
      * @returns {number} Milliseconds to wait; `0` when the call would succeed now.
      */
-    retryAfter(n?: number): number;
+    retryAfter(n?: number, options?: {}): number;
     /**
      * Consume, or return the exact wait needed.
      * @param {number} [n=1]
@@ -68,7 +80,7 @@ export class PowerGCRA {
      *
      * @returns {number} A non-negative whole number.
      */
-    available(): number;
+    available(options?: {}): number;
     /**
      * Whether the limiter would accept a single operation right now, without
      * consuming it. Same shape as `PowerThrottle.available()` for composition.
@@ -131,6 +143,12 @@ export type PowerGCRAOptions = {
      * a short spike of that many extra operations.
      */
     burst?: number | undefined;
+    /**
+     * - Clock override, for tests and for
+     * compositions that read the clock once. Ignored by a composition that
+     * threads its own reading, because an injected clock always wins.
+     */
+    now?: (() => number) | undefined;
     /**
      * - Called when the internal clock
      * misbehaves (time moving backwards), instead of throwing.

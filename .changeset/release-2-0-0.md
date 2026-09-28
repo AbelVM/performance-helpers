@@ -135,6 +135,25 @@ pipeline.
     6 requests on the wire — and a hedge draws a budget token like any retry.
     Off by default because it raises average load and only pays off if `fn`
     honours its `AbortSignal`.
+- **`PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` and `PowerRateLimit` can now be told what time it is,
+  and a composition reads the clock once instead of once per limiter.** `nowMs()` reads _two_ clocks per
+  call - the high-resolution one and `Date.now()`, the second purely to check they have not diverged under
+  a test harness - and measures ~141 ns, against a whole `tryConsume` of ~120-165 ns. An N-limiter
+  composition therefore spent N readings deciding what time it was, which is most of the call and all of it
+  duplicated: every limiter inside a single `tryConsume` is deciding at the same instant. `tryConsume`,
+  `reserve`, `available` and `retryAfter` now take an optional `{ now }`, and `PowerRateLimit` reads once
+  per composed call and threads that value into every leg - including the `available()` pre-flight, which
+  was a second N reads. Each limiter also takes a `now` **constructor** option for driving a fake clock.
+  **The two are deliberately asymmetric, and the rule is the substantive part: a limiter constructed with
+  its own `now` ignores any per-call value.** An injected clock always wins, because a limiter built with a
+  fake clock is a limiter _under test_, and a composition overriding it mid-run would make the test silently
+  measure something else. **The composition takes no constructor `now` at all** - `now` is a function on a
+  limiter and a number in a composition's per-call options, and one name meaning two types on adjacent APIs
+  is a trap; the per-call value covers every use it did, since the composer reads once and tells everyone.
+  A limiter that takes no second argument reads its own clock, so threading needs no capability check and
+  works with third-party limiters unchanged. **No speedup is claimed**: the win is arithmetic - one reading
+  instead of N, at ~141 ns each - because the previous attempt at this item measured _below the noise
+  floor_, and a benchmark on shared CI would be a number nobody could reproduce.
 - **`PowerSocketAdapter`** (new export) normalises the three socket models a server actually
   receives — Node `ws` (EventEmitter), browser `WebSocket` (EventTarget) and `WebSocketStream`
   (streams) — behind one interface, and adds socket-level liveness, per-message rate limiting and

@@ -6,6 +6,7 @@
  * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
  */
 import { nowMs } from '../utils/now.js';
+import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { MS_PER_SEC, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
 import { assertLimitRequired } from '../utils/options.js';
@@ -16,7 +17,7 @@ export class PowerSlidingWindow {
    *   and `windowMs` to one second.
    */
   constructor(options = {}) {
-    const { capacity = 1, windowMs = MS_PER_SEC } = options;
+    const { capacity = 1, windowMs = MS_PER_SEC, now } = options;
     // `Math.max(0, Number(capacity) || 0)` accepted `capacity: 0`, producing a
     // window that refuses everything, and coerced NaN to 0 rather than
     // surfacing it. Both are configuration errors, so they throw.
@@ -32,6 +33,16 @@ export class PowerSlidingWindow {
       min: 1,
       fallback: MS_PER_SEC,
     });
+    /**
+     * Clock for this limiter, and whether it was explicitly injected. See
+     * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
+     * must outrank a value threaded in by a composition.
+     * @type {(() => number)}
+     */
+    this._now = nowMs;
+    /** @type {boolean} */
+    this._nowExplicit = false;
+    attachLimiterClock(this, nowMs, { now }, 'PowerSlidingWindow');
     // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
     this._timestamps = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
   }
@@ -63,10 +74,13 @@ export class PowerSlidingWindow {
    * @param {number} [n=1]
    * @returns {boolean} True if consumption succeeded; false otherwise.
    */
-  tryConsume(n = 1) {
+  tryConsume(n = 1, options = {}) {
     const want = Math.max(0, Math.floor(n) || 0);
     if (want === 0) return true;
-    const now = nowMs();
+    // Read once and reuse: the prune and the push must agree on the timestamp,
+    // or a message is recorded at a time older than the window it was pruned
+    // against and the window silently grows by one.
+    const now = resolveLimiterNow(this._now, this._nowExplicit, options);
     this._prune(now);
     if (this._timestamps.length + want <= this.capacity) {
       if (want === 1) this._timestamps.push(now);
@@ -84,8 +98,8 @@ export class PowerSlidingWindow {
    * Return how many slots are currently available.
    * @returns {number}
    */
-  available() {
-    this._prune(nowMs());
+  available(options = {}) {
+    this._prune(resolveLimiterNow(this._now, this._nowExplicit, options));
     return Math.max(0, this.capacity - this._timestamps.length);
   }
 

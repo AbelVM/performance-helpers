@@ -20,12 +20,13 @@ The admission check is made **once per batch**, against the _pre-update_ TAT. Ch
 
 ## Constructor
 
-| Option    |            Type | Default | Description                                                                          |
-| --------- | --------------: | ------: | ------------------------------------------------------------------------------------ |
-| `rate`    |        `number` |       — | **Required.** Sustained rate in operations per `per` unit. Must be finite and `> 0`. |
-| `per`     |        `number` |  `1000` | The unit `rate` is measured against, in milliseconds.                                |
-| `burst`   |        `number` |     `0` | Extra tolerance above the steady-state rate, in operations.                          |
-| `onError` | `function(err)` |  `null` | Called instead of throwing when the internal clock misbehaves.                       |
+| Option    |                 Type |   Default | Description                                                                                        |
+| --------- | -------------------: | --------: | -------------------------------------------------------------------------------------------------- |
+| `rate`    |             `number` |         — | **Required.** Sustained rate in operations per `per` unit. Must be finite and `> 0`.               |
+| `per`     |             `number` |    `1000` | The unit `rate` is measured against, in milliseconds.                                              |
+| `burst`   |             `number` |       `0` | Extra tolerance above the steady-state rate, in operations.                                        |
+| `onError` |      `function(err)` |    `null` | Called instead of throwing when the internal clock misbehaves.                                     |
+| `now`     | `function(): number` | `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
 
 Invalid options throw a `TypeError` at construction.
 
@@ -80,3 +81,43 @@ Note that `PowerRateLimit`'s pre-check reads `available()` and refuses without c
 - `retryAfter()` works in fractional milliseconds (e.g. `142.857…` at 7/s), so round **up** if you feed it to a timer that only accepts whole milliseconds.
 - A batch is admitted behind a single check, so `retryAfter(n)` does not grow with `n` — waiting the reported amount always suffices for the whole batch.
 - `reset()` is a hard clear. It is not a throttle-friendly "refill", which is why it takes no count argument.
+
+## Clocks
+
+Every limiter reads time, and `nowMs()` is not cheap: it reads **two** clocks
+per call — the high-resolution one and `Date.now()`, the second purely to check
+the two have not diverged under a test harness — and measures about **141 ns**.
+Against a whole `tryConsume` of ~120-165 ns, deciding what time it is was most
+of the work.
+
+Two knobs address that, and they are deliberately not symmetric:
+
+| Where                     | Type                 | Used by                                                |
+| ------------------------- | -------------------- | ------------------------------------------------------ |
+| `now` constructor option  | `function(): number` | tests, and any caller driving a fake clock             |
+| `{ now }` per-call option | `number`             | `PowerRateLimit`, threading one reading into every leg |
+
+**A limiter constructed with its own `now` ignores any per-call value.** An
+explicitly injected clock always wins. The reason is not precedence taste: a
+limiter built with a fake clock is a limiter _under test_, and if a composition
+overrode its notion of time mid-run, the test would silently start measuring
+something else. That is the hardest kind of failure to notice, and it happens
+exactly when you are most likely to be looking for a different bug.
+
+A limiter that takes no second argument simply reads its own clock, which is
+why threading needs no capability check on the limiter and works with
+third-party limiters unchanged.
+
+```javascript
+// A driven clock, for anything deterministic.
+let clock = 0;
+const throttle = new PowerThrottle({ capacity: 10, refillRate: 100, now: () => clock });
+
+// One reading, shared by every leg of a composition.
+rateLimit.tryConsume(1, { now: Date.now() });
+```
+
+Note the sharp edge: a threaded `now` is **authoritative**, so a value far in the
+future will legitimately empty a sliding window. That is correct — it is what a
+real clock jumping would do — but it is why a caller should thread one instant
+for the whole composition rather than letting each leg drift.

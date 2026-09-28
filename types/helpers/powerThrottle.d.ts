@@ -11,6 +11,15 @@ export class PowerThrottle {
     tokens: number;
     refillRate: number;
     refillInterval: number;
+    /**
+     * Clock for this limiter, and whether it was explicitly injected. See
+     * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
+     * must outrank a value threaded in by a composition.
+     * @type {(() => number)}
+     */
+    _now: (() => number);
+    /** @type {boolean} */
+    _nowExplicit: boolean;
     _lastRefill: number;
     _tokenRemainder: number;
     /**
@@ -29,7 +38,7 @@ export class PowerThrottle {
      * @param {number} [n=1]
      * @returns {boolean} `true` when tokens were consumed; `false` otherwise.
      */
-    tryConsume(n?: number): boolean;
+    tryConsume(n?: number, options?: {}): boolean;
     /**
      * Add tokens to the bucket (forceful, useful for tests).
      * @param {number} n
@@ -51,7 +60,7 @@ export class PowerThrottle {
      *   throttle.release(token);
      * }
      */
-    reserve(n?: number): PowerThrottleToken | null;
+    reserve(n?: number, options?: {}): PowerThrottleToken | null;
     /**
      * Release a prior reservation token or add tokens back.
      * Accepts either a token returned from `reserve()` or a numeric count.
@@ -73,7 +82,7 @@ export class PowerThrottle {
      * Current available tokens (performs a refill before reporting).
      * @returns {number}
      */
-    available(): number;
+    available(options?: {}): number;
     /**
      * Reset the bucket to a given token count (or full when omitted).
      * @param {number} [count]

@@ -436,8 +436,17 @@ export type PowerThrottleOptions = {
     refillRate?: number | undefined;
     /**
      * Bookkeeping interval in milliseconds.
+     *
+     * A limiter constructed with its own `now` ignores any per-call value a
+     * composition threads in - see `LimiterNowOptions`.
      */
     refillInterval?: number | undefined;
+    /**
+     * - Clock override in ms. Defaults to the
+     * library's `nowMs()`. Injected for tests and for compositions; it outranks
+     * any per-call value.
+     */
+    now?: (() => number) | undefined;
 };
 /**
  * A reservation returned by `PowerThrottle.reserve()`, and the only thing
@@ -515,8 +524,34 @@ export type PowerSlidingWindowOptions = {
     capacity?: number | undefined;
     /**
      * Window size in milliseconds.
+     *
+     * A limiter constructed with its own `now` ignores any per-call value a
+     * composition threads in - see `LimiterNowOptions`.
      */
     windowMs?: number | undefined;
+    /**
+     * - Clock override in ms. Defaults to the
+     * library's `nowMs()`. Injected for tests and for compositions; it outranks
+     * any per-call value.
+     */
+    now?: (() => number) | undefined;
+};
+/**
+ * Per-call options shared by every limiter's clock-reading methods.
+ *
+ * The same shape on `tryConsume`, `reserve`, `available` and `retryAfter` so a
+ * caller - in practice `PowerRateLimit` - can hand one reading of the clock to a
+ * whole composition. `nowMs()` costs ~141 ns because it reads two clocks per
+ * call, so an N-limiter composition was spending N of them.
+ */
+export type LimiterNowOptions = {
+    /**
+     * - Milliseconds since epoch, used for this call only.
+     * **A limiter constructed with its own `now` ignores this**: an explicitly
+     * injected clock always wins, so a limiter under test cannot have its notion
+     * of time silently replaced by the composer's.
+     */
+    now?: number | undefined;
 };
 /**
  * A normalised inbound socket message, identical across all three transport

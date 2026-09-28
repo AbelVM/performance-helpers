@@ -17,6 +17,7 @@
  * @typedef {import('./jsdoc-types.js').PowerThrottleToken} PowerThrottleToken
  */
 import { nowMs } from '../utils/now.js';
+import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { assertLimitRequired } from '../utils/options.js';
 import { DEFAULT_REFILL_INTERVAL_MS, MS_PER_SEC } from './constants.js';
 
@@ -34,6 +35,7 @@ export class PowerThrottle {
       tokens = undefined,
       refillRate = 0,
       refillInterval = DEFAULT_REFILL_INTERVAL_MS,
+      now,
     } = options;
     // `Math.max(0, Number(x) || 0)` accepted `capacity: 0` - a throttle that
     // can never succeed - and coerced NaN to 0 rather than surfacing it. Both
@@ -63,8 +65,19 @@ export class PowerThrottle {
       fallback: DEFAULT_REFILL_INTERVAL_MS,
     });
 
+    /**
+     * Clock for this limiter, and whether it was explicitly injected. See
+     * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
+     * must outrank a value threaded in by a composition.
+     * @type {(() => number)}
+     */
+    this._now = nowMs;
+    /** @type {boolean} */
+    this._nowExplicit = false;
+    attachLimiterClock(this, nowMs, { now }, 'PowerThrottle');
+
     // track last refill timestamp (ms)
-    this._lastRefill = nowMs();
+    this._lastRefill = this._now();
     // accumulate fractional tokens between refills
     this._tokenRemainder = 0;
   }
@@ -98,11 +111,10 @@ export class PowerThrottle {
    * @param {number} [n=1]
    * @returns {boolean} `true` when tokens were consumed; `false` otherwise.
    */
-  tryConsume(n = 1) {
+  tryConsume(n = 1, options = {}) {
     const want = Math.max(0, Math.floor(+n) || 0);
     if (want === 0) return true;
-    const now = nowMs();
-    this._refill(now);
+    this._refill(resolveLimiterNow(this._now, this._nowExplicit, options));
     if (this.tokens >= want) {
       this.tokens -= want;
       return true;
@@ -136,11 +148,10 @@ export class PowerThrottle {
    *   throttle.release(token);
    * }
    */
-  reserve(n = 1) {
+  reserve(n = 1, options = {}) {
     const want = Math.max(0, Math.floor(+n) || 0);
     if (want === 0) return { n: 0 };
-    const now = nowMs();
-    this._refill(now);
+    this._refill(resolveLimiterNow(this._now, this._nowExplicit, options));
     if (this.tokens >= want) {
       this.tokens -= want;
       return { n: want };
@@ -181,9 +192,9 @@ export class PowerThrottle {
    * Current available tokens (performs a refill before reporting).
    * @returns {number}
    */
-  available() {
+  available(options = {}) {
     // perform a refill to present up-to-date value
-    this._refill(nowMs());
+    this._refill(resolveLimiterNow(this._now, this._nowExplicit, options));
     return this.tokens;
   }
 
@@ -195,7 +206,7 @@ export class PowerThrottle {
   reset(count) {
     if (count == null) this.tokens = this.capacity;
     else this.tokens = Math.max(0, Math.min(this.capacity, Number(count) || 0));
-    this._lastRefill = nowMs();
+    this._lastRefill = this._now();
     this._tokenRemainder = 0;
   }
 }

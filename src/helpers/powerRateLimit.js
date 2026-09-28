@@ -17,6 +17,10 @@
  * all-or-nothing semantics across the set of limiters.
  */
 
+import { resolveComposerNow } from '../utils/limiterClock.js';
+
+/** @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions */
+
 /**
  * PowerRateLimit
  *
@@ -42,6 +46,12 @@ export class PowerRateLimit {
  * @typedef {Object} PowerRateLimitOptions
  * @property {boolean} [atomic=false] Attempt all-or-nothing semantics across the
  *   composed limiters. Requires each to expose `available()`.
+ * Per-call `tryConsume(n, options)` also accepts a `{ now }` number - read
+ * **once per composed call** and threaded into every leg (PERF-007). There is
+ * deliberately no constructor `now` here: on the limiters `now` is a *function*,
+ * and having one name mean a function in one place and a number in another on
+ * the same class is a trap. The composer needs no injected clock of its own,
+ * because the per-call value covers every use the limiters' injection does.
  */
 
   /**
@@ -53,7 +63,12 @@ export class PowerRateLimit {
    * `tryConsume` would still be accepted.
    *
    * @typedef {Object} RateLimiterLike
-   * @property {function(number=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume
+   * @property {function(number=, LimiterNowOptions=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume -
+   *   The optional second argument carries a single `now` for the whole
+   *   composition (PERF-007). A limiter that did not inject its own clock
+   *   should honour it; one that did must ignore it, or a limiter under test
+   *   silently changes clock mid-run. A limiter that takes only `n` is fine -
+   *   it simply reads its own clock.
    * @property {function(number=): {n: number}|number|boolean|null} [reserve]
    *   A token to pass to `release` when it reserves a slot, `false` when it
    *   cannot, `null` when it has no reservation concept. `PowerGCRA` returns a
@@ -61,7 +76,7 @@ export class PowerRateLimit {
    * @property {function(*):void} [release]
    * @property {function(number):void} [addTokens]
    * @property {function(number):void} [rollback]
-   * @property {number|function(): number} [available] A count, or a method that
+   * @property {number|function(LimiterNowOptions=): number} [available] A count, or a method that
    *   returns one. Both `PowerGCRA` and `PowerThrottle` expose `available()` as
    *   a *method* - the first draft of this typedef said `number`, and the
    *   consumer type test caught it by refusing to accept either helper as a
@@ -107,14 +122,26 @@ export class PowerRateLimit {
    * `available()` for atomic semantics.
    *
    * @param {number} [n=1] - Tokens to consume.
-   * @param {PowerRateLimitOptions} [options] - Per-call overrides; `atomic`
-   *   defaults to the instance setting.
+   * @param {PowerRateLimitOptions & LimiterNowOptions} [options] - Per-call
+   *   overrides; `atomic` defaults to the instance setting, and `now` supplies
+   *   the single clock reading threaded into every leg.
    * @returns {boolean} `true` only when every composed limiter allowed it.
    */
   tryConsume(n = 1, options = {}) {
     const want = Math.max(0, Math.floor(+n) || 0);
     if (want === 0) return true;
     const atomic = options.atomic == null ? this.atomicDefault : Boolean(options.atomic);
+    // The whole point of PERF-007. `nowMs()` reads two clocks per call and
+    // costs ~141 ns, so an N-limiter composition was spending N of them - the
+    // dominant cost of the call, and pure waste: every limiter inside a single
+    // `tryConsume` is deciding what time it is at the same instant, so they
+    // should all be *told* rather than each going and looking.
+    //
+    // A limiter with its own injected clock ignores this (see
+    // `resolveLimiterNow`), and a third-party limiter that only accepts `n`
+    // simply reads its own clock - so threading is safe without a capability
+    // check on the limiter.
+    const legOptions = { now: resolveComposerNow(options) };
 
     // Validate every limiter up front. Previously the capability check lived
     // *inside* the commit loop, so a limiter without `tryConsume` threw only
@@ -134,7 +161,7 @@ export class PowerRateLimit {
     for (const l of this.limiters) {
       if (typeof l.available === 'function') {
         try {
-          if (l.available() < want) return false;
+          if (l.available(legOptions) < want) return false;
         } catch (e) {
           return false;
         }
@@ -149,7 +176,7 @@ export class PowerRateLimit {
       // limiters keep their tokens, which is the documented non-atomic
       // contract.
       for (const l of this.limiters) {
-        const ok = l.tryConsume(want);
+        const ok = l.tryConsume(want, legOptions);
         if (!ok) return false;
       }
       return true;
@@ -201,7 +228,7 @@ export class PowerRateLimit {
       // method guarantees one of the two exists, so reaching here means
       // `tryConsume` is present and safe to call.
       try {
-        const ok = l.tryConsume(want);
+        const ok = l.tryConsume(want, legOptions);
         if (!ok) {
           for (let i = committed.length - 1; i >= 0; i--) {
             this._undoCommit(committed[i], want).catch(() => {});
@@ -225,13 +252,16 @@ export class PowerRateLimit {
    * If any limiter does not expose `available()`, this returns `0`.
    * @returns {number}
    */
-  available() {
+  available(options = {}) {
     if (this.limiters.length === 0) return Infinity;
+    // One read for the whole composition, as in `tryConsume`. Without this the
+    // atomic pre-flight above costs a second N clock reads per call.
+    const legOptions = { now: resolveComposerNow(options) };
     let min = Infinity;
     for (const l of this.limiters) {
       if (typeof l.available !== 'function') return 0;
       try {
-        const value = l.available();
+        const value = l.available(legOptions);
         min = Math.min(min, Number(value) || 0);
       } catch (e) {
         return 0;

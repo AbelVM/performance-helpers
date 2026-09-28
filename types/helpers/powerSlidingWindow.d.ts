@@ -6,6 +6,15 @@ export class PowerSlidingWindow {
     constructor(options?: PowerSlidingWindowOptions);
     capacity: number;
     windowMs: number;
+    /**
+     * Clock for this limiter, and whether it was explicitly injected. See
+     * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
+     * must outrank a value threaded in by a composition.
+     * @type {(() => number)}
+     */
+    _now: (() => number);
+    /** @type {boolean} */
+    _nowExplicit: boolean;
     _timestamps: PowerQueue;
     /**
      * Remove timestamps older than now - windowMs.
@@ -25,12 +34,12 @@ export class PowerSlidingWindow {
      * @param {number} [n=1]
      * @returns {boolean} True if consumption succeeded; false otherwise.
      */
-    tryConsume(n?: number): boolean;
+    tryConsume(n?: number, options?: {}): boolean;
     /**
      * Return how many slots are currently available.
      * @returns {number}
      */
-    available(): number;
+    available(options?: {}): number;
     /**
      * Drop every recorded timestamp, returning the window to fully available.
      * @returns {void}

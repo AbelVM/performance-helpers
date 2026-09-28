@@ -321,6 +321,12 @@ export {};
  * @property {number} [tokens] Initial tokens. Defaults to `capacity`.
  * @property {number} [refillRate=0] Tokens added per second.
  * @property {number} [refillInterval=1000] Bookkeeping interval in milliseconds.
+ *
+ * A limiter constructed with its own `now` ignores any per-call value a
+ * composition threads in - see `LimiterNowOptions`.
+ * @property {function(): number} [now] - Clock override in ms. Defaults to the
+ *   library's `nowMs()`. Injected for tests and for compositions; it outranks
+ *   any per-call value.
  */
 
 /**
@@ -385,6 +391,27 @@ export {};
  * @typedef {Object} PowerSlidingWindowOptions
  * @property {number} [capacity=1] Max events allowed in window.
  * @property {number} [windowMs=1000] Window size in milliseconds.
+ *
+ * A limiter constructed with its own `now` ignores any per-call value a
+ * composition threads in - see `LimiterNowOptions`.
+ * @property {function(): number} [now] - Clock override in ms. Defaults to the
+ *   library's `nowMs()`. Injected for tests and for compositions; it outranks
+ *   any per-call value.
+ */
+
+/**
+ * Per-call options shared by every limiter's clock-reading methods.
+ *
+ * The same shape on `tryConsume`, `reserve`, `available` and `retryAfter` so a
+ * caller - in practice `PowerRateLimit` - can hand one reading of the clock to a
+ * whole composition. `nowMs()` costs ~141 ns because it reads two clocks per
+ * call, so an N-limiter composition was spending N of them.
+ *
+ * @typedef {Object} LimiterNowOptions
+ * @property {number} [now] - Milliseconds since epoch, used for this call only.
+ *   **A limiter constructed with its own `now` ignores this**: an explicitly
+ *   injected clock always wins, so a limiter under test cannot have its notion
+ *   of time silently replaced by the composer's.
  */
 
 /**
