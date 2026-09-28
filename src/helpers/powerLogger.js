@@ -299,10 +299,7 @@ export class PowerLogger {
       } catch (e) {
         // fallback: attempt plain console with resolved args
         try {
-          consoleCall(
-            consoleMethod,
-            ...(Array.isArray(resolved) ? resolved : [resolved])
-          );
+          consoleCall(consoleMethod, ...(Array.isArray(resolved) ? resolved : [resolved]));
         } catch (e2) {
           /* swallow logging failures */
         }

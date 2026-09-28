@@ -418,6 +418,38 @@ export {};
  */
 
 /**
+ * The rejection `PowerBulkhead.reset()` hands to every queued waiter.
+ *
+ * `code` is stamped on it (`ERR_BULKHEAD_RESET` unless the caller's reason
+ * already carried one) so a caller can tell a bulkhead teardown from a genuine
+ * task failure - which `Error` alone cannot.
+ *
+ * @typedef {Error & {code?: string}} BulkheadResetError
+ */
+
+/**
+ * Options accepted by `PowerBulkhead.reset()` / `dispose()`.
+ *
+ * @typedef {Object} PowerBulkheadResetOptions
+ * @property {number} [available] Permits to restore per partition. Defaults to
+ *   `maxConcurrency`.
+ * @property {string|Error} [reason] Rejection reason for queued waiters.
+ */
+
+/**
+ * Bulkhead construction options.
+ * @typedef {Object} PowerBulkheadOptions
+ * @property {number} [partitions=4] Number of isolated execution partitions.
+ * @property {number} [maxConcurrency=1] Maximum concurrent tasks per partition.
+ * @property {number} [queueCapacity=100] Maximum queued tasks across all
+ *   partitions.
+ * @property {(key:any)=>number} [partitioner] Maps a key to a partition index.
+ * @property {(err:any)=>void} [onError] Invoked whenever a user-supplied
+ *   `release()` or task hook throws. Added in 2.0; without it those failures were
+ *   silently discarded, because the field was read but never assigned.
+ */
+
+/**
  * Circuit options for `PowerCircuit`.
  * @typedef {Object} PowerCircuitOptions
  * @property {number} [threshold=5] Consecutive failures before the circuit opens.

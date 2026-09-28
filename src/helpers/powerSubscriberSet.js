@@ -108,16 +108,15 @@ export class PowerSubscriberSet {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
     // The wrapper is tagged with the original listener under a module-private
     // symbol so a caller holding the wrapper can recover what it wraps.
-    const wrapped =
-      /** @type {((...args:any[])=>void) & {[ORIGINAL]?: SubscriberListener}} */ (
-        (...args) => {
-          try {
-            fn(...args);
-          } finally {
-            this.delete(fn);
-          }
+    const wrapped = /** @type {((...args:any[])=>void) & {[ORIGINAL]?: SubscriberListener}} */ (
+      (...args) => {
+        try {
+          fn(...args);
+        } finally {
+          this.delete(fn);
         }
-      );
+      }
+    );
     try {
       wrapped[ORIGINAL] = fn;
     } catch (e) {

@@ -529,6 +529,58 @@ export type EventLoopMonitorOptions = {
  */
 export type PowerReleaseFn = () => void;
 /**
+ * The rejection `PowerBulkhead.reset()` hands to every queued waiter.
+ *
+ * `code` is stamped on it (`ERR_BULKHEAD_RESET` unless the caller's reason
+ * already carried one) so a caller can tell a bulkhead teardown from a genuine
+ * task failure - which `Error` alone cannot.
+ */
+export type BulkheadResetError = Error & {
+    code?: string;
+};
+/**
+ * Options accepted by `PowerBulkhead.reset()` / `dispose()`.
+ */
+export type PowerBulkheadResetOptions = {
+    /**
+     * Permits to restore per partition. Defaults to
+     * `maxConcurrency`.
+     */
+    available?: number | undefined;
+    /**
+     * Rejection reason for queued waiters.
+     */
+    reason?: string | Error | undefined;
+};
+/**
+ * Bulkhead construction options.
+ */
+export type PowerBulkheadOptions = {
+    /**
+     * Number of isolated execution partitions.
+     */
+    partitions?: number | undefined;
+    /**
+     * Maximum concurrent tasks per partition.
+     */
+    maxConcurrency?: number | undefined;
+    /**
+     * Maximum queued tasks across all
+     * partitions.
+     */
+    queueCapacity?: number | undefined;
+    /**
+     * Maps a key to a partition index.
+     */
+    partitioner?: ((key: any) => number) | undefined;
+    /**
+     * Invoked whenever a user-supplied
+     * `release()` or task hook throws. Added in 2.0; without it those failures were
+     * silently discarded, because the field was read but never assigned.
+     */
+    onError?: ((err: any) => void) | undefined;
+};
+/**
  * Circuit options for `PowerCircuit`.
  */
 export type PowerCircuitOptions = {

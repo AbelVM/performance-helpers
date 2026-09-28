@@ -17,17 +17,14 @@ import { DEFAULT_QUEUE_CAPACITY } from './constants.js';
  * @class PowerBulkhead
  * @public
  */
+/**
+ * @typedef {import('./jsdoc-types.js').PowerBulkheadOptions} PowerBulkheadOptions
+ * @typedef {import('./jsdoc-types.js').PowerBulkheadResetOptions} PowerBulkheadResetOptions
+ * @typedef {import('./jsdoc-types.js').BulkheadResetError} BulkheadResetError
+ */
 export class PowerBulkhead {
   /**
-   * @param {Object} [options]
-   * @param {number} [options.partitions=4] Number of isolated execution partitions.
-   * @param {number} [options.maxConcurrency=1] Maximum concurrent tasks per partition.
-   * @param {number} [options.queueCapacity=100] Maximum queued tasks across all partitions.
-   * @param {Function} [options.partitioner] Function `(key)=>partitionIndex`.
-   * @param {function(*):void} [options.onError] Invoked as `onError(err)`
-   *   whenever a user-supplied `release()` or task hook throws. Added in 2.0;
-   *   without it those failures were silently discarded, because the field was
-   *   read but never assigned.
+   * @param {PowerBulkheadOptions} [options]
    */
   constructor(options = {}) {
     const {
@@ -215,20 +212,25 @@ export class PowerBulkhead {
    * interrupt them - but they no longer block a subsequent `drain()` from
    * resolving once they settle.
    *
-   * @param {Object} [options] - Reset options.
-   * @param {number} [options.available] - Permits to restore per partition.
-   *   Defaults to `maxConcurrency`.
-   * @param {string|Error} [options.reason] - Rejection reason for queued waiters.
+   * @param {PowerBulkheadResetOptions} [options] - Reset options.
    * @returns {void}
    */
   reset(options = {}) {
+    // `available` was documented here and ignored - the gates were always
+    // restored to `maxConcurrency`. A caller who passed it got a bulkhead full
+    // of permits anyway.
+    const available = Number.isFinite(Number(options.available))
+      ? Math.max(0, Math.floor(Number(options.available)))
+      : this._maxConcurrency;
     const reason =
       options.reason instanceof Error
         ? options.reason
         : new Error(options.reason || 'PowerBulkhead reset');
-    reason.code = reason.code || 'ERR_BULKHEAD_RESET';
+    /** @type {BulkheadResetError} */
+    const coded = reason;
+    coded.code = coded.code || 'ERR_BULKHEAD_RESET';
     for (const bucket of this._buckets) {
-      bucket.gate.reset({ available: this._maxConcurrency, reason });
+      bucket.gate.reset({ available: this._maxConcurrency, reason: coded });
     }
     this._pendingCount = 0;
     this._resolveDrainWaitersIfIdle();
