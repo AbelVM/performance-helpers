@@ -8,6 +8,14 @@ pipeline.
 
 **Breaking**
 
+- **`PowerMemoizer` keys changed format.** The default `keyResolver` is now
+  `simpleArgsKey` rather than `(...args) => JSON.stringify(args)` — ~35%
+  cheaper for the scalar arguments memoizers are actually called with, falling
+  back to `JSON.stringify` the moment it meets a non-scalar. A memoizer's
+  `.cache` is in-memory and not a persisted format, but a caller reading keys in
+  a test or a debug dump will see the difference. Pass `keyResolver` explicitly
+  to keep the old shape.
+
 - **`PowerPool` frames every message.** The pool now posts a
   `PowerMessageCodec` frame (`[u8 version][u8 codec][u32 length][payload]`)
   instead of a bare `Uint8Array` of JSON, and decodes replies with

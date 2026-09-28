@@ -574,7 +574,7 @@ export class PowerMemoizer {
         ttl?: number | undefined;
         weight?: number | undefined;
     });
-    keyResolver: (...arg0: any[]) => string;
+    keyResolver: typeof simpleArgsKey;
     cache: PowerCache;
     _inflight: Map<any, any>;
     _defaultMemoizeOptions: {};
