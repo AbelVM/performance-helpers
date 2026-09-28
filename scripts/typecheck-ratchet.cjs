@@ -36,8 +36,8 @@ const path = require('node:path');
  * The ceiling this repository is allowed to reach. Lower it whenever you fix
  * some. `scripts/typecheck-ratchet.cjs --update` prints the replacement line.
  *
- * 563 = `tsconfig.check.json` (internal `checkJs` debt, pre-existing)
- *  28 = `tsconfig.types.json` (consumer-visible; every one of these is a real
+ * 553 = `tsconfig.check.json` (internal `checkJs` debt, pre-existing)
+ *  16 = `tsconfig.types.json` (consumer-visible; every one of these is a real
  *       promise the package breaks, so they get fixed first)
  *
  * The history of this number is worth keeping, because the wrong move was
@@ -51,12 +51,16 @@ const path = require('node:path');
  * so instead the ceiling was raised to match reality and the finding was filed.
  *
  * QUAL-009 is now fixed - `assertLimitRequired` gives the constructors a
- * variant that genuinely returns `number` - which brought it to 591: two
- * *below* where it started, because the `ESNext.Disposable` fix also removed
- * two consumer-visible errors. Neither the baseline nor the debt is a vanity
+ * variant that genuinely returns `number` - and the declaration work took the
+ * consumer project from 28 to 16. That is 569: 24 below where this started.
+ * The direction is the point. Neither the baseline nor the debt is a vanity
  * metric; they exist to make a regression impossible to miss.
+ *
+ * When the consumer column reaches zero, add `npm run test:types` to `verify`
+ * as a direct gate and delete the consumer half of this script. The ratchet is
+ * scaffolding for a check that is not yet honest, not a permanent fixture.
  */
-const BASELINE = 591;
+const BASELINE = 569;
 
 const PROJECTS = [
   { label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' },

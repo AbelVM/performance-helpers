@@ -32,9 +32,15 @@ export type PendingResponseEntry = {
      */
     reject: (arg0: any) => void;
     /**
-     * - Optional timeout handle used to cancel the pending request.
+     * - Optional timeout
+     * handle used to cancel the pending request. Spelled as
+     * `ReturnType<typeof setTimeout>` rather than `NodeJS.Timeout`: the latter is a
+     * Node-only global, so naming it made this declaration fail to compile for
+     * any consumer without `@types/node`. `clearTimeout` accepts the handle in
+     * both runtimes, and the project unrefs it, so only "something clearTimeout
+     * takes" is actually being promised.
      */
-    timer?: number | NodeJS.Timeout | null;
+    timer?: number | null | undefined;
 };
 /**
  * Common pool options that may be re-used across helpers.
@@ -226,6 +232,11 @@ export type PowerCacheOptions = {
     initialPoolSize?: number | undefined;
     maxCleanupPerTick?: number | undefined;
     eagerCleanupOnRead?: boolean | undefined;
+    /**
+     * - Default timeout (ms) applied to
+     * `getOrSetAsync` when a caller omits its own `timeout`.
+     */
+    defaultAsyncTimeout?: number | undefined;
     /**
      * - Invoked as `onError(err, message)`
      * whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`

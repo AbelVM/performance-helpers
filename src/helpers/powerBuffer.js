@@ -90,7 +90,14 @@ export const o2u8 = (obj, preStringified) => {
 /**
  * Decode a UTF-8 encoded binary (Uint8Array / ArrayBuffer / Buffer) into a JS value by parsing JSON.
  *
- * @param {ArrayBuffer|TypedArray|Buffer|Uint8Array} buf - Binary input containing JSON UTF-8.
+ * `ArrayBufferView` is the dependency-free spelling of "any typed array" - it is
+ * a TypeScript built-in, unlike `TypedArray`, which is a Node global alias and
+ * therefore leaked `@types/node` into the published declarations. Node `Buffer`
+ * needs no mention either: it extends `Uint8Array`, so `ArrayBufferView` already
+ * covers it, and naming it broke every consumer who has not installed
+ * `@types/node`.
+ *
+ * @param {ArrayBuffer|ArrayBufferView} buf - Binary input containing JSON UTF-8.
  * @returns {*} Parsed JavaScript value.
  * @throws {TypeError} If the input type is not supported.
  * @example
@@ -100,7 +107,7 @@ export const o2u8 = (obj, preStringified) => {
  * Decode a UTF-8 encoded binary (ArrayBuffer/TypedArray/Buffer/Uint8Array)
  * into a JavaScript value by parsing JSON.
  *
- * @param {ArrayBuffer|TypedArray|Buffer|Uint8Array} buf - Binary input.
+ * @param {ArrayBuffer|ArrayBufferView} buf - Binary input.
  * @returns {*} Parsed value.
  * @throws {TypeError} If the input type is unsupported.
  */
@@ -149,7 +156,7 @@ export const o2b = (obj) => {
  * Decode an ArrayBuffer/TypedArray/Buffer containing JSON UTF-8 to a value.
  * This is a small wrapper around `u82o` for the legacy ArrayBuffer API.
  *
- * @param {ArrayBuffer|TypedArray|Buffer} buf - Buffer-like input containing JSON UTF-8.
+ * @param {ArrayBuffer|ArrayBufferView} buf - Buffer-like input containing JSON UTF-8.
  * @returns {*} Parsed value.
  * @example
  * const obj = b2o(buf)
@@ -157,7 +164,7 @@ export const o2b = (obj) => {
 /**
  * Decode an ArrayBuffer/TypedArray/Buffer containing JSON UTF-8 to a value.
  *
- * @param {ArrayBuffer|TypedArray|Buffer} buf - Buffer-like input.
+ * @param {ArrayBuffer|ArrayBufferView} buf - Buffer-like input.
  * @returns {*} Parsed value.
  */
 export const b2o = (buf) => u82o(buf);

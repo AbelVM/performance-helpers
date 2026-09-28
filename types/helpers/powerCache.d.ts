@@ -26,33 +26,19 @@ export function simpleArgsKey(...args: any[]): string;
 export class PowerCache {
     /**
      * Create a PowerCache.
-     * @param {Object} [options]
-     * @param {number} [options.maxEntries=Infinity] Maximum number of entries.
-     * @param {number} [options.maxWeight=Infinity] Maximum total weight across entries.
-     * @param {function(*):number} [options.weightFn] Function to compute weight for a value.
-     * @param {number} [options.defaultTTL=60000] Default TTL (ms) for entries.
-     * @param {number} [options.maxPoolSize=1000] Maximum node pool size for reuse.
-     * @param {boolean} [options.rejectOversized=false] If true, inserting an item whose weight > `maxWeight` will be rejected.
-     * @param {function(*, *, string):void} [options.onEvict] Callback invoked when an item is evicted/deleted/rejected. Called as `(key, value, reason)` where reason is `'evicted'|'deleted'|'rejected-oversized'`.
-     * @param {function(*, *):void} [options.onExpire] Callback invoked when an item expires. Called as `(key, value)`.
-     * @param {number} [options.initialPoolSize=0] Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
-     * @param {number} [options.maxCleanupPerTick=100] Default max nodes scanned per cleanup tick when running `startCleanup()`.
-     * @param {boolean} [options.eagerCleanupOnRead=false] If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
+     *
+     * The options type is the `PowerCacheOptions` typedef, not a second inline
+     * list. The two had drifted: `defaultAsyncTimeout`, `onError` and `policy`
+     * were destructured here and documented in the typedef, but absent from a
+     * duplicated `@param` list on this constructor - so TypeScript synthesised an
+     * options type without them, the body failed to type-check against its own
+     * signature, and the three options were missing from the published
+     * declarations. One source of truth, not two that have to be kept in step.
+     *
+     * @param {PowerCacheOptions} [options]
      * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, }?: {
-        maxEntries?: number | undefined;
-        maxWeight?: number | undefined;
-        weightFn?: ((arg0: any) => number) | undefined;
-        defaultTTL?: number | undefined;
-        maxPoolSize?: number | undefined;
-        rejectOversized?: boolean | undefined;
-        onEvict?: ((arg0: any, arg1: any, arg2: string) => void) | undefined;
-        onExpire?: ((arg0: any, arg1: any) => void) | undefined;
-        initialPoolSize?: number | undefined;
-        maxCleanupPerTick?: number | undefined;
-        eagerCleanupOnRead?: boolean | undefined;
-    }, ...args: any[]);
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, }?: PowerCacheOptions, ...args: any[]);
     maxEntries: number;
     maxWeight: number;
     maxPoolSize: number;
@@ -60,7 +46,7 @@ export class PowerCache {
     defaultTTL: number;
     rejectOversized: boolean;
     onEvict: ((arg0: any, arg1: any, arg2: string) => void) | null;
-    onError: any;
+    onError: ((arg0: any, arg1: string) => void) | null;
     /** number of times `weightFn` threw; a non-zero value means `maxWeight`
      *  could not be enforced and should be surfaced by the caller. */
     _weightErrors: number;
@@ -385,12 +371,14 @@ export class PowerCache {
      * @param {number} [options.ttl]
      * @param {number} [options.weight]
      * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
+     * @param {number} [options.timeout] Per-call override of the cache's `defaultAsyncTimeout`, in ms.
      * @returns {Promise<*>}
      */
     getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate, timeout }?: {
         ttl?: number | undefined;
         weight?: number | undefined;
         staleWhileRevalidate?: boolean | undefined;
+        timeout?: number | undefined;
     }): Promise<any>;
     /**
      * Check membership without affecting recency and verify the stored value is deep-equal
@@ -615,7 +603,23 @@ export class PowerMemoizer {
      * @private
      */
     private _receiverKey;
-    _memoize(fn: any, { ttl, weight }?: {}): (...args: any[]) => any;
+    /**
+     * Wrap `fn` so every call goes through this memoizer's cache.
+     *
+     * Documented because it is a real (private) seam: `memoize()` normalises the
+     * options before calling it, and the declaration had no JSDoc at all, so the
+     * emitted signature was `{ ttl, weight }?: {}` - a destructuring pattern typed
+     * as the empty object, which is not assignable from anything. That is a
+     * declaration error in the published `.d.ts`, not a runtime one.
+     *
+     * @param {Function} fn - Function to wrap.
+     * @param {Object} [options] - Per-wrapper overrides merged over the defaults.
+     * @param {number} [options.ttl]
+     * @param {number} [options.weight]
+     * @returns {Function} The memoized wrapper.
+     * @private
+     */
+    private _memoize;
     /**
      * Public API to memoize an arbitrary function using this PowerMemoizer instance's cache.
      * Mirrors the behavior used by the constructor when a function is supplied —

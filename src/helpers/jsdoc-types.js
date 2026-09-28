@@ -19,7 +19,13 @@
  * @typedef {Object} PendingResponseEntry
  * @property {function(any):void} resolve - Resolve function for the pending Promise.
  * @property {function(any):void} reject - Reject function for the pending Promise.
- * @property {number|NodeJS.Timeout|null} [timer] - Optional timeout handle used to cancel the pending request.
+ * @property {ReturnType<typeof setTimeout>|null} [timer] - Optional timeout
+ *   handle used to cancel the pending request. Spelled as
+ *   `ReturnType<typeof setTimeout>` rather than `NodeJS.Timeout`: the latter is a
+ *   Node-only global, so naming it made this declaration fail to compile for
+ *   any consumer without `@types/node`. `clearTimeout` accepts the handle in
+ *   both runtimes, and the project unrefs it, so only "something clearTimeout
+ *   takes" is actually being promised.
  */
 
 /**
@@ -194,6 +200,8 @@ export {};
  * @property {number} [initialPoolSize]
  * @property {number} [maxCleanupPerTick]
  * @property {boolean} [eagerCleanupOnRead]
+ * @property {number} [defaultAsyncTimeout] - Default timeout (ms) applied to
+ *   `getOrSetAsync` when a caller omits its own `timeout`.
  * @property {function(*, string):void} [onError] - Invoked as `onError(err, message)`
  *   whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`
  *   callback, or a failing `weightFn`.
