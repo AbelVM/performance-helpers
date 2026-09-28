@@ -4,20 +4,20 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 ## PowerCache
 
-| option               |                         type |    default | description                                                                                             |
-| -------------------- | ---------------------------: | ---------: | ------------------------------------------------------------------------------------------------------- |
-| `maxEntries`         |                     `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                           |
-| `maxWeight`          |                     `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                 |
-| `weightFn`           |     `function(value):number` |  `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                            |
-| `defaultTTL`         |                     `number` |    `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                     |
-| `maxPoolSize`        |                     `number` |     `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                               |
-| `rejectOversized`    |                    `boolean` |    `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                           |
-| `onEvict`            | `function(key,value,reason)` |     `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                           | 'deleted' | 'rejected-oversized'`. |
-| `onExpire`           |        `function(key,value)` |     `null` | Callback invoked when an entry expires due to TTL.                                                      |
-| `initialPoolSize`    |                     `number` |        `0` | Prefill the internal node pool to reduce early allocations.                                             |
-| `maxCleanupPerTick`  |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                |
-| `eagerCleanupOnRead` |                    `boolean` |    `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior).              |
-| `policy`             |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`. |
+| option               |                         type |    default | description                                                                                                                                                                              |
+| -------------------- | ---------------------------: | ---------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxEntries`         |                     `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                                                                                                            |
+| `maxWeight`          |                     `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                                                                                                  |
+| `weightFn`           |     `function(value):number` |  `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                                                                                                             |
+| `defaultTTL`         |                     `number` |    `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                                                                                                      |
+| `maxPoolSize`        |                     `number` |     `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                                                                                                                |
+| `rejectOversized`    |                    `boolean` |    `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                                                                                                            |
+| `onEvict`            | `function(key,value,reason)` |     `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                                                                                                            | 'deleted' | 'rejected-oversized'`. |
+| `onExpire`           |        `function(key,value)` |     `null` | Callback invoked when an entry expires due to TTL.                                                                                                                                       |
+| `initialPoolSize`    |                     `number` |        `0` | Prefill the internal node pool to reduce early allocations.                                                                                                                              |
+| `maxCleanupPerTick`  |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                                                                                                 |
+| `eagerCleanupOnRead` |                    `boolean` |    `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior).                                                                                               |
+| `policy`             |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`.                                                                                  |
 | `admission`          |                     `'none'` |   `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan). |
 
 ### API
@@ -206,13 +206,13 @@ The constructor always returns a `PowerMemoizer` instance. Use the instance meth
 
 #### Memoizer constructor params
 
-| param                  |                       type |                           default | description                                                                                                                                                                                                                                            |
-| ---------------------- | -------------------------: | --------------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `fn`                   |                `Function?` |                                 — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied). |
-| `options.keyResolver`  | `function(...args):string` | `simpleArgsKey` | Function mapping call args to a stable cache key. **Changed in 2.0**: the default was `(...args) => JSON.stringify(args)`, which is ~35% slower for the scalar arguments memoizers are actually called with. The key *format* differs, so a caller reading keys will see it. |
-| `options.cacheOptions` |                   `Object` |                              `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                            |
-| `options.ttl`          |                  `number?` |                       `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                     |
-| `options.weight`       |                  `number?` |                       `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                       |
+| param                  |                       type |         default | description                                                                                                                                                                                                                                                                  |
+| ---------------------- | -------------------------: | --------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fn`                   |                `Function?` |               — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied).                       |
+| `options.keyResolver`  | `function(...args):string` | `simpleArgsKey` | Function mapping call args to a stable cache key. **Changed in 2.0**: the default was `(...args) => JSON.stringify(args)`, which is ~35% slower for the scalar arguments memoizers are actually called with. The key _format_ differs, so a caller reading keys will see it. |
+| `options.cacheOptions` |                   `Object` |            `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                                                  |
+| `options.ttl`          |                  `number?` |     `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                           |
+| `options.weight`       |                  `number?` |     `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                             |
 
 You can create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
 
@@ -253,63 +253,101 @@ await memo(1);
 
 ### TinyLFU admission: resisting a scan
 
-`{ admission: 'tinylfu' }` adds a frequency filter in front of the cache. An LRU
-admits anything that misses, so a one-off scan over a larger key space evicts
-the entire working set — every scan key is the *most recently used* by
-definition. A frequency filter asks a different question: is the thing I would
-evict still wanted?
+`{ admission: 'tinylfu' }` adds a frequency filter in front of the cache. The
+intent is sound: an LRU admits anything that misses, so a one-off scan over a
+larger key space evicts the entire working set — every scan key is the _most
+recently used_ by definition. A frequency filter asks a different question: is
+the thing I would evict still wanted?
 
-Measured, 40-key working set warmed over 5 passes, then hit by a 500-key one-off
-scan:
+> **Experimental, and currently a net loss. Measured, not assumed.**
+> `node bench/claims.js zipf` does not reproduce an earlier claim about this
+> option, and inverts it. On a cold 40-entry cache preceded by a 460-key scan
+> burst, `admission: 'tynilfu'` measured a **2.5 % hit rate against plain LRU's
+> 66.4 %**, retaining **1.7 of 40** working-set keys against LRU's 40/40. On the
+> sustained Zipf + scan mix below it is a mild loss. **Do not enable it on the
+> strength of the theory — measure your workload first**, and prefer
+> `policy: 'slru'`, which resists the same scan and is not experimental.
 
-| Configuration | Working set surviving | `size` | Insertions refused |
-|---|---:|---:|---:|
-| `policy: 'lru'` | **0 / 40** | 40 | 0 |
-| `policy: 'lru'`, `admission: 'tinylfu'` | **40 / 40** | 40 | 500 |
-| `policy: 'slru'` | 40 / 40 | 40 | 0 |
-| `policy: 'slru'`, `admission: 'tinylfu'` | 40 / 40 | 40 | 500 |
+Sustained Zipf + scan workload — 40-key working set, a 25-key one-shot scan
+every 40 hot accesses, 5 paired repeats so every variant sees a byte-identical
+key stream (`node bench/claims.js zipf`):
 
-**Worth being plain about the third and fourth rows: `policy: 'slru'` already
-resists this scan**, and it shipped earlier. TinyLFU's contribution is bringing
-*plain LRU* up to the same place, not compounding with SLRU. The two are
-complementary rather than additive on this workload.
+| Configuration                            | Working-set hit rate |     Survivors |
+| ---------------------------------------- | -------------------: | ------------: |
+| `policy: 'lru'`                          |               75.0 % |     17.2 / 40 |
+| `policy: 'lru'`, `admission: 'tinylfu'`  |               71.0 % |     15.2 / 40 |
+| **`policy: 'slru'`**                     |           **89.4 %** | **33.0 / 40** |
+| `policy: 'slru'`, `admission: 'tinylfu'` |               70.9 % |     15.2 / 40 |
 
-**Off by default.** The sketch costs memory and a hash per access, and a
-`slru` cache already behaves this way.
+`slru` wins outright, and adding the filter on top of it _hurts_. That is the
+result to act on: on this workload the scan-resistant behaviour people want
+comes from `slru`, which shipped earlier and is not experimental.
 
-Three things that had to be right, each of which was wrong first and caught by
-the benchmark rather than by review:
+**Off by default**, and the numbers above are the reason to leave it there. The
+sketch costs memory and a hash per access; the mechanism is right and the wiring
+is not yet.
 
-- **The filter only applies at capacity.** A brand-new key's estimate is 0, so
-  comparing it against an incumbent below capacity refuses every insert after
-  the first — measured 200 insertions rejected and `size` 1. Admission is about
-  what to *displace*, so it needs something to displace.
+#### The confirmed defect
+
+The admission check refuses when the incumbent's estimate is `>=` the
+challenger's. A brand-new key's estimate is 0, so in a cold sketch — where every
+estimate is 0 — **every admission is refused**. A cache that filled with one-shot
+scan keys while below capacity therefore cannot recover: the working set is
+refused every time, which is the 2.5 % above.
+
+The fix is **not** a comparison operator. Changing `>=` to `>` was implemented
+and measured: it improved the sustained mix (70.9 % → 77.0 %, finally beating
+plain LRU) but moved the cold-start case only from 2.5 % to 2.7 %, so a scan
+walks the working set — the exact failure the feature exists to prevent. It was
+reverted. The correct mechanism is W-TinyLFU's admission _window_: a small
+region at the MRU end that accepts new keys unconditionally, so scan traffic is
+absorbed there and the filter arbitrates only that window's victim against a
+main-space victim. That is not built.
+
+#### What the sketch itself gets right
+
+Independent of the admission defect, these hold and are worth keeping:
+
+- **The filter only applies at capacity.** Applying it below capacity refuses
+  every insert after the first — measured 200 insertions rejected, `size` 1.
+  Admission is about what to _displace_, so it needs something to displace.
 - **Rejection happens at the insert, not inside the eviction sweep.** Returning
   from `_evictIfNeeded` to reject skipped the sweep and let the cache grow to 77
   entries against a limit of 10.
-- **A tie keeps the incumbent.** A scan key and the previous scan key both sit at
-  estimate 0, and refusing that tie is the entire mechanism.
+- **The half-life is `100 × maxEntries`**, not the sketch's own default of 10
+  operations — at 10 a reset fired every ten `set`/`get` and halved a working set
+  that had only just been learned.
+- **Reads count towards frequency**, not just writes, so a read-mostly cache is
+  not judged on a history it never had. `clear()` drops the history with the
+  entries.
 
-The half-life is `100 × maxEntries`, not the sketch's own default of 10
-operations — at 10 a reset fired every ten `set`/`get` and halved a working set
-that had only just been learned. Reads count towards frequency, not just writes,
-so a read-mostly cache is not judged on a history it never had. `clear()` drops
-the history with the entries.
+#### A note on how this was diagnosed
+
+Three separate mechanism hypotheses were proposed and **all three were wrong**:
+a short half-life, Count-Min collisions inverting the ranking, and a `null`
+sketch under a `defaultTTL`. The two that survived were the ones measured
+against the shipped path and reproduced across a parameter sweep; the ones that
+failed came from synthetic probes that did not resemble the real workload. The
+sketch test suite also could not see any of it, because every test built its
+sketch with `sampleSize: 1e9`, which disables the half-life reset — so 156 lines
+of tests exercised a configuration that never occurs in production. That is
+fixed, and the reasoning is kept in `review.md` under BENCH-002 rather than
+deleted: a review that silently drops its own wrong conclusions is not a review.
 
 ### `hasEqual` and deep comparison limits
 
 `hasEqual(key, value, options)` deep-compares a stored value against an
 incoming one. It has two explicit limits and an escape hatch.
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `ignoreExpiry` | `boolean` | `false` | Treat an expired entry as present. |
-| `seen` | `WeakMap` | — | Reusable cycle map, for callers doing many comparisons. |
-| `maxNodes` | `number` | `10000` | Ceiling on how many pairs one comparison will examine. |
-| `compareFn` | `function` | `null` | `(a, b) => boolean \| undefined`. Return `undefined` for "no opinion" and the walk continues. |
+| Option         |       Type | Default | Description                                                                                   |
+| -------------- | ---------: | ------: | --------------------------------------------------------------------------------------------- |
+| `ignoreExpiry` |  `boolean` | `false` | Treat an expired entry as present.                                                            |
+| `seen`         |  `WeakMap` |       — | Reusable cycle map, for callers doing many comparisons.                                       |
+| `maxNodes`     |   `number` | `10000` | Ceiling on how many pairs one comparison will examine.                                        |
+| `compareFn`    | `function` |  `null` | `(a, b) => boolean \| undefined`. Return `undefined` for "no opinion" and the walk continues. |
 
 **Why a node budget, not just a depth limit.** Depth says nothing about width: a
-flat array of 50 000 scalars recurses at *depth 2* and never trips a depth limit,
+flat array of 50 000 scalars recurses at _depth 2_ and never trips a depth limit,
 and comparing two of them blocked the event loop for tens of milliseconds on what
 a caller expects to be a cache lookup. Measured after the change, that comparison
 is bounded and reports `false`.
@@ -319,7 +357,7 @@ false positive hands back the wrong value, and this is a cache. The same applies
 if you lower `maxNodes` yourself — a value larger than the budget reports "not
 equal", not a guess.
 
-**Reference equality is never rationed.** Passing the *same* object back is
+**Reference equality is never rationed.** Passing the _same_ object back is
 answered from `a === b` before any budget arithmetic, so storing and re-reading
 a large value by reference is still a hit at any `maxNodes`.
 
@@ -359,10 +397,10 @@ it cost a full extra lookup on every call.
 
 Measured A/B in one process, 400k calls against a 64-key working set:
 
-| Path | Per call |
-|---|---:|
-| 1.x shape (`JSON.stringify` keys, two lookups) | 0.55 us |
-| now (`simpleArgsKey`, one lookup) | **0.26 us** |
+| Path                                           |    Per call |
+| ---------------------------------------------- | ----------: |
+| 1.x shape (`JSON.stringify` keys, two lookups) |     0.55 us |
+| now (`simpleArgsKey`, one lookup)              | **0.26 us** |
 
 **2.1x.** The double lookup was the larger half and is the change the audit did
 not ask for; arity specialisation measured at ~0.1% and was not done.

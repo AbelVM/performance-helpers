@@ -343,6 +343,12 @@ required is the worker reply shape.
   is missing. Treat this entry as experimental rather than a recommendation, and
   run `node bench/claims.js zipf` before trusting any number about it.
   `maxEntries` and `clear()` are still honoured exactly.
+  **The withdrawal originally reached this note but not the guide** — `guides/powerCache.md`
+  still carried a benchmark table asserting `policy: 'lru'` + `admission: 'tinylfu'`
+  retains **40 / 40** working-set keys, which `bench/claims.js zipf` measures as
+  **15.2 / 40**. The table has been replaced with the measured numbers and marked
+  experimental, since a reader consulting the guide is the one most likely to act
+  on the number. If you read the earlier claim, it was wrong.
 - **`PowerPool` `{ maxQueueLength }`** — the pool's missing backpressure story.
   `queuePolicy` decided what happened when the pool was saturated but never
   whether that situation could _keep going_: with the default `'enqueue'` and no
