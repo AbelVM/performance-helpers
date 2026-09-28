@@ -21,12 +21,28 @@ if (
 // or `process.hrtime()` remain tied to real time. To keep tests reliable
 // prefer performance/hrt only when it's close to Date.now() (small delta).
 /**
+ * The high-resolution clock, resolved once.
+ *
+ * `() => performance.timeOrigin + performance.now()`, or `null` where
+ * `performance` is absent or does not carry a `timeOrigin`. Resolved at module
+ * load rather than per call - see the note inside `nowMs`.
+ *
+ * @type {(() => number)|null}
+ */
+const _perfNow =
+  typeof performance !== 'undefined' &&
+  typeof performance?.now === 'function' &&
+  typeof performance?.timeOrigin === 'number'
+    ? () => performance.timeOrigin + performance.now()
+    : null;
+
+/**
  * Get a high-resolution timestamp in milliseconds since the epoch.
  *
  * This function prefers `performance.timeOrigin + performance.now()` when
  * available and reasonably close to `Date.now()` to provide higher
- * resolution timestamps. On Node.js it uses `process.hrtime.bigint()` with
- * an epoch offset when available. Falls back to `Date.now()` if nothing
+ * resolution timestamps. On Node.js it uses `process.hrtime.bigint()` with an
+ * epoch offset when available. Falls back to `Date.now()` if nothing
  * better is available or when offsets appear to diverge (e.g. in some
  * test harnesses).
  *
@@ -35,13 +51,20 @@ if (
 export const nowMs = () => {
   const dateNow = Date.now();
 
-  if (
-    typeof performance !== 'undefined' &&
-    typeof performance?.now === 'function' &&
-    typeof performance?.timeOrigin === 'number'
-  ) {
+  // The capability checks are loop-invariant and were being re-evaluated on
+  // every single call. Resolving the high-resolution source once at module load
+  // is worth more than threading a single `now` through every limiter (which is
+  // what PERF-007 proposed): `nowMs()` is on the hot path of essentially
+  // every helper in the library, and measured **141 ns** per call - against a
+  // `PowerThrottle.tryConsume` of **164 ns** in total. The `typeof` guards, the
+  // optional-chain property reads and the `try`/`catch` frame were most of it.
+  //
+  // The bound source can still throw or go stale (a test harness replacing
+  // `globalThis.performance`, a torn-down sandbox), so the `try` and the
+  // closeness check stay: only the *resolution* moved out of the hot path.
+  if (_perfNow) {
     try {
-      const perfVal = performance.timeOrigin + performance.now();
+      const perfVal = _perfNow();
       // If perf-based time is close to Date.now(), prefer it for higher resolution.
       if (Math.abs(perfVal - dateNow) < 1000) return perfVal;
       return dateNow;
