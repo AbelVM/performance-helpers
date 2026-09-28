@@ -647,7 +647,7 @@ export class PowerPool {
      * Resolves with the result of `getStats()` at the time of idle.
      * @returns {Promise<object>} Promise resolving to `getStats()`.
      */
-    drain(): Promise<object>;
+    drain(options?: {}): Promise<object>;
     /**
      * Add an event listener for pool events. Supported types: 'message', 'error', 'messageerror', 'idle'.
      * @param {'message'|'error'|'messageerror'|'idle'} type

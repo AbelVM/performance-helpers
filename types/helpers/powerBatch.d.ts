@@ -42,7 +42,7 @@ export class PowerBatch {
      * resolves immediately.
      * @returns {Promise<void>}
      */
-    flush(): Promise<void>;
+    flush(options?: {}): Promise<void>;
     /**
      * The pending entry for the batch being assembled, created on first use.
      *

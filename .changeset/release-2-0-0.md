@@ -113,6 +113,12 @@ required is the worker reply shape.
   storm cannot leak capacity; and `pending`/`isFull` count live waiters only.
   For `PowerBulkhead.run` the *wait* is cancelled, not the work — a task that
   already holds a permit runs to completion.
+- **`PowerBatch.flush` and `PowerPool.drain` accept a `signal` too**, and mean
+  something slightly different: they cancel the *wait*, not the work. A batch
+  flush that was abandoned still delivers the items its `add()` callers are
+  waiting on, and an abandoned pool drain leaves the pool dispatching for
+  everyone else. Rejecting the batch's shared pending promise would break every
+  queued caller with a cancellation they did not ask for.
 
 **Added**
 

@@ -14,6 +14,7 @@
  * // items are coalesced and handler called once in the next tick
  */
 import { PowerQueue } from './powerQueue.js';
+import { abortReason, raceWithAbort } from '../utils/abort.js';
 import { assertLimitRequired } from '../utils/options.js';
 import { PowerScheduler } from './powerScheduler.js';
 
@@ -89,13 +90,20 @@ export class PowerBatch {
    * resolves immediately.
    * @returns {Promise<void>}
    */
-  flush() {
-    if (this._queue.length === 0 && !this._scheduler.scheduled) return Promise.resolve();
+  flush(options = {}) {
+    const signal = /** @type {{signal?: AbortSignal}} */ (options)?.signal ?? null;
+    // Aborting the flush abandons the *wait*, not the flush. The queued items
+    // still belong to the callers who passed them to `add()`, and rejecting the
+    // shared pending promise would break those; only this caller's view of the
+    // completion is dropped.
+    if (this._queue.length === 0 && !this._scheduler.scheduled) {
+      return signal?.aborted ? Promise.reject(abortReason(signal)) : Promise.resolve();
+    }
     const pending = this._ensurePending();
     if (!this._scheduler.scheduled) {
       this._scheduler.schedule();
     }
-    return pending.promise;
+    return raceWithAbort(pending.promise, signal);
   }
 
   /**

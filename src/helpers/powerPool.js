@@ -14,6 +14,7 @@
  *
  */
 import { o2u8, u82o } from './powerBuffer.js';
+import { abortReason, raceWithAbort } from '../utils/abort.js';
 import WorkerAgnostic from './WorkerAgnostic.js';
 import { nowMs } from '../utils/now.js';
 import { setSafeInterval } from '../utils/timers.js';
@@ -3015,14 +3016,23 @@ export class PowerPool {
    * Resolves with the result of `getStats()` at the time of idle.
    * @returns {Promise<object>} Promise resolving to `getStats()`.
    */
-  drain() {
+  drain(options = {}) {
+    const signal = /** @type {{signal?: AbortSignal}} */ (options)?.signal ?? null;
     const queueEmpty = this.queue.length === 0;
     const allWorkersIdle = this._activeTasks === 0;
     const allIdle = allWorkersIdle && queueEmpty;
 
-    if (allIdle) return Promise.resolve(this.getStats());
+    // Aborting the drain abandons the *wait*: the pool keeps dispatching and
+    // serving every other caller. Someone who stopped watching the drain does
+    // not get to stop the work.
+    if (allIdle) {
+      return signal?.aborted
+        ? Promise.reject(abortReason(signal))
+        : Promise.resolve(this.getStats());
+    }
+    if (signal?.aborted) return Promise.reject(abortReason(signal));
 
-    return new Promise((resolve) => {
+    const idle = new Promise((resolve) => {
       const cb = () => {
         try {
           this.removeEventListener('idle', cb);
@@ -3033,6 +3043,7 @@ export class PowerPool {
       };
       this.addEventListener('idle', cb);
     });
+    return raceWithAbort(idle, signal);
   }
 
   /**

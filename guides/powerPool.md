@@ -68,6 +68,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 - Disposal hooks: `[Symbol.dispose]()` calls `terminate()` synchronously; `[Symbol.asyncDispose]()` awaits `drain()` then terminates.
 
 - `getStats()` — Return a snapshot `{ status: Array<{id,tasks,lastActive}>, performance: Object }` with per-worker status and aggregated performance metrics (EWMA/time-per-task stats). This is useful for logging and autoscale decisions.
+- `drain({ signal })` — Resolves with the pool's stats once the queue is empty and no task is in flight. `signal` abandons the **wait** only: the pool keeps dispatching and serving every other caller, because someone who stopped watching a drain does not get to stop the work. An already-aborted signal rejects without waiting.
 
 ### Await-response and targeted worker semantics
 

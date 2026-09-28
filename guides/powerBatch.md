@@ -15,6 +15,23 @@ Useful for coalescing DB writes, network calls, or other I/O that benefits from 
 | `maxSize` | `number` | `Infinity` | When the queue reaches `maxSize`, the batch flushes immediately. |
 | `scheduling` | `'microtask'\|'macrotask'` | `'microtask'` | Choose whether the batch dispatch is scheduled on the microtask queue (`queueMicrotask`) or macrotask queue (`setTimeout(…,0)`). Default is `'microtask'` to match low-latency coalescing semantics.
 
+### Cancelling the wait
+
+`flush({ signal })` stops *waiting*. It does not cancel the flush: the items
+already queued still belong to the callers who passed them to `add()`, and
+those promises still resolve when the batch goes out. Rejecting the shared
+pending promise instead would break every queued caller with a cancellation
+they did not ask for.
+
+```js
+const controller = new AbortController();
+const flushed = batch.flush({ signal: controller.signal });
+controller.abort();
+await flushed; // rejects: AbortError - but the batch still flushes
+```
+
+An already-aborted signal rejects without flushing at all.
+
 ## API
 
 - `add(item)` — Add an item to the current batch. `add()` always returns a `Promise<void>` that resolves when the batch containing the item has been processed.
