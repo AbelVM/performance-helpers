@@ -9,6 +9,10 @@ import { PowerCron } from '../src/helpers/powerCron.js';
  * the moment the previous callback returned.** Every test below is written to
  * fail if that is replaced with a relative re-arm, because a relative re-arm
  * still *looks* right in a fast test — it just drifts, slowly, in production.
+ *
+ * Two of these tests deliberately use REAL timers, and the suite comment in
+ * `catch-up policy` explains why: a stall cannot be expressed with fake timers,
+ * because advancing the fake clock also fires everything due.
  */
 afterEach(() => {
   vi.useRealTimers();
@@ -109,36 +113,91 @@ describe('PowerCron', () => {
   });
 
   describe('catch-up policy', () => {
-    // NOTE: these policies are implemented but have no coverage yet, and the
-    // reason is worth recording rather than papering over. Exercising them needs
-    // the *clock to advance without timers firing* - a genuine stall. Fake
-    // timers cannot express that: `vi.advanceTimersByTime` advances the clock
-    // and fires everything due, so every fire lands exactly on its target and
-    // `missedPeriods` is always 0, making all three policies behave identically.
-    // An earlier version of this file asserted that and failed, which is how it
-    // was found.
+    // These need a REAL stall, which is why they are not fake-timer tests and
+    // why they are slow. `vi.advanceTimersByTime` advances the clock *and* fires
+    // everything due, so under fake timers every fire lands exactly on target,
+    // `missedPeriods` is always 0, and all three policies behave identically. An
+    // earlier version of this file asserted otherwise and failed, which is how
+    // the limitation was found.
     //
-    // Covering it properly needs a real-timer stall test, which is slow by
-    // nature. That belongs with the remaining `vi.useFakeTimers()` work in
-    // TEST-008, where the timing primitives are being consolidated.
-    it('defaults to skip', () => {
-      const cron = new PowerCron(() => {}, { intervalMs: 100 });
-      expect(cron._catchUp).toBe('skip');
-      cron.dispose();
+    // A stall is produced by making the first run block the event loop, so the
+    // timers that come due during it cannot fire until it returns. The task
+    // stops the cron on its second invocation, which makes the counts stable: no
+    // further timer can add to them mid-assertion.
+    const INTERVAL = 20;
+    const STALL = 200;
+
+    /**
+     * Drive one policy through a stall and report what actually happened.
+     * @param {'skip'|'catch-up'|'run-once'} policy
+     * @returns {Promise<{invocations: number, fireCount: number}>}
+     */
+    async function runThroughStall(policy) {
+      // The task needs to reach the cron to stop it, and the cron needs the
+      // task to exist first. A one-field holder breaks the cycle without a
+      // `let` that is never reassigned - which the linter is right to flag.
+      const holder = { cron: /** @type {PowerCron|null} */ (null) };
+      let invocations = 0;
+      const task = () => {
+        invocations += 1;
+        if (invocations === 1) {
+          const until = Date.now() + STALL;
+          while (Date.now() < until) {
+            /* block the loop so the due timers cannot fire */
+          }
+        }
+        if (invocations >= 2) holder.cron?.stop();
+      };
+
+      const cron = new PowerCron(task, { intervalMs: INTERVAL, catchUp: policy });
+      holder.cron = cron;
+      cron.start();
+      await new Promise((r) => setTimeout(r, STALL + 300));
+      cron.stop();
+      return { invocations, fireCount: cron.fireCount };
+    }
+
+    it("'skip' runs once for the whole stall and re-anchors on the original phase", async () => {
+      const { invocations, fireCount } = await runThroughStall('skip');
+      // One run for the stalled window, plus the one that stops the cron.
+      expect(invocations).toBe(2);
+      // Nothing was silently counted: skip *drops* the missed periods, it does
+      // not account for them. `fireCount` matching `invocations` is what
+      // distinguishes this from 'run-once'.
+      expect(fireCount).toBe(2);
     });
 
-    it('accepts each documented policy', () => {
+    it("'catch-up' replays every missed period, so no window is silently dropped", async () => {
+      const { invocations } = await runThroughStall('catch-up');
+      // ~STALL/INTERVAL missed periods, replayed, plus the stop. This is the
+      // whole point of the policy: a job that must account for each period.
+      expect(invocations).toBeGreaterThan(5);
+    });
+
+    it("'run-once' invokes the task once but still counts the work it stands in for", async () => {
+      const { invocations, fireCount } = await runThroughStall('run-once');
+      // Coalesced: one real run, like 'skip'.
+      expect(invocations).toBe(2);
+      // But unlike 'skip', the periods are *accounted for*, so a caller can see
+      // that work was coalesced rather than assume a clean single run. This is
+      // the only observable difference between the two policies.
+      expect(fireCount).toBeGreaterThan(5);
+    });
+
+    it("'catch-up' replays strictly more often than the other two", async () => {
+      const [skip, replay] = await Promise.all([
+        runThroughStall('skip'),
+        runThroughStall('catch-up'),
+      ]);
+      expect(replay.invocations).toBeGreaterThan(skip.invocations * 2);
+    });
+
+    it('defaults to skip, accepts each documented policy, and falls back for an unknown one', () => {
+      expect(new PowerCron(() => {}, { intervalMs: 100 })._catchUp).toBe('skip');
       for (const policy of ['skip', 'catch-up', 'run-once']) {
-        const cron = new PowerCron(() => {}, { intervalMs: 100, catchUp: policy });
-        expect(cron._catchUp).toBe(policy);
-        cron.dispose();
+        expect(new PowerCron(() => {}, { intervalMs: 100, catchUp: policy })._catchUp).toBe(policy);
       }
-    });
-
-    it('falls back to skip for an unknown policy', () => {
-      const cron = new PowerCron(() => {}, { catchUp: 'nonsense' });
-      expect(cron._catchUp).toBe('skip');
-      cron.dispose();
+      expect(new PowerCron(() => {}, { catchUp: 'nonsense' })._catchUp).toBe('skip');
     });
   });
 
