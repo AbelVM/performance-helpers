@@ -57,6 +57,7 @@ describe('API surface', () => {
         'PowerCache',
         'PowerChunker',
         'PowerCircuit',
+        'PowerCron',
         'PowerDeadline',
         'PowerDefer',
         'PowerEventBus',
@@ -157,9 +158,10 @@ describe('API surface', () => {
   it('every package.json subpath resolves to a real file with the types it promises', () => {
     const p = pkg();
     const subpaths = Object.keys(p.exports).filter((k) => k !== './package.json');
-    // The pre-existing test covered 3 of these. If this count drops, a subpath
-    // was removed and this file needs updating deliberately.
-    expect(subpaths.length).toBe(34);
+    // The pre-existing test covered 3 of these. If this count changes, a
+    // subpath was added or removed and this file needs updating deliberately -
+    // the count is here so that cannot happen by accident.
+    expect(subpaths.length).toBe(35);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

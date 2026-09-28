@@ -12,6 +12,7 @@ export { PowerSemaphore } from "./helpers/powerSemaphore.js";
 export { PowerDefer } from "./helpers/powerDefer.js";
 export { PowerTTLMap } from "./helpers/powerTTLMap.js";
 export { PowerCircuit } from "./helpers/powerCircuit.js";
+export { PowerCron } from "./helpers/powerCron.js";
 export { PowerRetry } from "./helpers/powerRetry.js";
 export { PowerDeadline } from "./helpers/powerDeadline.js";
 export { PowerHistogram } from "./helpers/powerHistogram.js";

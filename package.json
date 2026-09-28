@@ -91,6 +91,11 @@
       "import": "./src/helpers/powerCircuit.js",
       "default": "./src/helpers/powerCircuit.js"
     },
+    "./powerCron": {
+      "types": "./types/helpers/powerCron.d.ts",
+      "import": "./src/helpers/powerCron.js",
+      "default": "./src/helpers/powerCron.js"
+    },
     "./powerDeadline": {
       "types": "./types/helpers/powerDeadline.d.ts",
       "import": "./src/helpers/powerDeadline.js",

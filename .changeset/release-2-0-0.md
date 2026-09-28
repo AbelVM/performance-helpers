@@ -130,6 +130,36 @@ required is the worker reply shape.
 
 **Added**
 
+- **`PowerCron`** — a drift-free interval scheduler, available from the root and as the
+  `./powerCron` subpath for tree shaking. `setInterval` does not mean "every N ms"; it
+  means "every N ms after the previous callback returned", so a run that overruns pushes
+  every subsequent fire later and the phase error accumulates without bound, while a run
+  that stalls *queues* and fires repeatedly on resume. `PowerCron` re-arms from an
+  **absolute target** — each run records the time it was aimed at and the next timer is
+  computed from that target rather than from `Date.now()` — so drift cannot accumulate and
+  an overrun skips the periods it missed instead of stacking them. `averageDriftMs` and
+  `fireCount` make drift measurable rather than folklore.
+
+  ```js
+  const cron = new PowerCron(() => collectMetrics(), {
+    intervalMs: 60_000,
+    catchUp: 'skip', // or 'catch-up' to replay each missed period, or 'run-once'
+    jitter: 0.1,     // spread a fleet off the same minute boundary
+    onError: (err) => report(err),
+  });
+  cron.start();
+  // ... cron.stop(), or cron.dispose(); [Symbol.dispose] is also supported
+  ```
+
+  A throwing or rejecting task is routed to `onError` and the schedule continues — an
+  unhandled rejection from a timer callback takes the process down, so without that,
+  "one run threw" would silently become "the cron is dead". The pending timer is
+  `unref`'d by default, so a cron alone does not keep a Node process alive. It is an
+  interval scheduler, not a calendar: there is no `@daily` parsing or timezone handling,
+  and the first fire is one interval from `start()` rather than aligned to the top of the
+  minute, because a shared boundary is the largest single source of thundering herd in a
+  fleet.
+
 - **`PowerEventLoopMonitor`** — a latency number going up does not tell you
   whether *your* code got slower or the host was busy, and the two need
   different fixes. It measures timer drift (a probe scheduled `intervalMs` out;

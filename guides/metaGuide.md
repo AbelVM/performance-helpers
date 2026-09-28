@@ -45,6 +45,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                            |
 | Coordinate callbacks or multi-step async completion                   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                   |
 | Batch near-synchronous calls into one flush                           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                          |
+| Run something on a fixed cadence without drift                   | `PowerCron`                                         | `PowerScheduler` (one flush per turn, not a cadence)        | `setInterval`, which drifts and queues                        |
 | Tell whether a latency regression is yours or the host's                | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site |
 
 ---
@@ -408,6 +409,7 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `PowerBulkhead`: Partitioned concurrency isolation.
 - `PowerPermitGate`: Low-level permit primitive used by higher-level gates.
 - `PowerScheduler`: Small flush scheduler for deferred work.
+- `PowerCron`: Drift-free interval scheduler for recurring work.
 
 ### Rate limiting and resilience
 

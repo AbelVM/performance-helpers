@@ -43,6 +43,7 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerChunker: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerBulkhead: Partitioned executor](guides/powerBulkhead.md). Isolate noisy workloads into separate lanes so one hot partition cannot starve the rest.
 - [PowerCircuit: Circuit breaker](guides/powerCircuit.md). Small circuit breaker to protect external services from cascading failures.
+- [PowerCron: Drift-free cron-like scheduler](guides/powerCron.md). `setTimeout` chaining from an absolute target, with catch-up policy, jitter and a skip/run-once choice for missed fires.
 - [PowerRetry: Retry with backoff](guides/powerRetry.md). Helper for retrying flaky async operations with configurable backoff and jitter.
 - [PowerDeadline: Timeout, retry budget, and cancellation](guides/powerDeadline.md). Wrap async work with per-attempt timeouts, overall deadlines, and retry policy.
 - [PowerHistogram: Lock-free percentile estimator](guides/powerHistogram.md). Compact in-process histogram for latency telemetry and estimated percentiles.
