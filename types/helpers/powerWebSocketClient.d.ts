@@ -26,6 +26,8 @@ export const READY_STATE: Readonly<{
  * @property {number} [pollIntervalMs=20] - Base interval for the watermark
  *   poll. It backs off up to `maxPollIntervalMs` while paused, so a stuck
  *   socket does not spin the event loop.
+ * @property {string|string[]} [protocols] - Sub-protocols forwarded to the
+ *   `WebSocket` / `WebSocketStream` constructor.
  * @property {number} [maxPollIntervalMs=250] - Ceiling for the backed-off poll.
  * @property {number} [heartbeatIntervalMs=30000] - Send a ping at this interval.
  *   `0` disables heartbeats.
@@ -40,9 +42,21 @@ export const READY_STATE: Readonly<{
  *   heartbeat goes unanswered. A TCP connection that is silently dead is common
  *   behind proxies and load balancers, and a socket can sit in `OPEN` forever
  *   while nothing gets through.
+ * @property {boolean} [dropOnBackpressure=false] - Drop frames when the
+ *   producer is paused by the high-water mark instead of queueing them.
  * @property {Function} [onMessage] - Called with each decoded message.
- * @property {Function} [onOpen] / [onClose] / [onError] / [onPause] / [onResume]
- *   - Lifecycle and back-pressure callbacks.
+ * @property {Function} [onOpen] - Called once the socket reaches `OPEN`.
+ * @property {Function} [onClose] - Called with the close code and reason.
+ * @property {Function} [onError] - Called with each transport error.
+ * @property {Function} [onPause] - Called when the high-water mark is crossed.
+ * @property {Function} [onResume] - Called when `bufferedAmount` drains below
+ *   the low-water mark.
+ *
+ * These were written as one line - `[onOpen] / [onClose] / [onError] / ...` -
+ * which reads fine and parses as exactly one property. `onClose`, `onError`,
+ * `onPause` and `onResume` were therefore invisible to the type system while
+ * being fully supported at runtime, and every call site that passed one was an
+ * error. Five `@property` lines instead of one shorthand, for the same length.
  * @property {PowerHistogram} [rtt] - Histogram for heartbeat RTT. One is
  *   created when omitted.
  */
@@ -66,7 +80,7 @@ export class PowerWebSocketClient {
      */
     constructor(options?: WebSocketClientOptions);
     url: string;
-    protocols: any;
+    protocols: string | string[] | undefined;
     _WS: Function;
     _WSStream: any;
     _codec: "json" | "raw";
@@ -85,15 +99,16 @@ export class PowerWebSocketClient {
     _on: {
         message: Function | null;
         open: Function | null;
-        close: any;
-        error: any;
-        pause: any;
-        resume: any;
+        close: Function | null;
+        error: Function | null;
+        pause: Function | null;
+        resume: Function | null;
     };
     _socket: any;
     /** @type {WritableStreamDefaultWriter|null} */
     _writer: WritableStreamDefaultWriter | null;
-    _state: 3;
+    /** @type {0|1|2|3} */
+    _state: 0 | 1 | 2 | 3;
     _closedByUser: boolean;
     _reconnectAttempts: number;
     _connectTimer: any;
@@ -366,6 +381,11 @@ export type WebSocketClientOptions = {
      */
     pollIntervalMs?: number | undefined;
     /**
+     * - Sub-protocols forwarded to the
+     * `WebSocket` / `WebSocketStream` constructor.
+     */
+    protocols?: string | string[] | undefined;
+    /**
      * - Ceiling for the backed-off poll.
      */
     maxPollIntervalMs?: number | undefined;
@@ -404,14 +424,41 @@ export type WebSocketClientOptions = {
      */
     reconnectOnHeartbeatTimeout?: boolean | undefined;
     /**
+     * - Drop frames when the
+     * producer is paused by the high-water mark instead of queueing them.
+     */
+    dropOnBackpressure?: boolean | undefined;
+    /**
      * - Called with each decoded message.
      */
     onMessage?: Function | undefined;
     /**
-     * / [onClose] / [onError] / [onPause] / [onResume]
-     * - Lifecycle and back-pressure callbacks.
+     * - Called once the socket reaches `OPEN`.
      */
     onOpen?: Function | undefined;
+    /**
+     * - Called with the close code and reason.
+     */
+    onClose?: Function | undefined;
+    /**
+     * - Called with each transport error.
+     */
+    onError?: Function | undefined;
+    /**
+     * - Called when the high-water mark is crossed.
+     */
+    onPause?: Function | undefined;
+    /**
+     * - Called when `bufferedAmount` drains below
+     * the low-water mark.
+     *
+     * These were written as one line - `[onOpen] / [onClose] / [onError] / ...` -
+     * which reads fine and parses as exactly one property. `onClose`, `onError`,
+     * `onPause` and `onResume` were therefore invisible to the type system while
+     * being fully supported at runtime, and every call site that passed one was an
+     * error. Five `@property` lines instead of one shorthand, for the same length.
+     */
+    onResume?: Function | undefined;
     /**
      * - Histogram for heartbeat RTT. One is
      * created when omitted.

@@ -71,6 +71,8 @@ export const READY_STATE = Object.freeze({
  * @property {number} [pollIntervalMs=20] - Base interval for the watermark
  *   poll. It backs off up to `maxPollIntervalMs` while paused, so a stuck
  *   socket does not spin the event loop.
+ * @property {string|string[]} [protocols] - Sub-protocols forwarded to the
+ *   `WebSocket` / `WebSocketStream` constructor.
  * @property {number} [maxPollIntervalMs=250] - Ceiling for the backed-off poll.
  * @property {number} [heartbeatIntervalMs=30000] - Send a ping at this interval.
  *   `0` disables heartbeats.
@@ -85,9 +87,21 @@ export const READY_STATE = Object.freeze({
  *   heartbeat goes unanswered. A TCP connection that is silently dead is common
  *   behind proxies and load balancers, and a socket can sit in `OPEN` forever
  *   while nothing gets through.
+ * @property {boolean} [dropOnBackpressure=false] - Drop frames when the
+ *   producer is paused by the high-water mark instead of queueing them.
  * @property {Function} [onMessage] - Called with each decoded message.
- * @property {Function} [onOpen] / [onClose] / [onError] / [onPause] / [onResume]
- *   - Lifecycle and back-pressure callbacks.
+ * @property {Function} [onOpen] - Called once the socket reaches `OPEN`.
+ * @property {Function} [onClose] - Called with the close code and reason.
+ * @property {Function} [onError] - Called with each transport error.
+ * @property {Function} [onPause] - Called when the high-water mark is crossed.
+ * @property {Function} [onResume] - Called when `bufferedAmount` drains below
+ *   the low-water mark.
+ *
+ * These were written as one line - `[onOpen] / [onClose] / [onError] / ...` -
+ * which reads fine and parses as exactly one property. `onClose`, `onError`,
+ * `onPause` and `onResume` were therefore invisible to the type system while
+ * being fully supported at runtime, and every call site that passed one was an
+ * error. Five `@property` lines instead of one shorthand, for the same length.
  * @property {PowerHistogram} [rtt] - Histogram for heartbeat RTT. One is
  *   created when omitted.
  */
@@ -160,7 +174,10 @@ export class PowerWebSocketClient {
       );
     }
     this._WSStream =
-      WebSocketStreamImpl || (typeof WebSocketStream !== 'undefined' ? WebSocketStream : null);
+      WebSocketStreamImpl ||
+      // Feature test, deliberately: the DOM type is not in every lib, and reading
+      // it as an unknown global is exactly the runtime check we want.
+      (typeof WebSocketStream !== 'undefined' ? /** @type {*} */ (WebSocketStream) : null);
     this._codec = codec;
     this._connectTimeoutMs = Math.max(0, Math.floor(Number(connectTimeoutMs) || 0));
     this._highWaterMark = Math.max(0, Number(highWaterMarkBytes) || 0);
@@ -190,6 +207,13 @@ export class PowerWebSocketClient {
     this._socket = null;
     /** @type {WritableStreamDefaultWriter|null} */
     this._writer = null;
+    // Field declaration for the checker only: an `@type` on the initializer
+    // narrows `_state` to the literal `3`, which made every
+    // `_state === READY_STATE.X` comparison an "unintentional comparison"
+    // error. The bare statement is a property read and does nothing at
+    // runtime; the assignment below is what sets the value.
+    /** @type {0|1|2|3} */
+    this._state;
     this._state = READY_STATE.CLOSED;
     this._closedByUser = false;
     this._reconnectAttempts = 0;
