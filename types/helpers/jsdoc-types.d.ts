@@ -71,6 +71,22 @@ export type PowerPoolOptions = {
     weakListeners?: boolean | undefined;
     queueHighThreshold?: number | undefined;
     /**
+     * - Hard cap on queued tasks. `Infinity`
+     * (the default) keeps the pre-2.0 behaviour where `queuePolicy: 'enqueue'`
+     * grows without bound. With a finite cap the *incoming* task is the one that
+     * is refused, because a cap is what the caller asked for; `drop-oldest` is
+     * the exception and still evicts the oldest to make room for the newest.
+     * A refused task returns `false`, or rejects with `ERR_POOL_QUEUE_FULL` when
+     * the caller is awaiting a response.
+     */
+    maxQueueLength?: number | undefined;
+    /**
+     * - Cap on concurrent `drain()` waits.
+     * Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS`
+     * instead of accumulating an unbounded number of `idle` listeners.
+     */
+    maxDrainWaiters?: number | undefined;
+    /**
      * - Adaptive
      * concurrency. `true` enables the default `ewma` policy; an object configures
      * it. Typed as `AutoScaleOptions` rather than `Object` because the pool reads
@@ -624,10 +640,17 @@ export type PowerCircuitOptions = {
      */
     threshold?: number | undefined;
     /**
-     * Milliseconds the circuit stays open before
-     * a trial call is allowed.
+     * **Base** milliseconds the circuit stays
+     * open before a trial call is allowed. Consecutive trips grow this
+     * exponentially and jitter the result, so a fleet of clients does not probe
+     * one dependency in lockstep; the first trip uses this value unchanged.
      */
     timeout?: number | undefined;
+    /**
+     * Ceiling for the grown open window. Defaults
+     * to `timeout * 16`.
+     */
+    maxTimeout?: number | undefined;
     /**
      * - Called as
      * `(state, reason)` on every transition. `reason` is one of `success`,

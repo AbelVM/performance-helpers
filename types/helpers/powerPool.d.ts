@@ -75,6 +75,8 @@ export class PowerPool {
      * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
      * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
      * @param {number} [options.slowTaskThreshold=Infinity] - Task duration (ms) above which a completed task is counted as "slow". When finite, `stats().performance.percentSlowTasks` reports the exact percentage of tasks exceeding this threshold. Defaults to `Infinity` (disabled; `percentSlowTasks` stays `0`).
+     * @param {number} [options.maxQueueLength=Infinity] - Hard cap on queued tasks. With the default `queuePolicy: 'enqueue'` and no cap, a saturated pool grows its queue until the process runs out of memory; a cap makes the overflow observable instead - the incoming task is refused (`false`, or `ERR_POOL_QUEUE_FULL` when awaiting a response). `drop-oldest` still evicts the oldest to make room.
+     * @param {number} [options.maxDrainWaiters=100] - Cap on concurrent `drain()` waits, so a caller that drains in a loop cannot accumulate unbounded `idle` listeners. (Internally `DEFAULT_MAX_DRAIN_WAITERS`; not exported.)
      */
     constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined, ...args: any[]);
     _workerSource: string | Function;
@@ -85,6 +87,16 @@ export class PowerPool {
     idleTimeout: number;
     taskQueueEnabled: boolean;
     _queuePolicy: "enqueue" | "drop-oldest" | "drop-newest" | "reject";
+    _maxQueueLength: number;
+    _maxDrainWaiters: number;
+    /**
+     * Number of `drain()` calls currently *waiting* for idle. Each one holds an
+     * `idle` listener, so this is the bound that keeps a caller draining in a
+     * loop from accumulating listeners without limit. See
+     * `DEFAULT_MAX_DRAIN_WAITERS`.
+     * @type {number}
+     */
+    _drainWaiters: number;
     _createdAt: number;
     _totalWorkersCreated: number;
     _totalTasksCompleted: number;
@@ -211,6 +223,26 @@ export class PowerPool {
      */
     private _postToWorkerObj;
     /**
+     * Report a failed `postMessage` and clean up the pending response for it.
+     *
+     * Single choke point for the failure half of `_postToWorkerObj`, so the two
+     * posting paths (direct to the underlying worker, through the wrapper) cannot
+     * drift on what the caller is told. The important property is that a
+     * post that failed *after* possibly detaching buffers is still reported with
+     * its **original** error - never with a downstream `DataCloneError` from a
+     * retry against the same buffers.
+     *
+     * @param {any} err - The error thrown by `postMessage`.
+     * @param {boolean} wantResponse - Whether the caller is awaiting a response.
+     * @param {string|undefined} correlationKey - Pending-response key to reject.
+     * @param {Promise<any>} pendingPromise - The caller's pending promise.
+     * @param {{scope: string}} [info] - Debug-log scope.
+     * @returns {Promise<any>|boolean} `pendingPromise` when awaiting a response,
+     *   `false` otherwise - matching `postMessage`'s contract.
+     * @private
+     */
+    private _failPost;
+    /**
      * Attempt to grow the pool by adding a worker and dispatching the message.
      * Preserves the same pending-response cleanup semantics as inline logic.
      * @param {*} message
@@ -224,6 +256,50 @@ export class PowerPool {
      * @private
      */
     private _tryGrowPool;
+    /**
+     * Resolve and validate the per-item correlation ids for a batch that expects
+     * responses.
+     *
+     * Two failure modes are checked, and both are checked *before* any dispatch:
+     *
+     * 1. A duplicate **within** the batch. A `correlationIdFactory` is caller
+     *    code; a constant or a sloppy one returns the same id twice, and the
+     *    second `postMessage` under a live key rejects the first waiter and
+     *    takes the key over. The caller would hold a batch where one promise is
+     *    already rejected and the last result resolves for all of them.
+     * 2. A collision with an id that is **already in flight** from an earlier
+     *    call. Same mechanism, same outcome, and it is silently the caller's
+     *    fault because the factory is a global naming scheme, not a local one.
+     *
+     * @param {{message:*,transfer?:Transferable[]}[]} items - The batch items.
+     * @param {Function} factory - The caller's `correlationIdFactory`.
+     * @returns {string[]} One validated id per item, positionally aligned.
+     * @throws {Error} `ERR_POOL_DUPLICATE_CORRELATION_ID` on the first collision.
+     * @private
+     */
+    private _resolveBatchCorrelationIds;
+    /**
+     * Reserve room for `count` more tasks in the task queue, honouring
+     * `maxQueueLength` and the configured `queuePolicy`.
+     *
+     * Without a cap this is a no-op and returns `count`, which is what keeps the
+     * pre-2.0 behaviour intact: `queuePolicy: 'enqueue'` grew the queue until the
+     * process ran out of memory, with no event and no error. The cap exists to
+     * make that overflow *observable*, so the interesting decision is **which
+     * task gets refused**:
+     *
+     * - `drop-oldest` keeps its documented meaning: evict the oldest to make room
+     *   for the newest, so the queue length never exceeds the cap.
+     * - every other policy refuses the **incoming** task. That is the honest
+     *   reading of a caller-provided bound - the newest arrival is the one that
+     *   did not fit, and refusing it keeps the work already accepted.
+     *
+     * @param {number} count - How many tasks are about to be queued.
+     * @returns {number} How many of them may be queued. The remainder must be
+     *   refused by the caller.
+     * @private
+     */
+    private _reserveQueueSlots;
     /**
      * Enqueue or reject a prepared message according to the configured queue policy.
      * Returns `pendingPromise`/`true`/`false` to match `postMessage` semantics.
@@ -574,8 +650,22 @@ export class PowerPool {
     /**
      * Emit the pool-idle synthetic message to `onmessage` and listeners.
      *
-     * The emitted event object has the shape: `{ data: { type: 'pool:idle', stats } }` where
-     * `stats` is an array with the per-worker snapshot: `{ id, tasks, lastActive }`.
+     * The emitted event object is
+     * `{ data: { type: 'pool:idle', workers, stats } }`, where:
+     *
+     * - `data.workers` is the per-worker snapshot the pool is actually idle *by*:
+     *   an array of `{ id, tasks, lastActive }`. A worker with `tasks !== 0` here
+     *   means `_activeTasks` has drifted from the per-worker counts.
+     * - `data.stats` is the aggregate `getStats()` summary (`queueLength`,
+     *   `activeTasks`, `performance`, ...).
+     *
+     * Both are computed lazily and both used to be called "stats". The payload
+     * was always the `getStats()` *summary* while the JSDoc described an
+     * *array*, so a listener written against the documentation did
+     * `ev.data.stats.map(w => w.id)` and got a `TypeError` on a busy pool - the
+     * per-worker array simply was not reachable. Naming them for what they are is
+     * the fix; the summary keeps the `stats` key so existing readers of
+     * `ev.data.stats` are unaffected.
      *
      * Emission semantics:
      * - The event is emitted only when the pool transitions from non-idle to idle
@@ -589,11 +679,11 @@ export class PowerPool {
      * @returns {void}
      */
     /**
-     * Build the idle event object. `stats` is computed lazily (via a getter) so
-     * the `getStats()` allocation (which maps over all workers) is skipped on
-     * idle transitions when no listener actually reads `ev.data.stats`.
+     * Build the idle event object. Both payloads are computed lazily (via
+     * getters) so the `getStats()` allocation (which maps over all workers) is
+     * skipped on idle transitions when no listener actually reads them.
      * @private
-     * @returns {{data:{type:string,stats:object}}}
+     * @returns {{data:{type:string,workers:{id:number,tasks:number,lastActive:number}[],stats:object}}}
      */
     private _buildIdleEvent;
     _emitIdle(): void;
@@ -645,9 +735,35 @@ export class PowerPool {
     /**
      * Return a Promise that resolves when the pool becomes idle (queue empty and all workers have tasks === 0).
      * Resolves with the result of `getStats()` at the time of idle.
+     *
+     * The wait is bounded three ways, and every one of them **abandons the wait,
+     * never the work** - the pool keeps dispatching and keeps serving every other
+     * caller. That is the contract `drain()` has always had; what is new is that
+     * the wait can actually be given up on without leaking anything:
+     *
+     * - `signal` - an `AbortSignal` rejects with its reason. `AbortError` unless
+     *   the caller aborted with their own `Error`.
+     * - `timeout` - rejects with `ERR_POOL_DRAIN_TIMEOUT` after `timeout` ms.
+     *   Without it a drain against a wedged worker waits forever, which is
+     *   indistinguishable from a hang.
+     * - `maxDrainWaiters` (constructor option) - rejects with
+     *   `ERR_POOL_DRAIN_TOO_MANY_WAITERS` once too many are already waiting.
+     *
+     * Previously only `signal` existed, and it leaked: `raceWithAbort` rejected
+     * the returned promise but left the `idle` listener attached, so an aborted
+     * drain retained a closure and a listener slot until the pool happened to go
+     * idle again. This implementation owns the listener lifecycle directly and
+     * detaches on *every* exit path.
+     *
+     * @param {object} [options]
+     * @param {AbortSignal} [options.signal] - Abandons the wait when aborted.
+     * @param {number} [options.timeout] - Abandons the wait after this many ms.
      * @returns {Promise<object>} Promise resolving to `getStats()`.
      */
-    drain(options?: {}): Promise<object>;
+    drain(options?: {
+        signal?: AbortSignal | undefined;
+        timeout?: number | undefined;
+    }): Promise<object>;
     /**
      * Add an event listener for pool events. Supported types: 'message', 'error', 'messageerror', 'idle'.
      * @param {'message'|'error'|'messageerror'|'idle'} type
@@ -722,6 +838,7 @@ export class PowerPool {
      */
     [Symbol.asyncDispose](): Promise<void>;
 }
+export type TransferList = import("./jsdoc-types.js").TransferList;
 export type WorkerLike = import("./jsdoc-types.js").WorkerLike;
 export type WorkerObj = import("./jsdoc-types.js").WorkerObj;
 /**

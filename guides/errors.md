@@ -45,3 +45,43 @@ If your pool still runs with `messageCodec: 'legacy'`, use `u82o(e.data)` here i
 
 - Log structured JSON when integrating with centralized logging or pipeline tools. `PowerLogger` supports a JSON mode in the library; prefer that in production.
 - Avoid swallowing errors silently; if you must, log them at `debug` level with `PowerLogger` so they are available under higher verbosity during troubleshooting.
+
+## Pool refusal codes
+
+Some `PowerPool` failures are not exceptions thrown at you — they are *refusals*, and the pool signals them with a stable `err.code` so you can branch on them without string-matching a message. Every code below means **the pool is healthy; it declined this particular piece of work**, and the right response differs for each one. Treating them as generic errors and retrying blindly is the common mistake: retrying a `QUEUE_FULL` refusal is precisely the load that filled the queue.
+
+| `err.code` | Raised by | What it means | What to do |
+| --- | --- | --- | --- |
+| `ERR_POOL_QUEUE_FULL` | `postMessage` / `postMessageBatch` / `stopThePress` | The task queue is at `options.maxQueueLength`. The incoming task did not fit. | **Shed load.** Return a 429, drop the request, or apply backoff. Retrying immediately re-sends the same task into a full queue. |
+| `ERR_POOL_DRAIN_TIMEOUT` | `drain({ timeout })` | The pool did not become idle within `timeout` ms. | **Retry or give up.** Something is still running — inspect `getStats().activeTasks` and the per-worker `tasks` counts to find out what. |
+| `ERR_POOL_DRAIN_TOO_MANY_WAITERS` | `drain()` | `options.maxDrainWaiters` drains are already waiting. | **Stop draining.** You are draining in a loop, which is the bug this bound exists to catch. Drain once and share the result. |
+| `ERR_POOL_DUPLICATE_CORRELATION_ID` | `postMessageBatch`, `postMessage` | Two requests claim the same `correlationId`. | **Fix the id generator.** Nothing was dispatched, so no state needs unwinding — this is a naming collision, not a runtime failure. |
+| `ERR_POOL_TERMINATED` | any dispatch method | The pool has been shut down. | Do not retry. Create a new pool. |
+
+A refused task that was *not* awaiting a response returns `false` rather than throwing, so a plain `postMessage` caller sees a falsy return instead of a code. The codes are only observable through the Promise path (`awaitResponse` or an explicit `correlationId`):
+
+```js
+// Boolean form - check the return value.
+if (pool.postMessage(payload) === false) {
+  // queue full or worker busy; this call did not queue anything
+}
+
+// Promise form - branch on the code.
+try {
+  const result = await pool.postMessage(payload, undefined, { awaitResponse: true });
+} catch (err) {
+  switch (err.code) {
+    case 'ERR_POOL_QUEUE_FULL':
+      metrics.increment('pool.refused', { reason: 'queue_full' });
+      throw new TooManyRequestsError();
+    case 'ERR_POOL_TERMINATED':
+      throw new ServiceUnavailableError();
+    default:
+      throw err;
+  }
+}
+```
+
+Two of these codes are worth calling out as *good news*: `ERR_POOL_DUPLICATE_CORRELATION_ID` from a batch is thrown **before anything is dispatched**, so a collision cannot leave half the batch on the wire and the other half orphaned. And `ERR_POOL_DRAIN_TIMEOUT` / `ERR_POOL_DRAIN_TOO_MANY_WAITERS` abandon only the *wait* — the pool keeps dispatching and keeps serving every other caller, so treating them as fatal to the pool is a mistake.
+
+See [Bounding the queue](powerPool.md#bounding-the-queue) for how to produce the first one deliberately, and the `drain()` entry in [PowerPool's API](powerPool.md#api) for the second and third.

@@ -16,6 +16,8 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 | `options.messageCodec`                                  |                              `'framed' \| 'legacy'` |                                     `'framed'` | Wire protocol for object messages. `'framed'` posts a `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON body. See [Migrating to the framed protocol](#migrating-to-the-framed-protocol-breaking-change-in-20).                                                                                                   |
 | `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                     |
 | `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                 |
+| `options.maxQueueLength`                                 |                                            `number` |                                      `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue). |
+| `options.maxDrainWaiters`                                |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be *waiting* at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners. |
 | `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                      |
 | `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                               |
 | `options.weakListeners`                                 |                                           `boolean` |                                        `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests). |
@@ -27,11 +29,12 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
   - Pass `options.workerId` to route the message to a specific worker id; targeting a missing or saturated worker will fail (returns `false` or a rejected Promise).
   - When `options.taskQueue` is enabled, `options.queuePolicy` controls overload behavior:
-    - `'enqueue'` (default) queues all overflow tasks.
+    - `'enqueue'` (default) queues all overflow tasks — **without a `maxQueueLength` cap, without bound.**
     - `'drop-oldest'` drops the oldest queued task when new work arrives.
     - `'drop-newest'` drops the newest incoming task when there is already queued backlog.
     - `'reject'` rejects new overflow tasks immediately instead of queueing.
 
+    - A refused task returns `false`, or — when the caller passed `awaitResponse` or an explicit `correlationId` — rejects with `code === 'ERR_POOL_QUEUE_FULL'`. See [Bounding the queue](#bounding-the-queue).
     - Note: `options.awaitResponse` requires the outgoing `message` to be a plain-object (not a TypedArray/ArrayBuffer). The implementation augments the object with a `correlationId` and will throw if a non-plain-object is supplied when `awaitResponse` is requested.
     - `options.workerId` may be a `number` or `string` (the pool coerces ids to strings internally for correlation handling).
 
@@ -41,6 +44,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
   - When `options.awaitResponse` is enabled, each batch item is handled through the same internal `postMessage()` path as a single-item request. That means the batch preserves correlation behavior and returns Promises for response-waiting entries.
   - For stable per-item identity in response mode, pass `options.correlationIdFactory(index, item)` to generate a unique `correlationId` for each batch entry.
+  - **The factory is resolved once, up front, and validated before anything is dispatched.** If it returns a duplicate id — within this batch, or one that is already in flight from an earlier call — the whole `postMessageBatch` throws `code === 'ERR_POOL_DUPLICATE_CORRELATION_ID'` and **nothing is sent**. This is deliberately stronger than the alternative: dispatching item-by-item would leave the first caller holding a promise that the second registration already rejected, with two messages already on the wire. The error names the duplicated id and its item index. Because the ids are resolved once, the factory is called exactly `items.length` times even if it is impure.
   - A fixed `options.correlationId` may only be used when the batch contains a single item. For multiple items the API throws because the pool cannot safely reuse one identifier for many pending responses.
   - Specifying `options.workerId` targets the batch to a single worker. Targeted batch dispatch is fail-fast: a missing or busy worker will not queue the batch item, and the corresponding return value is `false`.
   - When `options.taskQueue` is enabled, `options.queuePolicy` also applies to batch enqueue behavior in the fire-and-forget path.
@@ -68,7 +72,13 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 - Disposal hooks: `[Symbol.dispose]()` calls `terminate()` synchronously; `[Symbol.asyncDispose]()` awaits `drain()` then terminates.
 
 - `getStats()` — Return a snapshot `{ status: Array<{id,tasks,lastActive}>, performance: Object }` with per-worker status and aggregated performance metrics (EWMA/time-per-task stats). This is useful for logging and autoscale decisions.
-- `drain({ signal })` — Resolves with the pool's stats once the queue is empty and no task is in flight. `signal` abandons the **wait** only: the pool keeps dispatching and serving every other caller, because someone who stopped watching a drain does not get to stop the work. An already-aborted signal rejects without waiting.
+- `drain({ signal, timeout })` — Resolves with the pool's stats once the queue is empty and no task is in flight. The wait is bounded three ways, and **every one of them abandons the wait, never the work**: the pool keeps dispatching and keeps serving every other caller, because someone who stopped watching a drain does not get to stop the work.
+
+  - `signal` — an `AbortSignal` rejects with its reason. An `AbortError` unless you aborted with your own `Error`. An already-aborted signal rejects without waiting.
+  - `timeout` — rejects with `code === 'ERR_POOL_DRAIN_TIMEOUT'` after `timeout` ms. Without it, a drain against a wedged worker waits forever, which is indistinguishable from a hang.
+  - `maxDrainWaiters` (constructor option) — rejects with `code === 'ERR_POOL_DRAIN_TOO_MANY_WAITERS'` once that many are already waiting. Each waiting drain holds an `idle` listener, so a caller that drains in a loop would otherwise accumulate one per call.
+
+  Whatever ends the wait, the `idle` listener is detached and the waiter slot released — there is no path that leaves either behind.
 
 ### Await-response and targeted worker semantics
 
@@ -77,6 +87,44 @@ When `options.awaitResponse` is requested, the pool tracks the outgoing request 
 When `options.workerId` is supplied, the pool routes the message to that worker only. Targeting a missing or currently saturated worker fails immediately rather than silently queuing the request. For `awaitResponse` callers this means the returned Promise rejects with an immediate failure instead of waiting in the queue.
 
 If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises and removes the associated pending state. This ensures there are no leaked Promise entries after worker teardown or pool shutdown.
+
+## Bounding the queue
+
+`options.queuePolicy` decides what happens when the pool is saturated; `options.maxQueueLength` decides *whether that situation can keep going*. They are different questions, and the defaults answer the second one with "forever".
+
+With the default `queuePolicy: 'enqueue'` and no cap, a pool whose workers are slower than its producers accumulates queued tasks without limit. There is no error, no event, and no threshold that stops it — the failure is the process running out of memory, which by then is a long way from the cause. If your producers are not rate-limited against your consumers, set a cap:
+
+```js
+const pool = new PowerPool(ImageWorker, {
+  minSize: 2,
+  maxSize: 8,
+  taskQueue: true,
+  queuePolicy: 'enqueue',
+  maxQueueLength: 500, // refuse the 501st task rather than growing until OOM
+});
+```
+
+**Which task gets refused.** With a finite cap, the *incoming* task is the one that does not fit. A bound the caller asked for is a statement about the newest arrival, and refusing it keeps the work already accepted — with one deliberate exception:
+
+- `'drop-oldest'` keeps its documented meaning and evicts the oldest to make room for the newest, so the queue holds a steady number and the newest work is the work that runs. Note this policy was already self-bounding before `maxQueueLength` existed: it evicts one and admits one, so the cap never turns it into a refusal.
+- `'drop-newest'` and `'reject'` refuse the incoming task, exactly as they already did.
+
+**What refusal looks like.** A refused task returns `false` from `postMessage` / the corresponding slot in a `postMessageBatch` result array. If the caller passed `awaitResponse` or an explicit `correlationId`, the returned Promise rejects with `code === 'ERR_POOL_QUEUE_FULL'` instead, so you can tell "the queue was full" from "the worker failed":
+
+```js
+try {
+  const result = await pool.postMessage(payload, undefined, { awaitResponse: true });
+} catch (err) {
+  if (err.code === 'ERR_POOL_QUEUE_FULL') {
+    // shed load: 429, drop the request, or back off
+  }
+  throw err;
+}
+```
+
+A batch is capped as a group: if 8 of 10 items do not fit, the first 2 are queued and the remaining 8 slots in the result array are `false`. The pool does not queue what fits and then silently drop the rest.
+
+If you would rather be **told** about pressure without refusing anything, set `options.queueHighThreshold` instead. It emits `pool:queue:high` on the first crossing (and not again until the queue drains back below it) and changes nothing else — see [Events and handlers](#events-and-handlers). The two compose: use the threshold for alerting, the cap for safety.
 
 ## Autoscaling
 
@@ -159,9 +207,15 @@ Notes:
 
 ## Events and handlers
 
-`onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive events with `data.type === 'pool:idle'` and `data.stats` containing `{ status, performance }` where `status` is the per-worker snapshot and `performance` is aggregated metrics.
+`onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive an event with `data.type === 'pool:idle'` and two separate payloads:
 
-`pool:queue:high` — emitted on the internal event bus when the internal task queue length crosses the configured `options.queueHighThreshold`. Payload: `{ length, threshold }`. Configure `queueHighThreshold` in constructor options to enable this event.
+- `data.workers` — the per-worker snapshot: an array of `{ id, tasks, lastActive }`. This is the pool's account of *which* workers it believes are idle. A worker with `tasks !== 0` here means the pool's active-task accounting has drifted from the per-worker counts, so this is the field to log when investigating a drain that never settles.
+- `data.stats` — the aggregate `getStats()` summary: `{ status, performance, queueLength, activeTasks, workerCount, ... }`.
+
+Both are computed lazily, so an idle transition costs nothing when no listener reads them. They used to be one field called `stats` that the documentation described as an array while the code produced a summary — the split names each for what it actually is, and `stats` keeps its key so existing listeners are unaffected.
+
+`pool:queue:high` — emitted on the internal event bus when the internal task queue length crosses the configured `options.queueHighThreshold`. Payload: `{ length, threshold }`. Configure `queueHighThreshold` in constructor options to enable this event. This is a **notification, not a limit** — nothing is refused when the threshold is crossed. Use `options.maxQueueLength` to actually bound the queue.
+
 `pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
 
 ## Example

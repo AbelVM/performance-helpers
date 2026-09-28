@@ -55,6 +55,16 @@
  * @property {number} [listenerMaxListeners]
  * @property {boolean} [weakListeners]
  * @property {number} [queueHighThreshold]
+ * @property {number} [maxQueueLength] - Hard cap on queued tasks. `Infinity`
+ *   (the default) keeps the pre-2.0 behaviour where `queuePolicy: 'enqueue'`
+ *   grows without bound. With a finite cap the *incoming* task is the one that
+ *   is refused, because a cap is what the caller asked for; `drop-oldest` is
+ *   the exception and still evicts the oldest to make room for the newest.
+ *   A refused task returns `false`, or rejects with `ERR_POOL_QUEUE_FULL` when
+ *   the caller is awaiting a response.
+ * @property {number} [maxDrainWaiters] - Cap on concurrent `drain()` waits.
+ *   Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS`
+ *   instead of accumulating an unbounded number of `idle` listeners.
  * @property {boolean|AutoScaleOptions} [autoScale=false] - Adaptive
  *   concurrency. `true` enables the default `ewma` policy; an object configures
  *   it. Typed as `AutoScaleOptions` rather than `Object` because the pool reads
@@ -474,8 +484,12 @@ export {};
  * Circuit options for `PowerCircuit`.
  * @typedef {Object} PowerCircuitOptions
  * @property {number} [threshold=5] Consecutive failures before the circuit opens.
- * @property {number} [timeout=30000] Milliseconds the circuit stays open before
- *   a trial call is allowed.
+ * @property {number} [timeout=30000] **Base** milliseconds the circuit stays
+ *   open before a trial call is allowed. Consecutive trips grow this
+ *   exponentially and jitter the result, so a fleet of clients does not probe
+ *   one dependency in lockstep; the first trip uses this value unchanged.
+ * @property {number} [maxTimeout] Ceiling for the grown open window. Defaults
+ *   to `timeout * 16`.
  * @property {(state:string,reason?:string)=>void} [onStateChange] - Called as
  *   `(state, reason)` on every transition. `reason` is one of `success`,
  *   `thresholdExceeded`, `timeoutElapsed`, `trialFailed`, `reset` or

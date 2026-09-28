@@ -1,6 +1,6 @@
 # Parallelizing
 
-- [PowerPool: Worker pool](../guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling can use the latency-threshold heuristic or an adaptive concurrency controller (`policy: 'aimd' | 'vegas' | 'gradient2'`).
+- [PowerPool: Worker pool](../guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling can use the latency-threshold heuristic or an adaptive concurrency controller (`policy: 'aimd' | 'vegas' | 'gradient2'`). `maxQueueLength` bounds the task queue so a saturated pool refuses the overflow instead of growing until OOM, and `drain({ signal, timeout })` bounds the wait without ever stopping the work.
 - [WorkerAgnostic: One worker abstraction for Node, browser and web worker](../guides/WorkerAgnostic.md). Resolves the environment and returns a worker-like object either way, from a factory function or a path/code string. Handles the pure-ESM `node:worker_threads` caveat. Used directly by `PowerPool` and `PowerChunker`.
 - [PowerChunker: Chunk + pool helper](../guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerBulkhead: Partitioned executor](../guides/powerBulkhead.md). Isolate noisy workloads into separate lanes so one hot partition cannot starve the rest.

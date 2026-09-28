@@ -11,6 +11,79 @@ export const DEFAULT_MAX_CLEANUP_PER_TICK = 100;
 export const MAX_DEEP_EQUAL_DEPTH = 100;
 
 /**
+ * Default preallocation for a `PowerQueue`, and the value every helper that
+ * builds an internal queue passes explicitly.
+ *
+ * `PowerQueue` uses a power-of-two bitmask index, so its backing buffer grows by
+ * doubling. Preallocating 16 costs 16 slots and saves four grow-and-copy cycles
+ * for the small queues that dominate: a batch's pending list, a permit gate's
+ * waiters, a sliding window's timestamps, a bulkhead's drain waiters. Those four
+ * sites all passed a bare `16` with no name, which made it impossible to change
+ * the preallocation, impossible to find the sites, and impossible to tell a
+ * deliberate choice from a copy-paste of whatever the default happened to be.
+ *
+ * Not to be confused with `DEFAULT_QUEUE_CAPACITY`, which is the backlog a
+ * backpressure helper admits before it starts shedding, not a buffer size.
+ */
+export const POWER_QUEUE_INITIAL_CAPACITY = 16;
+
+/**
+ * Target number of in-flight chunks per pool worker when splitting an array.
+ *
+ * Aim for roughly `poolSize * 4` chunks, which keeps every worker fed without
+ * queueing far more work than can be in flight. Below that a fast worker idles
+ * between messages; much above it and the chunk list itself becomes the thing
+ * being allocated per call.
+ */
+export const CHUNKS_PER_WORKER_TARGET = 4;
+
+/**
+ * Window multiplier for adaptive chunk-size re-estimation.
+ *
+ * After the first pass the target is widened to `poolSize * 8`, giving the pool
+ * a deeper queue to chew through before the next measurement. A *wider* target
+ * means *smaller* chunks and more of them, so a measurement is taken sooner -
+ * this is the convergence knob, not a throughput knob.
+ */
+export const CHUNK_WINDOW_MULTIPLIER = 8;
+
+/**
+ * Fallback for `navigator.hardwareConcurrency` where the runtime does not
+ * expose it.
+ *
+ * Node, Deno and every current browser report it, but a non-browser runtime, a
+ * hardened/cross-origin-isolated context, and most test runners do not. `2` is
+ * the smallest value that still permits a worker pool to do anything in
+ * parallel; anything lower silently serialises the pool.
+ */
+export const DEFAULT_HARDWARE_CONCURRENCY = 2;
+
+/**
+ * How many workers a `PowerPool` starts with when the caller names no `size`.
+ *
+ * Deliberately small even on a 64-core box. A pool is usually constructed at
+ * module load, when the work it will eventually do is unknown, and a pool that
+ * eagerly spawns one worker per core pays that startup cost — and holds that
+ * memory — whether or not the traffic ever arrives. Start at two and let
+ * `autoScale` or the reaper move it. This is both the default initial `size`
+ * (capped by real concurrency) and the default `minSize`, because they express
+ * the same decision: start small. They are one constant for that reason, and
+ * splitting them would imply they can differ.
+ */
+export const DEFAULT_POOL_SIZE = 2;
+
+/**
+ * Floor on a `PowerHistogram`'s bucket count.
+ *
+ * Fewer than 4 buckets makes the log-bucket ladder degenerate - the space
+ * between the first and second boundary swallows most of the value range, so the
+ * reported percentiles lose all resolution exactly where a small bucket count
+ * seemed like a saving. Rounding up to 4 costs a handful of counters and keeps
+ * the ladder meaningful.
+ */
+export const MIN_HISTOGRAM_BUCKETS = 4;
+
+/**
  * Ceiling on how many *nodes* one `hasEqual` deep comparison will visit.
  *
  * `MAX_DEEP_EQUAL_DEPTH` bounds depth and says nothing about width, so a wide
@@ -29,6 +102,33 @@ export const MAX_DEEP_EQUAL_NODES = 10_000;
 export const DEFAULT_RETRY_BASE_DELAY_MS = 100;
 export const DEFAULT_RETRY_MAX_DELAY_MS = 10000;
 
+/**
+ * How many times a circuit's open window may double before it is capped.
+ *
+ * `PowerCircuit` opens for `baseTimeout`, then `2x`, then `4x`… up to
+ * `baseTimeout * 16`, so a dependency that is genuinely down stops being probed
+ * at a rate that cannot itself keep it down, while one that recovers after a
+ * brief blip is not locked out for minutes.
+ */
+export const DEFAULT_CIRCUIT_MAX_OPEN_FACTOR = 16;
+
+/**
+ * Floor on the jittered open window, as a fraction of the computed backoff.
+ *
+ * This is **equal jitter** (the window is drawn uniformly from
+ * `[delay / 2, delay]`), not AWS-style *full* jitter (`[0, delay]`), and the
+ * distinction matters for a circuit breaker specifically. Full jitter is right
+ * for a retry delay, where the goal is to spread attempts. For a breaker's open
+ * window the goal is different: the window has to be long enough to actually
+ * stop the traffic. A full-jitter draw of a 30 s backoff can land near zero,
+ * which re-opens the circuit almost immediately and turns the breaker into a
+ * fast flapping no-op. Half-jitter still randomises — which is what breaks the
+ * synchronised retry burst, since every client sharing a dependency would
+ * otherwise probe it on the same tick — while guaranteeing the window never
+ * collapses below half the computed backoff.
+ */
+export const DEFAULT_CIRCUIT_MIN_JITTER_RATIO = 0.5;
+
 // Pool / encode defaults
 export const DEFAULT_REAPER_MIN_INTERVAL_MS = 1000;
 export const ENCODE_CACHE_LARGE_KEY_LENGTH = 2048;
@@ -36,6 +136,19 @@ export const ENCODE_CACHE_LARGE_KEY_LENGTH = 2048;
 // separate from cache TTL constants so the pool's idle semantics are not
 // coupled to `DEFAULT_CACHE_DEFAULT_TTL_MS`.
 export const DEFAULT_POOL_IDLE_TIMEOUT_MS = 60 * MS_PER_SEC; // 60000
+
+/**
+ * Ceiling on how many `PowerPool.drain()` calls may be *waiting* at once.
+ *
+ * `drain()` registers an `idle` listener, so N concurrent drains are N
+ * listeners and N closures retained until the pool next goes idle. A caller
+ * that drains in a loop - once per request, say - accumulates them without
+ * bound and eventually trips `MaxListenersExceededWarning`. 100 is far above any
+ * deliberate use and low enough to stay under Node's default warning threshold
+ * of 10 per emitter only if the caller also raises `maxListeners`; the honest
+ * behaviour is to refuse the overflow and say so.
+ */
+export const DEFAULT_MAX_DRAIN_WAITERS = 100;
 
 // Cache defaults
 export const DEFAULT_CACHE_MAX_WEIGHT_BYTES = 1024 * 1024; // 1MB

@@ -14,7 +14,7 @@
  *
  */
 import { o2u8, u82o } from './powerBuffer.js';
-import { abortReason, raceWithAbort } from '../utils/abort.js';
+import { abortReason } from '../utils/abort.js';
 import WorkerAgnostic from './WorkerAgnostic.js';
 import { nowMs } from '../utils/now.js';
 import { setSafeInterval } from '../utils/timers.js';
@@ -28,8 +28,11 @@ import {
   isRawPayload,
 } from './powerMessageCodec.js';
 import {
+  DEFAULT_HARDWARE_CONCURRENCY,
+  DEFAULT_POOL_SIZE,
   DEFAULT_REAPER_MIN_INTERVAL_MS,
   ENCODE_CACHE_LARGE_KEY_LENGTH,
+  DEFAULT_MAX_DRAIN_WAITERS,
   DEFAULT_POOL_IDLE_TIMEOUT_MS,
   DEFAULT_TIMEOUT_MS,
   DEFAULT_AUTOSCALE_MIN_INTERVAL_MS,
@@ -39,6 +42,7 @@ import {
   DEFAULT_AUTOSCALE_LONG_WINDOW_ALPHA,
   DEFAULT_AUTOSCALE_AIMD_BETA,
 } from './constants.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
 
@@ -56,6 +60,86 @@ const CORRELATION_PROCESS_TAG = Math.floor(Math.random() * 0xffffffff).toString(
 let _correlationSequence = 0;
 
 // Module-level tuning constants (imported from shared constants.js)
+
+/**
+ * Build a coded `Error` for a pool-side refusal.
+ *
+ * The pool signals "your work was refused" through three distinct codes rather
+ * than one generic failure, because the caller's correct response differs in
+ * each case: retry later (`ERR_POOL_DRAIN_TIMEOUT`), stop draining
+ * (`ERR_POOL_DRAIN_TOO_MANY_WAITERS`), or shed load
+ * (`ERR_POOL_QUEUE_FULL`). A single `Error` message forces the caller to
+ * string-match to tell them apart.
+ *
+ * @param {string} code - The `err.code` to set.
+ * @param {string} message - Human-readable detail.
+ * @returns {Error & {code: string}}
+ * @private
+ */
+function poolRefusal(code, message) {
+  /** @type {Error & {code: string}} */
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+/** @typedef {import('./jsdoc-types.js').TransferList} TransferList */
+
+/**
+ * Are every entry in a transfer list still live?
+ *
+ * A successful `postMessage` *detaches* everything in its transfer list - that
+ * is the whole point, and it is what makes zero-copy possible. A `postMessage`
+ * that **throws** may already have detached some or all of it, because the
+ * structured clone runs before the failure is detected. There is no API to
+ * learn which, only which are already gone, so the only safe read is "is
+ * anything already detached".
+ *
+ * `ArrayBuffer.prototype.detached` is the precise test and is available in every
+ * runtime this library targets (Node >= 22.12 and every current browser), so it
+ * is the only one used. The older `byteLength === 0` heuristic is deliberately
+ * *not* used alongside it: a legitimately zero-length buffer is a perfectly
+ * valid transferable, and treating it as dead would refuse real work.
+ *
+ * @param {TransferList} transfer - The transfer list to inspect.
+ * @returns {boolean} `true` when nothing in the list is detached.
+ * @private
+ */
+function isTransferListLive(transfer) {
+  if (!Array.isArray(transfer)) return true;
+  for (let i = 0; i < transfer.length; i++) {
+    const item = transfer[i];
+    if (item instanceof ArrayBuffer) {
+      if (isDetached(item)) return false;
+    } else if (ArrayBuffer.isView(item)) {
+      if (isDetached(item.buffer)) return false;
+    } else if (item === null || typeof item !== 'object') {
+      // Not a transferable at all. Posting with it is guaranteed to throw, and
+      // the point of this check is to fail *before* the post, not after.
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Read `ArrayBuffer.prototype.detached` without requiring the `es2024` lib.
+ *
+ * The getter is ES2024, and this library's `lib` target predates it. The
+ * property is read through a cast rather than by raising the target, because
+ * raising it would change the meaning of every other check in the project
+ * rather than this one. A runtime without the getter reports `undefined`,
+ * which compares `!== true` and is correctly treated as "not known to be
+ * detached" - the pre-check then simply does not fire, which is the same
+ * behaviour as before this check existed.
+ *
+ * @param {ArrayBuffer|ArrayBufferLike|undefined|null} buffer
+ * @returns {boolean}
+ * @private
+ */
+function isDetached(buffer) {
+  return /** @type {{detached?: boolean}|null|undefined} */ (buffer)?.detached === true;
+}
 
 // Lightweight stable-shape wrapper for underlying worker-like objects.
 // Extracted to module-level to avoid recreating the class on every
@@ -255,12 +339,16 @@ export class PowerPool {
    * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
    * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
    * @param {number} [options.slowTaskThreshold=Infinity] - Task duration (ms) above which a completed task is counted as "slow". When finite, `stats().performance.percentSlowTasks` reports the exact percentage of tasks exceeding this threshold. Defaults to `Infinity` (disabled; `percentSlowTasks` stays `0`).
+   * @param {number} [options.maxQueueLength=Infinity] - Hard cap on queued tasks. With the default `queuePolicy: 'enqueue'` and no cap, a saturated pool grows its queue until the process runs out of memory; a cap makes the overflow observable instead - the incoming task is refused (`false`, or `ERR_POOL_QUEUE_FULL` when awaiting a response). `drop-oldest` still evicts the oldest to make room.
+   * @param {number} [options.maxDrainWaiters=100] - Cap on concurrent `drain()` waits, so a caller that drains in a loop cannot accumulate unbounded `idle` listeners. (Internally `DEFAULT_MAX_DRAIN_WAITERS`; not exported.)
    */
   constructor(workerSource, options = {}) {
-    const hwConcurrency = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+    const hwConcurrency =
+      (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ||
+      DEFAULT_HARDWARE_CONCURRENCY;
     const {
-      size = Math.min(hwConcurrency, 2),
-      minSize = 2,
+      size = Math.min(hwConcurrency, DEFAULT_POOL_SIZE),
+      minSize = DEFAULT_POOL_SIZE,
       maxSize = Math.max(size, hwConcurrency),
       workerOptions = {},
       maxTasksPerWorker: maxTasksPerWorkerOption,
@@ -293,6 +381,29 @@ export class PowerPool {
     this._queuePolicy = ['enqueue', 'drop-oldest', 'drop-newest', 'reject'].includes(queuePolicy)
       ? queuePolicy
       : 'enqueue';
+    // Hard cap on the task queue. `Infinity` (the default) preserves the
+    // pre-2.0 behaviour where `queuePolicy: 'enqueue'` grows without bound.
+    this._maxQueueLength = assertLimitRequired(options.maxQueueLength, {
+      name: 'maxQueueLength',
+      className: 'PowerPool',
+      min: 0,
+      allowInfinity: true,
+      fallback: Infinity,
+    });
+    this._maxDrainWaiters = assertLimitRequired(options.maxDrainWaiters, {
+      name: 'maxDrainWaiters',
+      className: 'PowerPool',
+      min: 1,
+      fallback: DEFAULT_MAX_DRAIN_WAITERS,
+    });
+    /**
+     * Number of `drain()` calls currently *waiting* for idle. Each one holds an
+     * `idle` listener, so this is the bound that keeps a caller draining in a
+     * loop from accumulating listeners without limit. See
+     * `DEFAULT_MAX_DRAIN_WAITERS`.
+     * @type {number}
+     */
+    this._drainWaiters = 0;
 
     // performance tracking
     this._createdAt = nowMs(); // pool creation timestamp (ms)
@@ -653,21 +764,38 @@ export class PowerPool {
    * @private
    */
   _postToWorkerObj(obj, prepared, startTime, wantResponse, correlationKey, pendingPromise) {
-    // Monkey-patch: bypass wrapper if possible to avoid losing transferred typed arrays
+    // Bypass the wrapper for "plain object + explicit transfer list".
+    //
+    // `WorkerWrapper.postMessage` re-encodes a plain-object message to JSON and
+    // substitutes the encoded buffer for it. That is the right default, and it
+    // is wrong here: a caller who passes an object *together with* a transfer
+    // list is saying "send this object as-is and transfer these buffers", and
+    // the wrapper would silently substitute a `Uint8Array` for their object.
+    // Posting to the underlying worker directly is what preserves that intent.
+    //
+    // `_underlying` is a private field of `WorkerWrapper`, so this reach-through
+    // is an internal contract and is checked as one: `instanceof` for the
+    // wrapper, and `typeof === 'function'` for the method. The previous
+    // `obj?.worker?.['_underlying']?.postMessage` truthiness check also passed
+    // for a non-function truthy value - a test spy, a half-constructed worker -
+    // and then failed with a `TypeError: postMessage is not a function` that had
+    // nothing to do with the caller's message.
+    const underlying =
+      obj?.worker instanceof WorkerWrapper ? /** @type {any} */ (obj.worker)._underlying : null;
     const canBypassWrapper =
-      prepared &&
-      prepared.message &&
+      prepared != null &&
+      prepared.message != null &&
       typeof prepared.message === 'object' &&
-      prepared.message !== null &&
       !ArrayBuffer.isView(prepared.message) &&
       !(prepared.message instanceof ArrayBuffer) &&
       Array.isArray(prepared.transfer) &&
       prepared.transfer.length > 0 &&
-      obj?.worker?.['_underlying']?.postMessage;
+      typeof underlying?.postMessage === 'function' &&
+      isTransferListLive(prepared.transfer);
 
     if (canBypassWrapper) {
       try {
-        obj.worker._underlying.postMessage(prepared.message, prepared.transfer);
+        underlying.postMessage(prepared.message, prepared.transfer);
         if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
         obj.tasks++;
         this._activeTasks++;
@@ -675,7 +803,16 @@ export class PowerPool {
         if (this._isIdle) this._updateIdleState();
         return wantResponse ? pendingPromise : true;
       } catch (err) {
-        // Fallback to the original behavior if direct postMessage fails.
+        // Deliberately no retry on the wrapper path. A `postMessage` that
+        // throws may already have detached part of the transfer list, so
+        // re-posting the same buffers fails with `DataCloneError: ArrayBuffer
+        // at index N has already been detached` - a message that reads like a
+        // caller bug and hides the error that actually happened. The wrapper
+        // path is not an equivalent retry either: it would re-encode the
+        // message, which is the very substitution this bypass exists to avoid.
+        return this._failPost(err, wantResponse, correlationKey, pendingPromise, {
+          scope: 'postToWorkerObj: direct postMessage failed',
+        });
       }
     }
     try {
@@ -688,26 +825,51 @@ export class PowerPool {
       if (this._isIdle) this._updateIdleState();
       return wantResponse ? pendingPromise : true;
     } catch (err) {
-      if (wantResponse && correlationKey) {
-        try {
-          this._cleanupPendingResponse(correlationKey, { rejectWith: err });
-        } catch (e) {
-          this._debugLog?.(e, 'postToWorkerObj: cleanupPendingResponse failed');
-        }
-        try {
-          this._logger.error(err, 'Failed to postMessage to worker');
-        } catch (e) {
-          this._debugLog?.(e, 'postToWorkerObj: logger.error failed');
-        }
-        return pendingPromise;
+      return this._failPost(err, wantResponse, correlationKey, pendingPromise, {
+        scope: 'postToWorkerObj: wrapper postMessage failed',
+      });
+    }
+  }
+
+  /**
+   * Report a failed `postMessage` and clean up the pending response for it.
+   *
+   * Single choke point for the failure half of `_postToWorkerObj`, so the two
+   * posting paths (direct to the underlying worker, through the wrapper) cannot
+   * drift on what the caller is told. The important property is that a
+   * post that failed *after* possibly detaching buffers is still reported with
+   * its **original** error - never with a downstream `DataCloneError` from a
+   * retry against the same buffers.
+   *
+   * @param {any} err - The error thrown by `postMessage`.
+   * @param {boolean} wantResponse - Whether the caller is awaiting a response.
+   * @param {string|undefined} correlationKey - Pending-response key to reject.
+   * @param {Promise<any>} pendingPromise - The caller's pending promise.
+   * @param {{scope: string}} [info] - Debug-log scope.
+   * @returns {Promise<any>|boolean} `pendingPromise` when awaiting a response,
+   *   `false` otherwise - matching `postMessage`'s contract.
+   * @private
+   */
+  _failPost(err, wantResponse, correlationKey, pendingPromise, info) {
+    if (wantResponse && correlationKey) {
+      try {
+        this._cleanupPendingResponse(correlationKey, { rejectWith: err });
+      } catch (e) {
+        this._debugLog?.(e, `${info?.scope ?? 'failPost'}: cleanupPendingResponse failed`);
       }
       try {
         this._logger.error(err, 'Failed to postMessage to worker');
       } catch (e) {
-        this._debugLog?.(e, 'postToWorkerObj: logger.error failed');
+        this._debugLog?.(e, `${info?.scope ?? 'failPost'}: logger.error failed`);
       }
-      return false;
+      return pendingPromise;
     }
+    try {
+      this._logger.error(err, 'Failed to postMessage to worker');
+    } catch (e) {
+      this._debugLog?.(e, `${info?.scope ?? 'failPost'}: logger.error failed`);
+    }
+    return false;
   }
 
   /**
@@ -781,6 +943,87 @@ export class PowerPool {
   }
 
   /**
+   * Resolve and validate the per-item correlation ids for a batch that expects
+   * responses.
+   *
+   * Two failure modes are checked, and both are checked *before* any dispatch:
+   *
+   * 1. A duplicate **within** the batch. A `correlationIdFactory` is caller
+   *    code; a constant or a sloppy one returns the same id twice, and the
+   *    second `postMessage` under a live key rejects the first waiter and
+   *    takes the key over. The caller would hold a batch where one promise is
+   *    already rejected and the last result resolves for all of them.
+   * 2. A collision with an id that is **already in flight** from an earlier
+   *    call. Same mechanism, same outcome, and it is silently the caller's
+   *    fault because the factory is a global naming scheme, not a local one.
+   *
+   * @param {{message:*,transfer?:Transferable[]}[]} items - The batch items.
+   * @param {Function} factory - The caller's `correlationIdFactory`.
+   * @returns {string[]} One validated id per item, positionally aligned.
+   * @throws {Error} `ERR_POOL_DUPLICATE_CORRELATION_ID` on the first collision.
+   * @private
+   */
+  _resolveBatchCorrelationIds(items, factory) {
+    const ids = new Array(items.length);
+    const seen = new Set();
+    for (let i = 0; i < items.length; i++) {
+      const id = String(factory(i, items[i] || {}));
+      if (seen.has(id) || this._pendingResponses.has(id)) {
+        const err = new Error(
+          `postMessageBatch correlationIdFactory produced a duplicate correlationId: "${id}" (item ${i})`
+        );
+        err.code = 'ERR_POOL_DUPLICATE_CORRELATION_ID';
+        throw err;
+      }
+      seen.add(id);
+      ids[i] = id;
+    }
+    return ids;
+  }
+
+  /**
+   * Reserve room for `count` more tasks in the task queue, honouring
+   * `maxQueueLength` and the configured `queuePolicy`.
+   *
+   * Without a cap this is a no-op and returns `count`, which is what keeps the
+   * pre-2.0 behaviour intact: `queuePolicy: 'enqueue'` grew the queue until the
+   * process ran out of memory, with no event and no error. The cap exists to
+   * make that overflow *observable*, so the interesting decision is **which
+   * task gets refused**:
+   *
+   * - `drop-oldest` keeps its documented meaning: evict the oldest to make room
+   *   for the newest, so the queue length never exceeds the cap.
+   * - every other policy refuses the **incoming** task. That is the honest
+   *   reading of a caller-provided bound - the newest arrival is the one that
+   *   did not fit, and refusing it keeps the work already accepted.
+   *
+   * @param {number} count - How many tasks are about to be queued.
+   * @returns {number} How many of them may be queued. The remainder must be
+   *   refused by the caller.
+   * @private
+   */
+  _reserveQueueSlots(count) {
+    const cap = this._maxQueueLength;
+    if (!Number.isFinite(cap)) return count;
+    let room = cap - this.queue.length;
+    if (room >= count) return count;
+    if (this._queuePolicy === 'drop-oldest') {
+      let evict = count - room;
+      while (evict > 0 && this.queue.length > 0) {
+        evict--;
+        const dropped = this.queue.shift();
+        if (dropped?.correlationId != null) {
+          this._cleanupPendingResponse(dropped.correlationId, {
+            rejectWith: new Error('postMessage queued task dropped by policy'),
+          });
+        }
+      }
+      room = cap - this.queue.length;
+    }
+    return room > 0 ? room : 0;
+  }
+
+  /**
    * Enqueue or reject a prepared message according to the configured queue policy.
    * Returns `pendingPromise`/`true`/`false` to match `postMessage` semantics.
    * @private
@@ -812,6 +1055,23 @@ export class PowerPool {
           rejectWith: new Error('postMessage queued task dropped by policy'),
         });
       }
+    } else if (this._reserveQueueSlots(1) === 0) {
+      // The queue is at `maxQueueLength`. `drop-oldest` above already made
+      // room, so reaching here means the incoming task is the one that does
+      // not fit.
+      if (wantResponse && correlationKey) {
+        this._cleanupPendingResponse(correlationKey, {
+          rejectWith: (() => {
+            const err = new Error(
+              `postMessage rejected: task queue is full (maxQueueLength ${this._maxQueueLength})`
+            );
+            err.code = 'ERR_POOL_QUEUE_FULL';
+            return err;
+          })(),
+        });
+        return pendingPromise;
+      }
+      return false;
     }
     const queuedItem = { message: prepared.message, transfer: prepared.transfer };
     if (wantResponse && correlationKey) queuedItem.correlationId = correlationKey;
@@ -2177,17 +2437,17 @@ export class PowerPool {
     //    again and defeat `recreateWorkers: false`, so only the queue is
     //    restored (and the message enqueued for a future `addWorker()`).
     if (!recreate) {
+      // The documented contract is "the same return value as `postMessage`", so
+      // the enqueue result is forwarded rather than an unconditional `true`.
+      // This is what makes `maxQueueLength` observable here: with a full queue
+      // the message is refused and the caller is told so, instead of `stopThePress`
+      // reporting a success that discarded the message it was handed.
       try {
-        this._enqueueOrReject({
-          message,
-          transfer,
-          correlationId: null,
-          reject: false,
-        });
+        return this._enqueueOrReject({ message, transfer }, false, undefined, undefined);
       } catch (e) {
         this._logger.error(e, 'stopThePress: enqueue after reset failed');
+        return false;
       }
-      return true;
     }
     return this.postMessage(message, transfer, fwdOptions);
   }
@@ -2219,13 +2479,29 @@ export class PowerPool {
           'postMessageBatch cannot use a fixed correlationId for multiple items; provide options.correlationIdFactory or omit correlationId'
         );
       }
+      // A `correlationIdFactory` is caller code, and a caller-supplied factory
+      // is the one place a duplicate id can be produced *by the batch itself*.
+      // `postMessage` does not defend against this: a second registration
+      // under a live key rejects the first waiter with
+      // `ERR_POOL_DUPLICATE_CORRELATION_ID` and takes over the key, so a
+      // 3-item batch with a constant factory would leave caller 1 holding a
+      // promise that is already rejected and the last result resolving for
+      // everyone. Worse, it is destructive *and* partial - the first two
+      // messages were already dispatched before the third collided.
+      //
+      // So the ids are resolved once, up front, and validated as a set before
+      // a single item is dispatched. A duplicate then fails the whole call
+      // atomically, with nothing sent and nothing orphaned. Resolving once
+      // also means the factory is called exactly `items.length` times even for
+      // an impure factory - the ids it produced are the ids that get used.
+      const ids = correlationIdFactory
+        ? this._resolveBatchCorrelationIds(items, correlationIdFactory)
+        : null;
       const results = new Array(items.length);
       for (let i = 0; i < items.length; i++) {
         const it = items[i] || {};
         const perItemOptions = Object.assign({}, options);
-        if (correlationIdFactory) {
-          perItemOptions.correlationId = String(correlationIdFactory(i, it));
-        }
+        if (ids) perItemOptions.correlationId = ids[i];
         results[i] = this.postMessage(it.message, it.transfer, perItemOptions);
       }
       return results;
@@ -2382,7 +2658,11 @@ export class PowerPool {
                 });
               }
             }
-            queuedPrepared.push({ message: prepared.message, transfer: prepared.transfer });
+            queuedPrepared.push({
+              message: prepared.message,
+              transfer: prepared.transfer,
+              index: i,
+            });
             results[i] = true;
           }
         } else {
@@ -2417,24 +2697,44 @@ export class PowerPool {
     // Push queued items into the queue using batch enqueue for efficiency
     if (queuedPrepared.length) {
       try {
-        // queue stores plain objects `{message,transfer}` so we can pass the array directly
-        this.queue.pushMany(queuedPrepared);
-        idleStateDirty = true;
-        // emit queue high-watermark event when threshold crossed (avoid spamming)
-        try {
-          if (
-            Number.isFinite(this._queueHighThreshold) &&
-            this.queue.length > this._queueHighThreshold &&
-            !this._queueHighCrossed
-          ) {
-            this._queueHighCrossed = true;
-            this._bus.emit('pool:queue:high', {
-              length: this.queue.length,
-              threshold: this._queueHighThreshold,
-            });
+        // A batch can overshoot `maxQueueLength` in one go, so reserve room for
+        // the whole group up front rather than pushing the overflow and then
+        // noticing. The items that do not fit are refused - the newest ones,
+        // because that is what every policy except `drop-oldest` already does.
+        const admitted = this._reserveQueueSlots(queuedPrepared.length);
+        if (admitted < queuedPrepared.length) {
+          for (let i = admitted; i < queuedPrepared.length; i++) {
+            results[queuedPrepared[i].index] = false;
           }
-        } catch (e) {
-          this._debugLog?.(e, 'postMessageBatch: bus.emit pool:queue:high failed');
+          queuedPrepared.length = admitted;
+        }
+        if (!queuedPrepared.length) {
+          this._logger.error?.(
+            new Error(
+              `postMessageBatch rejected ${items.length - admitted} task(s): task queue is full (maxQueueLength ${this._maxQueueLength})`
+            ),
+            'postMessageBatch: queue full'
+          );
+        } else {
+          // queue stores plain objects `{message,transfer}` so we can pass the array directly
+          this.queue.pushMany(queuedPrepared);
+          idleStateDirty = true;
+          // emit queue high-watermark event when threshold crossed (avoid spamming)
+          try {
+            if (
+              Number.isFinite(this._queueHighThreshold) &&
+              this.queue.length > this._queueHighThreshold &&
+              !this._queueHighCrossed
+            ) {
+              this._queueHighCrossed = true;
+              this._bus.emit('pool:queue:high', {
+                length: this.queue.length,
+                threshold: this._queueHighThreshold,
+              });
+            }
+          } catch (e) {
+            this._debugLog?.(e, 'postMessageBatch: bus.emit pool:queue:high failed');
+          }
         }
       } catch (err) {
         this._logger.error(err, 'postMessageBatch: failed to enqueue prepared items');
@@ -2800,8 +3100,22 @@ export class PowerPool {
   /**
    * Emit the pool-idle synthetic message to `onmessage` and listeners.
    *
-   * The emitted event object has the shape: `{ data: { type: 'pool:idle', stats } }` where
-   * `stats` is an array with the per-worker snapshot: `{ id, tasks, lastActive }`.
+   * The emitted event object is
+   * `{ data: { type: 'pool:idle', workers, stats } }`, where:
+   *
+   * - `data.workers` is the per-worker snapshot the pool is actually idle *by*:
+   *   an array of `{ id, tasks, lastActive }`. A worker with `tasks !== 0` here
+   *   means `_activeTasks` has drifted from the per-worker counts.
+   * - `data.stats` is the aggregate `getStats()` summary (`queueLength`,
+   *   `activeTasks`, `performance`, ...).
+   *
+   * Both are computed lazily and both used to be called "stats". The payload
+   * was always the `getStats()` *summary* while the JSDoc described an
+   * *array*, so a listener written against the documentation did
+   * `ev.data.stats.map(w => w.id)` and got a `TypeError` on a busy pool - the
+   * per-worker array simply was not reachable. Naming them for what they are is
+   * the fix; the summary keeps the `stats` key so existing readers of
+   * `ev.data.stats` are unaffected.
    *
    * Emission semantics:
    * - The event is emitted only when the pool transitions from non-idle to idle
@@ -2815,23 +3129,38 @@ export class PowerPool {
    * @returns {void}
    */
   /**
-   * Build the idle event object. `stats` is computed lazily (via a getter) so
-   * the `getStats()` allocation (which maps over all workers) is skipped on
-   * idle transitions when no listener actually reads `ev.data.stats`.
+   * Build the idle event object. Both payloads are computed lazily (via
+   * getters) so the `getStats()` allocation (which maps over all workers) is
+   * skipped on idle transitions when no listener actually reads them.
    * @private
-   * @returns {{data:{type:string,stats:object}}}
+   * @returns {{data:{type:string,workers:{id:number,tasks:number,lastActive:number}[],stats:object}}}
    */
   _buildIdleEvent() {
     const self = this;
+    /** @type {object|undefined} */
     let stats;
-    let computed = false;
+    let statsComputed = false;
+    /** @type {{id:number,tasks:number,lastActive:number}[]|undefined} */
+    let workers;
+    let workersComputed = false;
     return {
       data: {
         type: 'pool:idle',
+        get workers() {
+          if (!workersComputed) {
+            workers = self.workers.map((w) => ({
+              id: w.id,
+              tasks: w.tasks,
+              lastActive: w.lastActive,
+            }));
+            workersComputed = true;
+          }
+          return workers;
+        },
         get stats() {
-          if (!computed) {
+          if (!statsComputed) {
             stats = self.getStats();
-            computed = true;
+            statsComputed = true;
           }
           return stats;
         },
@@ -3014,17 +3343,42 @@ export class PowerPool {
   /**
    * Return a Promise that resolves when the pool becomes idle (queue empty and all workers have tasks === 0).
    * Resolves with the result of `getStats()` at the time of idle.
+   *
+   * The wait is bounded three ways, and every one of them **abandons the wait,
+   * never the work** - the pool keeps dispatching and keeps serving every other
+   * caller. That is the contract `drain()` has always had; what is new is that
+   * the wait can actually be given up on without leaking anything:
+   *
+   * - `signal` - an `AbortSignal` rejects with its reason. `AbortError` unless
+   *   the caller aborted with their own `Error`.
+   * - `timeout` - rejects with `ERR_POOL_DRAIN_TIMEOUT` after `timeout` ms.
+   *   Without it a drain against a wedged worker waits forever, which is
+   *   indistinguishable from a hang.
+   * - `maxDrainWaiters` (constructor option) - rejects with
+   *   `ERR_POOL_DRAIN_TOO_MANY_WAITERS` once too many are already waiting.
+   *
+   * Previously only `signal` existed, and it leaked: `raceWithAbort` rejected
+   * the returned promise but left the `idle` listener attached, so an aborted
+   * drain retained a closure and a listener slot until the pool happened to go
+   * idle again. This implementation owns the listener lifecycle directly and
+   * detaches on *every* exit path.
+   *
+   * @param {object} [options]
+   * @param {AbortSignal} [options.signal] - Abandons the wait when aborted.
+   * @param {number} [options.timeout] - Abandons the wait after this many ms.
    * @returns {Promise<object>} Promise resolving to `getStats()`.
    */
   drain(options = {}) {
-    const signal = /** @type {{signal?: AbortSignal}} */ (options)?.signal ?? null;
+    const signal = options?.signal ?? null;
+    const rawTimeout = Number(options?.timeout);
+    // A non-finite or non-positive `timeout` means "no timeout", matching every
+    // other timeout option in the library.
+    const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.floor(rawTimeout) : 0;
+
     const queueEmpty = this.queue.length === 0;
     const allWorkersIdle = this._activeTasks === 0;
     const allIdle = allWorkersIdle && queueEmpty;
 
-    // Aborting the drain abandons the *wait*: the pool keeps dispatching and
-    // serving every other caller. Someone who stopped watching the drain does
-    // not get to stop the work.
     if (allIdle) {
       return signal?.aborted
         ? Promise.reject(abortReason(signal))
@@ -3032,18 +3386,69 @@ export class PowerPool {
     }
     if (signal?.aborted) return Promise.reject(abortReason(signal));
 
-    const idle = new Promise((resolve) => {
-      const cb = () => {
+    if (this._drainWaiters >= this._maxDrainWaiters) {
+      return Promise.reject(
+        poolRefusal(
+          'ERR_POOL_DRAIN_TOO_MANY_WAITERS',
+          `drain(): ${this._drainWaiters} drain(s) already waiting (maxDrainWaiters ${this._maxDrainWaiters})`
+        )
+      );
+    }
+
+    this._drainWaiters++;
+    return new Promise((resolve, reject) => {
+      /** @type {any} */
+      let timer = null;
+      let done = false;
+
+      /**
+       * Release the listener, the timer and the waiter slot exactly once,
+       * whichever path got here first.
+       * @returns {void}
+       */
+      const release = () => {
+        if (done) return;
+        done = true;
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        this._drainWaiters--;
         try {
-          this.removeEventListener('idle', cb);
+          this.removeEventListener('idle', onIdle);
         } catch (e) {
           this._debugLog?.(e, 'drain: removeEventListener failed');
         }
+      };
+
+      const onIdle = () => {
+        release();
         resolve(this.getStats());
       };
-      this.addEventListener('idle', cb);
+      const onAbort = () => {
+        release();
+        // Only ever registered when `signal` is non-null, further down.
+        reject(abortReason(/** @type {AbortSignal} */ (signal)));
+      };
+      const onTimeout = () => {
+        release();
+        reject(
+          poolRefusal(
+            'ERR_POOL_DRAIN_TIMEOUT',
+            `drain(): pool did not become idle within ${timeout}ms`
+          )
+        );
+      };
+
+      if (timeout) {
+        // Deliberately *not* `setSafeTimeout`. An unref'd timer would let a
+        // Node process exit while a caller is `await pool.drain({ timeout })`,
+        // which is the one case where holding the loop open is the point.
+        timer = setTimeout(onTimeout, timeout);
+      }
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      this.addEventListener('idle', onIdle);
     });
-    return raceWithAbort(idle, signal);
   }
 
   /**
