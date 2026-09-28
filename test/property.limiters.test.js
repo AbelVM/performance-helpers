@@ -295,7 +295,7 @@ describe('PowerPermitGate / PowerSemaphore concurrency invariants', () => {
         fc.integer({ min: 1, max: 3 }),
         fc.array(fc.nat({ max: 4 }), { minLength: 1, maxLength: 30 }),
         async (permits, holds) => {
-          const sem = new PowerSemaphore({ permits });
+          const sem = new PowerSemaphore(permits);
           let concurrent = 0;
           let peak = 0;
           await Promise.all(

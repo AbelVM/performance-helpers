@@ -9,6 +9,7 @@
  */
 import { PowerQueue } from './powerQueue.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /**
  * PowerPermitGate
@@ -65,14 +66,41 @@ export class PowerPermitGate {
    * @param {number} [options.initialTokens]
    */
   constructor(options = {}) {
-    const { capacity = 1, queueCapacity = Infinity, initialTokens } = options || {};
-    this._capacity = Math.max(1, Math.floor(Number(capacity) || 1));
-    this._queueCapacity = Number.isFinite(Number(queueCapacity))
-      ? Math.max(0, Math.floor(Number(queueCapacity)))
-      : Infinity;
-    this._available = Number.isFinite(initialTokens)
-      ? Math.min(this._capacity, Math.max(0, Math.floor(Number(initialTokens))))
-      : this._capacity;
+    const { capacity, queueCapacity, initialTokens } = options || {};
+    // `Math.max(1, Math.floor(Number(capacity) || 1))` read `0` as absent, so
+    // `capacity: 0` produced a gate holding *one* permit rather than none. A
+    // permit gate configured to allow nothing is a real configuration - it is
+    // how a dependency is switched off - and silently becoming open is the worst
+    // direction for it to fail in. Validated instead.
+    this._capacity = assertLimitRequired(capacity, {
+      name: 'capacity',
+      className: 'PowerPermitGate',
+      min: 1,
+      fallback: 1,
+    });
+    this._queueCapacity =
+      queueCapacity === undefined || queueCapacity === null
+        ? Infinity
+        : assertLimitRequired(queueCapacity, {
+            name: 'queueCapacity',
+            className: 'PowerPermitGate',
+            min: 0,
+            allowInfinity: true,
+          });
+    // `initialTokens` is genuinely optional and genuinely allowed to be 0 -
+    // "start with nothing and let it refill" is the point of a token bucket - so
+    // it is clamped to capacity rather than rejected.
+    this._available =
+      initialTokens === undefined || initialTokens === null
+        ? this._capacity
+        : Math.min(
+            this._capacity,
+            assertLimitRequired(initialTokens, {
+              name: 'initialTokens',
+              className: 'PowerPermitGate',
+              min: 0,
+            })
+          );
     this._waiters = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
     /**
      * Waiters that were aborted and are still physically in the queue.

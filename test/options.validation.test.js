@@ -7,6 +7,9 @@ import {
   PowerQueue,
   PowerGCRA,
   PowerCache,
+  PowerCircuit,
+  PowerPermitGate,
+  PowerDeadline,
 } from '../src/index.js';
 
 /**
@@ -188,5 +191,114 @@ describe('validation never breaks a valid configuration', () => {
         expect(() => new PowerGCRA({ rate: bad })).toThrow();
       }
     }
+  });
+});
+
+// ─── QUAL-001, part 2: the limiters and the deadline runner ──────────────────
+//
+// Each of these had a hand-rolled coercion that read `0` as "absent" and
+// substituted a plausible default. For a permit gate and a circuit breaker that
+// is the worst direction to fail in: the configuration asked for was "allow
+// nothing" or "never trip", and the object built was the opposite.
+describe('PowerCircuit option validation (QUAL-001)', () => {
+  it('rejects threshold 0 rather than reading it as absent', () => {
+    // `Number(0) || 5` gave a breaker that never trips. The failure was silent
+    // and the symptom appears only under load.
+    expect(() => new PowerCircuit({ threshold: 0 })).toThrow(TypeError);
+    expect(() => new PowerCircuit({ threshold: 0 })).toThrow(/threshold/);
+  });
+
+  it('rejects a negative or non-numeric threshold', () => {
+    expect(() => new PowerCircuit({ threshold: -1 })).toThrow(TypeError);
+    expect(() => new PowerCircuit({ threshold: 'many' })).toThrow(TypeError);
+    expect(() => new PowerCircuit({ threshold: Number.NaN })).toThrow(TypeError);
+  });
+
+  it('still accepts every valid threshold and falls back when omitted', () => {
+    for (const n of [1, 2, 5, 100]) {
+      expect(new PowerCircuit({ threshold: n })._threshold).toBe(n);
+    }
+    expect(new PowerCircuit()._threshold).toBe(5);
+    expect(new PowerCircuit({})._threshold).toBe(5);
+  });
+
+  it('rejects timeout 0, which used to become 30s', () => {
+    expect(() => new PowerCircuit({ timeout: 0 })).toThrow(TypeError);
+    expect(() => new PowerCircuit({ timeout: -1 })).toThrow(TypeError);
+  });
+
+  it('derives maxTimeout only when it is absent, and validates it otherwise', () => {
+    expect(new PowerCircuit({ timeout: 100 })._maxTimeout).toBe(100 * 16);
+    expect(new PowerCircuit({ timeout: 100, maxTimeout: 5000 })._maxTimeout).toBe(5000);
+    // An explicit `maxTimeout: 0` is a real mistake, not a request for the
+    // default - it would make the open window vanish.
+    expect(() => new PowerCircuit({ timeout: 100, maxTimeout: 0 })).toThrow(TypeError);
+  });
+});
+
+describe('PowerPermitGate option validation (QUAL-001)', () => {
+  it('rejects capacity 0 rather than reading it as absent', () => {
+    // `Math.max(1, Math.floor(Number(0) || 1))` gave a gate holding ONE permit.
+    // A gate configured to allow nothing is how a dependency is switched off,
+    // and silently becoming open is the worst possible direction to fail.
+    expect(() => new PowerPermitGate({ capacity: 0 })).toThrow(TypeError);
+    expect(() => new PowerPermitGate({ capacity: 0 })).toThrow(/capacity/);
+  });
+
+  it('rejects a negative or non-numeric capacity', () => {
+    expect(() => new PowerPermitGate({ capacity: -3 })).toThrow(TypeError);
+    expect(() => new PowerPermitGate({ capacity: 'lots' })).toThrow(TypeError);
+  });
+
+  it('still accepts every valid capacity and defaults to 1', () => {
+    for (const n of [1, 2, 8, 1024]) {
+      expect(new PowerPermitGate({ capacity: n })._capacity).toBe(n);
+    }
+    expect(new PowerPermitGate()._capacity).toBe(1);
+  });
+
+  it('accepts queueCapacity 0 and Infinity, and rejects nonsense', () => {
+    expect(new PowerPermitGate({ queueCapacity: 0 })._queueCapacity).toBe(0);
+    expect(new PowerPermitGate({ queueCapacity: Infinity })._queueCapacity).toBe(Infinity);
+    expect(new PowerPermitGate()._queueCapacity).toBe(Infinity);
+    expect(() => new PowerPermitGate({ queueCapacity: -1 })).toThrow(TypeError);
+  });
+
+  it('accepts initialTokens 0, because "start empty" is a real request', () => {
+    const g = new PowerPermitGate({ capacity: 4, initialTokens: 0 });
+    expect(g._available).toBe(0);
+    // tryAcquire() grants immediately by returning true; with no tokens it
+    // returns a waiter to be called on release, so the check is that it is not
+    // an immediate grant.
+    expect(g.tryAcquire()).not.toBe(true);
+  });
+
+  it('clamps initialTokens to capacity rather than rejecting it', () => {
+    expect(new PowerPermitGate({ capacity: 4, initialTokens: 99 })._available).toBe(4);
+    expect(() => new PowerPermitGate({ capacity: 4, initialTokens: -1 })).toThrow(TypeError);
+  });
+});
+
+describe('PowerDeadline option validation (QUAL-001)', () => {
+  it('rejects maxAttempts 0 and negatives, which used to become 1', async () => {
+    // A caller who computed a retry budget and silently got 1 attempt back
+    // would never find out.
+    await expect(PowerDeadline.run(() => 1, { maxAttempts: 0 })).rejects.toThrow(TypeError);
+    await expect(PowerDeadline.run(() => 1, { maxAttempts: -5 })).rejects.toThrow(TypeError);
+  });
+
+  it('rejects a non-numeric retryDelay, which used to become 0', async () => {
+    await expect(PowerDeadline.run(() => 1, { retryDelay: 'soon' })).rejects.toThrow(TypeError);
+  });
+
+  it('accepts retryDelay 0, which is a real request', async () => {
+    await expect(PowerDeadline.run(() => 1, { retryDelay: 0 })).resolves.toBe(1);
+  });
+
+  it('accepts valid budgets and still defaults sensibly', async () => {
+    await expect(PowerDeadline.run(() => 1, { maxAttempts: 3 })).resolves.toBe(1);
+    await expect(PowerDeadline.run(() => 1, {})).resolves.toBe(1);
+    await expect(PowerDeadline.run(() => 1, { totalTimeout: 1000 })).resolves.toBe(1);
+    await expect(PowerDeadline.run(() => 1, { attemptTimeout: 50 })).resolves.toBe(1);
   });
 });

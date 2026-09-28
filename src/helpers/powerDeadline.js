@@ -1,5 +1,6 @@
 import { PowerRetry } from './powerRetry.js';
 import { nowMs } from '../utils/now.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerDeadlineOptions} PowerDeadlineOptions
@@ -38,10 +39,38 @@ export class PowerDeadline {
       jitter,
     } = options || {};
 
-    const attempts = Math.max(1, Math.floor(Number(maxAttempts) || 1));
-    const perAttemptTimeout = Number(attemptTimeout) > 0 ? Number(attemptTimeout) : null;
-    const deadlineMs = Number(totalTimeout) > 0 ? Number(totalTimeout) : null;
-    const delayMs = Math.max(0, Number(retryDelay) || 0);
+    // These were `Math.max(1, Math.floor(Number(x) || 1))` and friends, which
+    // silently rewrote nonsense into a plausible default: `maxAttempts: 0` and
+    // `maxAttempts: -5` both became 1, and `retryDelay: 'soon'` became 0. A
+    // caller who computed a budget and got 1 attempt back would never know.
+    const attempts = assertLimitRequired(maxAttempts, {
+      name: 'maxAttempts',
+      className: 'PowerDeadline',
+      min: 1,
+      fallback: 1,
+    });
+    const perAttemptTimeout =
+      attemptTimeout === undefined || attemptTimeout === null
+        ? null
+        : assertLimitRequired(attemptTimeout, {
+            name: 'attemptTimeout',
+            className: 'PowerDeadline',
+            min: 1,
+          });
+    const deadlineMs =
+      totalTimeout === undefined || totalTimeout === null
+        ? null
+        : assertLimitRequired(totalTimeout, {
+            name: 'totalTimeout',
+            className: 'PowerDeadline',
+            min: 1,
+          });
+    const delayMs = assertLimitRequired(retryDelay, {
+      name: 'retryDelay',
+      className: 'PowerDeadline',
+      min: 0,
+      fallback: 0,
+    });
     const shouldRetry = typeof retryIf === 'function' ? retryIf : () => Boolean(retryIf);
 
     const startedAt = nowMs();

@@ -22,6 +22,7 @@
  */
 import { PowerEventBus } from './powerEventBus.js';
 import { nowMs } from '../utils/now.js';
+import { assertLimitRequired } from '../utils/options.js';
 import {
   DEFAULT_CIRCUIT_MAX_OPEN_FACTOR,
   DEFAULT_CIRCUIT_MIN_JITTER_RATIO,
@@ -67,14 +68,32 @@ export class PowerCircuit {
       onStateChange = null,
       eventBus = null,
     } = options;
-    this._threshold = Number(threshold) || 5;
+    // `Number(x) || default` treats 0 as absent, which for a *breaker* is the
+    // worst possible reading of it: `threshold: 0` became 5, a circuit that
+    // never trips, and `timeout: 0` became 30s, an open window the caller
+    // believed was instant. Both were silent. Validated instead.
+    this._threshold = assertLimitRequired(threshold, {
+      name: 'threshold',
+      className: 'PowerCircuit',
+      min: 1,
+      fallback: 5,
+    });
     // `timeout` is the **base** open window, not the only one. It stays the
     // first window so a circuit that trips once behaves exactly as 1.x did.
-    this._timeout = Number(timeout) || DEFAULT_TIMEOUT_MS;
+    this._timeout = assertLimitRequired(timeout, {
+      name: 'timeout',
+      className: 'PowerCircuit',
+      min: 1,
+      fallback: DEFAULT_TIMEOUT_MS,
+    });
     this._maxTimeout =
-      Number.isFinite(Number(maxTimeout)) && Number(maxTimeout) > 0
-        ? Number(maxTimeout)
-        : this._timeout * DEFAULT_CIRCUIT_MAX_OPEN_FACTOR;
+      maxTimeout === undefined || maxTimeout === null
+        ? this._timeout * DEFAULT_CIRCUIT_MAX_OPEN_FACTOR
+        : assertLimitRequired(maxTimeout, {
+            name: 'maxTimeout',
+            className: 'PowerCircuit',
+            min: 1,
+          });
     /**
      * Consecutive entries into `open`, which drive the exponential growth.
      * Reset to 0 whenever the circuit proves the dependency is healthy again.

@@ -40,7 +40,7 @@ beforeAll(async () => {
 const RESOURCE_OWNERS = [
   ['PowerEventBus', () => new PowerEventBus()],
   ['PowerSubscriberSet', () => new PowerSubscriberSet()],
-  ['PowerSemaphore', () => new PowerSemaphore({ permits: 2 })],
+  ['PowerSemaphore', () => new PowerSemaphore(2)],
   ['PowerPermitGate', () => new PowerPermitGate({ capacity: 2 })],
   ['PowerScheduler', () => new PowerScheduler(() => {}, { scheduling: 'microtask' })],
   ['PowerTTLMap', () => new PowerTTLMap(1000)],
