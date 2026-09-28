@@ -450,6 +450,27 @@ export {};
  */
 
 /**
+ * AIMD settings for `PowerBackpressure` (`adaptive`).
+ *
+ * Disabled by default: the pre-2.0 behaviour, a constant `refillAmount`, is
+ * unchanged unless asked for.
+ *
+ * @typedef {Object} BackpressureAdaptiveOptions
+ * @property {boolean} [enabled=true] Set `false` to keep the constants but
+ *   leave AIMD off - useful for turning it off without unsetting the tuning.
+ * @property {number} [additiveIncrease=1] Permits added per refill tick that
+ *   finds consumers draining. TCP adds one segment per round trip; here a tick
+ *   is the unit of observation.
+ * @property {number} [beta=0.5] Multiplicative decrease factor, clamped to
+ *   `(0.1, 0.99)`. 0.5 is TCP's.
+ * @property {number} [min=1] Floor for the refill amount. Never probes with
+ *   less than one permit, so a backoff cannot deadlock the queue.
+ * @property {number} [max=1000000] Ceiling, so a permanently fast consumer
+ *   cannot drive the window past capacity on its own. The refill is still
+ *   capped by the number of missing permits.
+ */
+
+/**
  * Circuit options for `PowerCircuit`.
  * @typedef {Object} PowerCircuitOptions
  * @property {number} [threshold=5] Consecutive failures before the circuit opens.

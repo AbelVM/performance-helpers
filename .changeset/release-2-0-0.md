@@ -94,6 +94,15 @@ The ones that could bite an existing user:
 `PowerPool` remains backwards compatible at the API level; the only migration
 required is the worker reply shape.
 
+- **`PowerBackpressure` `{ adaptive: true }`** — AIMD tuning of the refill
+  amount, off by default. The controller already refilled on pressure but had no
+  idea whether the consumers it handed permits to were coping; now a refill tick
+  that finds every permit still out cuts the window multiplicatively, and one
+  that finds permits coming back grows it additively. The signal is "did my
+  probe come back" rather than a measured delay, so it needs no clock and cannot
+  be fooled by a fast consumer that keeps everything. `bp.refillAmount` reads
+  the current window; `reset()` returns it to its base.
+
 **Added**
 
 - **`PowerEventLoopMonitor`** — a latency number going up does not tell you

@@ -4,17 +4,6 @@ Producer-facing backpressure controller with adaptive refill.
 
 `PowerBackpressure` is designed to help producers throttle themselves when downstream capacity is limited. It provides a permit-based API and automatically refills permits when pressure is high.
 
-## Constructor
-
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `capacity` | `number` | `100` | Maximum number of concurrent permits.
-| `queueCapacity` | `number` | `1000` | Maximum number of producers that may wait for a permit.
-| `lowWaterMark` | `number` | `Math.ceil(capacity * 0.25)` | When available permits fall below this threshold, adaptive refill begins.
-| `refillAmount` | `number` | `Math.max(1, Math.ceil(capacity * 0.1))` | Base number of permits restored during each adaptive refill.
-| `refillInterval` | `number` | `200` | Refill interval in milliseconds when pressure is high.
-| `initialTokens` | `number` | `capacity` | Initial available permits.
-
 ## API
 
 - `acquire()` — Returns a `Promise<Function>` that resolves when a permit is available. The resolved function releases the permit.
@@ -26,6 +15,55 @@ Producer-facing backpressure controller with adaptive refill.
 - `pending` — Number of waiting producers.
 - `queueCapacity` — Maximum queued producers.
 - `isFull` — `true` when the waiting queue is saturated.
+
+## Adaptive refill (AIMD)
+
+Off by default. With `adaptive: true` the refill amount becomes a congestion
+window in the TCP sense, tuned by what the consumers do with the permits they
+are given:
+
+- **Additive increase** — a refill tick that finds at least one permit has come
+  back grows the window by `additiveIncrease` (default 1).
+- **Multiplicative decrease** — a refill tick that finds *every* permit still
+  out, however long the consumer has held them, cuts the window by `beta`
+  (default 0.5, clamped to `(0.1, 0.99)`).
+
+The signal is deliberately not a clock. CoDel judges congestion from a
+round-trip delay; the honest analogue here is "did my probe come back", which
+needs no timer and cannot be fooled by a consumer that is fast but keeps
+everything.
+
+```js
+const bp = new PowerBackpressure({
+  capacity: 64,
+  adaptive: { additiveIncrease: 2, beta: 0.5, min: 1 },
+});
+// bp.refillAmount reads the current window; reset() returns it to its base.
+```
+
+Two things worth knowing:
+
+- **It only observes under load.** If the queue is empty there is nothing to
+  measure and the window does not move. That is correct: a system that is not
+  saturated has no reason to probe harder.
+- **`reset()` puts the window back to its configured `refillAmount`** and clears
+  in-flight accounting. Carrying a tuned window across a reset would keep
+  applying a conclusion drawn about a workload that no longer exists.
+
+In-flight accounting is exact: a permit is counted when it reaches a consumer
+and decremented when it comes back, so `_inFlight` is bounded by `capacity`.
+
+## Constructor
+
+| Option | Type | Default | Description |
+|---|---:|---:|---|
+| `capacity` | `number` | `100` | Maximum number of concurrent permits.
+| `queueCapacity` | `number` | `1000` | Maximum number of producers that may wait for a permit.
+| `lowWaterMark` | `number` | `Math.ceil(capacity * 0.25)` | When available permits fall below this threshold, adaptive refill begins.
+| `refillAmount` | `number` | `Math.max(1, Math.ceil(capacity * 0.1))` | Base number of permits restored during each adaptive refill.
+| `refillInterval` | `number` | `200` | Refill interval in milliseconds when pressure is high.
+| `initialTokens` | `number` | `capacity` | Initial available permits.
+| `adaptive` | `boolean`\|`Object` | `false` | AIMD tuning of `refillAmount`. `true` takes the defaults; an object configures `additiveIncrease`, `beta`, `min` and `max`. See [Adaptive refill](#adaptive-refill-aimd). |
 
 ## Example
 
