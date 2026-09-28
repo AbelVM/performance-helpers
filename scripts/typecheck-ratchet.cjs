@@ -43,7 +43,7 @@ const path = require('node:path');
  * The ceiling this repository is allowed to reach. Lower it whenever you fix
  * some. `scripts/typecheck-ratchet.cjs --update` prints the replacement line.
  *
- * 542 = `tsconfig.check.json`, internal `checkJs` debt, all pre-existing.
+ * 523 = `tsconfig.check.json`, internal `checkJs` debt, all pre-existing.
  *
  * The history of this number is worth keeping, because the wrong move was
  * available three times and taken none of them.

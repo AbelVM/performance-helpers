@@ -153,6 +153,11 @@ function resolveWorker(workerSource, options, env) {
  * If the factory returns a worker-like object it is used as-is; if it returns
  * a string it is treated as a module specifier and a native Worker is built
  * from it.
+ * @param {Function} workerSource
+ * @param {Function|undefined} WorkerCtor
+ * @param {Object} options
+ * @param {string} env
+ * @returns {Object} A worker-like object.
  * @private
  */
 function createFromFunction(workerSource, WorkerCtor, options, env) {
@@ -176,6 +181,11 @@ function createFromFunction(workerSource, WorkerCtor, options, env) {
 
 /**
  * Normalize a factory result into a worker-like object.
+ * @param {*} result
+ * @param {Function|undefined} WorkerCtor
+ * @param {Object} options
+ * @param {string} env
+ * @returns {Object} A worker-like object.
  * @private
  */
 function coerceFactoryResult(result, WorkerCtor, options, env) {
@@ -305,6 +315,12 @@ class WorkerAgnostic {
    * Web Worker (value delivered via `event.data`).
    * @private
    */
+  /**
+   * Fan one native worker event out to the registered listeners.
+   * @param {string} type
+   * @param {...*} args
+   * @private
+   */
   _dispatch(type, ...args) {
     const set = this._listeners.get(type);
     if (!set || !set.size) return;
@@ -333,6 +349,11 @@ class WorkerAgnostic {
   }
 
   // ── Unified event API (Web Worker style) ──────────────────────────────────
+  /**
+   * @param {string} type
+   * @param {function(...*):void} handler
+   * @returns {this}
+   */
   addEventListener(type, handler) {
     if (typeof handler !== 'function') return this;
     if (!this._listeners.has(type)) this._listeners.set(type, new Set());
@@ -340,6 +361,11 @@ class WorkerAgnostic {
     return this;
   }
 
+  /**
+   * @param {string} type
+   * @param {function(...*):void} handler
+   * @returns {this}
+   */
   removeEventListener(type, handler) {
     const set = this._listeners.get(type);
     if (set) {
@@ -350,15 +376,32 @@ class WorkerAgnostic {
   }
 
   // ── Node-style event API ──────────────────────────────────────────────────
+  /**
+   * Node-style alias for {@link addEventListener}.
+   * @param {string} type
+   * @param {function(...*):void} handler
+   * @returns {this}
+   */
   on(type, handler) {
     return this.addEventListener(type, handler);
   }
 
+  /**
+   * Node-style alias for {@link removeEventListener}.
+   * @param {string} type
+   * @param {function(...*):void} handler
+   * @returns {this}
+   */
   off(type, handler) {
     return this.removeEventListener(type, handler);
   }
 
   // ── Messaging ─────────────────────────────────────────────────────────────
+  /**
+   * @param {*} message
+   * @param {ArrayBuffer[]|ArrayBufferView[]|Object} [transfer]
+   * @returns {*}
+   */
   postMessage(message, transfer) {
     const w = this.worker;
     if (!w || typeof w.postMessage !== 'function') {
@@ -372,6 +415,9 @@ class WorkerAgnostic {
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
+  /**
+   * @returns {Promise<void>|void}
+   */
   terminate() {
     const w = this.worker;
     if (!w || typeof w.terminate !== 'function') return Promise.resolve();

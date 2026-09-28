@@ -52,12 +52,48 @@ declare class WorkerAgnostic {
      * Web Worker (value delivered via `event.data`).
      * @private
      */
+    /**
+     * Fan one native worker event out to the registered listeners.
+     * @param {string} type
+     * @param {...*} args
+     * @private
+     */
     private _dispatch;
-    addEventListener(type: any, handler: any): this;
-    removeEventListener(type: any, handler: any): this;
-    on(type: any, handler: any): this;
-    off(type: any, handler: any): this;
-    postMessage(message: any, transfer: any): any;
-    terminate(): any;
+    /**
+     * @param {string} type
+     * @param {function(...*):void} handler
+     * @returns {this}
+     */
+    addEventListener(type: string, handler: (...args: any[]) => void): this;
+    /**
+     * @param {string} type
+     * @param {function(...*):void} handler
+     * @returns {this}
+     */
+    removeEventListener(type: string, handler: (...args: any[]) => void): this;
+    /**
+     * Node-style alias for {@link addEventListener}.
+     * @param {string} type
+     * @param {function(...*):void} handler
+     * @returns {this}
+     */
+    on(type: string, handler: (...args: any[]) => void): this;
+    /**
+     * Node-style alias for {@link removeEventListener}.
+     * @param {string} type
+     * @param {function(...*):void} handler
+     * @returns {this}
+     */
+    off(type: string, handler: (...args: any[]) => void): this;
+    /**
+     * @param {*} message
+     * @param {ArrayBuffer[]|ArrayBufferView[]|Object} [transfer]
+     * @returns {*}
+     */
+    postMessage(message: any, transfer?: ArrayBuffer[] | ArrayBufferView[] | Object): any;
+    /**
+     * @returns {Promise<void>|void}
+     */
+    terminate(): Promise<void> | void;
 }
 export function detectEnv(): "browser" | "webworker" | "node" | "unknown";
