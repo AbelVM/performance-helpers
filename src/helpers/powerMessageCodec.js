@@ -185,12 +185,20 @@ function _frame(codecId, payload) {
  */
 export function frameEncodedJson(json) {
   if (typeof json === 'string') return _frame(CODECS.JSON, o2u8(null, json));
-  if (!(json instanceof Uint8Array)) {
+  // Deliberately not `json instanceof Uint8Array`. That test is realm-bound: a
+  // `Uint8Array` produced by a `TextEncoder` injected from a host realm (a
+  // `node:vm` sandbox, an iframe, a test-runner sandbox) is not an instance of
+  // *this* realm's Uint8Array, so the check rejected it. `PowerPool`
+  // `_prepareForTransfer` then took its `catch` and silently downgraded the
+  // message to the 1.x bare-JSON wire format while still reporting
+  // `messageCodec: 'framed'` - the worker failed much later, at
+  // `decodeMessage`, with a version error that pointed nowhere near the cause.
+  if (!isRawPayload(json)) {
     throw new TypeError(
       'PowerMessageCodec: frameEncodedJson() requires a Uint8Array or a JSON string'
     );
   }
-  return _frame(CODECS.JSON, json);
+  return _frame(CODECS.JSON, toBytes(json));
 }
 
 /**

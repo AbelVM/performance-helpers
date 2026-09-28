@@ -1172,6 +1172,26 @@ export class PowerPool {
         }
         return { message: buf, transfer: transferList };
       } catch (err) {
+        // Falling back to the raw object is deliberate: if `JSON.stringify`
+        // throws (a circular reference, a BigInt) the message is still
+        // postable, because the transport structured-clones whatever it cannot
+        // JSON-encode, and refusing it would break a working caller.
+        //
+        // What made this a *silent* protocol downgrade - and hid BUG-029 for so
+        // long - is that nothing was reported. A framing failure in framed mode
+        // means the worker will not see the envelope it is documented to
+        // receive, so say so at the point it happens rather than letting it
+        // surface much later as "unsupported protocol version" inside
+        // `decodeMessage`, which points nowhere near the cause.
+        this._debugLog?.(err, '_prepareForTransfer: could not frame, posting raw');
+        if (this._messageCodec === 'framed') {
+          this._logger?.warn?.(
+            'PowerPool: message could not be framed and was posted unframed ' +
+              '(messageCodec is "framed"). A worker using decodeMessage() will ' +
+              'reject it. Cause: ' +
+              (err instanceof Error ? err.message : String(err))
+          );
+        }
         return { message: msg, transfer: tr };
       }
     }
