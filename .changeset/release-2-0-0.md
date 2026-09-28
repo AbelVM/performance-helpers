@@ -8,6 +8,26 @@ pipeline.
 
 **Breaking**
 
+- **Out-of-range options now throw instead of being silently coerced** in
+  `PowerCircuit`, `PowerPermitGate` and `PowerDeadline`. Each read `0` as
+  "absent" and substituted a plausible default, which was the wrong answer:
+  `new PowerCircuit({ threshold: 0 })` gave a breaker that **never trips** and
+  `{ timeout: 0 }` gave a 30 s open window; `new PowerPermitGate({ capacity: 0 })`
+  gave a gate holding **one permit** rather than none, and a gate configured to
+  allow nothing is how you switch a dependency off; `PowerDeadline` clamped
+  `maxAttempts: 0` and `-5` to 1 and turned `retryDelay: 'soon'` into 0. If you
+  were relying on the coercion, pass the value you actually meant — and note that
+  `capacity: 0` and `threshold: 0` now throw rather than quietly doing the
+  opposite of what they say.
+
+  Three cases are deliberately *still* accepted, because they are requests
+  rather than mistakes: `PowerPermitGate`'s `queueCapacity: 0` and
+  `initialTokens: 0` ("start empty and let it refill" is the point of a token
+  bucket, so `initialTokens` is clamped to capacity rather than rejected), and
+  `PowerCircuit`'s `maxTimeout`, which is derived from `timeout` only when
+  omitted so an explicit `maxTimeout: 0` still throws.
+
+
 - **`PowerMemoizer` keys changed format.** The default `keyResolver` is now
   `simpleArgsKey` rather than `(...args) => JSON.stringify(args)` — ~35%
   cheaper for the scalar arguments memoizers are actually called with, falling

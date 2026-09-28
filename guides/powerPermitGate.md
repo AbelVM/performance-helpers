@@ -42,6 +42,21 @@ The abort listener is detached as soon as a waiter is served, so reusing one
 signal across many acquires does not accumulate listeners or make the signal
 retain every settled closure.
 
+### Options are validated, not coerced
+
+`capacity` and `queueCapacity` are validated. Before 2.0, `capacity` was read as
+`Math.max(1, Number(x) || 1)`, so **`capacity: 0` produced a gate holding one
+permit rather than none** — and a gate configured to allow nothing is how you
+switch a dependency off, so silently becoming *open* is the worst direction to
+fail in. Both now throw a `TypeError` naming the option.
+
+Two zero values are deliberately still accepted, because they are requests
+rather than mistakes:
+
+- `queueCapacity: 0` — refuse immediately instead of queueing.
+- `initialTokens: 0` — "start empty and let it refill" is the point of a token
+  bucket. It is clamped to `capacity` rather than rejected.
+
 ## API
 
 - `acquire()` — Returns a `Promise` that resolves to a release callback when a permit becomes available. If a permit is immediately available, the promise resolves synchronously.

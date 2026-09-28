@@ -14,6 +14,16 @@ Simple circuit breaker primitive to protect external services from cascading fai
 | `timeout` | `number` (ms) | `30000` | **Base** milliseconds to keep the circuit open before allowing a trial (`half-open`) call. Consecutive trips grow this exponentially and jitter the result — see [The open window](#the-open-window). |
 | `maxTimeout` | `number` (ms) | `timeout * 16` | Ceiling for the grown open window. |
 
+### Options are validated, not coerced
+
+`threshold`, `timeout` and `maxTimeout` are validated. Before 2.0 they were read
+as `Number(x) || default`, which treats `0` as absent — so `threshold: 0`
+produced a breaker that **never trips**, and `timeout: 0` a 30 s open window. Both
+now throw a `TypeError` naming the option.
+
+`maxTimeout` is derived from `timeout` only when it is omitted, so an explicit
+`maxTimeout: 0` throws rather than silently collapsing the open window to nothing.
+
 ## API
 
 - `call(fn)` — Execute the provided function `fn` under circuit protection. Returns a `Promise` resolved with `fn`'s result or rejected if `fn` throws. When the circuit is open `call` will reject immediately with a circuit-open error.
