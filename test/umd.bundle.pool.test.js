@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { createBundleContext, evalInBundle } from './helpers/umdBundle.js';
+import {
+  createBundleContext,
+  evalInBundle,
+  receivedCountExpression,
+  waitForBundleValue,
+} from './helpers/umdBundle.js';
 
 // Tests specific PowerPool behaviors against the UMD bundle
 describe('UMD bundle - PowerPool (extra)', () => {
@@ -32,7 +37,9 @@ describe('UMD bundle - PowerPool (extra)', () => {
       })()`
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForBundleValue(ctx, receivedCountExpression('__received'), {
+      description: 'a broadcast reply',
+    });
 
     const summary = evalInBundle(
       ctx,

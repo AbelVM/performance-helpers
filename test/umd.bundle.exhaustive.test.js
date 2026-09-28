@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import vm from 'vm';
 import path from 'path';
+import { waitForBundleValue, receivedCountExpression } from './helpers/umdBundle.js';
 
 const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
 if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
@@ -110,8 +111,10 @@ describe('UMD bundle exhaustive branches', () => {
       { filename: distFile }
     );
 
-    // allow async replies
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the reply rather than guessing how long it takes.
+    await waitForBundleValue(ctx, receivedCountExpression('__r'), {
+      description: 'a PowerPool reply',
+    });
     const summary = vm.runInContext(
       `(function(){
       const count = (this.__r && this.__r.length) || 0

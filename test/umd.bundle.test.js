@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'fs';
 import { execSync } from 'child_process';
 import vm from 'vm';
 import path from 'path';
+import { waitForBundleValue, receivedCountExpression } from './helpers/umdBundle.js';
 
 describe('UMD bundle', () => {
   it('builds UMD bundle and exposes expected globals and APIs', () => {
@@ -117,8 +118,10 @@ describe('UMD bundle', () => {
       { filename: distFile }
     );
 
-    // allow async replies to be delivered
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for the reply rather than guessing how long it takes.
+    await waitForBundleValue(ctx, receivedCountExpression('__received'), {
+      description: 'a PowerPool reply',
+    });
 
     const summary = vm.runInContext(
       `(function(){
@@ -196,7 +199,9 @@ describe('UMD bundle', () => {
       { filename: distFile }
     );
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitForBundleValue(ctx3, receivedCountExpression('__received_str'), {
+      description: 'a transfer reply',
+    });
 
     const summary3 = vm.runInContext(
       `(function(){

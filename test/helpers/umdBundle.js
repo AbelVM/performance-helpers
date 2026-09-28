@@ -23,6 +23,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import vm from 'node:vm';
 import path from 'node:path';
+import { vi } from 'vitest';
 
 const DIST_FILE = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
 
@@ -134,4 +135,76 @@ export function createBundleContext({ sandbox: extra = {} } = {}) {
  */
 export function evalInBundle(ctx, expression) {
   return vm.runInContext(expression, ctx, { filename: DIST_FILE });
+}
+
+/**
+ * Wait for an asynchronous reply from inside the bundle.
+ *
+ * The UMD tests drive a real `PowerPool` inside a `vm` context, so a reply
+ * arrives on a later turn. Four test files used to handle that with
+ * `await new Promise((r) => setTimeout(r, 50))` — a fixed guess in both
+ * directions: it added 200 ms to the suite, and on a loaded machine it was a
+ * coin flip whether the reply had landed. The failure mode is the bad one: a
+ * slow run reads a summary before the reply arrives and asserts on an empty
+ * array.
+ *
+ * Polling for the actual condition removes both. `vi.waitFor` retries until the
+ * callback stops throwing, and its error names the expression, so a genuine
+ * timeout says *what* never arrived instead of reporting a count mismatch
+ * several lines later.
+ *
+ * The default timeout is 2000ms rather than 5000 deliberately: it has to be
+ * comfortably under vitest's own 5000ms per-test limit, or the *test* timeout
+ * fires first and the caller sees "Test timed out" instead of the message
+ * naming the reply that never arrived.
+ *
+ * @param {Object} ctx - A context from {@link createBundleContext}.
+ * @param {string} expression - A JavaScript expression evaluated in that context.
+ * @param {Object} [options]
+ * @param {number} [options.expected=1] - Minimum value the expression must reach.
+ * @param {number} [options.timeout=2000] - Give up after this many ms.
+ * @param {number} [options.interval=5] - Poll this often, in ms.
+ * @param {string} [options.description] - What is being waited for, in the error.
+ * @returns {Promise<number>} The final value of the expression.
+ */
+export async function waitForBundleValue(
+  ctx,
+  expression,
+  { expected = 1, timeout = 2000, interval = 5, description = 'a reply' } = {}
+) {
+  let last;
+  try {
+    await vi.waitFor(
+      () => {
+        last = vm.runInContext(expression, ctx, { filename: DIST_FILE });
+        if (!Number.isFinite(Number(last)) || Number(last) < expected) {
+          throw new Error(`got ${String(last)}, need >= ${expected}`);
+        }
+      },
+      { timeout, interval }
+    );
+  } catch (err) {
+    // Re-throw with the description attached. `vi.waitFor`'s own `onTimeout`
+    // option is not honoured in this vitest version, so the wrapper is the only
+    // way the caller learns *which* reply never arrived rather than just
+    // "got 0, need >= 1" - which says what failed but not what.
+    throw new Error(
+      `timed out after ${timeout}ms waiting for ${description} ` +
+        `(stuck at ${String(last)}, need >= ${expected})`,
+      { cause: err }
+    );
+  }
+  return Number(last);
+}
+
+/**
+ * The canonical "the pool has replied" probe for a context that pushes onto
+ * `__received`.
+ *
+ * @param {Object} ctx
+ * @param {string} [name] - The array name the test pushed onto.
+ * @returns {string} An expression for {@link waitForBundleValue}.
+ */
+export function receivedCountExpression(name = '__received') {
+  return `(this.${name} && this.${name}.length) || 0`;
 }
