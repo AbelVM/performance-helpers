@@ -218,6 +218,19 @@ export type PowerRetryOptions = {
     attemptTimeout?: number | undefined;
 };
 /**
+ * The rejection `PowerRetry.run` produces when a single attempt exceeds
+ * `attemptTimeout`.
+ *
+ * A named type because all three fields are read by callers - `code` to tell a
+ * timeout from a genuine failure, and `attempts`/`attemptTimeout` to know which
+ * attempt gave up and how long it was allowed - and none of them are on `Error`.
+ */
+export type RetryTimeoutError = Error & {
+    code: "ETIMEOUT";
+    attempts: number;
+    attemptTimeout: number;
+};
+/**
  * Latch options for `PowerLatch`.
  */
 export type PowerLatchOptions = {
@@ -498,10 +511,41 @@ export type PowerReleaseFn = () => void;
  * Circuit options for `PowerCircuit`.
  */
 export type PowerCircuitOptions = {
+    /**
+     * Consecutive failures before the circuit opens.
+     */
     threshold?: number | undefined;
+    /**
+     * Milliseconds the circuit stays open before
+     * a trial call is allowed.
+     */
     timeout?: number | undefined;
+    /**
+     * - Called as
+     * `(state, reason)` on every transition. `reason` is one of `success`,
+     * `thresholdExceeded`, `timeoutElapsed`, `trialFailed`, `reset` or
+     * `hub-closed`.
+     */
     onStateChange?: ((state: string, reason?: string) => void) | undefined;
+    /**
+     * - When
+     * given, transitions are also emitted on it as `stateChange`.
+     */
     eventBus?: import("./powerEventBus.js").PowerEventBus | undefined;
+};
+/**
+ * The three states a `PowerCircuit` moves between.
+ */
+export type CircuitState = "closed" | "open" | "half-open";
+/**
+ * The rejection `PowerCircuit.call()` throws while the circuit is open.
+ *
+ * A named type because the `code` is the documented contract - the guide and
+ * `powerCircuit.test.js` both branch on `err.code === 'ECIRCUITOPEN'` - and an
+ * `Error` does not carry one.
+ */
+export type CircuitOpenError = Error & {
+    code: "ECIRCUITOPEN";
 };
 /**
  * Buffer encoder/decoder adapters used by `powerBuffer` helpers when

@@ -16,10 +16,27 @@
  */
 /**
  * @typedef {import('./jsdoc-types.js').PowerCircuitOptions} PowerCircuitOptions
+ * @typedef {import('./jsdoc-types.js').CircuitState} CircuitState
+ * @typedef {import('./jsdoc-types.js').CircuitOpenError} CircuitOpenError
  */
 import { PowerEventBus } from './powerEventBus.js';
 import { nowMs } from '../utils/now.js';
 import { DEFAULT_TIMEOUT_MS } from './constants.js';
+
+/**
+ * The rejection `PowerCircuit.call()` throws when it refuses to run `fn`.
+ *
+ * Built in one place so the `code` that callers branch on is set the same way
+ * on both paths, and so its type can be stated once.
+ *
+ * @returns {CircuitOpenError}
+ */
+function circuitOpenError() {
+  const err = new Error('CircuitOpen');
+  /** @type {CircuitOpenError} */
+  const typed = Object.assign(err, { code: /** @type {const} */ ('ECIRCUITOPEN') });
+  return typed;
+}
 
 /**
  * PowerCircuit
@@ -31,6 +48,10 @@ import { DEFAULT_TIMEOUT_MS } from './constants.js';
  * @public
  */
 export class PowerCircuit {
+  /**
+   * @param {PowerCircuitOptions} [options] - `threshold` and `timeout` default
+   *   to 5 and 30s; `onStateChange` and `eventBus` are optional sinks.
+   */
   constructor(options = {}) {
     const {
       threshold = 5,
@@ -40,18 +61,30 @@ export class PowerCircuit {
     } = options;
     this._threshold = Number(threshold) || 5;
     this._timeout = Number(timeout) || DEFAULT_TIMEOUT_MS;
+    /** @type {CircuitState} */
     this._state = 'closed';
     this._failures = 0; // consecutive failures
+    /** @type {any} */
     this.lastError = null;
+    /** @type {?number} */
     this._openedAt = null;
     this._trialInFlight = false;
 
     // optional callback invoked on state transitions: (state, reason)
+    /** @type {?((state: CircuitState, reason?: string) => void)} */
     this.onStateChange = typeof onStateChange === 'function' ? onStateChange : null;
     // optional external event bus to emit `stateChange` events
     this._bus = eventBus instanceof PowerEventBus ? eventBus : null;
   }
 
+  /**
+   * Move to a new state, stamping `_openedAt`, notifying `onStateChange` and
+   * emitting on the bus. A no-op when the state is unchanged.
+   *
+   * @param {CircuitState} newState
+   * @param {string} [reason]
+   * @returns {void}
+   */
   _setState(newState, reason) {
     const prev = this._state;
     if (prev === newState) return;
@@ -73,6 +106,7 @@ export class PowerCircuit {
     }
   }
 
+  /** @returns {CircuitState} */
   get state() {
     // If open and timeout elapsed, expose as 'half-open' logically
     if (this._state === 'open' && this._openedAt != null) {
@@ -91,19 +125,20 @@ export class PowerCircuit {
    * If the circuit is `open`, this will throw an error with `code === 'ECIRCUITOPEN'`.
    * When in `half-open` state a single trial call is allowed.
    *
-   * @param {Function} fn Async function to execute.
+   * @param {() => Promise<any>|any} fn Async or sync function to execute.
    * @returns {Promise<any>} Resolves with the function's result.
    * @throws {Error} If the circuit is open or if `fn` throws/rejects.
    */
   async call(fn) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
 
-    // short-circuit when open and timeout not elapsed
+    // short-circuit when open and timeout not elapsed. `_openedAt` is stamped by
+    // `_setState` on every entry to `open`, so it is set whenever `_state` is -
+    // the comparison reads it without a guard, and the guard would only have
+    // hidden the invariant.
     if (this._state === 'open') {
-      if (nowMs() - this._openedAt < this._timeout) {
-        const err = new Error('CircuitOpen');
-        err.code = 'ECIRCUITOPEN';
-        throw err;
+      if (nowMs() - Number(this._openedAt) < this._timeout) {
+        throw circuitOpenError();
       }
       // else allow half-open trial
       this._setState('half-open', 'timeoutElapsed');
@@ -111,9 +146,7 @@ export class PowerCircuit {
 
     if (this._state === 'half-open') {
       if (this._trialInFlight) {
-        const err = new Error('CircuitOpen');
-        err.code = 'ECIRCUITOPEN';
-        throw err;
+        throw circuitOpenError();
       }
       this._trialInFlight = true;
     }

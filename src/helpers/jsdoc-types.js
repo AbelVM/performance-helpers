@@ -175,6 +175,17 @@ export {};
  */
 
 /**
+ * The rejection `PowerRetry.run` produces when a single attempt exceeds
+ * `attemptTimeout`.
+ *
+ * A named type because all three fields are read by callers - `code` to tell a
+ * timeout from a genuine failure, and `attempts`/`attemptTimeout` to know which
+ * attempt gave up and how long it was allowed - and none of them are on `Error`.
+ *
+ * @typedef {Error & {code: 'ETIMEOUT', attempts: number, attemptTimeout: number}} RetryTimeoutError
+ */
+
+/**
  * Latch options for `PowerLatch`.
  * @typedef {Object} PowerLatchOptions
  * @property {(reason:any)=>void} [onAbort]
@@ -393,10 +404,30 @@ export {};
 /**
  * Circuit options for `PowerCircuit`.
  * @typedef {Object} PowerCircuitOptions
- * @property {number} [threshold]
- * @property {number} [timeout]
- * @property {(state:string,reason?:string)=>void} [onStateChange]
- * @property {import("./powerEventBus.js").PowerEventBus} [eventBus]
+ * @property {number} [threshold=5] Consecutive failures before the circuit opens.
+ * @property {number} [timeout=30000] Milliseconds the circuit stays open before
+ *   a trial call is allowed.
+ * @property {(state:string,reason?:string)=>void} [onStateChange] - Called as
+ *   `(state, reason)` on every transition. `reason` is one of `success`,
+ *   `thresholdExceeded`, `timeoutElapsed`, `trialFailed`, `reset` or
+ *   `hub-closed`.
+ * @property {import("./powerEventBus.js").PowerEventBus} [eventBus] - When
+ *   given, transitions are also emitted on it as `stateChange`.
+ */
+
+/**
+ * The three states a `PowerCircuit` moves between.
+ * @typedef {'closed'|'open'|'half-open'} CircuitState
+ */
+
+/**
+ * The rejection `PowerCircuit.call()` throws while the circuit is open.
+ *
+ * A named type because the `code` is the documented contract - the guide and
+ * `powerCircuit.test.js` both branch on `err.code === 'ECIRCUITOPEN'` - and an
+ * `Error` does not carry one.
+ *
+ * @typedef {Error & {code: 'ECIRCUITOPEN'}} CircuitOpenError
  */
 
 /**

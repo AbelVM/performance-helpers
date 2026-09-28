@@ -9,12 +9,14 @@
 export class PowerRetry {
     /**
      * Execute a function with retry/backoff semantics.
-     * @param {Function} fn Async function to execute.
+     * @param {((signal?: AbortSignal) => Promise<any>|any)} fn Function to execute.
+     *   It receives the `AbortSignal` for the attempt when `attemptTimeout` is
+     *   set, and `undefined` otherwise.
      * @param {PowerRetryOptions} [options] Retry behavior overrides for this invocation.
      * @returns {Promise<any>} Resolves with `fn` result, rejects with final attempt error.
      * @throws {TypeError} When `fn` is not callable or `maxAttempts` is not a positive finite number.
      */
-    static run(fn: Function, options?: PowerRetryOptions): Promise<any>;
+    static run(fn: ((signal?: AbortSignal) => Promise<any> | any), options?: PowerRetryOptions): Promise<any>;
     /**
      * Run a function with retry/backoff semantics.
      * Create a configured retry helper.
@@ -25,11 +27,12 @@ export class PowerRetry {
     /**
      * Instance method that runs `fn` with the configured options merged with
      * any per-call `options` provided.
-     * @param {Function} fn Async function to execute.
+     * @param {((signal?: AbortSignal) => Promise<any>|any)} fn Function to execute.
      * @param {PowerRetryOptions} [options] Per-call retry overrides.
      * @returns {Promise<any>} Resolves with `fn` result, rejects with final attempt error.
      */
-    run(fn: Function, options?: PowerRetryOptions): Promise<any>;
+    run(fn: ((signal?: AbortSignal) => Promise<any> | any), options?: PowerRetryOptions): Promise<any>;
 }
 export default PowerRetry;
 export type PowerRetryOptions = import("./jsdoc-types.js").PowerRetryOptions;
+export type RetryTimeoutError = import("./jsdoc-types.js").RetryTimeoutError;

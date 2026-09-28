@@ -187,7 +187,10 @@ const bulkheadStats: Record<string, unknown> = bulkhead.stats() as unknown as Re
 void [bulkheadStats, bulkhead.active, bulkhead.pending];
 
 // --- Resilience -----------------------------------------------------------
-const circuit = new PowerCircuit({ threshold: 3, resetTimeout: 1000 });
+// `resetTimeout` was never an option - `PowerCircuit` reads `timeout`. It
+// type-checked only because the constructor took a bare `Object`, so a consumer
+// reading this test could have copied an option that is silently ignored.
+const circuit = new PowerCircuit({ threshold: 3, timeout: 1000 });
 const retry = new PowerRetry({ maxAttempts: 3, baseDelay: 50 });
 const deadline = new PowerDeadline({ timeout: 1000 });
 void [circuit, retry, deadline];

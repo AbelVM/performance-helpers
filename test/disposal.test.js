@@ -44,7 +44,7 @@ const RESOURCE_OWNERS = [
   ['PowerPermitGate', () => new PowerPermitGate({ capacity: 2 })],
   ['PowerScheduler', () => new PowerScheduler(() => {}, { scheduling: 'microtask' })],
   ['PowerTTLMap', () => new PowerTTLMap(1000)],
-  ['PowerCircuit', () => new PowerCircuit({ threshold: 3, resetTimeout: 1000 })],
+  ['PowerCircuit', () => new PowerCircuit({ threshold: 3, timeout: 1000 })],
   ['PowerLatch', () => new PowerLatch(1)],
   ['PowerBatch', () => new PowerBatch(() => {}, { maxSize: 8 })],
   [

@@ -1,5 +1,6 @@
 /**
  * @typedef {import('./jsdoc-types.js').PowerRetryOptions} PowerRetryOptions
+ * @typedef {import('./jsdoc-types.js').RetryTimeoutError} RetryTimeoutError
  */
 
 import { DEFAULT_RETRY_BASE_DELAY_MS, DEFAULT_RETRY_MAX_DELAY_MS } from './constants.js';
@@ -24,7 +25,9 @@ export class PowerRetry {
 
   /**
    * Execute a function with retry/backoff semantics.
-   * @param {Function} fn Async function to execute.
+   * @param {((signal?: AbortSignal) => Promise<any>|any)} fn Function to execute.
+   *   It receives the `AbortSignal` for the attempt when `attemptTimeout` is
+   *   set, and `undefined` otherwise.
    * @param {PowerRetryOptions} [options] Retry behavior overrides for this invocation.
    * @returns {Promise<any>} Resolves with `fn` result, rejects with final attempt error.
    * @throws {TypeError} When `fn` is not callable or `maxAttempts` is not a positive finite number.
@@ -48,6 +51,13 @@ export class PowerRetry {
     }
     const attempts = Math.floor(parsedAttempts);
 
+    /**
+     * Delay before attempt `attempt + 1`, capped at `maxDelay` and halved-to-
+     * full by `jitter`.
+     *
+     * @param {number} attempt - 1-based number of the attempt that just failed.
+     * @returns {number} Milliseconds to wait.
+     */
     const calcDelay = (attempt) => {
       let d;
       if (backoff === 'linear') d = baseDelay * attempt;
@@ -65,8 +75,14 @@ export class PowerRetry {
       // (mirrors the `fetch(url, { signal })` contract). The signal is aborted
       // only if the attempt actually times out; successful attempts leave it
       // untouched so `fn` can finish cleanly.
+      /** @type {?AbortController} */
       let controller = null;
+      /** @type {AbortSignal|undefined} */
       let signal = undefined;
+      // Captured with the controller rather than read back from
+      // `attemptTimeout` further down: it is narrowed to `number` here, and
+      // that narrowing does not survive into the timer callback.
+      let timeoutMs = 0;
       if (
         typeof attemptTimeout === 'number' &&
         attemptTimeout > 0 &&
@@ -74,11 +90,13 @@ export class PowerRetry {
       ) {
         controller = new AbortController();
         signal = controller.signal;
+        timeoutMs = attemptTimeout;
       }
       try {
         const attemptPromise = (async () => fn(signal))();
         if (controller) {
-          let timer;
+          /** @type {?(ReturnType<typeof setTimeout>)} */
+          let timer = null;
           let timedOut = false;
           try {
             return await Promise.race([
@@ -86,12 +104,13 @@ export class PowerRetry {
               new Promise((_, rej) => {
                 timer = setTimeout(() => {
                   timedOut = true;
-                  const err = new Error('Attempt timed out');
-                  err.code = 'ETIMEOUT';
-                  err.attempts = attempt;
-                  err.attemptTimeout = attemptTimeout;
+                  const err = Object.assign(new Error('Attempt timed out'), {
+                    code: /** @type {const} */ ('ETIMEOUT'),
+                    attempts: attempt,
+                    attemptTimeout: timeoutMs,
+                  });
                   rej(err);
-                }, attemptTimeout);
+                }, timeoutMs);
               }),
             ]);
           } finally {
@@ -125,13 +144,18 @@ export class PowerRetry {
   /**
    * Instance method that runs `fn` with the configured options merged with
    * any per-call `options` provided.
-   * @param {Function} fn Async function to execute.
+   * @param {((signal?: AbortSignal) => Promise<any>|any)} fn Function to execute.
    * @param {PowerRetryOptions} [options] Per-call retry overrides.
    * @returns {Promise<any>} Resolves with `fn` result, rejects with final attempt error.
    */
   async run(fn, options = {}) {
     const merged = Object.assign({}, this._options || {}, options || {});
-    return this.constructor.run(fn, merged);
+    // `this.constructor` is typed `Function`, which has no `run`. The subclass
+    // shape is fixed - nothing in the package or its tests subclasses
+    // PowerRetry, and both `run`s are on this class - so the annotation records
+    // that invariant instead of casting the call's result.
+    const ctor = /** @type {typeof PowerRetry} */ (this.constructor);
+    return ctor.run(fn, merged);
   }
 }
 
