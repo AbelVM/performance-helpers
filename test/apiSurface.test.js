@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import * as index from '../src/index.js';
 import * as constants from '../src/helpers/constants.js';
 
@@ -29,9 +28,10 @@ import * as constants from '../src/helpers/constants.js';
  *  2. **Every `package.json` subpath resolves, and its named exports match the
  *     module it points at.** 35 subpaths exist; the pre-existing
  *     `test/packageExports.test.js` checked 3.
- *  3. **ESM and UMD expose the same names.** These are two separate hand-written
- *     entry points to the same library, so they drift silently, and the failure
- *     mode is a bundler-only or Node-only `undefined` at a user's call site.
+ *  3. **ESM/UMD export parity — NOT IMPLEMENTED, and deliberately so.** See the
+ *     note at the bottom of this file: two separate hand-written entry points to
+ *     one library do drift silently, but no check written inside this file could
+     be demonstrated to fail, so none is claimed.
  */
 
 /** @returns {Record<string, unknown>} package.json parsed. */
@@ -190,47 +190,38 @@ describe('API surface', () => {
       }
     }
   });
-
-  it('the UMD bundle exposes exactly the ESM names, so bundlers do not see undefined', () => {
-    // Two hand-maintained entry points to one library drift silently, and the
-    // symptom is a `undefined is not a function` in a bundled app rather than
-    // anything a unit test in the ESM suite would catch.
-    const p = pkg();
-    const umdPath = p.exports['.'].require;
-    expect(umdPath, 'the root export must keep a `require` condition for CJS/UMD').toBeTruthy();
-
-    const require = createRequire(import.meta.url);
-    const umd = require(new URL(`../${umdPath}`, import.meta.url).pathname);
-    const umdNames = Object.keys(umd)
-      .filter((k) => k !== 'default' && k !== '__esModule')
-      .sort();
-
-    const esmNames = ROOT_EXPORTS.filter((n) => n !== 'default');
-
-    // Guard the guard. A parity assertion that compares two *empty* collections
-    // passes forever and is worse than no test at all, and that failure is easy
-    // to hit here: if the `require` ever resolves to a namespace with no keys,
-    // `missingFromUmd` and `extraInUmd` are both empty and the diff is green.
-    // These two assertions make that impossible to mistake for parity.
-    expect(umdNames.length).toBeGreaterThan(50);
-    expect(umdNames.length).toBe(esmNames.length);
-
-    // Report the difference in both directions; a one-sided diff is how a
-    // "parity" assertion quietly starts tolerating a missing export.
-    const missingFromUmd = esmNames.filter((n) => !umdNames.includes(n));
-    const extraInUmd = umdNames.filter((n) => !esmNames.includes(n));
-    expect({ missingFromUmd, extraInUmd }).toEqual({ missingFromUmd: [], extraInUmd: [] });
-
-    // KNOWN LIMITATION, recorded rather than papered over. This test compares
-    // against a **prebuilt** `dist/performance-helpers.cjs`, so it can only
-    // detect divergence after the bundle is rebuilt. Deliberately adding an
-    // export to `src/index.js` and re-running *without* rebuilding the UMD was
-    // expected to fail the assertions above — the ESM snapshot did fail, but
-    // the parity assertions did **not**, and the cause has not been diagnosed.
-    // The likely candidates are the transform/module cache vitest applies to
-    // the freshly-edited `src/index.js` versus Node's own `require` cache for
-    // the bundle. Until that is explained, treat the parity half as
-    // unproven: `npm run bench && npm test` in CI, where the bundle is built
-    // first, is the configuration in which it is meaningful.
-  });
 });
+
+// ─── Open gap: ESM ↔ UMD export parity ──────────────────────────────────────
+//
+// `package.json` maps the root export's `require` condition to a **prebuilt**
+// `dist/performance-helpers.cjs`, alongside `import`/`default` pointing at
+// `src/index.js`. Those are two hand-maintained entry points to one library, so
+// a helper added to `src/index.js` and not re-exported by the bundle entry
+// drifts silently, and the symptom is a `undefined is not a function` in a
+// bundled app that no ESM test would catch.
+//
+// Two approaches were written and **both were removed, because neither could be
+// demonstrated to fail**:
+//
+// 1. `createRequire(...)(umdPath)` then compare `Object.keys()`. Overwriting
+//    `dist/performance-helpers.cjs` with `module.exports = {}` and re-running
+//    still passed — Node's `require` cache (and vitest's transform layer above
+//    it) keeps serving the module loaded first, so the test could not observe
+//    the file on disk at all. That is also why an earlier version of this file
+//    had a parity assertion that passed while the ESM snapshot correctly failed:
+//    the two halves were reading different module graphs.
+// 2. Read the bundle as **text** and assert every ESM name appears in it. The
+//    escape and the premise both check out (the bundle genuinely lacks a
+//    deliberately-added export name, and the word-boundary regex is correct), yet
+//    the test still passed — which means `ROOT_EXPORTS` inside the test file was
+//    not the value the snapshot assertion had just compared against. Also
+//    undiagnosed.
+//
+// The three assertions that remain have each been demonstrated to fail when the
+// thing they guard is broken. That is the bar this file holds itself to: a guard
+// that cannot be shown to fail reads as coverage while providing none, which is
+// worse than an honest gap. Restoring parity coverage needs either a bundle
+// built by the test itself, or a check that runs outside vitest's module graph
+// (a `scripts/` step in `npm run verify`). Tracked as open work, not silently
+// dropped.
