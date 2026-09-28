@@ -480,13 +480,6 @@ export class PowerPool {
      * @type {boolean}
      */
     this._terminated = false;
-    /**
-     * Monotonic token per dispatched task, used to make `_activeTasks`
-     * accounting idempotent: a late `message` from a worker terminated by
-     * `resize()`/`removeWorker()` no longer double-decrements the counter.
-     * @type {number}
-     */
-    this._taskTokenSeq = 0;
 
     // Create a per-instance logger. Allow callers to override via options.debugLevel (default 1).
     const dbg = typeof options?.debugLevel === 'number' ? options.debugLevel : 1;
@@ -1511,6 +1504,25 @@ export class PowerPool {
   /**
    * Decrement the global active task counter safely.
    * Ensures the counter never goes negative and centralizes error handling.
+   *
+   * **The `Math.max(0, …)` clamp is a mitigation, not a fix.** It stops the
+   * counter going negative, but it cannot stop a *double* decrement from
+   * counting as a single one, and that is the live hazard: `removeWorker`/
+   * `resize`/`stopThePress` drain `workerObj.tasks` in one go, and a `message`
+   * already in flight from a worker being terminated arrives afterwards and
+   * decrements again. The count then falls below the number of tasks actually
+   * running, so `getStats().activeTasks` under-reports, `_isIdle` can go true
+   * while work is outstanding, and `drain()` resolves early against a pool that
+   * is not idle.
+   *
+   * The real fix is per-task idempotency: hand each dispatched task a token
+   * from a monotonic sequence, record it on the worker, and decrement only when
+   * a completion actually consumes a token that was outstanding. A late message
+   * then finds nothing to consume and is correctly ignored. This used to be
+   * described by a `_taskTokenSeq` field on this class that nothing ever read,
+   * which asserted a mechanism that did not exist; the field is gone and the
+   * work is recorded as BUG-011 rather than implied to be done.
+   *
    * @private
    * @param {number} [n=1]
    */
