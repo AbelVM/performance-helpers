@@ -32,10 +32,21 @@ export class PowerSlidingWindow {
      */
     available(): number;
     /**
-     * Reset internal state.
+     * Drop every recorded timestamp, returning the window to fully available.
      * @returns {void}
      */
     reset(): void;
+    /**
+     * Alias for {@link PowerSlidingWindow#reset}.
+     *
+     * This one is a true synonym and not a uniformity gesture: `reset()` here
+     * *is* a clear - it empties the timestamp queue. Contrast the limiters, where
+     * `reset()` restores a usable state (refilled tokens, re-closed circuit) and
+     * `clear()` would read as the exact opposite.
+     *
+     * @returns {void}
+     */
+    clear(): void;
 }
 export type PowerSlidingWindowOptions = import("./jsdoc-types.js").PowerSlidingWindowOptions;
 import { PowerQueue } from './powerQueue.js';

@@ -8,6 +8,7 @@
  * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
  */
 import { PowerQueue } from './powerQueue.js';
+import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 
 /**
  * PowerPermitGate
@@ -72,7 +73,7 @@ export class PowerPermitGate {
     this._available = Number.isFinite(initialTokens)
       ? Math.min(this._capacity, Math.max(0, Math.floor(Number(initialTokens))))
       : this._capacity;
-    this._waiters = new PowerQueue(16);
+    this._waiters = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
     /**
      * Waiters that were aborted and are still physically in the queue.
      *

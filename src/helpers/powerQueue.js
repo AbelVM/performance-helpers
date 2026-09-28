@@ -1,4 +1,5 @@
 import { assertLimitRequired } from '../utils/options.js';
+import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 /**
  * PowerQueue
  *
@@ -21,7 +22,7 @@ export class PowerQueue {
    * Create a PowerQueue.
    * @param {number} [initialCapacity=16] Initial capacity (rounded up to power-of-two).
    */
-  constructor(initialCapacity = 16) {
+  constructor(initialCapacity = POWER_QUEUE_INITIAL_CAPACITY) {
     // A power-of-two buffer length is required for the bitmask indexing, so a
     // small request is rounded *up* rather than rejected - 1 and 2 are
     // legitimate hints. A non-finite or negative request is a configuration
@@ -81,6 +82,22 @@ export class PowerQueue {
    * Remove all items from the queue.
    * @returns {void}
    */
+
+  /**
+   * Alias for {@link PowerQueue#clear}.
+   *
+   * `clear()` here empties the container, and "reset" is a natural second word
+   * for exactly that - so a caller who reaches for `reset()` on this class gets
+   * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+   * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+   * would read as the opposite, and the two are deliberately not synonyms.
+   *
+   * @returns {void}
+   */
+  reset() {
+    this.clear();
+  }
+
   clear() {
     if (this._size === 0) return;
     let i = this._head;

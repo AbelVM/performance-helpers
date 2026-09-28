@@ -86,6 +86,16 @@ export class PowerEventLoopMonitor {
      */
     reset(): void;
     /**
+     * Alias for {@link PowerEventLoopMonitor#reset}.
+     *
+     * `reset()` here *is* a clear — it discards every accumulated sample, so both
+     * words describe the same act. Contrast the limiters, where `reset()` restores
+     * a usable state and `clear()` would read as the opposite.
+     *
+     * @returns {void}
+     */
+    clear(): void;
+    /**
      * The last recorded drift, in milliseconds. `0` before the first sample.
      * @returns {number}
      */

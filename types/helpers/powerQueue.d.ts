@@ -47,6 +47,18 @@ export class PowerQueue {
      * Remove all items from the queue.
      * @returns {void}
      */
+    /**
+     * Alias for {@link PowerQueue#clear}.
+     *
+     * `clear()` here empties the container, and "reset" is a natural second word
+     * for exactly that - so a caller who reaches for `reset()` on this class gets
+     * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+     * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+     * would read as the opposite, and the two are deliberately not synonyms.
+     *
+     * @returns {void}
+     */
+    reset(): void;
     clear(): void;
     /**
      * Internal buffer capacity (always a power-of-two).

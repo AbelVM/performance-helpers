@@ -153,6 +153,20 @@ export class PowerEventBus {
      */
     clear(event?: string): void;
     /**
+     * Alias for {@link PowerEventBus#clear}.
+     *
+     * `clear()` here empties the container, and "reset" is a natural second word
+     * for exactly that - so a caller who reaches for `reset()` on this class gets
+     * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+     * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+     * would read as the opposite, and the two are deliberately not synonyms.
+     *
+     * @param {string} [event] - Passed through to `clear()`; clears just that
+     *   event's listeners when given, and every listener when omitted.
+     * @returns {void}
+     */
+    reset(event?: string): void;
+    /**
      * Release every listener, and reset the `FinalizationRegistry` so the
      * registry's retained callbacks become garbage.
      *

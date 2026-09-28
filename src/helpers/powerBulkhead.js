@@ -6,7 +6,7 @@
  */
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
-import { DEFAULT_QUEUE_CAPACITY } from './constants.js';
+import { DEFAULT_QUEUE_CAPACITY, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 
 /**
  * PowerBulkhead
@@ -50,7 +50,7 @@ export class PowerBulkhead {
     this._buckets = Array.from({ length: this._partitions }, () => ({
       gate: new PowerPermitGate({ capacity: this._maxConcurrency, queueCapacity: Infinity }),
     }));
-    this._drainWaiters = new PowerQueue(16);
+    this._drainWaiters = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
   }
 
   /** Number of partitions used for workload isolation. */

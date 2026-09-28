@@ -102,6 +102,17 @@ export class PowerGCRA {
     };
     /** @returns {void} */
     dispose(): void;
+    /**
+     * Alias for {@link PowerGCRA#reset}.
+     *
+     * `reset()` here *is* a clear — it discards the one piece of stored state, so
+     * both words describe the same act. Contrast the limiters that *hold* capacity
+     * (`PowerThrottle`, `PowerPermitGate`), where `reset()` refills and `clear()`
+     * would read as the opposite.
+     *
+     * @returns {void}
+     */
+    clear(): void;
     [Symbol.dispose](): void;
 }
 export default PowerGCRA;

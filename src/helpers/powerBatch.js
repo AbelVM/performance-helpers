@@ -17,6 +17,7 @@ import { PowerQueue } from './powerQueue.js';
 import { abortReason, raceWithAbort } from '../utils/abort.js';
 import { assertLimitRequired } from '../utils/options.js';
 import { PowerScheduler } from './powerScheduler.js';
+import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 
 /**
  * PowerBatch
@@ -51,7 +52,7 @@ export class PowerBatch {
       min: 1,
       allowInfinity: true,
     });
-    this._queue = new PowerQueue(16);
+    this._queue = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
     /** @type {?BatchPending} */
     this._pending = null;
     this._scheduler = new PowerScheduler(() => this._runBatch(), {
@@ -178,6 +179,22 @@ export class PowerBatch {
    * Any pending promise for the current batch is rejected.
    * @returns {void}
    */
+
+  /**
+   * Alias for {@link PowerBatch#clear}.
+   *
+   * `clear()` here empties the container, and "reset" is a natural second word
+   * for exactly that - so a caller who reaches for `reset()` on this class gets
+   * the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+   * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
+   * would read as the opposite, and the two are deliberately not synonyms.
+   *
+   * @returns {void}
+   */
+  reset() {
+    this.clear();
+  }
+
   clear() {
     this._queue.clear();
     if (this._pending) {

@@ -35,7 +35,11 @@
  * @class PowerHistogram
  * @public
  */
-import { DEFAULT_HISTOGRAM_RELATIVE_ACCURACY, DEFAULT_HISTOGRAM_MAX_VALUE } from './constants.js';
+import {
+  DEFAULT_HISTOGRAM_RELATIVE_ACCURACY,
+  DEFAULT_HISTOGRAM_MAX_VALUE,
+  MIN_HISTOGRAM_BUCKETS,
+} from './constants.js';
 
 export class PowerHistogram {
   /**
@@ -75,7 +79,7 @@ export class PowerHistogram {
     // `bucketCount` is accepted for backwards compatibility only. Keep it so a
     // caller reading the option back is not surprised by `undefined`.
     this._legacyBucketCount = Number.isFinite(Number(bucketCount))
-      ? Math.max(4, Math.floor(Number(bucketCount)))
+      ? Math.max(MIN_HISTOGRAM_BUCKETS, Math.floor(Number(bucketCount)))
       : null;
 
     /** @type {Map<number, number>} sparse bucket index -> count */

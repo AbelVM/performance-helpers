@@ -6,7 +6,7 @@
  * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
  */
 import { nowMs } from '../utils/now.js';
-import { MS_PER_SEC } from './constants.js';
+import { MS_PER_SEC, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
 import { assertLimitRequired } from '../utils/options.js';
 
@@ -33,7 +33,7 @@ export class PowerSlidingWindow {
       fallback: MS_PER_SEC,
     });
     // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
-    this._timestamps = new PowerQueue(16);
+    this._timestamps = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
   }
 
   /**
@@ -90,10 +90,24 @@ export class PowerSlidingWindow {
   }
 
   /**
-   * Reset internal state.
+   * Drop every recorded timestamp, returning the window to fully available.
    * @returns {void}
    */
   reset() {
     this._timestamps.clear();
+  }
+
+  /**
+   * Alias for {@link PowerSlidingWindow#reset}.
+   *
+   * This one is a true synonym and not a uniformity gesture: `reset()` here
+   * *is* a clear - it empties the timestamp queue. Contrast the limiters, where
+   * `reset()` restores a usable state (refilled tokens, re-closed circuit) and
+   * `clear()` would read as the exact opposite.
+   *
+   * @returns {void}
+   */
+  clear() {
+    this.reset();
   }
 }

@@ -2,6 +2,11 @@ import { PowerPool } from './powerPool.js';
 import { u82o } from './powerBuffer.js';
 import { decodeMessage } from './powerMessageCodec.js';
 import { normalizeError } from '../utils/errors.js';
+import {
+  CHUNKS_PER_WORKER_TARGET,
+  CHUNK_WINDOW_MULTIPLIER,
+  DEFAULT_HARDWARE_CONCURRENCY,
+} from './constants.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerChunkingOptions} PowerChunkingOptions
@@ -67,7 +72,9 @@ export class PowerChunker {
     const items = isArray ? iterable : null;
     const total = isArray ? items.length : null;
 
-    const hw = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 2;
+    const hw =
+      (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ||
+      DEFAULT_HARDWARE_CONCURRENCY;
     const poolSize =
       Number.isFinite(poolOptions?.size) && poolOptions?.size > 0
         ? poolOptions.size
@@ -85,7 +92,10 @@ export class PowerChunker {
     if (Number.isFinite(explicitChunkSize) && explicitChunkSize > 0) {
       chunkSize = Math.max(1, Math.floor(explicitChunkSize));
     } else if (total != null) {
-      chunkSize = Math.max(1, Math.floor(total / Math.max(1, poolSize * 4)) || 1);
+      chunkSize = Math.max(
+        1,
+        Math.floor(total / Math.max(1, poolSize * CHUNKS_PER_WORKER_TARGET)) || 1
+      );
     } else {
       // streaming mode default
       chunkSize = Math.max(1, Math.floor(poolSize));
@@ -274,7 +284,10 @@ function dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions
   if (totalChunks <= 0) return;
 
   // Keep memory bounded by sending chunk descriptors in windows instead of one huge batch.
-  const windowChunks = Math.max(1, Math.min(totalChunks, Math.max(1, poolSize * 8)));
+  const windowChunks = Math.max(
+    1,
+    Math.min(totalChunks, Math.max(1, poolSize * CHUNK_WINDOW_MULTIPLIER))
+  );
 
   for (let chunkStart = 0; chunkStart < totalChunks; chunkStart += windowChunks) {
     const chunkEnd = Math.min(totalChunks, chunkStart + windowChunks);
