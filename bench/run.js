@@ -28,8 +28,10 @@ const POOL_SIZES = (process.env.BENCH_POOLS || '1,2,4,8').split(',').map((s) => 
 const CACHE_DUPLICATE_KEYS = Number(process.env.BENCH_CACHE_DUPLICATE_KEYS || 10);
 const MEMOIZER_DUPLICATE_KEYS = Number(process.env.BENCH_MEMOIZER_DUPLICATE_KEYS || 10);
 const AUTOSCALE_CACHE_KEYS = Number(process.env.BENCH_AUTOSCALE_CACHE_KEYS || 10);
-// How many times to repeat each helper micro-benchmark; median is reported.
-const BENCH_RUNS = Math.max(1, Number(process.env.BENCH_RUNS || 5));
+// How many times to repeat each helper micro-benchmark; the trimmed median is
+// reported. 9 (was 5) because at 5 runs a single GC pause moves the reported
+// median by more than most of the deltas this harness is asked to justify.
+const BENCH_RUNS = Math.max(1, Number(process.env.BENCH_RUNS || 9));
 // How many times to repeat each pool/scenario variant; median is reported.
 // Defaults to 1 because pool runs are slow; set to 3 for more stable results.
 const POOL_RUNS = Math.max(1, Number(process.env.BENCH_POOL_RUNS || 3));
@@ -47,6 +49,70 @@ const LOAD_PROFILES = [
   { name: '75% variable', variableFraction: 0.75 },
   { name: '100% variable', variableFraction: 1 },
 ];
+
+// ─── Reproducibility (BENCH-001) ────────────────────────────────────────────
+//
+// Every workload in this harness was generated from `Math.random()`, so two runs
+// measured two *different* workloads and any delta between them was partly the
+// workload changing. That is unfixable by repetition: more runs reduce timer
+// noise, not workload noise, and a delta smaller than the run-to-run spread of
+// the *input* is not a measurement at all. The seed is now fixed, printed, and
+// overridable, so a run is reproducible and two reports are comparable.
+
+/** Default seed. Any fixed value works; this one is arbitrary. */
+const DEFAULT_BENCH_SEED = 0x5eed1234;
+/** Seed for workload generation. `BENCH_SEED` overrides; the run prints it. */
+const BENCH_SEED = Number.isFinite(Number(process.env.BENCH_SEED))
+  ? Number(process.env.BENCH_SEED) >>> 0
+  : DEFAULT_BENCH_SEED;
+
+/**
+ * mulberry32 — a small, fast, well-distributed 32-bit PRNG.
+ *
+ * Chosen over `Math.random()` because the latter cannot be seeded, and over a
+ * stronger generator because this only has to *reproduce a workload*, not be
+ * cryptographically sound. 2^32 distinct streams is ample for a benchmark.
+ *
+ * @param {number} seed
+ * @returns {() => number} A function returning floats in [0, 1).
+ */
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return function next() {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** The single seeded stream used to build every workload. */
+const rng = makeRng(BENCH_SEED);
+
+/**
+ * Collect between phases so a measurement is not taken on a heap the previous
+ * phase filled with garbage.
+ *
+ * Without `--expose-gc` this is a no-op rather than a crash: V8 does not expose
+ * `global.gc` by default, and a harness that dies because a diagnostic is
+ * unavailable is worse than one that reports it was skipped. `npm run bench`
+ * passes `--expose-gc`; the report records whether collection actually ran.
+ *
+ * @returns {boolean} Whether a collection was performed.
+ */
+function collectGarbage() {
+  if (typeof global.gc !== 'function') return false;
+  try {
+    global.gc();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `global.gc` is available, recorded in the report. */
+const GC_AVAILABLE = typeof global.gc === 'function';
 
 function sampleIterations(baseIterations) {
   return Math.max(
@@ -82,7 +148,7 @@ function buildLoadProfile(tasks, baseIterations, variableFraction) {
   }
 
   for (let i = taskEntries.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [taskEntries[i], taskEntries[j]] = [taskEntries[j], taskEntries[i]];
   }
 
@@ -97,8 +163,8 @@ function buildLoadProfile(tasks, baseIterations, variableFraction) {
 function randomNormalArray(n, mean = 0, std = 1) {
   const out = new Array(n);
   for (let i = 0; i < n; i += 2) {
-    const u1 = Math.random() || 1e-12;
-    const u2 = Math.random();
+    const u1 = rng() || 1e-12;
+    const u2 = rng();
     const mag = Math.sqrt(-2 * Math.log(u1));
     const z0 = mag * Math.cos(2 * Math.PI * u2);
     const z1 = mag * Math.sin(2 * Math.PI * u2);
@@ -342,13 +408,106 @@ async function poolMedian(fn) {
 
 function shuffleArray(array) {
   for (let i = array.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rng() * (i + 1));
     [array[i], array[j]] = [array[j], array[i]];
   }
   return array;
 }
 
 // ─── Statistics helpers ────────────────────────────────────────────────────
+
+/**
+ * Per-call-site measurement bands, keyed by the label the caller supplies.
+ *
+ * The point of tracking these is that a single number is not a measurement. If
+ * a variant reports 12.40 ms with a 9-run min/max of 11.9–14.8, a claimed 5%
+ * improvement is inside the noise, and the reader cannot tell without the band.
+ * Every timed variant records its band here; the report surfaces the aggregate
+ * so one number characterises how much of any given delta is trustworthy.
+ *
+ * @type {Map<string, {label: string, median: number, min: number, max: number, spreadPct: number, samples: number, trimmed: number}>}
+ */
+const MEASUREMENT_BANDS = new Map();
+
+/**
+ * Trimmed median over `n >= 5` samples: drop the slowest and fastest, then take
+ * the median of the rest.
+ *
+ * Outlier rejection here is *symmetric trimming*, not "discard anything slow".
+ * A GC pause only makes a run slower, so a naive "drop the max" rule would
+ * quietly delete the most important noise source in a Node benchmark while
+ * leaving a pathological fast run to distort the median in the other direction.
+ * Trimming one from each end is a standard robust estimator, and `trimmed` is
+ * reported so a reader knows how many samples the figure rests on.
+ *
+ * @param {number[]} values
+ * @returns {{value: number, min: number, max: number, trimmed: number}}
+ */
+function trimmedMedian(values) {
+  if (!values.length) return { value: 0, min: 0, max: 0, trimmed: 0 };
+  const sorted = values.slice().sort((a, b) => a - b);
+  const trim = sorted.length >= 5 ? 1 : 0;
+  const kept = sorted.slice(trim, sorted.length - trim);
+  return {
+    value: medianOf(kept),
+    min: sorted[0],
+    max: sorted[sorted.length - 1],
+    trimmed: trim,
+  };
+}
+
+/**
+ * Record a variant's measurement band and return the reported figure.
+ *
+ * Returns the trimmed median so existing call sites that assign straight into
+ * `totalMs` keep working, while the band accumulates for the report.
+ *
+ * @param {string} label - Stable identifier for the call site.
+ * @param {number[]} times - One sample per run, in ms.
+ * @returns {number} The trimmed median, in ms.
+ */
+function recordBand(label, times) {
+  const { value, min, max, trimmed } = trimmedMedian(times);
+  MEASUREMENT_BANDS.set(label, {
+    label,
+    median: value,
+    min,
+    max,
+    // Relative to the median, so it is comparable across variants of very
+    // different magnitudes. A band wider than the claimed delta means the
+    // delta is not measurable at this sample count.
+    spreadPct: value > 0 ? ((max - min) / value) * 100 : 0,
+    samples: times.length,
+    trimmed,
+  });
+  return value;
+}
+
+/**
+ * Summarise how noisy the whole run was, for the report's `measurement` block.
+ *
+ * An aggregate is more useful here than 40 per-row bands: what a reader needs
+ * to know is "how big a delta can this harness actually resolve on this
+ * machine, today", plus the name of the worst site in case a delta came from
+ * there specifically.
+ *
+ * @returns {object|null} `null` when nothing was timed.
+ */
+function summariseMeasurementBands() {
+  if (!MEASUREMENT_BANDS.size) return null;
+  const spreads = [...MEASUREMENT_BANDS.values()].map((b) => b.spreadPct).sort((a, b) => a - b);
+  const worst = [...MEASUREMENT_BANDS.values()].reduce((a, b) =>
+    b.spreadPct > a.spreadPct ? b : a
+  );
+  return {
+    sites: MEASUREMENT_BANDS.size,
+    // The honest headline: a claimed delta smaller than this is not measurable.
+    medianSpreadPct: Number(percentile(spreads, 50).toFixed(2)),
+    p95SpreadPct: Number(percentile(spreads, 95).toFixed(2)),
+    maxSpreadPct: Number(percentile(spreads, 100).toFixed(2)),
+    worstSite: { label: worst.label, spreadPct: Number(worst.spreadPct.toFixed(2)) },
+  };
+}
 
 /** Return the p-th percentile (0–100) of a pre-sorted numeric array. */
 function percentile(sorted, p) {
@@ -955,12 +1114,17 @@ async function runCacheWarmupPhase(cache, iterations, keys) {
 // A silent warmup pass runs before timing to stabilise JIT.
 // When BENCH_RUNS > 1, the variant is run that many times and the median totalMs is reported.
 
-async function benchVariantRepeat(runs, fn) {
+async function benchVariantRepeat(runs, fn, label) {
   // Silent warmup — lets V8 JIT-compile the hot path before we start timing.
   await fn();
   const times = [];
   for (let r = 0; r < runs; r++) times.push(await fn());
-  return medianOf(times);
+  // Collect between repeats so run N is not measured on run N-1's garbage.
+  // Skipped silently when `global.gc` is unavailable; the report records that.
+  collectGarbage();
+  // Returns the trimmed median, so the call sites that assign straight into
+  // `totalMs` are unchanged, while the band accumulates for the report.
+  return recordBand(label ?? 'unlabelled', times);
 }
 
 // ── PowerRateLimit ──────────────────────────────────────────────────────────
@@ -968,32 +1132,40 @@ async function runBenchmarkPowerRateLimit(ops) {
   const warmOps = Math.min(1000, Math.ceil(ops / 100));
 
   // Under rate: bucket has more tokens than ops — every tryConsume succeeds.
-  const underRateMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const throttle = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
-    const limiter = new PowerRateLimit([throttle]);
-    for (let i = 0; i < warmOps; i++) limiter.tryConsume(1);
-    const throttle2 = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
-    const limiter2 = new PowerRateLimit([throttle2]);
-    const t0 = process.hrtime.bigint();
-    let passed = 0;
-    for (let i = 0; i < ops; i++) {
-      if (limiter2.tryConsume(1)) passed++;
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const underRateMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const throttle = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
+      const limiter = new PowerRateLimit([throttle]);
+      for (let i = 0; i < warmOps; i++) limiter.tryConsume(1);
+      const throttle2 = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
+      const limiter2 = new PowerRateLimit([throttle2]);
+      const t0 = process.hrtime.bigint();
+      let passed = 0;
+      for (let i = 0; i < ops; i++) {
+        if (limiter2.tryConsume(1)) passed++;
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'underRateMs'
+  );
 
   // Over rate: bucket holds ops/2 tokens — ~50 % of calls are rejected.
-  const overRateMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const throttle = new PowerThrottle({
-      capacity: Math.ceil(ops / 2),
-      tokens: Math.ceil(ops / 2),
-      refillRate: 0,
-    });
-    const limiter = new PowerRateLimit([throttle]);
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < ops; i++) limiter.tryConsume(1);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const overRateMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const throttle = new PowerThrottle({
+        capacity: Math.ceil(ops / 2),
+        tokens: Math.ceil(ops / 2),
+        refillRate: 0,
+      });
+      const limiter = new PowerRateLimit([throttle]);
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) limiter.tryConsume(1);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'overRateMs'
+  );
 
   return {
     name: 'PowerRateLimit',
@@ -1018,37 +1190,45 @@ async function runBenchmarkPowerCircuit(ops) {
   const smallOps = Math.min(ops, 20000);
 
   // Closed state: happy-path overhead of call() wrapping a sync fn.
-  const closedMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const circuit = new PowerCircuit({ threshold: smallOps + 1, timeout: 60000 });
-    // warmup
-    for (let i = 0; i < Math.min(100, smallOps / 10); i++) await circuit.call(() => 1);
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) await circuit.call(() => 1);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const closedMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const circuit = new PowerCircuit({ threshold: smallOps + 1, timeout: 60000 });
+      // warmup
+      for (let i = 0; i < Math.min(100, smallOps / 10); i++) await circuit.call(() => 1);
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) await circuit.call(() => 1);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'closedMs'
+  );
 
   // Open state: fast-fail overhead after circuit is tripped.
-  const openMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const circuit = new PowerCircuit({ threshold: 1, timeout: 60000 });
-    try {
-      await circuit.call(() => {
-        throw new Error('trip');
-      });
-    } catch (_) {
-      // Expected: tripping the circuit is the point of this warm-up, so the
-      // rejection is the success path.
-    }
-    const t0 = process.hrtime.bigint();
-    let rejections = 0;
-    for (let i = 0; i < smallOps; i++) {
+  const openMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const circuit = new PowerCircuit({ threshold: 1, timeout: 60000 });
       try {
-        await circuit.call(() => 1);
+        await circuit.call(() => {
+          throw new Error('trip');
+        });
       } catch (_) {
-        rejections++;
+        // Expected: tripping the circuit is the point of this warm-up, so the
+        // rejection is the success path.
       }
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+      const t0 = process.hrtime.bigint();
+      let rejections = 0;
+      for (let i = 0; i < smallOps; i++) {
+        try {
+          await circuit.call(() => 1);
+        } catch (_) {
+          rejections++;
+        }
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'openMs'
+  );
 
   return {
     name: 'PowerCircuit',
@@ -1065,33 +1245,41 @@ async function runBenchmarkPowerRetry(ops) {
   const smallOps = Math.min(ops, 10000);
 
   // 1 attempt, always succeeds — measures wrapper overhead only.
-  const successMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    // warmup
-    for (let i = 0; i < Math.min(50, smallOps / 100); i++) {
-      await PowerRetry.run(() => 1, { maxAttempts: 3, baseDelay: 0, jitter: false });
-    }
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) {
-      await PowerRetry.run(() => 1, { maxAttempts: 3, baseDelay: 0, jitter: false });
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const successMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      // warmup
+      for (let i = 0; i < Math.min(50, smallOps / 100); i++) {
+        await PowerRetry.run(() => 1, { maxAttempts: 3, baseDelay: 0, jitter: false });
+      }
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) {
+        await PowerRetry.run(() => 1, { maxAttempts: 3, baseDelay: 0, jitter: false });
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'successMs'
+  );
 
   // Fail-once: function rejects on attempt 1, succeeds on attempt 2.
-  const retryOnceMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) {
-      let calls = 0;
-      await PowerRetry.run(
-        () => {
-          if (++calls < 2) throw new Error('transient');
-          return 1;
-        },
-        { maxAttempts: 3, baseDelay: 0, jitter: false }
-      );
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const retryOnceMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) {
+        let calls = 0;
+        await PowerRetry.run(
+          () => {
+            if (++calls < 2) throw new Error('transient');
+            return 1;
+          },
+          { maxAttempts: 3, baseDelay: 0, jitter: false }
+        );
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'retryOnceMs'
+  );
 
   return {
     name: 'PowerRetry',
@@ -1116,21 +1304,29 @@ async function runBenchmarkPowerSemaphore(ops) {
   const smallOps = Math.min(ops, 50000);
 
   // Limit=1: exclusive lock, fully serial.
-  const serial1Ms = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const sem = new PowerSemaphore(1);
-    for (let i = 0; i < Math.min(50, smallOps / 100); i++) await sem.run(() => 1);
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) await sem.run(() => 1);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const serial1Ms = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const sem = new PowerSemaphore(1);
+      for (let i = 0; i < Math.min(50, smallOps / 100); i++) await sem.run(() => 1);
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) await sem.run(() => 1);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'serial1Ms'
+  );
 
   // Limit=8: concurrent pool — all tasks fly in parallel.
-  const conc8Ms = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const sem = new PowerSemaphore(8);
-    const t0 = process.hrtime.bigint();
-    await Promise.all(Array.from({ length: smallOps }, () => sem.run(() => 1)));
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const conc8Ms = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const sem = new PowerSemaphore(8);
+      const t0 = process.hrtime.bigint();
+      await Promise.all(Array.from({ length: smallOps }, () => sem.run(() => 1)));
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'conc8Ms'
+  );
 
   return {
     name: 'PowerSemaphore',
@@ -1156,22 +1352,30 @@ async function runBenchmarkPowerBulkhead(ops) {
   const half = Math.floor(smallOps / 2);
 
   // Mixed critical + background lanes under the same bulkhead.
-  const mixedMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const bh = new PowerBulkhead({ partitions: 2, maxConcurrency: 8, queueCapacity: smallOps });
-    const t0 = process.hrtime.bigint();
-    const critTasks = Array.from({ length: half }, () => bh.run(() => 1, { partitionKey: 0 }));
-    const bgTasks = Array.from({ length: half }, () => bh.run(() => 1, { partitionKey: 1 }));
-    await Promise.all([...critTasks, ...bgTasks]);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const mixedMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const bh = new PowerBulkhead({ partitions: 2, maxConcurrency: 8, queueCapacity: smallOps });
+      const t0 = process.hrtime.bigint();
+      const critTasks = Array.from({ length: half }, () => bh.run(() => 1, { partitionKey: 0 }));
+      const bgTasks = Array.from({ length: half }, () => bh.run(() => 1, { partitionKey: 1 }));
+      await Promise.all([...critTasks, ...bgTasks]);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'mixedMs'
+  );
 
   // Single partition as baseline (no isolation overhead).
-  const singleMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const bh = new PowerBulkhead({ partitions: 1, maxConcurrency: 8, queueCapacity: smallOps });
-    const t0 = process.hrtime.bigint();
-    await Promise.all(Array.from({ length: smallOps }, () => bh.run(() => 1)));
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const singleMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const bh = new PowerBulkhead({ partitions: 1, maxConcurrency: 8, queueCapacity: smallOps });
+      const t0 = process.hrtime.bigint();
+      await Promise.all(Array.from({ length: smallOps }, () => bh.run(() => 1)));
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'singleMs'
+  );
 
   return {
     name: 'PowerBulkhead',
@@ -1197,37 +1401,45 @@ async function runBenchmarkPowerBatch(ops) {
 
   // Individual dispatch: maxSize=1 so every add() triggers an immediate flush.
   let handlerCallsIndividual = 0;
-  const individualMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    handlerCallsIndividual = 0;
-    const batch = new PowerBatch(
-      (items) => {
-        handlerCallsIndividual += items.length;
-      },
-      { maxSize: 1 }
-    );
-    const t0 = process.hrtime.bigint();
-    const ps = [];
-    for (let i = 0; i < smallOps; i++) ps.push(batch.add(i));
-    await Promise.all(ps);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const individualMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      handlerCallsIndividual = 0;
+      const batch = new PowerBatch(
+        (items) => {
+          handlerCallsIndividual += items.length;
+        },
+        { maxSize: 1 }
+      );
+      const t0 = process.hrtime.bigint();
+      const ps = [];
+      for (let i = 0; i < smallOps; i++) ps.push(batch.add(i));
+      await Promise.all(ps);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'individualMs'
+  );
 
   // Coalesced dispatch: large maxSize — all items land in one (or few) handler calls.
   let handlerCallsCoalesced = 0;
-  const coalescedMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    handlerCallsCoalesced = 0;
-    const batch = new PowerBatch(
-      (items) => {
-        handlerCallsCoalesced++;
-      },
-      { maxSize: smallOps }
-    );
-    const t0 = process.hrtime.bigint();
-    const ps = [];
-    for (let i = 0; i < smallOps; i++) ps.push(batch.add(i));
-    await Promise.all(ps);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const coalescedMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      handlerCallsCoalesced = 0;
+      const batch = new PowerBatch(
+        (items) => {
+          handlerCallsCoalesced++;
+        },
+        { maxSize: smallOps }
+      );
+      const t0 = process.hrtime.bigint();
+      const ps = [];
+      for (let i = 0; i < smallOps; i++) ps.push(batch.add(i));
+      await Promise.all(ps);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'coalescedMs'
+  );
 
   return {
     name: 'PowerBatch',
@@ -1254,23 +1466,35 @@ async function runBenchmarkPowerBackpressure(ops) {
   const smallOps = Math.min(ops, 30000);
 
   // No backpressure: capacity >> task count, acquire never blocks.
-  const noPresMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const bp = new PowerBackpressure({ capacity: smallOps * 2, queueCapacity: smallOps * 2 });
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) {
-      const rel = await bp.acquire();
-      rel();
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const noPresMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const bp = new PowerBackpressure({ capacity: smallOps * 2, queueCapacity: smallOps * 2 });
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) {
+        const rel = await bp.acquire();
+        rel();
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'noPresMs'
+  );
 
   // With backpressure: capacity = 100, producers queue up.
-  const presMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    const bp = new PowerBackpressure({ capacity: 100, queueCapacity: smallOps, refillInterval: 1 });
-    const t0 = process.hrtime.bigint();
-    await Promise.all(Array.from({ length: smallOps }, () => bp.acquire().then((rel) => rel())));
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const presMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const bp = new PowerBackpressure({
+        capacity: 100,
+        queueCapacity: smallOps,
+        refillInterval: 1,
+      });
+      const t0 = process.hrtime.bigint();
+      await Promise.all(Array.from({ length: smallOps }, () => bp.acquire().then((rel) => rel())));
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'presMs'
+  );
 
   return {
     name: 'PowerBackpressure',
@@ -1295,28 +1519,36 @@ async function runBenchmarkPowerTTLMap(ops) {
   const keyCount = Math.min(1000, Math.ceil(ops / 10));
 
   // Long TTL: entries never expire during the benchmark run.
-  const longMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const m = new PowerTTLMap(60000);
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < ops; i++) {
-      const k = `key:${i % keyCount}`;
-      m.set(k, i);
-      m.get(k);
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const longMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const m = new PowerTTLMap(60000);
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) {
+        const k = `key:${i % keyCount}`;
+        m.set(k, i);
+        m.get(k);
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'longMs'
+  );
 
   // Short TTL (1 ms): entries expire rapidly, measuring eviction overhead.
-  const shortMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const m = new PowerTTLMap(1);
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < ops; i++) {
-      const k = `key:${i % keyCount}`;
-      m.set(k, i);
-      m.get(k);
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const shortMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const m = new PowerTTLMap(1);
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) {
+        const k = `key:${i % keyCount}`;
+        m.set(k, i);
+        m.get(k);
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'shortMs'
+  );
 
   return {
     name: 'PowerTTLMap',
@@ -1339,20 +1571,24 @@ async function runBenchmarkPowerEventBus(ops) {
   const variants = [];
 
   for (const subCount of subscriberCounts) {
-    const ms = await benchVariantRepeat(BENCH_RUNS, () => {
-      const bus = new PowerEventBus();
-      let received = 0;
-      for (let s = 0; s < subCount; s++)
-        bus.on('evt', () => {
-          received++;
-        });
-      // warmup
-      for (let i = 0; i < Math.min(100, smallOps / 100); i++) bus.emit('evt', i);
-      received = 0;
-      const t0 = process.hrtime.bigint();
-      for (let i = 0; i < smallOps; i++) bus.emit('evt', i);
-      return Number(process.hrtime.bigint() - t0) / 1e6;
-    });
+    const ms = await benchVariantRepeat(
+      BENCH_RUNS,
+      () => {
+        const bus = new PowerEventBus();
+        let received = 0;
+        for (let s = 0; s < subCount; s++)
+          bus.on('evt', () => {
+            received++;
+          });
+        // warmup
+        for (let i = 0; i < Math.min(100, smallOps / 100); i++) bus.emit('evt', i);
+        received = 0;
+        const t0 = process.hrtime.bigint();
+        for (let i = 0; i < smallOps; i++) bus.emit('evt', i);
+        return Number(process.hrtime.bigint() - t0) / 1e6;
+      },
+      'ms'
+    );
     variants.push({
       label: `${subCount} subscriber${subCount > 1 ? 's' : ''}`,
       totalMs: ms,
@@ -1369,32 +1605,40 @@ async function runBenchmarkPowerDeadline(ops) {
   const smallOps = Math.min(ops, 5000);
 
   // Success path: task resolves well within deadline.
-  const successMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    for (let i = 0; i < Math.min(20, smallOps / 50); i++) {
-      await PowerDeadline.run(() => 1, { totalTimeout: 1000 });
-    }
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) await PowerDeadline.run(() => 1, { totalTimeout: 1000 });
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const successMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      for (let i = 0; i < Math.min(20, smallOps / 50); i++) {
+        await PowerDeadline.run(() => 1, { totalTimeout: 1000 });
+      }
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) await PowerDeadline.run(() => 1, { totalTimeout: 1000 });
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'successMs'
+  );
 
   // Abort path: every task outlives its 1 ms deadline.
   let deadlineHits = 0;
-  const abortMs = await benchVariantRepeat(BENCH_RUNS, async () => {
-    deadlineHits = 0;
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < smallOps; i++) {
-      try {
-        await PowerDeadline.run(() => new Promise((r) => setTimeout(r, 5)), {
-          totalTimeout: 1,
-          maxAttempts: 1,
-        });
-      } catch (_) {
-        deadlineHits++;
+  const abortMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      deadlineHits = 0;
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < smallOps; i++) {
+        try {
+          await PowerDeadline.run(() => new Promise((r) => setTimeout(r, 5)), {
+            totalTimeout: 1,
+            maxAttempts: 1,
+          });
+        } catch (_) {
+          deadlineHits++;
+        }
       }
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'abortMs'
+  );
 
   return {
     name: 'PowerDeadline',
@@ -1418,26 +1662,34 @@ async function runBenchmarkPowerDeadline(ops) {
 // ── PowerSlidingWindow ────────────────────────────────────────────────────────
 async function runBenchmarkPowerSlidingWindow(ops) {
   // Under capacity: window is large enough to accept all ops.
-  const underMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const win = new PowerSlidingWindow({ capacity: ops + 1, windowMs: 60000 });
-    // warmup
-    for (let i = 0; i < Math.min(1000, ops / 100); i++) win.tryConsume(1);
-    const win2 = new PowerSlidingWindow({ capacity: ops + 1, windowMs: 60000 });
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < ops; i++) win2.tryConsume(1);
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const underMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const win = new PowerSlidingWindow({ capacity: ops + 1, windowMs: 60000 });
+      // warmup
+      for (let i = 0; i < Math.min(1000, ops / 100); i++) win.tryConsume(1);
+      const win2 = new PowerSlidingWindow({ capacity: ops + 1, windowMs: 60000 });
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) win2.tryConsume(1);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'underMs'
+  );
 
   // At capacity: half the tokens available — ~50 % of calls rejected.
-  const capMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const win = new PowerSlidingWindow({ capacity: Math.ceil(ops / 2), windowMs: 60000 });
-    const t0 = process.hrtime.bigint();
-    let consumed = 0;
-    for (let i = 0; i < ops; i++) {
-      if (win.tryConsume(1)) consumed++;
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const capMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const win = new PowerSlidingWindow({ capacity: Math.ceil(ops / 2), windowMs: 60000 });
+      const t0 = process.hrtime.bigint();
+      let consumed = 0;
+      for (let i = 0; i < ops; i++) {
+        if (win.tryConsume(1)) consumed++;
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'capMs'
+  );
 
   return {
     name: 'PowerSlidingWindow',
@@ -1452,30 +1704,38 @@ async function runBenchmarkPowerSlidingWindow(ops) {
 // ── PowerQueue ────────────────────────────────────────────────────────────────
 async function runBenchmarkPowerQueue(ops) {
   // Bulk push then bulk shift.
-  const pushShiftMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const q = new PowerQueue(Math.min(ops, 65536));
-    for (let i = 0; i < 1000; i++) {
-      q.push(i);
-      q.shift();
-    } // warmup
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < ops; i++) q.push(i);
-    while (q.length > 0) q.shift();
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const pushShiftMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const q = new PowerQueue(Math.min(ops, 65536));
+      for (let i = 0; i < 1000; i++) {
+        q.push(i);
+        q.shift();
+      } // warmup
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) q.push(i);
+      while (q.length > 0) q.shift();
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'pushShiftMs'
+  );
 
   // Interleaved push+shift (ring-buffer steady state).
-  const interleavedMs = await benchVariantRepeat(BENCH_RUNS, () => {
-    const q = new PowerQueue(64);
-    const half = 32;
-    for (let i = 0; i < half; i++) q.push(i); // pre-fill
-    const t0 = process.hrtime.bigint();
-    for (let i = 0; i < ops; i++) {
-      q.push(i);
-      q.shift();
-    }
-    return Number(process.hrtime.bigint() - t0) / 1e6;
-  });
+  const interleavedMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const q = new PowerQueue(64);
+      const half = 32;
+      for (let i = 0; i < half; i++) q.push(i); // pre-fill
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) {
+        q.push(i);
+        q.shift();
+      }
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'interleavedMs'
+  );
 
   return {
     name: 'PowerQueue',
@@ -1946,6 +2206,10 @@ async function runAllHelperBenchmarks() {
   ];
 
   for (const [name, fn] of runners) {
+    // Collect before reading the heap baseline, or `memDeltaKb` for this helper
+    // inherits the previous helper's uncollected garbage and reports a phantom
+    // memory cost that is really the last phase's.
+    collectGarbage();
     const heapBefore = heapKb();
     console.log(`  Running helper: ${name}...`);
     try {
@@ -2007,6 +2271,40 @@ function formatMd(report, filename, prevDeltaMap = new Map()) {
   if (report.config.BENCH_RUNS > 1) lines.push(`- BENCH_RUNS: ${report.config.BENCH_RUNS}`);
   if (report.config.POOL_RUNS > 1) lines.push(`- POOL_RUNS: ${report.config.POOL_RUNS}`);
   if (report.config.HELPER_OPS) lines.push(`- HELPER_OPS: ${report.config.HELPER_OPS}`);
+
+  // ── Measurement quality (BENCH-001) ──────────────────────────────────────
+  // Printed before any number so a reader meets the noise floor first. Without
+  // this, a 3% improvement reads as a result when it may be well inside the
+  // run-to-run spread of the thing it claims to measure.
+  if (report.measurement) {
+    const m = report.measurement;
+    lines.push('\n## Measurement quality\n');
+    lines.push(
+      `- Workload seed: \`${m.seed}\` (${m.seedSource}) — the workload is ` +
+        'generated from a seeded PRNG, so two runs with this seed measure the ' +
+        'same work and are comparable. Set `BENCH_SEED` to vary it deliberately.'
+    );
+    lines.push(`- Repeats: ${m.benchRuns} per micro-benchmark, ${m.poolRuns} per pool variant`);
+    lines.push(`- Outliers: ${m.outlierPolicy}, reported as the trimmed median`);
+    lines.push(
+      m.gcBetweenRuns
+        ? '- `global.gc()` between repeats and phases: enabled (run with `--expose-gc`)'
+        : '- `global.gc()` between repeats and phases: **skipped** — this run did ' +
+            "NOT have `--expose-gc`, so timings include the previous phase's garbage. " +
+            'Treat cross-variant deltas with suspicion.'
+    );
+    if (m.noise) {
+      lines.push(
+        `- Noise floor: **${m.noise.medianSpreadPct}%** median min/max spread ` +
+          `across ${m.noise.sites} timed variants (p95 ${m.noise.p95SpreadPct}%, ` +
+          `max ${m.noise.maxSpreadPct}% at \`${m.noise.worstSite.label}\`)`
+      );
+      lines.push(
+        '  - Any claimed delta smaller than this is **not measurable at this sample ' +
+          'count** — raise `BENCH_RUNS` before believing it.'
+      );
+    }
+  }
 
   lines.push('\nLearn more about the benchmarks [here](README.md)\n');
 
@@ -2327,6 +2625,21 @@ async function main() {
 
   const report = {
     timestamp: new Date().toISOString(),
+    // How much of a claimed delta this run can actually resolve. A reader
+    // comparing against `prevDeltaMap` needs this to know which rows to
+    // believe: anything smaller than `medianSpreadPct` is inside the noise.
+    measurement: {
+      seed: BENCH_SEED,
+      seedSource: Number.isFinite(Number(process.env.BENCH_SEED)) ? 'BENCH_SEED' : 'default',
+      benchRuns: BENCH_RUNS,
+      poolRuns: POOL_RUNS,
+      // Outlier handling: symmetric one-from-each-end trim when n >= 5.
+      outlierPolicy: `symmetric trim ${BENCH_RUNS >= 5 ? 1 : 0} from each end`,
+      // `false` means every phase ran on whatever the previous one left behind.
+      gcBetweenRuns: GC_AVAILABLE,
+      // Filled in after the phases run; see the assignment at the end of main().
+      noise: null,
+    },
     config: {
       mode,
       TASKS,
@@ -2580,6 +2893,15 @@ async function main() {
   if (runHelpers) {
     console.log('\nRunning helper micro-benchmarks...');
     report.helpers = await runAllHelperBenchmarks();
+  }
+
+  // The `report` object is built before any benchmark runs, so the noise
+  // summary has to be filled in here rather than at construction time — at
+  // construction `MEASUREMENT_BANDS` is still empty and the block would
+  // serialise as `null`, which is exactly the run-to-run noise figure a reader
+  // most needs.
+  if (report.measurement) {
+    report.measurement.noise = summariseMeasurementBands();
   }
 
   const fname = 'bench/results.md';

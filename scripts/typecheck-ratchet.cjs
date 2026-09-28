@@ -62,7 +62,7 @@ const path = require('node:path');
  * below the 593 this started at, and the consumer column is no longer here at
  * all.
  */
-const BASELINE = 305;
+const BASELINE = 303;
 
 const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' }];
 
