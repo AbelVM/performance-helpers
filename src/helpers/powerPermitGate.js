@@ -139,4 +139,29 @@ export class PowerPermitGate {
     this._available -= 1;
     return this._makeRelease();
   }
+
+  /**
+   * Release every resource this instance holds: queued waiters are rejected and
+   * the listener registry is emptied.
+   *
+   * Idempotent, and safe to call while the instance is idle. Exists so the
+   * instance works with `using` / `await using`.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    this.reset();
+    // Neutralise the cleanup so a second dispose (or a late call) is a no-op
+    // rather than a second teardown pass.
+    this.reset = () => {};
+  }
+
+  /**
+   * Alias for {@link dispose}, so `using x = new X()` releases the instance
+   * deterministically at scope exit.
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }

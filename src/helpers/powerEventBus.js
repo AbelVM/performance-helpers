@@ -400,6 +400,32 @@ export class PowerEventBus {
     this._clearWeakListenerEvent(event);
     this._listeners.delete(event);
   }
+
+  /**
+   * Release every listener, and reset the `FinalizationRegistry` so the
+   * registry's retained callbacks become garbage.
+   *
+   * Idempotent, and safe to call while the bus is idle. Exists so a bus works
+   * with `using` / `await using` (see {@link PowerEventBus.[Symbol.dispose]})
+   * and gives callers an explicit name to call.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    this.clear();
+    // Neutralise `clear` so a second dispose, or a late callback, cannot run a
+    // second teardown pass over an already-empty bus.
+    this.clear = () => {};
+  }
+
+  /**
+   * Alias for {@link PowerEventBus#dispose}, so `using bus = new PowerEventBus()`
+   * releases the listeners and the finalization registry at scope exit.
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }
 
 export default PowerEventBus;

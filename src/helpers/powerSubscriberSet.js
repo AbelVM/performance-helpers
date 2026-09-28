@@ -228,6 +228,32 @@ export class PowerSubscriberSet {
   _deref(entry) {
     return typeof entry?.deref === 'function' ? entry.deref() : entry;
   }
+
+  /**
+   * Release every resource this instance holds: the listener registry is
+   * emptied and the `FinalizationRegistry` is replaced, so its retained
+   * callbacks become collectable.
+   *
+   * Idempotent, and safe to call while the instance is idle. Exists so the
+   * instance works with `using` / `await using`.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    this.clear();
+    // Neutralise `clear` so a second dispose (or a late callback) cannot run a
+    // second teardown pass over an already-empty registry.
+    this.clear = () => {};
+  }
+
+  /**
+   * Alias for {@link dispose}, so `using set = new PowerSubscriberSet()`
+   * releases the listeners at scope exit.
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }
 
 /**

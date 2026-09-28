@@ -106,4 +106,29 @@ export class PowerScheduler {
       // ignore logger failures
     }
   }
+
+  /**
+   * Release every resource this instance holds.
+   *
+   * Idempotent, and safe to call while the instance is idle. Exists so the
+   * instance works with `using` / `await using` and gives callers an explicit
+   * name to call.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    this.cancel();
+    // Neutralise the cleanup so a second dispose (or a late call) is a no-op
+    // rather than a second teardown pass.
+    this.cancel = () => {};
+  }
+
+  /**
+   * Alias for {@link dispose}, so `using x = new X()` releases the instance
+   * deterministically at scope exit.
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }

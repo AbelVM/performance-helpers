@@ -305,6 +305,20 @@ export class PowerRealtimeHub {
     this._topics.clear();
   }
 
+  /**
+
+   * Named alias for the `Symbol.dispose` implementation, so callers who do not
+
+   * want to reach for the symbol still have something to call.
+
+   * @returns {void}
+
+   */
+
+  dispose() {
+    this[Symbol.dispose]();
+  }
+
   [Symbol.dispose]() {
     this.close();
   }

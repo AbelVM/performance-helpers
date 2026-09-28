@@ -2850,6 +2850,16 @@ export class PowerPool {
    * Must be synchronous (returns `undefined`) so `using` blocks don't await
    * and leak in-flight work; it performs a hard stop via `shutdown()`.
    */
+
+  /**
+   * Named alias for the `Symbol.dispose` implementation, so callers who do not
+   * want to reach for the symbol still have something to call.
+   * @returns {void}
+   */
+  dispose() {
+    this[Symbol.dispose]();
+  }
+
   [Symbol.dispose]() {
     this.shutdown();
   }

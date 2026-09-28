@@ -1173,6 +1173,16 @@ export class PowerCache {
    * Synchronous disposal hook (TC39 Explicit Resource Management).
    * Stops any background cleanup and clears the cache.
    */
+
+  /**
+   * Named alias for the `Symbol.dispose` implementation, so callers who do not
+   * want to reach for the symbol still have something to call.
+   * @returns {void}
+   */
+  dispose() {
+    this[Symbol.dispose]();
+  }
+
   [Symbol.dispose]() {
     try {
       this.stopCleanup();
@@ -1765,6 +1775,29 @@ export class PowerMemoizer {
   stats() {
     return this.cache.stats();
   }
+  /**
+   * Release the underlying cache.
+   *
+   * `PowerMemoizer` owns no state of its own - it delegates to a `PowerCache`
+   * - so disposal forwards to it. The inner cache is not replaced, so a
+   * disposed memoizer's `cache` reference stays readable.
+   *
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    if (typeof this.cache?.[Symbol.dispose] === 'function') {
+      this.cache[Symbol.dispose]();
+    }
+  }
+
+  /**
+   * Named alias for the `Symbol.dispose` implementation, so callers who do not
+   * want to reach for the symbol still have something to call.
+   * @returns {void}
+   */
+  dispose() {
+    this[Symbol.dispose]();
+  }
 }
 
 /**
@@ -1847,6 +1880,15 @@ export class PowerTimedCache {
   values(order) {
     return this.cache.values(order);
   }
+  /**
+   * Named alias for the `Symbol.dispose` implementation, so callers who
+   * do not want to reach for the symbol still have something to call.
+   * @returns {void}
+   */
+  dispose() {
+    this[Symbol.dispose]();
+  }
+
   [Symbol.dispose]() {
     if (typeof this.cache?.[Symbol.dispose] === 'function') return this.cache[Symbol.dispose]();
   }
