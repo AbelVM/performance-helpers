@@ -38,7 +38,8 @@ declare class WorkerAgnostic {
     env: string;
     options: Object;
     _listeners: Map<any, any>;
-    worker: object;
+    /** @type {import('./jsdoc-types.js').WorkerLike} */
+    worker: import("./jsdoc-types.js").WorkerLike;
     /**
      * Attach the underlying worker's native events to our unified dispatcher.
      * @private

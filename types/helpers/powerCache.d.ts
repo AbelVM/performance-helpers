@@ -176,6 +176,10 @@ export class PowerCache {
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExpiry=false]
      * @param {boolean} [options.countMiss=false]
+     * @param {boolean} [options.allowExpired=false] Return an expired node instead
+     *   of `null`. Read by `_fetchValidNode` and passed by `getOrSet` when
+     *   `staleWhileRevalidate` is on; previously read but never documented, so it
+     *   was missing from the declared options type.
      * @returns {CacheNode|null}
      */
     private _fetchValidNode;
@@ -348,11 +352,11 @@ export class PowerCache {
      * @param {Iterable<*>} keys
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExpiry=false]
-     * @returns {Map}
+     * @returns {Map<string, *>} One entry per resolved key, in input order.
      */
     getMany(keys: Iterable<any>, { ignoreExpiry }?: {
         ignoreExpiry?: boolean | undefined;
-    }): Map<any, any>;
+    }): Map<string, any>;
     /**
      * Touch an entry: update its recency and optionally refresh TTL without
      * reading or modifying the stored value.

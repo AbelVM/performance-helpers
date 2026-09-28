@@ -100,7 +100,7 @@ const SUPPORTED_EVENTS = ['message', 'error', 'messageerror'];
  *   or path/URL string.
  * @param {Object} options - Options forwarded to the native Worker constructor.
  * @param {string} env - Resolved environment from `detectEnv()`.
- * @returns {object} The underlying worker-like object.
+ * @returns {import('./jsdoc-types.js').WorkerLike} The underlying worker-like object.
  * @private
  */
 function resolveWorker(workerSource, options, env) {
@@ -157,7 +157,7 @@ function resolveWorker(workerSource, options, env) {
  * @param {Function|undefined} WorkerCtor
  * @param {Object} options
  * @param {string} env
- * @returns {Object} A worker-like object.
+ * @returns {import('./jsdoc-types.js').WorkerLike} A worker-like object.
  * @private
  */
 function createFromFunction(workerSource, WorkerCtor, options, env) {
@@ -185,7 +185,7 @@ function createFromFunction(workerSource, WorkerCtor, options, env) {
  * @param {Function|undefined} WorkerCtor
  * @param {Object} options
  * @param {string} env
- * @returns {Object} A worker-like object.
+ * @returns {import('./jsdoc-types.js').WorkerLike} A worker-like object.
  * @private
  */
 function coerceFactoryResult(result, WorkerCtor, options, env) {
@@ -210,6 +210,9 @@ function coerceFactoryResult(result, WorkerCtor, options, env) {
 /**
  * Create a Web Worker from a (possibly relative) path string, resolving it
  * against the current module URL in bundler contexts when possible.
+ * @param {string} workerSource
+ * @param {Object} [options]
+ * @returns {import('./jsdoc-types.js').WorkerLike} A worker-like object.
  * @private
  */
 function createWebWorkerFromString(workerSource, options) {
@@ -266,6 +269,7 @@ class WorkerAgnostic {
     this.options = options && typeof options === 'object' ? options : {};
     // unified listener registry: event name -> Set<handler>
     this._listeners = new Map();
+    /** @type {import('./jsdoc-types.js').WorkerLike} */
     this.worker = resolveWorker(workerSource, this.options, this.env);
     this._wireEvents();
   }

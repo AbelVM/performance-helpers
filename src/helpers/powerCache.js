@@ -99,7 +99,9 @@ export class PowerCache {
     defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
     maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
     rejectOversized = false,
+    /** @type {?(function(*, *, string):void)} */
     onEvict = null,
+    /** @type {?(function(*, *):void)} */
     onExpire = null,
     initialPoolSize = 0,
     maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
@@ -108,6 +110,7 @@ export class PowerCache {
     defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
     // invoked as onError(err, message) whenever an internal failure is
     // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
+    /** @type {?(function(*, string):void)} */
     onError = null,
     /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
     policy = 'lru',
@@ -380,6 +383,10 @@ export class PowerCache {
    * @param {Object} [options]
    * @param {boolean} [options.ignoreExpiry=false]
    * @param {boolean} [options.countMiss=false]
+   * @param {boolean} [options.allowExpired=false] Return an expired node instead
+   *   of `null`. Read by `_fetchValidNode` and passed by `getOrSet` when
+   *   `staleWhileRevalidate` is on; previously read but never documented, so it
+   *   was missing from the declared options type.
    * @returns {CacheNode|null}
    */
   _fetchValidNode(key, { ignoreExpiry = false, countMiss = false, allowExpired = false } = {}) {
@@ -822,7 +829,7 @@ export class PowerCache {
    * @param {Iterable<*>} keys
    * @param {Object} [options]
    * @param {boolean} [options.ignoreExpiry=false]
-   * @returns {Map}
+   * @returns {Map<string, *>} One entry per resolved key, in input order.
    */
   getMany(keys, { ignoreExpiry = false } = {}) {
     const res = new Map();
