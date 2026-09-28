@@ -192,36 +192,15 @@ describe('API surface', () => {
   });
 });
 
-// ─── Open gap: ESM ↔ UMD export parity ──────────────────────────────────────
+// A UMD/ESM export-parity assertion was tried here three times and removed each
+// time, because `test/globalSetup.js` deletes and rebuilds `dist/` before any
+// test runs, from the same `src/` this file imports - so within a run the two
+// cannot diverge, and no such assertion can fail. Not because the comparison is
+// broken, but because nothing is being compared that could differ. A guard that
+// cannot fail reads as coverage while providing none.
 //
-// `package.json` maps the root export's `require` condition to a **prebuilt**
-// `dist/performance-helpers.cjs`, alongside `import`/`default` pointing at
-// `src/index.js`. Those are two hand-maintained entry points to one library, so
-// a helper added to `src/index.js` and not re-exported by the bundle entry
-// drifts silently, and the symptom is a `undefined is not a function` in a
-// bundled app that no ESM test would catch.
-//
-// Two approaches were written and **both were removed, because neither could be
-// demonstrated to fail**:
-//
-// 1. `createRequire(...)(umdPath)` then compare `Object.keys()`. Overwriting
-//    `dist/performance-helpers.cjs` with `module.exports = {}` and re-running
-//    still passed — Node's `require` cache (and vitest's transform layer above
-//    it) keeps serving the module loaded first, so the test could not observe
-//    the file on disk at all. That is also why an earlier version of this file
-//    had a parity assertion that passed while the ESM snapshot correctly failed:
-//    the two halves were reading different module graphs.
-// 2. Read the bundle as **text** and assert every ESM name appears in it. The
-//    escape and the premise both check out (the bundle genuinely lacks a
-//    deliberately-added export name, and the word-boundary regex is correct), yet
-//    the test still passed — which means `ROOT_EXPORTS` inside the test file was
-//    not the value the snapshot assertion had just compared against. Also
-//    undiagnosed.
-//
-// The three assertions that remain have each been demonstrated to fail when the
-// thing they guard is broken. That is the bar this file holds itself to: a guard
-// that cannot be shown to fail reads as coverage while providing none, which is
-// worse than an honest gap. Restoring parity coverage needs either a bundle
-// built by the test itself, or a check that runs outside vitest's module graph
-// (a `scripts/` step in `npm run verify`). Tracked as open work, not silently
-// dropped.
+// The real check lives outside vitest, where it has teeth:
+//   node scripts/check-bundle-exports.mjs     (npm run check:bundle)
+// It reads both artefacts from disk after a build, and is part of
+// `npm run verify`. Demonstrated failing: adding an export to `src/index.js`
+// without rebuilding reports the missing name and the stale bundle.

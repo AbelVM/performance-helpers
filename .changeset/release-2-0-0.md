@@ -317,8 +317,18 @@ required is the worker reply shape.
 
 **Internal**
 
-- The benchmark harness is now reproducible, and reports its own noise floor.
-  Workloads are generated from a seeded PRNG (printed in every report, overridable
+- **A new `npm run check:bundle` step, wired into `npm run verify`, verifies the
+  built CJS/UMD bundle actually exports what `src/index.js` declares**, and that
+  the bundle is not older than its sources. This exists because the check cannot
+  live in the test suite: `test/globalSetup.js` rebuilds `dist/` from `src/`
+  before every run, so within a run the two cannot diverge and any such assertion
+  passes no matter what — three attempts at one were written and discarded before
+  the real reason was found. A bundle missing an export, or stale against
+  `src/`, is now caught in CI rather than shipping to a consumer who gets
+  `undefined` from a bundled app. For maintainers: the bundle is not committed,
+  so this is a release-gate check, not a drift check across releases.
+
+- The benchmark harness is now reproducible, and reports its own noise floor.  Workloads are generated from a seeded PRNG (printed in every report, overridable
   with `BENCH_SEED`) — previously every run measured a *different* workload, so no
   delta between two runs was meaningful, because repetition reduces timer noise
   but not workload noise. Repeats raised to 9, `global.gc()` between repeats and

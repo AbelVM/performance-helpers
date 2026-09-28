@@ -98,9 +98,26 @@ Run the same gate that runs before every publish:
 npm run verify
 ```
 
-`verify` is `lint` + `test` + the type-debt ratchet + `build` + a check that
-`types/` still matches `src/`. It is what `prepublishOnly` calls, so
-`npm publish` and CI can never disagree about what "green" means.
+`verify` is `lint` + `test` + the type-debt ratchet + `build` + a check that the
+built bundle exports what `src/` declares + a check that `types/` still matches
+`src/`. It is what `prepublishOnly` calls, so `npm publish` and CI can never
+disagree about what "green" means.
+
+### Why the bundle check is not a test
+
+`npm run check:bundle` compares the export names in `src/index.js` against the
+built `dist/performance-helpers.cjs`. It is a `scripts/` step rather than a case
+in the suite for a reason worth knowing before you try to "fix" it by moving it
+back: `test/globalSetup.js` deletes and rebuilds `dist/` before every run, from
+the same `src/` a test would import. So **inside a test run the bundle and the
+source cannot diverge**, and a parity assertion there passes no matter what you
+do to either side — three attempts at one were written and discarded before this
+was the accepted reason.
+
+The check also catches a bundle *older than its sources*, which is the failure
+that actually reaches users: `dist/` is not committed, so a stale bundle
+survives locally and every UMD test then asserts against yesterday's code.
+`npm publish` runs `verify`, so that cannot ship.
 
 ## Type checking and type debt
 
@@ -111,6 +128,7 @@ Two TypeScript projects exist, and both are wired into the release gate:
 | `npm run typecheck` | `tsconfig.check.json` - the JSDoc in `src/`, with `checkJs` on. Internal quality. |
 | `npm run test:types` | `tsconfig.types.json` - the generated `types/*.d.ts` compiled the way a downstream TypeScript consumer would compile them, with no `@types/node`. |
 | `npm run typecheck:ratchet` | Both of the above, as a gate on the **total** error count. |
+| `npm run check:bundle` | The built `dist/performance-helpers.cjs` exports everything `src/index.js` declares, and is not older than `src/`. Run by `verify` after `build`; must run *outside* vitest to be meaningful. |
 
 Neither project is at zero, and neither can be fixed in one sitting, so the
 gate is on direction rather than on zero: **the count may fall, never rise.**
