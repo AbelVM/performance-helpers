@@ -15,7 +15,7 @@ Use `PowerBulkhead` when you need to protect critical work from a noisy producer
 
 ## API
 
-- `run(task, options)` — Enqueue a task for execution. When the chosen partition has available concurrency, the task runs immediately; otherwise it waits in that partition's queue.
+- `run(task, options)` — Enqueue a task for execution. When the chosen partition has available concurrency, the task runs immediately; otherwise it waits in that partition's queue. `options.signal` aborts the *wait*: the promise rejects with an `AbortError` and the task never runs. A task that already holds a permit is not interrupted — cancelling the queueing is not cancelling the work. See [cancelling a wait](powerPermitGate.md#cancelling-a-wait).
 - `tryRun(task, options)` — Attempt immediate execution and return a `Promise` if the partition has capacity, or `null` if it would have to queue.
 - `drain()` — Wait until all active and queued tasks complete.
 - `partitions` — Number of configured partitions.

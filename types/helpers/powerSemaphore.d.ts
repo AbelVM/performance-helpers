@@ -18,13 +18,18 @@ export class PowerSemaphore {
     /**
      * Acquire a permit asynchronously.
      * Resolves immediately when one is available; otherwise waits in FIFO order.
+     * @param {{signal?: AbortSignal}} [options] - Pass `options.signal` to stop
+     *   waiting: the returned promise rejects with an `AbortError` and the caller
+     *   leaves the queue instead of holding a slot until a permit arrives.
      * @returns {Promise<function():void>} Promise resolving to the release
      *   callback. Spelled as a call signature rather than `Function` because
      *   `Function` is not assignable to `() => void`, so `.then((release) =>
      *   release())` - the documented way to use it - failed to type-check for
      *   consumers.
      */
-    acquire(): Promise<() => void>;
+    acquire(options?: {
+        signal?: AbortSignal;
+    }): Promise<() => void>;
     /**
      * Try to acquire a permit without waiting.
      * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.

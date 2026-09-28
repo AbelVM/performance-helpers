@@ -12,6 +12,36 @@ Low-level permit queue helper for building semaphore-like concurrency primitives
 | `queueCapacity` | `number` | `Infinity` | Maximum number of waiting callers allowed in the queue. |
 | `initialTokens` | `number` | `capacity` | Number of permits available immediately after construction. |
 
+### Cancelling a wait
+
+`acquire({ signal })` stops waiting. The returned promise rejects with an
+`AbortError` and the caller leaves the queue — it does not wait for a permit
+that may never come, and it does not hold a queue slot in the meantime.
+
+```js
+const controller = new AbortController();
+const pending = gate.acquire({ signal: controller.signal });
+controller.abort();
+await pending; // rejects: AbortError
+```
+
+Three details that are easy to get wrong and are worth stating plainly:
+
+- **An already-aborted signal rejects even when a permit is free.** Passing a
+  dead signal means "do not do this", and answering "it happens to be
+  convenient right now" is how a cancelled request ends up doing work nobody
+  will collect.
+- **An aborted waiter never consumes a permit.** When the queue drains, a
+  cancelled entry is compacted out *without* taking a permit. Letting it take
+  one is a quiet capacity leak: the gate looks one permit emptier after every
+  abort, and nothing reports it.
+- **`pending` and `isFull` count live waiters only.** A cancel storm cannot
+  leave the queue reporting itself full with nothing actually waiting.
+
+The abort listener is detached as soon as a waiter is served, so reusing one
+signal across many acquires does not accumulate listeners or make the signal
+retain every settled closure.
+
 ## API
 
 - `acquire()` — Returns a `Promise` that resolves to a release callback when a permit becomes available. If a permit is immediately available, the promise resolves synchronously.

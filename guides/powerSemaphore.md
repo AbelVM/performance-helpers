@@ -10,7 +10,7 @@ Lightweight async concurrency gate for IO-heavy fanout. Use a semaphore when you
 
 ## API
 
-- `acquire()` — Returns a `Promise<Function>` that resolves when a permit is available. The resolved function releases the permit.
+- `acquire({ signal })` — Resolve immediately when a permit is available, otherwise wait in FIFO order. Returns a `Promise` of a release function. Pass an `AbortSignal` to stop waiting: the promise rejects with an `AbortError` and the waiter leaves the queue without consuming a permit — see [cancelling a wait](powerPermitGate.md#cancelling-a-wait).
 - `tryAcquire()` — Attempts to take a permit immediately. Returns the release callback when successful, or `null` when no permit is available.
 - `run(fn)` — Runs an async callback while holding a permit. The permit is automatically released when the callback settles.
 - `limit` — The configured maximum concurrent permits.

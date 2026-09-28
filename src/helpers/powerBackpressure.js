@@ -164,16 +164,24 @@ export class PowerBackpressure extends PowerPermitGate {
    * Acquire a permit asynchronously.
    * Resolves immediately when a permit is available.
    * Otherwise queues the producer until capacity frees.
+   * @param {Object} [options] - `signal` aborts the wait: the returned promise
+   *   rejects with an `AbortError` and the producer leaves the queue instead of
+   *   holding a slot until a permit is refilled.
    * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
    */
-  acquire() {
+  acquire(options = {}) {
+    // Before the fast path, for the same reason as the gate: an already-aborted
+    // signal is a refusal, not a suggestion.
+    if (/** @type {{signal?: AbortSignal}} */ (options)?.signal?.aborted) {
+      return Promise.reject(new Error('PowerBackpressure acquire aborted'));
+    }
     if (this.available > 0) {
       return Promise.resolve(this._grant());
     }
     if (this.isFull) {
       return Promise.reject(new Error('PowerBackpressure queue is full'));
     }
-    const promise = super.acquire();
+    const promise = super.acquire(options);
     if (this.pending > 0 && !this._refillTimer) {
       this._scheduleRefill();
     }

@@ -47,6 +47,16 @@ export class PowerBackpressure extends PowerPermitGate {
      */
     get refillAmount(): number;
     /**
+     * Acquire a permit asynchronously.
+     * Resolves immediately when a permit is available.
+     * Otherwise queues the producer until capacity frees.
+     * @param {Object} [options] - `signal` aborts the wait: the returned promise
+     *   rejects with an `AbortError` and the producer leaves the queue instead of
+     *   holding a slot until a permit is refilled.
+     * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
+     */
+    acquire(options?: Object): Promise<PowerReleaseFn>;
+    /**
      * Reset the controller to its initial capacity and clear waiting producers.
      */
     reset(): void;

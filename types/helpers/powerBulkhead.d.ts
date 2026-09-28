@@ -46,10 +46,15 @@ export class PowerBulkhead {
      * @param {Function} task Async callback to execute.
      * @param {Object} [options]
      * @param {any} [options.partitionKey] Optional key used to route the task to a partition.
+     * @param {AbortSignal} [options.signal] Abort while queued: the returned promise
+     *   rejects with an `AbortError` and the task never runs. Cancelling the *wait*
+     *   is not cancelling the *work* - a task that already holds a permit runs to
+     *   completion.
      * @returns {Promise<any>} Promise resolving or rejecting with task result.
      */
     run(task: Function, options?: {
         partitionKey?: any;
+        signal?: AbortSignal | undefined;
     }): Promise<any>;
     /**
      * Try to execute immediately without queuing.

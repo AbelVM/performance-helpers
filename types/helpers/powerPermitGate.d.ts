@@ -1,13 +1,3 @@
-/**
- * PowerPermitGate
- *
- * Internal helper that manages a finite number of permits and a FIFO waiter queue.
- * Provides `acquire()`, `tryAcquire()` and `release()` primitives used by
- * semaphore-like helpers.
- *
- * @class PowerPermitGate
- * @public
- */
 export class PowerPermitGate {
     /**
      * @param {Object} [options]
@@ -24,11 +14,26 @@ export class PowerPermitGate {
     _queueCapacity: number;
     _available: number;
     _waiters: PowerQueue;
+    /**
+     * Waiters that were aborted and are still physically in the queue.
+     *
+     * An abort is O(1): the entry is marked and the promise rejected, and the
+     * entry is compacted out the next time the queue is drained. That is
+     * deliberate - removing by reference from the ring buffer is O(n) per
+     * cancellation, and a cancellation storm is exactly the case where you do
+     * not want an O(n) walk per cancelled waiter. The counter keeps
+     * {@link PowerPermitGate#pending} and {@link PowerPermitGate#isFull}
+     * honest in the meantime.
+     *
+     * @type {number}
+     * @private
+     */
+    private _cancelledWaiters;
     /** Maximum number of permits. */
     get capacity(): number;
     /** Currently available permits. */
     get available(): number;
-    /** Number of queued waiters. */
+    /** Number of queued waiters, excluding any that have been aborted. */
     get pending(): number;
     /** Maximum number of waiters allowed in the queue. */
     get queueCapacity(): number;
@@ -41,7 +46,7 @@ export class PowerPermitGate {
      * Resolves immediately when a permit is available; otherwise waits in FIFO order.
      * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
      */
-    acquire(): Promise<PowerReleaseFn>;
+    acquire(options?: {}): Promise<PowerReleaseFn>;
     /**
      * Try to acquire a permit without waiting.
      * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.

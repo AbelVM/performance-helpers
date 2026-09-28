@@ -103,6 +103,17 @@ required is the worker reply shape.
   be fooled by a fast consumer that keeps everything. `bp.refillAmount` reads
   the current window; `reset()` returns it to its base.
 
+- **`AbortSignal` on the whole permit-gate family** — `PowerPermitGate.acquire`,
+  `PowerSemaphore.acquire`, `PowerBulkhead.run` and `PowerBackpressure.acquire`
+  all accept `options.signal`. Cancelling the wait rejects with an `AbortError`
+  and the caller leaves the queue instead of holding a slot until a permit
+  arrives. Three properties worth relying on: an already-aborted signal rejects
+  even when a permit is free (a dead signal is a refusal, not a suggestion);
+  an aborted waiter never consumes a permit when the queue drains, so a cancel
+  storm cannot leak capacity; and `pending`/`isFull` count live waiters only.
+  For `PowerBulkhead.run` the *wait* is cancelled, not the work — a task that
+  already holds a permit runs to completion.
+
 **Added**
 
 - **`PowerEventLoopMonitor`** — a latency number going up does not tell you
