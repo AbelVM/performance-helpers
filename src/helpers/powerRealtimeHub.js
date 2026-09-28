@@ -58,16 +58,25 @@ import { nowMs } from '../utils/now.js';
  * @typedef {object} HubSubscriber
  * @property {string} id
  * @property {string} topic
- * @property {{push: function(*): number, size: number|(() => number)}} queue
- *   Bounded buffer for this subscriber.
+ * @property {any[]} queue
+ *   Bounded buffer for this subscriber. A plain array - the hub reads
+ *   `.length`, `.push`, `.shift` and `.splice` off it, so a queue typed as an
+ *   abstract buffer (the previous declaration) had no `.length` at any of the
+ *   five places that check it before enqueueing.
  * @property {number} dropped - Messages discarded by the slow-consumer policy.
+ * @property {number} bytesQueued - Approximate bytes currently buffered.
  * @property {number} inFlight - Sends currently awaiting the transport.
  * @property {number} maxQueue
  * @property {number} maxBatch
  * @property {SlowConsumerPolicy} slowConsumer
  * @property {boolean} closed
- * @property {Function} [handler]
- * @property {Function} [unsubscribe]
+ * @property {function(any, HubSubscriber):void} handler - Invoked with each
+ *   delivered message, after the transport accepted it, plus the subscriber it
+ *   was delivered to. Spelled as a call signature so the two arguments the hub
+ *   passes are checked, and so a handler is callable rather than `Function`.
+ * @property {*} [transport] - Opaque handle the caller attached at subscribe
+ *   time (a socket, a stream, a peer id). The hub never reads it; it exists so
+ *   a `send`/`close` adapter can get back to its own connection.
  */
 
 /**
@@ -80,6 +89,21 @@ import { nowMs } from '../utils/now.js';
  *   when `maxQueue` is exceeded.
  * @property {number} [maxBatch=32] - Maximum messages coalesced into one send.
  * @property {string} [id] - Stable identifier; generated when omitted.
+ * @property {*} [transport] - Carried through to the stored
+ *   {@link HubSubscriber} untouched, for the caller's own `send`/`close`
+ *   adapters to use.
+ */
+
+/**
+ * One entry of the per-subscriber array in {@link PowerRealtimeHub#stats}.
+ * @typedef {object} HubSubscriberStat
+ * @property {string} id
+ * @property {string} topic
+ * @property {number} queued - Messages waiting for this subscriber right now.
+ * @property {number} dropped
+ * @property {number} inFlight
+ * @property {number} maxQueue
+ * @property {SlowConsumerPolicy} slowConsumer
  */
 
 /**
@@ -98,9 +122,12 @@ import { nowMs } from '../utils/now.js';
  * @property {function(object, Uint8Array):(void|Promise<void>)} send - Required
  *   transport adapter, called as `send(subscriber, frame)`. Return a promise if
  *   the transport is async; the hub tracks in-flight sends per subscriber.
- * @property {function(object):(void|Promise<void>)} [close] - Optional
+ * @property {function(object, string):(void|Promise<void>)} [close] - Optional
  *   adapter called when the hub closes a subscriber for falling behind or on
- *   `close()`.
+ *   `close()`. Takes the same `(subscriber, reason)` pair as `send` plus why
+ *   it happened - `'unsubscribe'`, `'slow-consumer'` or `'hub-closed'`. The
+ *   published type previously declared one parameter, while the guide, the
+ *   runtime and every test all pass and read two.
  * @property {boolean} [batch=true] - Coalesce messages published within the
  *   same microtask into a single `send`. Turn off for tests or transports that
  *   cannot handle several frames at once.
@@ -125,9 +152,10 @@ const RETAIN_LIMIT = 32;
 
 export class PowerRealtimeHub {
   /**
-   * @param {HubOptions} options
+   * @param {HubOptions} options - `send` is required; the constructor throws
+   *   without it, so the parameter is not defaulted.
    */
-  constructor(options = {}) {
+  constructor(options) {
     const {
       send,
       close,
@@ -203,6 +231,7 @@ export class PowerRealtimeHub {
       throw new TypeError('PowerRealtimeHub: `maxBatch` must be >= 1');
     }
 
+    /** @type {HubSubscriber} */
     const sub = {
       id: id ?? `sub-${++_nextSubId}`,
       topic,
@@ -210,7 +239,6 @@ export class PowerRealtimeHub {
       maxQueue: Math.floor(Number(maxQueue)),
       slowConsumer,
       maxBatch: Math.floor(Number(maxBatch)),
-      /** @type {any[]} */
       queue: [],
       inFlight: 0,
       bytesQueued: 0,
@@ -293,7 +321,13 @@ export class PowerRealtimeHub {
 
   /**
    * Snapshot of counters and per-subscriber state.
-   * @returns {HubStats & {subscribers:Array<object>}}
+   *
+   * `subscribers` is the live *count*, and the per-subscriber array is `list`.
+   * The declared return previously intersected `subscribers: Array<object>`
+   * onto `HubStats`, which is how the hub ended up publishing a type saying
+   * `subscribers` was an array of records - a number at runtime.
+   *
+   * @returns {HubStats & {list: HubSubscriberStat[]}}
    */
   stats() {
     return {
@@ -351,6 +385,9 @@ export class PowerRealtimeHub {
    * Queue a message for one subscriber, applying the slow-consumer policy when
    * the queue is full.
    * @private
+   * @param {HubSubscriber} sub
+   * @param {any} message
+   * @returns {void}
    */
   _enqueue(sub, message) {
     // maxQueue 0 means no buffering: the policy is evaluated immediately.
@@ -387,6 +424,9 @@ export class PowerRealtimeHub {
   /**
    * Retain a message for future subscribers of a topic.
    * @private
+   * @param {string} topic
+   * @param {any} message
+   * @returns {void}
    */
   _retain(topic, message) {
     let log = this._retained.get(topic);
@@ -423,6 +463,7 @@ export class PowerRealtimeHub {
   /**
    * Drain every subscriber with queued work, one batch per send.
    * @private
+   * @returns {void}
    */
   _drain() {
     for (const sub of Array.from(this._subs.values())) {
@@ -433,6 +474,7 @@ export class PowerRealtimeHub {
 
   /**
    * @private
+   * @returns {Promise<void>}
    */
   async _flushAll() {
     const pending = [];
@@ -446,7 +488,7 @@ export class PowerRealtimeHub {
   /**
    * Build one frame from a subscriber's queue and hand it to the transport.
    * @private
-   * @param {object} sub
+   * @param {HubSubscriber} sub
    * @returns {Promise<void>}
    */
   _flushSubscriber(sub) {
@@ -524,7 +566,11 @@ export class PowerRealtimeHub {
   }
 
   /**
+   * Detach a subscriber from the hub, optionally closing its transport.
    * @private
+   * @param {HubSubscriber} sub
+   * @param {{close?: boolean, reason?: string}} [options]
+   * @returns {void}
    */
   _detach(sub, { close = false, reason = 'unsubscribe' } = {}) {
     if (sub.closed) return;
@@ -547,7 +593,12 @@ export class PowerRealtimeHub {
   }
 
   /**
+   * Report an internal failure through the optional `onError` adapter. A
+   * throwing `onError` must not break the hub, so it is swallowed.
    * @private
+   * @param {any} err
+   * @param {HubSubscriber} sub
+   * @returns {void}
    */
   _notify(err, sub) {
     if (!this._onError) return;

@@ -1,10 +1,11 @@
 export class PowerRealtimeHub {
     /**
-     * @param {HubOptions} options
+     * @param {HubOptions} options - `send` is required; the constructor throws
+     *   without it, so the parameter is not defaulted.
      */
-    constructor(options?: HubOptions);
+    constructor(options: HubOptions);
     _send: (arg0: object, arg1: Uint8Array) => (void | Promise<void>);
-    _close: ((arg0: object) => (void | Promise<void>)) | null;
+    _close: ((arg0: object, arg1: string) => (void | Promise<void>)) | null;
     _batch: boolean;
     _batchDelayMs: number;
     _codec: "json" | "raw";
@@ -69,10 +70,16 @@ export class PowerRealtimeHub {
     flush(): Promise<void>;
     /**
      * Snapshot of counters and per-subscriber state.
-     * @returns {HubStats & {subscribers:Array<object>}}
+     *
+     * `subscribers` is the live *count*, and the per-subscriber array is `list`.
+     * The declared return previously intersected `subscribers: Array<object>`
+     * onto `HubStats`, which is how the hub ended up publishing a type saying
+     * `subscribers` was an array of records - a number at runtime.
+     *
+     * @returns {HubStats & {list: HubSubscriberStat[]}}
      */
     stats(): HubStats & {
-        subscribers: Array<object>;
+        list: HubSubscriberStat[];
     };
     /**
      * Close every subscription and release timers. The hub cannot be reused.
@@ -93,11 +100,17 @@ export class PowerRealtimeHub {
      * Queue a message for one subscriber, applying the slow-consumer policy when
      * the queue is full.
      * @private
+     * @param {HubSubscriber} sub
+     * @param {any} message
+     * @returns {void}
      */
     private _enqueue;
     /**
      * Retain a message for future subscribers of a topic.
      * @private
+     * @param {string} topic
+     * @param {any} message
+     * @returns {void}
      */
     private _retain;
     /**
@@ -107,16 +120,18 @@ export class PowerRealtimeHub {
     /**
      * Drain every subscriber with queued work, one batch per send.
      * @private
+     * @returns {void}
      */
     private _drain;
     /**
      * @private
+     * @returns {Promise<void>}
      */
     private _flushAll;
     /**
      * Build one frame from a subscriber's queue and hand it to the transport.
      * @private
-     * @param {object} sub
+     * @param {HubSubscriber} sub
      * @returns {Promise<void>}
      */
     private _flushSubscriber;
@@ -127,11 +142,20 @@ export class PowerRealtimeHub {
      */
     private _encodeBatch;
     /**
+     * Detach a subscriber from the hub, optionally closing its transport.
      * @private
+     * @param {HubSubscriber} sub
+     * @param {{close?: boolean, reason?: string}} [options]
+     * @returns {void}
      */
     private _detach;
     /**
+     * Report an internal failure through the optional `onError` adapter. A
+     * throwing `onError` must not break the hub, so it is swallowed.
      * @private
+     * @param {any} err
+     * @param {HubSubscriber} sub
+     * @returns {void}
      */
     private _notify;
     [Symbol.dispose](): void;
@@ -164,16 +188,20 @@ export type HubSubscriber = {
     id: string;
     topic: string;
     /**
-     *   Bounded buffer for this subscriber.
+     *   Bounded buffer for this subscriber. A plain array - the hub reads
+     *   `.length`, `.push`, `.shift` and `.splice` off it, so a queue typed as an
+     *   abstract buffer (the previous declaration) had no `.length` at any of the
+     *   five places that check it before enqueueing.
      */
-    queue: {
-        push: (arg0: any) => number;
-        size: number | (() => number);
-    };
+    queue: any[];
     /**
      * - Messages discarded by the slow-consumer policy.
      */
     dropped: number;
+    /**
+     * - Approximate bytes currently buffered.
+     */
+    bytesQueued: number;
     /**
      * - Sends currently awaiting the transport.
      */
@@ -182,8 +210,19 @@ export type HubSubscriber = {
     maxBatch: number;
     slowConsumer: SlowConsumerPolicy;
     closed: boolean;
-    handler?: Function | undefined;
-    unsubscribe?: Function | undefined;
+    /**
+     * - Invoked with each
+     * delivered message, after the transport accepted it, plus the subscriber it
+     * was delivered to. Spelled as a call signature so the two arguments the hub
+     * passes are checked, and so a handler is callable rather than `Function`.
+     */
+    handler: (arg0: any, arg1: HubSubscriber) => void;
+    /**
+     * - Opaque handle the caller attached at subscribe
+     * time (a socket, a stream, a peer id). The hub never reads it; it exists so
+     * a `send`/`close` adapter can get back to its own connection.
+     */
+    transport?: any;
 };
 export type SubscriberOptions = {
     /**
@@ -206,6 +245,27 @@ export type SubscriberOptions = {
      * - Stable identifier; generated when omitted.
      */
     id?: string | undefined;
+    /**
+     * - Carried through to the stored
+     * {@link HubSubscriber} untouched, for the caller's own `send`/`close`
+     * adapters to use.
+     */
+    transport?: any;
+};
+/**
+ * One entry of the per-subscriber array in {@link PowerRealtimeHub#stats}.
+ */
+export type HubSubscriberStat = {
+    id: string;
+    topic: string;
+    /**
+     * - Messages waiting for this subscriber right now.
+     */
+    queued: number;
+    dropped: number;
+    inFlight: number;
+    maxQueue: number;
+    slowConsumer: SlowConsumerPolicy;
 };
 export type HubStats = {
     /**
@@ -247,9 +307,12 @@ export type HubOptions = {
     /**
      * - Optional
      * adapter called when the hub closes a subscriber for falling behind or on
-     * `close()`.
+     * `close()`. Takes the same `(subscriber, reason)` pair as `send` plus why
+     * it happened - `'unsubscribe'`, `'slow-consumer'` or `'hub-closed'`. The
+     * published type previously declared one parameter, while the guide, the
+     * runtime and every test all pass and read two.
      */
-    close?: ((arg0: object) => (void | Promise<void>)) | undefined;
+    close?: ((arg0: object, arg1: string) => (void | Promise<void>)) | undefined;
     /**
      * - Coalesce messages published within the
      * same microtask into a single `send`. Turn off for tests or transports that
