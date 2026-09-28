@@ -36,6 +36,11 @@
  * @returns {PowerPool} The created `PowerPool` instance managing the chunked work.
  */
 export class PowerChunker {
-    constructor(iterable: any, fn: any, options?: {});
+    /**
+     * @param {Iterable<*>} iterable - Items to process, chunked.
+     * @param {Function} fn - Called once per chunk.
+     * @param {PowerChunkingOptions} [options]
+     */
+    constructor(iterable: Iterable<any>, fn: Function, options?: PowerChunkingOptions);
 }
 export type PowerChunkingOptions = import("./jsdoc-types.js").PowerChunkingOptions;

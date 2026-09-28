@@ -43,6 +43,11 @@ import { normalizeError } from '../utils/errors.js';
  */
 
 export class PowerChunker {
+  /**
+   * @param {Iterable<*>} iterable - Items to process, chunked.
+   * @param {Function} fn - Called once per chunk.
+   * @param {PowerChunkingOptions} [options]
+   */
   constructor(iterable, fn, options = {}) {
     if (!iterable || typeof fn !== 'function') {
       throw new Error('PowerChunker requires an iterable and a function');
@@ -118,6 +123,11 @@ export class PowerChunker {
 }
 
 // Module-level helpers to avoid per-constructor allocations.
+/**
+ * Guess how expensive `fn` is, to bias the chunk-size heuristic.
+ * @param {Function} fnToAnalyze
+ * @returns {'light'|'medium'|'heavy'}
+ */
 function analyzeFnComplexity(fnToAnalyze) {
   try {
     const ctorName = fnToAnalyze?.constructor?.name;
@@ -129,6 +139,12 @@ function analyzeFnComplexity(fnToAnalyze) {
   }
 }
 
+/**
+ * Build a worker constructor that runs `fn` inline, for the case where the
+ * caller has no worker source to hand the pool.
+ * @param {Function} fn
+ * @returns {new () => import('./jsdoc-types.js').WorkerLike}
+ */
 function makeInlineWorkerConstructor(fn) {
   return class InlineWorker {
     constructor() {
