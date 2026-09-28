@@ -60,7 +60,6 @@ export class PowerPoolShutdownError extends Error {
  * @public
  */
 export class PowerPool {
-    [x: number]: () => void;
     /**
      * Create a PowerPool.
      *
@@ -579,6 +578,18 @@ export class PowerPool {
      */
     terminate(): void;
     /**
+     * Synchronous disposal hook (TC39 Explicit Resource Management).
+     * Allows `using`-style disposal when supported: `pool[Symbol.dispose]()`.
+     * Must be synchronous (returns `undefined`) so `using` blocks don't await
+     * and leak in-flight work; it performs a hard stop via `shutdown()`.
+     */
+    /**
+     * Named alias for the `Symbol.dispose` implementation, so callers who do not
+     * want to reach for the symbol still have something to call.
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
      * Return stats for debugging and telemetry.
      * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
      */
@@ -669,6 +680,12 @@ export class PowerPool {
      * @private
      */
     private _dispatchQueuedTasks;
+    [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook. Drains outstanding work and then terminates.
+     * Use `await pool[Symbol.asyncDispose]()` in environments that support it.
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type WorkerObj = import("./jsdoc-types.js").WorkerObj;
 /**

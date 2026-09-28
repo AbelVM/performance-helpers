@@ -1,5 +1,4 @@
 export class PowerRealtimeHub {
-    [x: number]: () => void;
     /**
      * @param {HubOptions} options
      */
@@ -81,6 +80,16 @@ export class PowerRealtimeHub {
      */
     close(): void;
     /**
+  
+     * Named alias for the `Symbol.dispose` implementation, so callers who do not
+  
+     * want to reach for the symbol still have something to call.
+  
+     * @returns {void}
+  
+     */
+    dispose(): void;
+    /**
      * Queue a message for one subscriber, applying the slow-consumer policy when
      * the queue is full.
      * @private
@@ -125,6 +134,7 @@ export class PowerRealtimeHub {
      * @private
      */
     private _notify;
+    [Symbol.dispose](): void;
 }
 export default PowerRealtimeHub;
 /**

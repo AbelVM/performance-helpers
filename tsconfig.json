@@ -1,6 +1,14 @@
 {
   "compilerOptions": {
     "target": "ES2022",
+    // Explicit, because the *emit* depends on it. Without `ESNext.Disposable`,
+    // `Symbol.dispose` is an unresolved name at declaration time and TypeScript
+    // falls back to emitting `[x: number]: () => void;` on every class with a
+    // disposal method - an index signature that leaks into the published types
+    // and makes every other property access on the instance `() => void`.
+    // ES2023 + DOM matches what the code actually uses (structuredClone,
+    // performance.now, Object.hasOwn-era builtins).
+    "lib": ["ES2023", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "esModuleInterop": true,

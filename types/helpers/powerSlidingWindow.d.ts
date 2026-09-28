@@ -8,8 +8,8 @@ export class PowerSlidingWindow {
      * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
      */
     constructor(options?: {});
-    capacity: number;
-    windowMs: number;
+    capacity: number | null | undefined;
+    windowMs: number | null | undefined;
     _timestamps: PowerQueue;
     /**
      * Remove timestamps older than now - windowMs.

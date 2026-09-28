@@ -1,6 +1,6 @@
 {
   "name": "performance-helpers",
-  "version": "2.0.0",
+  "version": "1.0.3",
   "description": "Performance toolbox",
   "keywords": [
     "node",
@@ -233,13 +233,21 @@
     "bench:cache": "node bench/run.js cache",
     "types:generate": "tsc --project tsconfig.json --emitDeclarationOnly --declaration --allowJs --outDir types --declarationMap false",
     "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs",
-    "prepublishOnly": "npm run lint && npm run test && npm run test:types && npm run build && npm run types:generate",
+    "types:drift": "git diff --exit-code -- types",
+    "typecheck:ratchet": "node scripts/typecheck-ratchet.cjs",
+    "verify": "npm run lint && npm run test && npm run typecheck:ratchet && npm run build && npm run types:generate && npm run types:drift",
+    "prepublishOnly": "npm run verify",
+    "changeset": "changeset",
+    "changeset:status": "changeset status",
+    "release:version": "changeset version && npm run types:generate && git add -A",
+    "release:publish": "changeset publish",
     "test:types": "tsc --noEmit --project tsconfig.types.json"
   },
   "engines": {
     "node": ">=22.12.0"
   },
   "devDependencies": {
+    "@changesets/cli": "3.0.3",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.0",
     "@vitest/coverage-v8": "^5.0.2",

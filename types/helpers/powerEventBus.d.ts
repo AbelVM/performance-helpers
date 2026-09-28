@@ -21,7 +21,7 @@ export class PowerEventBus {
     _maxListeners: number;
     _weak: boolean;
     _fr: FinalizationRegistry<any> | null;
-    _finalizationRefs: WeakMap<object, any>;
+    _finalizationRefs: WeakMap<WeakKey, any>;
     _eventFinalizationRefs: Map<any, any>;
     _ensureFinalizationRegistry(): FinalizationRegistry<any> | null;
     /**
@@ -102,6 +102,23 @@ export class PowerEventBus {
      * @param {string} [event]
      */
     clear(event?: string): void;
+    /**
+     * Release every listener, and reset the `FinalizationRegistry` so the
+     * registry's retained callbacks become garbage.
+     *
+     * Idempotent, and safe to call while the bus is idle. Exists so a bus works
+     * with `using` / `await using` (see {@link PowerEventBus.[Symbol.dispose]})
+     * and gives callers an explicit name to call.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
+     * Alias for {@link PowerEventBus#dispose}, so `using bus = new PowerEventBus()`
+     * releases the listeners and the finalization registry at scope exit.
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }
 export default PowerEventBus;
 export type PowerEventBusOptions = import("./jsdoc-types.js").PowerEventBusOptions;

@@ -11,7 +11,7 @@
     // `performance.now` and `Object.hasOwn`-era builtins, none of which are in
     // the ES2020 default lib. Without this the run reported ~60 phantom
     // "cannot find name" errors for things the runtime definitely has.
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": ["ES2023", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     // @types/node supplies `process`, `Buffer` and the Worker types. Without it
     // `src/utils/now.js` alone produced 8 "Cannot find name 'process'" errors.
     "types": ["node"]

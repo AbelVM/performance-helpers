@@ -34,19 +34,24 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # Validates the JSDoc that backs the published `types/*.d.ts`. The
-      # `types:generate` script only *emits* declarations (`checkJs: false`),
-      # so before this step existed the shipped types were never checked.
+      # Ratchets the TypeScript debt instead of merely reporting it.
       #
-      # NOTE: non-blocking. `tsconfig.check.json` turns on `checkJs` and
-      # currently reports ~494 pre-existing errors spread across every module
-      # (the JSDoc has never been type-checked). It runs on every build so the
-      # count is visible and ratcheting is possible, but it must not block
-      # unrelated work until the debt is cleared. Flip `continue-on-error` to
-      # false once it reaches zero.
-      - name: Typecheck (non-blocking, see comment)
-        continue-on-error: true
-        run: npm run typecheck
+      # `types:generate` only *emits* declarations (`checkJs: false`), so before
+      # this existed the shipped `types/*.d.ts` were never checked at all. They
+      # are now checked two ways, and the two projects are the same two the
+      # release gate runs:
+      #   tsconfig.check.json  internal `checkJs` over JSDoc that has never been
+      #                         type-checked (pre-existing debt)
+      #   tsconfig.types.json  the generated declarations compiled as a
+      #                         downstream TypeScript consumer would
+      #
+      # Neither is at zero and neither can be, without a large unrelated change.
+      # The gate is on *direction*: the count may fall, never rise. That is what
+      # turns ~593 errors into a measurable series instead of a number nobody
+      # looks at again. `node scripts/typecheck-ratchet.cjs --verbose` prints the
+      # full output; `--update` re-baselines after a deliberate increase.
+      - name: Typecheck (debt ratchet)
+        run: npm run typecheck:ratchet
 
       # `test` alone does not enforce the thresholds configured in
       # vitest.config.js - they only apply under `--coverage`.
@@ -74,15 +79,11 @@ jobs:
             console.log('cjs ok, p99.9=' + p);
           "
 
-      # Compiles test/types.test-d.ts against the generated declarations, as a
-      # downstream TypeScript consumer would. This is what actually protects the
-      # shipped .d.ts: `types:generate` only emits them.
-      - name: Consumer type test
-        continue-on-error: true
-        run: npm run test:types
-
+      # `types/` is committed, so the only way it can drift from `src/` is for
+      # someone to change a JSDoc and forget to regenerate. Regenerate, then
+      # require the tree to be clean.
       - name: Verify types are in sync with src
-        run: npm run types:generate && git diff --exit-code -- types
+        run: npm run types:generate && npm run types:drift
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4

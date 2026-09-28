@@ -118,8 +118,24 @@ export class PowerTTLMap {
      */
     forEach(cb: Function, thisArg?: any): void;
     /**
+     * Release every resource this instance holds.
+     *
+     * Idempotent, and safe to call while the instance is idle. Exists so the
+     * instance works with `using` / `await using` and gives callers an explicit
+     * name to call.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
      * Default iterator yielding `[key, value]` pairs for non-expired entries.
      */
     [Symbol.iterator](): IterableIterator<[any, any]>;
+    /**
+     * Alias for {@link dispose}, so `using x = new X()` releases the instance
+     * deterministically at scope exit.
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }
 export default PowerTTLMap;

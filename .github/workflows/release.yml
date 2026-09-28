@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Releases must not be cancelled halfway. CI (`.github/workflows/ci.yml`)
+  # uses the opposite setting, on purpose.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # A change that reaches users has to say so, in the changelog, in the PR that
+  # makes it. `changeset status` exits 1 when the package changed with no
+  # changeset. For a change that genuinely needs no release (docs, tests, an
+  # internal refactor), `npx changeset add --empty` is the escape hatch.
+  changeset:
+    name: changeset
+    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npx changeset status --since=origin/${{ github.base_ref }}
+
+  # Cuts the version. `release:version` runs `changeset version`, regenerates the
+  # committed `types/*.d.ts`, and stages the result; the action then opens (or
+  # updates) a "chore: version packages" PR. That PR is the reviewable record of
+  # exactly what the next release contains, and merging it is what publishes.
+  version:
+    name: version packages
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # The action authenticates with GITHUB_TOKEN explicitly below.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: npm ci
+
+      - uses: changesets/action@v1
+        with:
+          version: npm run release:version
+          commit: 'chore: version packages'
+          title: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # Runs on the push that merges the version PR. `changeset publish` no-ops when
+  # the version on npm already matches package.json, so a push to main that did
+  # not come from a version PR is a cheap no-op.
+  publish:
+    name: publish
+    needs: version
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Granted so npm provenance can be switched on, but not switched on yet -
+      # see the note at the bottom of this file.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.12'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      # devDependencies are not optional here: `prepublishOnly` runs the whole
+      # verify gate, which needs eslint, vitest, vite and typescript.
+      - run: npm ci
+
+      # `release:publish` is only `changeset publish`. The real gate is
+      # `prepublishOnly` -> `npm run verify`, which npm runs as part of every
+      # publish: lint, the full test suite, the type-debt ratchet, the build, and
+      # a check that the committed `types/` still matches `src/`. Defining it
+      # once there means a maintainer running `npm publish` by hand is protected
+      # by exactly the same gate as this workflow.
+      - uses: changesets/action@v1
+        with:
+          publish: npm run release:publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # `actions/setup-node` writes an .npmrc that interpolates
+          # NODE_AUTH_TOKEN, and that is the variable `npm publish` actually
+          # reads. NPM_TOKEN is what the changesets docs use; set both rather
+          # than guess.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # Provenance: add `NPM_CONFIG_PROVENANCE: true` here to publish signed
+          # build attestations. The `id-token: write` permission above is
+          # already granted for it. Left off until it has been observed working
+          # on this repository, because it fails at the very last step of a
+          # release - after the version PR has already been merged.

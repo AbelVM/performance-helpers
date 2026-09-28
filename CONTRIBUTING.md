@@ -33,7 +33,8 @@ npm install
 2. Keep public APIs stable unless the change explicitly requires API work.
 3. Add or update tests for behavior changes.
 4. Update the relevant guide or README entry when user-facing behavior changes.
-5. Run the relevant validation commands before opening a PR.
+5. Add a changeset for anything a consumer can observe (see [Releases](#releases)).
+6. Run `npm run verify` before opening a PR.
 
 ## Useful commands
 
@@ -90,6 +91,84 @@ Run the full validation pipeline:
 ```bash
 npm run build:full
 ```
+
+Run the same gate that runs before every publish:
+
+```bash
+npm run verify
+```
+
+`verify` is `lint` + `test` + the type-debt ratchet + `build` + a check that
+`types/` still matches `src/`. It is what `prepublishOnly` calls, so
+`npm publish` and CI can never disagree about what "green" means.
+
+## Type checking and type debt
+
+Two TypeScript projects exist, and both are wired into the release gate:
+
+| Command | What it checks |
+| --- | --- |
+| `npm run typecheck` | `tsconfig.check.json` - the JSDoc in `src/`, with `checkJs` on. Internal quality. |
+| `npm run test:types` | `tsconfig.types.json` - the generated `types/*.d.ts` compiled the way a downstream TypeScript consumer would compile them, with no `@types/node`. |
+| `npm run typecheck:ratchet` | Both of the above, as a gate on the **total** error count. |
+
+Neither project is at zero, and neither can be fixed in one sitting, so the
+gate is on direction rather than on zero: **the count may fall, never rise.**
+
+```bash
+npm run typecheck:ratchet              # the gate
+npm run typecheck:ratchet -- --verbose # ... with the full tsc output
+npm run typecheck:ratchet -- --update  # print the new BASELINE line
+```
+
+`BASELINE` lives at the top of `scripts/typecheck-ratchet.cjs`. If your change
+*fixes* type errors, lower it. If your change *adds* them, fix them - do not
+raise the ceiling to make the build pass. A genuine exception (a new file that
+is itself known debt) should raise it, and say so in the PR, so the increase is
+deliberate rather than accidental.
+
+`npm run test:types` is the one that matters for consumers: it is the only thing
+verifying the declarations that actually ship. If you change public JSDoc, run
+`npm run types:generate` and commit the result.
+
+## Releases
+
+Releases are automated with [changesets](https://github.com/changesets/changesets).
+**Never bump `version` in `package.json` by hand, and never run `npm publish`
+by hand** - the workflow owns both.
+
+The loop:
+
+1. On your branch, add a changeset for anything a consumer can observe:
+
+   ```bash
+   npm run changeset
+   ```
+
+   Choose `major` / `minor` / `patch` and write the entry for the reader of the
+   changelog, not for the reader of the diff. For a change that genuinely needs
+   no release (docs, tests, an internal refactor), use
+   `npx changeset add --empty` instead - CI requires a changeset on any PR that
+   touches the package.
+
+2. Open a PR. CI runs the full gate, including `changeset status`.
+
+3. On merge to `main`, the **Release** workflow opens a *"chore: version
+   packages"* PR containing the version bump, the regenerated `types/*.d.ts`,
+   and `CHANGELOG.md`. That PR is the reviewable record of what the release
+   contains.
+
+4. Merging that PR publishes to npm. The publish step runs `prepublishOnly`, so
+   the gate applies to releases exactly as it applies locally.
+
+To cut a release by hand instead of waiting for CI:
+
+```bash
+npm run release:version   # changeset version + regenerate types + stage
+npm run release:publish   # changeset publish (runs prepublishOnly first)
+```
+
+`.changeset/README.md` covers the changeset format in more detail.
 
 ## Coding guidelines
 

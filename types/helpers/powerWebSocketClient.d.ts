@@ -61,7 +61,6 @@ export const READY_STATE: Readonly<{
  * client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
  */
 export class PowerWebSocketClient {
-    [x: number]: () => void;
     /**
      * @param {WebSocketClientOptions} options
      */
@@ -155,6 +154,16 @@ export class PowerWebSocketClient {
      * @returns {void}
      */
     close(code?: number, reason?: string): void;
+    /**
+  
+     * Named alias for the `Symbol.dispose` implementation, so callers who do not
+  
+     * want to reach for the symbol still have something to call.
+  
+     * @returns {void}
+  
+     */
+    dispose(): void;
     /**
      * Send a message, applying back-pressure.
      *
@@ -300,6 +309,7 @@ export class PowerWebSocketClient {
      * @private
      */
     private _emit;
+    [Symbol.dispose](): void;
 }
 export default PowerWebSocketClient;
 export type WebSocketReadyState = "connecting" | "open" | "closing" | "closed";

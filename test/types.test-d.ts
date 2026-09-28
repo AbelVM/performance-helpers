@@ -11,7 +11,8 @@
  * Anything that fails is a broken promise, regardless of what the JSDoc looks
  * like internally.
  *
- * @see scripts/test-types.mjs
+ * @see tsconfig.types.json
+ * @see scripts/typecheck-ratchet.cjs
  */
 import {
   PowerCache,

@@ -17,7 +17,6 @@
  * else setTimeout(doWork, limiter.retryAfter());
  */
 export class PowerGCRA {
-    [x: number]: () => void;
     /**
      * @param {PowerGCRAOptions} options
      */
@@ -92,6 +91,7 @@ export class PowerGCRA {
     };
     /** @returns {void} */
     dispose(): void;
+    [Symbol.dispose](): void;
 }
 export default PowerGCRA;
 export type PowerGCRAOptions = {

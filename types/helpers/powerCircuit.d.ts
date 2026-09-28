@@ -37,6 +37,22 @@ export class PowerCircuit {
      * @returns {void}
      */
     reset(): void;
+    /**
+     * Release every resource this instance holds.
+     *
+     * Idempotent, and safe to call while the instance is idle. Exists so the
+     * instance works with `using` / `await using` and gives callers an explicit
+     * name to call.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
+     * Alias for {@link dispose}, so `using x = new X()` releases the instance
+     * deterministically at scope exit.
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }
 export default PowerCircuit;
 export type PowerCircuitOptions = import("./jsdoc-types.js").PowerCircuitOptions;

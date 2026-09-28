@@ -26,23 +26,36 @@ export function intAtLeast(value: any, min?: number, fallback?: number): number;
  * nothing.
  *
  * @param {any} value - The option value.
- * @param {object} spec - Validation spec.
+ * @param {object} spec - Validation spec. The `spec.*` tags are what bind the
+ *   property types; declaring it as a bare `{object}` with no property tags
+ *   makes every field `any`.
  * @param {string} spec.name - Option name, used in the error message.
  * @param {string} spec.className - Constructing class name.
  * @param {number} [spec.min=0] - Smallest acceptable value.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
- * @param {any} [spec.fallback] - Value used when `undefined`/`null` is passed.
- *   When omitted, `undefined` is passed through unchanged.
- * @returns {number|any}
+ * @param {number|null|undefined} [spec.fallback] - Value used when
+ *   `undefined`/`null` is passed. When omitted the value passes through
+ *   unchanged (BUG-024).
+ * @returns {number|null|undefined} The validated number, `spec.fallback`, or the
+ *   original value.
+ *
+ * @remarks This was declared `number|any`, which TypeScript collapses to `any`.
+ *   That was not cosmetic: it made every field assigned from this helper emit as
+ *   `any` in the published `types/*.d.ts` (`capacity`, `tokens`, `refillRate`,
+ *   `maxEntries`, `maxWeight`, `maxPoolSize`, `_maxSize`), *and* it silenced
+ *   ~25 null-safety diagnostics across `powerBatch`/`powerCache`/`powerQueue`/
+ *   `powerSlidingWindow`/`powerThrottle`, because `any` satisfies anything. Those
+ *   diagnostics are real - see QUAL-008 - and the honest return type is what
+ *   makes them countable.
  * @private
  */
-export function assertLimit(value: any, { name, className, min, allowInfinity, fallback }: {
+export function assertLimit(value: any, spec: {
     name: string;
     className: string;
     min?: number | undefined;
     allowInfinity?: boolean | undefined;
-    fallback?: any;
-}): number | any;
+    fallback?: number | null | undefined;
+}): number | null | undefined;
 /**
  * Validate an option that must be a function (or explicitly null/undefined).
  * @param {any} value

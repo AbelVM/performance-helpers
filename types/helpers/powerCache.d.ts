@@ -24,7 +24,6 @@ export function simpleArgsKey(...args: any[]): string;
  * @public
  */
 export class PowerCache {
-    [x: number]: () => void;
     /**
      * Create a PowerCache.
      * @param {Object} [options]
@@ -54,9 +53,9 @@ export class PowerCache {
         maxCleanupPerTick?: number | undefined;
         eagerCleanupOnRead?: boolean | undefined;
     }, ...args: any[]);
-    maxEntries: any;
-    maxWeight: any;
-    maxPoolSize: any;
+    maxEntries: number | null | undefined;
+    maxWeight: number | null | undefined;
+    maxPoolSize: number | null | undefined;
     weightFn: (arg0: any) => number;
     defaultTTL: number;
     rejectOversized: boolean;
@@ -233,6 +232,23 @@ export class PowerCache {
      * @returns {void}
      */
     private _insertIntoProbation;
+    /**
+     * Unlink a node and update every piece of bookkeeping that depends on it.
+     *
+     * Four call sites - expiry, eviction, `delete()` and the cleanup sweep -
+     * each had their own copy of this sequence, which is exactly the kind of
+     * duplication that lets one path drift. The only difference between them is
+     * that eviction sweeps must also advance `_evictionCandidate`, hence the
+     * flag.
+     *
+     * @private
+     * @param {CacheNode} node - Node to unlink. Must currently be in the list.
+     * @param {Object} [options]
+     * @param {boolean} [options.advanceEvictionCandidate=false] - Also move the
+     *   eviction cursor past the removed node.
+     * @returns {CacheNode|null} The node that followed it, now at this position.
+     */
+    private _unlinkNode;
     /**
      * Remove a node from the linked list without freeing it. The node's
      * `prev`/`next` references are updated on neighbors and the node's links
@@ -454,6 +470,16 @@ export class PowerCache {
      */
     stopCleanup(): void;
     /**
+     * Synchronous disposal hook (TC39 Explicit Resource Management).
+     * Stops any background cleanup and clears the cache.
+     */
+    /**
+     * Named alias for the `Symbol.dispose` implementation, so callers who do not
+     * want to reach for the symbol still have something to call.
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
      * Prototype tick used by the cleanup timer loop. Separated to avoid
      * allocating a per-call closure inside `startCleanup()`.
      * @private
@@ -508,6 +534,13 @@ export class PowerCache {
      * @param {'LRU'|'MRU'} [order='MRU']
      */
     values(order?: "LRU" | "MRU"): Generator<any, void, unknown>;
+    [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook. Provided for symmetry with `using`/`await using`.
+     * Cache cleanup is synchronous so this simply performs the same actions and
+     * returns a resolved Promise for await compatibility.
+     */
+    [Symbol.asyncDispose](): Promise<void>;
     [Symbol.iterator](): IterableIterator<[any, any]>;
 }
 /**
@@ -554,7 +587,7 @@ export class PowerMemoizer {
     _defaultMemoizeOptions: {};
     run: (...args: any[]) => any;
     _originalFn: Function | null;
-    _receiverIds: WeakMap<object, any>;
+    _receiverIds: WeakMap<WeakKey, any>;
     _nextReceiverId: number;
     _fnWrapper: Function | undefined;
     /**
@@ -621,6 +654,22 @@ export class PowerMemoizer {
      * @returns {Object}
      */
     stats(): Object;
+    /**
+     * Named alias for the `Symbol.dispose` implementation, so callers who do not
+     * want to reach for the symbol still have something to call.
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
+     * Release the underlying cache.
+     *
+     * `PowerMemoizer` owns no state of its own - it delegates to a `PowerCache`
+     * - so disposal forwards to it. The inner cache is not replaced, so a
+     * disposed memoizer's `cache` reference stays readable.
+     *
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }
 /**
  * PowerTimedCache
@@ -640,7 +689,6 @@ export class PowerMemoizer {
  * @public
  */
 export class PowerTimedCache {
-    [x: number]: () => void;
     /**
      * @param {number} ttl - Default TTL in milliseconds for entries.
      * @param {Object} [options]
@@ -677,6 +725,14 @@ export class PowerTimedCache {
     entries(order: any): IterableIterator<[any, any]>;
     keys(order: any): Generator<any, void, unknown>;
     values(order: any): Generator<any, void, unknown>;
+    /**
+     * Named alias for the `Symbol.dispose` implementation, so callers who
+     * do not want to reach for the symbol still have something to call.
+     * @returns {void}
+     */
+    dispose(): void;
+    [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type CacheNode = import("./jsdoc-types.js").CacheNode;
 export type PowerCacheOptions = import("./jsdoc-types.js").PowerCacheOptions;

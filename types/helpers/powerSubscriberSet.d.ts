@@ -27,7 +27,7 @@ export class PowerSubscriberSet {
     _weak: boolean;
     _maxListeners: number;
     _listeners: Set<any>;
-    _onceMap: WeakMap<object, any>;
+    _onceMap: WeakMap<WeakKey, any>;
     _finalization: FinalizationRegistry<any> | null;
     /** Number of currently live listeners. */
     get size(): number;
@@ -71,8 +71,25 @@ export class PowerSubscriberSet {
     _makeEntry(fn: any): any;
     _deref(entry: any): any;
     /**
+     * Release every resource this instance holds: the listener registry is
+     * emptied and the `FinalizationRegistry` is replaced, so its retained
+     * callbacks become collectable.
+     *
+     * Idempotent, and safe to call while the instance is idle. Exists so the
+     * instance works with `using` / `await using`.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
      * Iterate live listeners in insertion order.
      * @yields {Function}
      */
     [Symbol.iterator](): Generator<any, void, unknown>;
+    /**
+     * Alias for {@link dispose}, so `using set = new PowerSubscriberSet()`
+     * releases the listeners at scope exit.
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }

@@ -8,7 +8,6 @@
  * @public
  */
 export class PowerBulkhead {
-    [x: number]: () => void;
     /**
      * @param {Object} [options]
      * @param {number} [options.partitions=4] Number of isolated execution partitions.
@@ -115,6 +114,7 @@ export class PowerBulkhead {
     _choosePartition(key: any): number;
     _hashKey(value: any): number;
     _resolveDrainWaitersIfIdle(): void;
+    [Symbol.dispose](): void;
 }
 export default PowerBulkhead;
 import { PowerPermitGate } from './powerPermitGate.js';

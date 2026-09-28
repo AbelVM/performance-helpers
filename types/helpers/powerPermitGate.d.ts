@@ -64,5 +64,21 @@ export class PowerPermitGate {
     }): void;
     _makeRelease(): () => void;
     _grant(): () => void;
+    /**
+     * Release every resource this instance holds: queued waiters are rejected and
+     * the listener registry is emptied.
+     *
+     * Idempotent, and safe to call while the instance is idle. Exists so the
+     * instance works with `using` / `await using`.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
+     * Alias for {@link dispose}, so `using x = new X()` releases the instance
+     * deterministically at scope exit.
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }
 import { PowerQueue } from './powerQueue.js';
