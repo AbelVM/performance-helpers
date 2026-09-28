@@ -6,8 +6,14 @@
  * - Avoid importing the `buffer` polyfill; fall back to Node Buffer only if necessary.
  *
  */
-// `undefined` = not-yet-checked, object = available encoder/decoder, `false` = unavailable
+// Lazily-resolved codec cache. Three states, and the comment above used to be
+// the only record of them:
+//   `undefined` - not probed yet
+//   `false`     - probed, and this runtime has no encoder/decoder
+//   an object   - the resolved codec
+/** @type {(BufferEncoder|false|undefined)} */
 let _encoder;
+/** @type {(BufferDecoder|false|undefined)} */
 let _decoder;
 
 /**
@@ -18,6 +24,12 @@ let _decoder;
  * @typedef {import('./jsdoc-types.js').BufferDecoder} BufferDecoder
  */
 
+/**
+ * Resolve a UTF-8 encoder, caching the answer - including "there is none".
+ *
+ * @returns {?BufferEncoder} `null` when the runtime has neither
+ *   `TextEncoder` nor Node's `Buffer`.
+ */
 function getEncoder() {
   if (_encoder !== undefined) return _encoder === false ? null : _encoder;
   if (typeof TextEncoder !== 'undefined') {
@@ -34,6 +46,12 @@ function getEncoder() {
   return null;
 }
 
+/**
+ * Resolve a UTF-8 decoder, caching the answer - including "there is none".
+ *
+ * @returns {?BufferDecoder} `null` when the runtime has neither
+ *   `TextDecoder` nor Node's `Buffer`.
+ */
 function getDecoder() {
   if (_decoder !== undefined) return _decoder === false ? null : _decoder;
   if (typeof TextDecoder !== 'undefined') {
