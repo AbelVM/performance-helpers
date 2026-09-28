@@ -164,6 +164,17 @@ required is the worker reply shape.
   cannot model — private fields, domain objects, anything with its own notion of
   equality. Return `undefined` for "no opinion" and the walk continues.
 
+- **`PowerCache` `{ admission: 'tinylfu' }`** — a 4-bit Count-Min frequency
+  filter (W-TinyLFU) in front of the cache, off by default. An LRU admits
+  anything that misses, so a one-off scan evicts the whole working set; a
+  frequency filter refuses an insert when the entry it would evict is still
+  wanted. Measured over a 40-key working set hit by a 500-key scan: plain `lru`
+  keeps **0 of 40**, `lru` + `tinylfu` keeps **40 of 40**. Worth being plain
+  that `policy: 'slru'` already reached 40/40 on that workload — TinyLFU brings
+  *plain LRU* up to the same place rather than compounding with it. Reads count
+  towards frequency, `maxEntries` is still honoured exactly, and `clear()` drops
+  the history with the entries.
+
 **Types**
 
 The shipped `types/*.d.ts` are what TypeScript consumers actually compile, and

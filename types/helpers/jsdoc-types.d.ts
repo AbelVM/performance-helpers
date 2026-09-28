@@ -703,6 +703,14 @@ export type PowerCacheOptions = {
      */
     onError?: ((arg0: any, arg1: string) => void) | null | undefined;
     /**
+     * - Admission filter in front
+     * of the eviction policy. `'tinylfu'` runs a 4-bit Count-Min frequency
+     * sketch and refuses an insert when the entry it would evict is still wanted,
+     * which is what makes a cache survive a one-off scan. Only consulted at
+     * capacity, and a tie keeps the incumbent.
+     */
+    admission?: "none" | "tinylfu" | undefined;
+    /**
      * - Eviction policy. `'slru'` (opt-in) splits
      * the list into probation and protected segments and promotes on access, which
      * resists a one-off sequential scan. Defaults to `'lru'`.

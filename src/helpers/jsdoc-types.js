@@ -541,6 +541,11 @@ export {};
  * @property {?(function(*, string):void)} [onError] - Invoked as `onError(err, message)`
  *   whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`
  *   callback, or a failing `weightFn`.
+ * @property {'none'|'tinylfu'} [admission='none'] - Admission filter in front
+ *   of the eviction policy. `'tinylfu'` runs a 4-bit Count-Min frequency
+ *   sketch and refuses an insert when the entry it would evict is still wanted,
+ *   which is what makes a cache survive a one-off scan. Only consulted at
+ *   capacity, and a tie keeps the incumbent.
  * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits
  *   the list into probation and protected segments and promotes on access, which
  *   resists a one-off sequential scan. Defaults to `'lru'`.

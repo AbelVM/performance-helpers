@@ -38,7 +38,7 @@ export class PowerCache {
      * @param {PowerCacheOptions} [options]
      * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, }?: PowerCacheOptions, ...args: any[]);
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, admission, }?: PowerCacheOptions, ...args: any[]);
     maxEntries: number;
     maxWeight: number;
     maxPoolSize: number;
@@ -69,6 +69,7 @@ export class PowerCache {
     _misses: number;
     _evictions: number;
     _rejected: number;
+    _rejectedAdmission: number;
     _expirations: number;
     _cleanupTimer: any;
     _cleanupRunning: boolean;
@@ -86,6 +87,13 @@ export class PowerCache {
      * resistant to a one-off sequential scan evicting the working set.
      */
     _policy: string;
+    /**
+     * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
+     * admission is off. See {@link SmallLfuSketch}.
+     * @type {SmallLfuSketch|null}
+     * @private
+     */
+    private _sketch;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:

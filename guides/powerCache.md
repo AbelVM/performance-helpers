@@ -18,6 +18,7 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 | `maxCleanupPerTick`  |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                |
 | `eagerCleanupOnRead` |                    `boolean` |    `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior).              |
 | `policy`             |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`. |
+| `admission`          |                     `'none'` |   `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan). |
 
 ### API
 
@@ -249,6 +250,51 @@ const memo = pm.memoize(fetchUserFn);
 // call the memoized function directly
 await memo(1);
 ```
+
+### TinyLFU admission: resisting a scan
+
+`{ admission: 'tinylfu' }` adds a frequency filter in front of the cache. An LRU
+admits anything that misses, so a one-off scan over a larger key space evicts
+the entire working set — every scan key is the *most recently used* by
+definition. A frequency filter asks a different question: is the thing I would
+evict still wanted?
+
+Measured, 40-key working set warmed over 5 passes, then hit by a 500-key one-off
+scan:
+
+| Configuration | Working set surviving | `size` | Insertions refused |
+|---|---:|---:|---:|
+| `policy: 'lru'` | **0 / 40** | 40 | 0 |
+| `policy: 'lru'`, `admission: 'tinylfu'` | **40 / 40** | 40 | 500 |
+| `policy: 'slru'` | 40 / 40 | 40 | 0 |
+| `policy: 'slru'`, `admission: 'tinylfu'` | 40 / 40 | 40 | 500 |
+
+**Worth being plain about the third and fourth rows: `policy: 'slru'` already
+resists this scan**, and it shipped earlier. TinyLFU's contribution is bringing
+*plain LRU* up to the same place, not compounding with SLRU. The two are
+complementary rather than additive on this workload.
+
+**Off by default.** The sketch costs memory and a hash per access, and a
+`slru` cache already behaves this way.
+
+Three things that had to be right, each of which was wrong first and caught by
+the benchmark rather than by review:
+
+- **The filter only applies at capacity.** A brand-new key's estimate is 0, so
+  comparing it against an incumbent below capacity refuses every insert after
+  the first — measured 200 insertions rejected and `size` 1. Admission is about
+  what to *displace*, so it needs something to displace.
+- **Rejection happens at the insert, not inside the eviction sweep.** Returning
+  from `_evictIfNeeded` to reject skipped the sweep and let the cache grow to 77
+  entries against a limit of 10.
+- **A tie keeps the incumbent.** A scan key and the previous scan key both sit at
+  estimate 0, and refusing that tie is the entire mechanism.
+
+The half-life is `100 × maxEntries`, not the sketch's own default of 10
+operations — at 10 a reset fired every ten `set`/`get` and halved a working set
+that had only just been learned. Reads count towards frequency, not just writes,
+so a read-mostly cache is not judged on a history it never had. `clear()` drops
+the history with the entries.
 
 ### `hasEqual` and deep comparison limits
 

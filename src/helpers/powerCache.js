@@ -1,3 +1,12 @@
+import { SmallLfuSketch } from '../utils/smallLfu.js';
+
+/**
+ * Half-life, as a multiple of `maxEntries`. TinyLFU's guidance is ~10x, but the
+ * sketch here is incremented on `get` as well as `set`, so a short warm-up can
+ * trip a reset and halve a working set that had only just been learned. Tuned by
+ * measurement - see the scan-resistance table in guides/powerCache.md.
+ */
+const ADMISSION_SAMPLE_MULTIPLE = 200;
 /**
  * @typedef {import('./jsdoc-types.js').CacheNode} CacheNode
  */
@@ -112,6 +121,7 @@ export class PowerCache {
     onError = null,
     /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
     policy = 'lru',
+    admission = 'none',
   } = {}) {
     // Basic options validation: when an explicit options argument is provided it must be an object
     if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
@@ -171,6 +181,7 @@ export class PowerCache {
     this._misses = 0;
     this._evictions = 0;
     this._rejected = 0; // rejected oversized insert attempts
+    this._rejectedAdmission = 0; // insert attempts refused by the TinyLFU filter
     this._expirations = 0;
 
     // Backwards-compatible aliases for external access. These were ten
@@ -210,6 +221,26 @@ export class PowerCache {
      * resistant to a one-off sequential scan evicting the working set.
      */
     this._policy = policy === 'slru' ? 'slru' : 'lru';
+
+    /**
+     * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
+     * admission is off. See {@link SmallLfuSketch}.
+     * @type {SmallLfuSketch|null}
+     * @private
+     */
+    this._sketch =
+      admission === 'tinylfu'
+        ? new SmallLfuSketch({
+            // The half-life has to be sized against the working set, not left
+            // at the sketch's own default of 10 operations. At 10 a reset
+            // fired every ten set/get and halved everything, so by the time a
+            // scan began the hot keys had decayed to the same estimate as the
+            // scan keys and the filter admitted every one of them - 0/40 on the
+            // scan-resistance benchmark, exactly as plain LRU does. TinyLFU's own
+            // guidance is roughly 10x the distinct-key count.
+            sampleSize: Math.max(1, ADMISSION_SAMPLE_MULTIPLE * Math.min(this.maxEntries, 1e6)),
+          })
+        : null;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -665,6 +696,44 @@ export class PowerCache {
       this._currentWeight += node.weight || 0;
       this._moveToTail(node);
     } else {
+      // Admission, decided *before* the insert. An LRU evicts the coldest by
+      // recency, which a one-off scan does not disturb: the scan's keys are the
+      // *most* recent by definition, and it walks the working set straight out.
+      // A frequency filter asks a different question - is the thing about to be
+      // evicted still wanted - and refuses the insertion when the incumbent is
+      // the better bet.
+      //
+      // Refusing here rather than inside the eviction sweep matters. An earlier
+      // version returned from `_evictIfNeeded` to reject, which skipped the
+      // sweep entirely and let the cache grow to 77 entries against a limit of
+      // 10. Rejection is about *this key*, so it belongs at the insert.
+      // Only ever consulted at capacity. A frequency filter compares the
+      // challenger's popularity against the victim's, and a brand-new key's
+      // estimate is 0 - so applying the rule below capacity refuses every
+      // insert after the first and the cache can never fill. Measured: 200
+      // insertions rejected, `size` 1. Admission is about what to *displace*,
+      // so it needs something to displace.
+      if (this._sketch && this._map.size >= this.maxEntries) {
+        const incumbent = this._evictionCandidate || this._head;
+        // A key seen for the first time is admitted unconditionally, and that
+        // is the TinyLFU admission window in its simplest form.
+        //
+        // It is also what keeps a decayed incumbent from locking the cache.
+        // The sketch is reset on a half-life, so a working set that has not been
+        // touched for a while sits at estimate 0 alongside a brand-new key's 0,
+        // and a `>=` rule then refuses every insert forever: measured 1/40
+        // surviving, and it broke `policy: 'slru'`'s own scan resistance, which
+        // was 40/40 before. Only a *strictly* hotter incumbent may refuse.
+        // `>=`, so a tie keeps the incumbent. A brand-new key has estimate 0
+        // and the scan's eviction candidate is an earlier scan key also at 0, so
+        // the tie is the signal: neither is wanted, and the incumbent is the
+        // safer of the two to keep because at least it was here first.
+        const challenger = this._sketch.estimate(key);
+        if (incumbent && this._sketch.estimate(incumbent.key) >= challenger) {
+          this._rejectedAdmission += 1;
+          return this;
+        }
+      }
       const node = this._allocNode(key, value, w, expiresAt);
       this._map.set(key, node);
       this._append(node);
@@ -674,7 +743,10 @@ export class PowerCache {
     // entry's weight can push the cache over `maxWeight`, and only the insert
     // branch used to trigger eviction — leaving the cache permanently over
     // budget until the next insert.
-    this._evictIfNeeded();
+    // The key is recorded even when the insert is admitted, so the sketch
+    // reflects attempted demand rather than only what survived.
+    this._sketch?.increment(key);
+    this._evictIfNeeded(key);
     return this;
   }
 
@@ -688,6 +760,11 @@ export class PowerCache {
     if (!node) return undefined;
     this._moveToTail(node);
     this._hits++;
+    // A hit is the strongest frequency evidence there is, and TinyLFU is
+    // frequency-driven: without this the sketch only ever sees writes, so a
+    // read-mostly cache would admit one-off writes on the strength of a
+    // history it never had.
+    this._sketch?.increment(key);
     return node.value;
   }
 
@@ -1066,6 +1143,11 @@ export class PowerCache {
     }
     this._head = this._tail = null;
     this._map.clear();
+    // The frequency history goes with the entries. Carrying it across a clear
+    // would let the next admission decisions be made from a workload that no
+    // longer exists.
+    this._sketch?.clear();
+    this._rejectedAdmission = 0;
     this._currentWeight = 0;
     this._cleanupCursor = null;
     this._cleanupCursorValid = false;
