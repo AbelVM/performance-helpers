@@ -379,6 +379,17 @@ ArrayBuffer at index N has already been detached`, a message that reads like a
   the mapper invalidates the cache, so the next `prev` comes from the mapper
   that produced it.
 
+**Docs**
+
+- **New [troubleshooting guide](guides/troubleshooting.md)**, led by the pure-ESM `preloadNode()` failure. It is the most
+  likely first-run problem and it is specific to one environment: `require` does not exist in an ES
+  module's scope at all, so the pool cannot reach `Worker` synchronously and the only way to build a
+  `require` from `node:module` is asynchronous. The guide gives the exact error the pool throws and
+  three fixes — with a recommendation, because the best one is not the obvious one: **pass a factory
+  function** rather than satisfying the preload, since that removes the step instead of paying it. It
+  also covers the framed-vs-plain-object worker mismatch introduced by the 2.0 default codec,
+  `ERR_POOL_QUEUE_FULL` as a load-shedding signal rather than a retry signal, and `setInterval` drift.
+
 **Internal**
 
 - **Formatting, linting and generated types are now enforced at commit time.** Prettier and eslint run over the

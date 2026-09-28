@@ -88,7 +88,10 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 ## When to use what
 
-Check the [Quick Guide](guides/metaGuide.md)
+Check the [Quick Guide](guides/metaGuide.md), or the
+[Troubleshooting guide](guides/troubleshooting.md) if something is already
+misbehaving — it starts with the pure-ESM `preloadNode()` failure, which is the
+most likely thing to go wrong on a first run.
 
 ## Quick start
 

@@ -24,29 +24,29 @@ If you already know the exact helper you want, go straight to its dedicated guid
 
 ## Quick chooser
 
-| If your problem is...                                                 | Start here                                         | Add these when needed                                      | Do not start with                                           |
-| --------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
-| Cache expensive values by key                                         | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function         |
-| Memoize a function call                                               | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control           |
-| Expire keys after a fixed TTL                                         | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights            |
-| Offload CPU-heavy or blocking work                                    | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control              |
-| Write code that runs on any runtime with a worker                     | `WorkerAgnostic`                                   | `PowerPool`                                                | runtime `if (typeof Worker)` branches                       |
-| Move structured values across a byte-stream transport                 | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary              |
-| Fan out to many subscribers without one slow client stalling the rest | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                          |
-| Push to a socket without unbounded client-side buffering              | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                     |
-| Process a very large iterable in parallel                             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle         |
-| Smooth bursts from producers                                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                      |
-| Limit concurrent async work globally                                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block          |
-| Isolate noisy workloads from critical ones                            | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                       |
-| Enforce burst and sustained API quotas                                | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                          |
-| Retry flaky work safely                                               | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                 |
-| Put a hard time budget on work                                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                            |
-| Broadcast events across components                                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure |
-| Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                            |
-| Coordinate callbacks or multi-step async completion                   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                   |
-| Batch near-synchronous calls into one flush                           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                          |
-| Run something on a fixed cadence without drift                   | `PowerCron`                                         | `PowerScheduler` (one flush per turn, not a cadence)        | `setInterval`, which drifts and queues                        |
-| Tell whether a latency regression is yours or the host's                | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site |
+| If your problem is...                                                 | Start here                                         | Add these when needed                                      | Do not start with                                            |
+| --------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------ |
+| Cache expensive values by key                                         | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function          |
+| Memoize a function call                                               | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control            |
+| Expire keys after a fixed TTL                                         | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights             |
+| Offload CPU-heavy or blocking work                                    | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control               |
+| Write code that runs on any runtime with a worker                     | `WorkerAgnostic`                                   | `PowerPool`                                                | runtime `if (typeof Worker)` branches                        |
+| Move structured values across a byte-stream transport                 | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary               |
+| Fan out to many subscribers without one slow client stalling the rest | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                           |
+| Push to a socket without unbounded client-side buffering              | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                      |
+| Process a very large iterable in parallel                             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle          |
+| Smooth bursts from producers                                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                       |
+| Limit concurrent async work globally                                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block           |
+| Isolate noisy workloads from critical ones                            | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                        |
+| Enforce burst and sustained API quotas                                | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                           |
+| Retry flaky work safely                                               | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                  |
+| Put a hard time budget on work                                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                             |
+| Broadcast events across components                                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure  |
+| Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                             |
+| Coordinate callbacks or multi-step async completion                   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                    |
+| Batch near-synchronous calls into one flush                           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                           |
+| Run something on a fixed cadence without drift                        | `PowerCron`                                        | `PowerScheduler` (one flush per turn, not a cadence)       | `setInterval`, which drifts and queues                       |
+| Tell whether a latency regression is yours or the host's              | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site |
 
 ---
 
@@ -410,6 +410,10 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `PowerPermitGate`: Low-level permit primitive used by higher-level gates.
 - `PowerScheduler`: Small flush scheduler for deferred work.
 - `PowerCron`: Drift-free interval scheduler for recurring work.
+
+If something is already misbehaving rather than undecided, start at
+[Troubleshooting](troubleshooting.md) — it leads with the pure-ESM `preloadNode()` failure,
+which is the most likely first-run problem and is specific to one environment.
 
 ### Rate limiting and resilience
 
