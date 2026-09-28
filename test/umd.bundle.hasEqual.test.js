@@ -1,34 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
-import { execSync } from 'child_process';
-import vm from 'vm';
-import path from 'path';
-
-const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
-const code = readFileSync(distFile, 'utf8');
+import { createBundleContext, evalInBundle } from './helpers/umdBundle.js';
 
 describe('UMD bundle deep-equality and logger edge branches', () => {
   it('PowerCache.hasEqual exercises many deep-equality branches', () => {
-    const sandbox = {
-      console,
-      setTimeout,
-      clearTimeout,
-      setInterval,
-      clearInterval,
-      TextEncoder,
-      TextDecoder,
-      globalThis: {},
-    };
-    sandbox.window = sandbox.globalThis;
-    sandbox.self = sandbox.globalThis;
-    sandbox.global = sandbox.globalThis;
-
-    const ctx = vm.createContext(sandbox);
-    vm.runInContext(code, ctx, { filename: distFile });
+    const { ctx } = createBundleContext();
 
     // Run several hasEqual scenarios inside VM to exercise many branches
-    const result = vm.runInContext(
+    const result = evalInBundle(
+      ctx,
       `(function(){
       const lib = (typeof globalThis !== 'undefined' && (globalThis.PerformanceHelpers || globalThis.performanceHelpers)) || (typeof PerformanceHelpers !== 'undefined' && (PerformanceHelpers || performanceHelpers)) || this.PerformanceHelpers || this.performanceHelpers
       const cache = new lib.PowerCache({ maxEntries: 20 })
@@ -63,9 +42,7 @@ describe('UMD bundle deep-equality and logger edge branches', () => {
       const ok5 = cache.hasEqual('set', s2)
 
       return { ok1, ok2, ok3, ok4, ok5 }
-    })()`,
-      ctx,
-      { filename: distFile }
+    })()`
     );
 
     expect(result.ok1).toBe(true);
@@ -76,17 +53,19 @@ describe('UMD bundle deep-equality and logger edge branches', () => {
   });
 
   it('PowerLogger handles missing console methods and lazy args safely', () => {
-    const sandbox = { setTimeout, clearTimeout, setInterval, clearInterval, globalThis: {} };
-    sandbox.window = sandbox.globalThis;
-    sandbox.self = sandbox.globalThis;
-    sandbox.global = sandbox.globalThis;
-    // Provide a console with missing methods
-    sandbox.console = { log: () => {}, warn: () => {} };
+    // A deliberately incomplete sandbox: a console with most methods missing,
+    // and no TextEncoder/TextDecoder. `createBundleContext` accepts overrides
+    // so a bespoke environment is still expressed through the shared helper.
+    const { ctx } = createBundleContext({
+      sandbox: {
+        console: { log: () => {}, warn: () => {} },
+        TextEncoder: undefined,
+        TextDecoder: undefined,
+      },
+    });
 
-    const ctx = vm.createContext(sandbox);
-    vm.runInContext(code, ctx, { filename: distFile });
-
-    const res = vm.runInContext(
+    const res = evalInBundle(
+      ctx,
       `(function(){
       const lib = (typeof globalThis !== 'undefined' && (globalThis.PerformanceHelpers || globalThis.performanceHelpers)) || (typeof PerformanceHelpers !== 'undefined' && (PerformanceHelpers || performanceHelpers)) || this.PerformanceHelpers || this.performanceHelpers
       const logger = new lib.PowerLogger(3)
@@ -94,9 +73,7 @@ describe('UMD bundle deep-equality and logger edge branches', () => {
       try { logger.info(() => 'a', () => { throw new Error('boom') }); } catch (e) { return false }
       try { logger.error('x', () => 'y'); } catch (e) { return false }
       return true
-    })()`,
-      ctx,
-      { filename: distFile }
+    })()`
     );
 
     expect(res).toBe(true);

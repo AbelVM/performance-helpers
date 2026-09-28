@@ -1,34 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
-import { execSync } from 'child_process';
-import vm from 'vm';
-import path from 'path';
-
-const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
-const code = readFileSync(distFile, 'utf8');
+import { createBundleContext, evalInBundle } from './helpers/umdBundle.js';
 
 describe('UMD bundle broader exercise', () => {
   it('runs a wide set of operations to exercise branches', () => {
-    const sandbox = {
-      console,
-      setTimeout,
-      clearTimeout,
-      setInterval,
-      clearInterval,
-      TextEncoder,
-      TextDecoder,
-      Buffer: global.Buffer,
-      globalThis: {},
-    };
-    sandbox.window = sandbox.globalThis;
-    sandbox.self = sandbox.globalThis;
-    sandbox.global = sandbox.globalThis;
+    // `Buffer` is injected so the bundle's Node fallback path is reachable.
+    const { ctx } = createBundleContext({ sandbox: { Buffer: globalThis.Buffer } });
 
-    const ctx = vm.createContext(sandbox);
-    vm.runInContext(code, ctx, { filename: distFile });
-
-    const res = vm.runInContext(
+    const res = evalInBundle(
+      ctx,
       `(function(){
       const lib = (typeof globalThis !== 'undefined' && (globalThis.PerformanceHelpers || globalThis.performanceHelpers)) || (typeof PerformanceHelpers !== 'undefined' && (PerformanceHelpers || performanceHelpers)) || this.PerformanceHelpers || this.performanceHelpers
       const cache = new lib.PowerCache({ maxEntries: 50, maxWeight: 1000 })
@@ -74,9 +53,7 @@ describe('UMD bundle broader exercise', () => {
       const posted = pool.postMessage({a:1})
 
       return { dvOk, bufOk, posted }
-    })()`,
-      ctx,
-      { filename: distFile }
+    })()`
     );
 
     expect(res.dvOk).toBe(true);
