@@ -45,6 +45,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                            |
 | Coordinate callbacks or multi-step async completion                   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                   |
 | Batch near-synchronous calls into one flush                           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                          |
+| Tell whether a latency regression is yours or the host's                | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site |
 
 ---
 
@@ -123,6 +124,8 @@ Use `PowerObserver` for one changing value with subscribers.
 Use `PowerHistogram` for latency distribution and percentile-style telemetry.
 
 Use `PowerLogger` for structured runtime diagnostics and test-friendly output sinks.
+
+Use `PowerEventLoopMonitor` when a latency number went up and you need to know whether the host was busy, rather than guessing.
 
 Use `PowerDefer` when external code resolves a promise later.
 
@@ -422,6 +425,7 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `PowerObserver`: Reactive container for one changing value.
 - `PowerLogger`: Structured runtime logging.
 - `PowerHistogram`: In-process latency and percentile-style telemetry.
+- `PowerEventLoopMonitor`: Event-loop delay histogram and `eventLoopUtilization()`.
 
 ### Coordination and async building blocks
 

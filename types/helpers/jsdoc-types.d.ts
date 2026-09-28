@@ -398,9 +398,53 @@ export type PowerSlidingWindowOptions = {
 export type PowerLoggerOptions = {
     format?: "text" | "json" | undefined;
     name?: string | undefined;
-    formatter?: ((payload: Object) => string | Object | null) | undefined;
-    output?: ((payload: Object | string) => void) | undefined;
+    formatter?: ((payload: PowerLoggerPayload) => string | PowerLoggerPayload | null) | undefined;
+    output?: ((payload: PowerLoggerPayload | string) => void) | undefined;
 };
+/**
+ * The structured record `PowerLogger` builds and hands to `formatter` and to an
+ * `output` sink.
+ *
+ * Named because `_emit` builds it as an object literal and then both adds
+ * `name` to it conditionally and *replaces* it wholesale with whatever
+ * `formatter` returns - so an inline shape could never have described it: `name`
+ * did not exist on it, and the formatter's `Object` return was not assignable
+ * back to it.
+ *
+ * `level` is the textual label ('error', 'warn', ...) rather than the numeric
+ * threshold that gates it, and `format` echoes the sink's own mode so a sink can
+ * format for itself.
+ */
+export type PowerLoggerPayload = {
+    level: string;
+    /**
+     * - The resolved log arguments: the sole argument when
+     * there was one, otherwise the whole array.
+     */
+    msg: any;
+    /**
+     * - `nowMs()` at emit time.
+     */
+    ts: number;
+    format: "text" | "json";
+    /**
+     * - The logger's `name`, when it has one.
+     */
+    name?: string | undefined;
+};
+/**
+ * Extra per-call switches `_emit` accepts. `msgArray` forces `msg` to stay an
+ * array even when a single argument was passed, which is what `table()` needs.
+ */
+export type PowerLoggerEmitOptions = {
+    msgArray?: boolean | undefined;
+};
+/**
+ * The console methods `_emit` dispatches to by name. A union rather than
+ * `string`, so indexing `Console` with the name is checked instead of falling
+ * back to an implicit `any`.
+ */
+export type PowerLoggerConsoleMethod = "error" | "warn" | "info" | "log" | "debug";
 /**
  * Options for `PowerEventLoopMonitor`.
  */

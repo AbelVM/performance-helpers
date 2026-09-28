@@ -30,10 +30,72 @@ const getConsole = () => {
 
 const ROOT_CONSOLE = getConsole();
 
+/**
+ * Whether a named console method exists and is callable on the captured root
+ * console. Narrowed once because `_emit` dispatches through the name, and the
+ * test is repeated at four call sites.
+ *
+ * @param {PowerLoggerConsoleMethod} method
+ * @returns {boolean}
+ */
+function hasConsoleMethod(method) {
+  return typeof ROOT_CONSOLE?.[method] === 'function';
+}
+
+/**
+ * Call a console method that {@link hasConsoleMethod} has already accepted.
+ *
+ * A separate function because `ROOT_CONSOLE` is nullable and a boolean helper
+ * cannot narrow the receiver: optional chaining in the test and a bare call
+ * here are two different expressions to TypeScript, and the call site is
+ * guarded by the test.
+ *
+ * @param {PowerLoggerConsoleMethod} method
+ * @param {...any} args
+ * @returns {void}
+ */
+function consoleCall(method, ...args) {
+  const target = ROOT_CONSOLE;
+  if (!target || typeof target[method] !== 'function') return;
+  target[method](...args);
+}
+
+/**
+ * Coerce a debug level to a number, the way `setDebugLevel` has always done it.
+ *
+ * Kept out of `setDebugLevel` itself for two reasons. It keeps the public
+ * signature honest - the method is documented as taking a `number` in 0..3, and
+ * that is what a consumer should pass - and it gives the `instanceof` checks a
+ * parameter that is genuinely `unknown`: `instanceof` needs an object operand,
+ * and a `number` parameter narrows to `never` after the primitive branches.
+ *
+ * `powerLogger.branches.test.js` covers the boxed-primitive and throwing-
+ * `toString` cases, so the coercion is behaviour, not accident. A value that
+ * does not produce a finite number yields `NaN`, which the caller turns into
+ * level 0.
+ *
+ * @param {unknown} level
+ * @returns {number}
+ */
+function coerceDebugLevel(level) {
+  if (typeof level === 'number') return level;
+  if (typeof level === 'string' || typeof level === 'boolean') return Number(level);
+  if (level instanceof Number || level instanceof String || level instanceof Boolean) {
+    return Number(level.valueOf());
+  }
+  return NaN;
+}
+
 // Safely serialize an object to JSON for logging. Handles circular
 // references and common non-serializable types (BigInt, Symbol, Function)
 // by providing reasonable string fallbacks. Attempts a fast `JSON.stringify`
 // first and falls back to a replacer-based pass when that fails.
+//
+/**
+ * @param {*} obj - Any value. `JSON.stringify` yields `undefined` for a
+ *   function or `undefined`, so the result is not always a string.
+ * @returns {string|undefined}
+ */
 function safeStringify(obj) {
   try {
     return JSON.stringify(obj);
@@ -85,6 +147,9 @@ function safeStringify(obj) {
  */
 /**
  * @typedef {import('./jsdoc-types.js').PowerLoggerOptions} PowerLoggerOptions
+ * @typedef {import('./jsdoc-types.js').PowerLoggerPayload} PowerLoggerPayload
+ * @typedef {import('./jsdoc-types.js').PowerLoggerEmitOptions} PowerLoggerEmitOptions
+ * @typedef {import('./jsdoc-types.js').PowerLoggerConsoleMethod} PowerLoggerConsoleMethod
  */
 export class PowerLogger {
   /**
@@ -107,18 +172,16 @@ export class PowerLogger {
 
   /**
    * Set the global debug level.
+   *
+   * Coerced with `Number()` and clamped to 0..3; anything that does not coerce
+   * to a finite non-negative number leaves the level at 0. See
+   * {@link coerceDebugLevel} for what the coercion accepts.
+   *
    * @param {number} level - Integer in range 0..3
    * @returns {void}
    */
   setDebugLevel(level) {
-    let n = NaN;
-    if (typeof level === 'number') {
-      n = level;
-    } else if (typeof level === 'string' || typeof level === 'boolean') {
-      n = Number(level);
-    } else if (level instanceof Number || level instanceof String || level instanceof Boolean) {
-      n = Number(level.valueOf());
-    }
+    const n = coerceDebugLevel(level);
     this._debugLevel = Number.isFinite(n) && n >= 0 ? Math.max(0, Math.min(3, Math.floor(n))) : 0;
   }
 
@@ -170,9 +233,10 @@ export class PowerLogger {
    * Internal helper to emit logs with unified JSON/text formatting.
    * @private
    * @param {number} threshold - minimum debug level required to emit
-   * @param {string} consoleMethod - name of console method to call (error, warn, info, log, debug)
+   * @param {PowerLoggerConsoleMethod} consoleMethod - name of console method to call (error, warn, info, log, debug)
    * @param {string} levelLabel - textual level label for JSON mode
    * @param {any[]} args - original arguments array
+   * @param {PowerLoggerEmitOptions} [opts]
    */
   _emit(threshold, consoleMethod, levelLabel, args, opts = {}) {
     if (!this.isDebugLevel(threshold)) return;
@@ -180,6 +244,7 @@ export class PowerLogger {
 
     // Build a structured payload that output() handlers can use.
     const msg = opts.msgArray ? resolved : resolved.length === 1 ? resolved[0] : resolved;
+    /** @type {PowerLoggerPayload} */
     let payload = { level: levelLabel, msg, ts: nowMs(), format: this._format };
     if (this.name) payload.name = this.name;
 
@@ -202,9 +267,7 @@ export class PowerLogger {
               return;
             }
             // No output transport: write string directly to the root console.
-            if (typeof ROOT_CONSOLE?.[consoleMethod] === 'function') {
-              ROOT_CONSOLE[consoleMethod](formatted);
-            }
+            consoleCall(consoleMethod, formatted);
             return;
           }
           // Non-string formatted payload becomes the new payload object
@@ -228,30 +291,27 @@ export class PowerLogger {
     }
 
     // Fall back to console methods when no output transport is provided.
-    if (typeof ROOT_CONSOLE?.[consoleMethod] !== 'function') return;
+    if (!hasConsoleMethod(consoleMethod)) return;
     if (this._format === 'json') {
       try {
         const out = typeof payload === 'string' ? payload : safeStringify(payload);
-        ROOT_CONSOLE[consoleMethod](out);
+        consoleCall(consoleMethod, out);
       } catch (e) {
         // fallback: attempt plain console with resolved args
         try {
-          ROOT_CONSOLE[consoleMethod](...(Array.isArray(resolved) ? resolved : [resolved]));
+          consoleCall(
+            consoleMethod,
+            ...(Array.isArray(resolved) ? resolved : [resolved])
+          );
         } catch (e2) {
           /* swallow logging failures */
         }
       }
     } else {
-      ROOT_CONSOLE[consoleMethod](...resolved);
+      consoleCall(consoleMethod, ...resolved);
     }
   }
 
-  /**
-   * Log an error-level message when debug level is >= 1.
-   * Accepts values or functions (lazy evaluated).
-   * @param {...any} args
-   * @returns {void}
-   */
   /**
    * Report a failure raised by a user-supplied log sink.
    *
@@ -273,6 +333,16 @@ export class PowerLogger {
     }
   }
 
+  /**
+   * Log an error-level message when debug level is >= 1.
+   * Accepts values or functions (lazy evaluated).
+   *
+   * Errors are formatted on the way through rather than left to the transport,
+   * so a sink always receives a readable message instead of an `Error` object.
+   *
+   * @param {...any} args
+   * @returns {void}
+   */
   error(...args) {
     const formatted = args.map((a) => {
       try {

@@ -23,6 +23,9 @@
  */
 /**
  * @typedef {import('./jsdoc-types.js').PowerLoggerOptions} PowerLoggerOptions
+ * @typedef {import('./jsdoc-types.js').PowerLoggerPayload} PowerLoggerPayload
+ * @typedef {import('./jsdoc-types.js').PowerLoggerEmitOptions} PowerLoggerEmitOptions
+ * @typedef {import('./jsdoc-types.js').PowerLoggerConsoleMethod} PowerLoggerConsoleMethod
  */
 export class PowerLogger {
     /**
@@ -38,10 +41,15 @@ export class PowerLogger {
     _counters: any;
     _format: "text" | "json";
     name: string | null;
-    _formatter: ((payload: Object) => string | Object | null) | null;
-    _output: ((payload: Object | string) => void) | null;
+    _formatter: ((payload: import("./jsdoc-types.js").PowerLoggerPayload) => string | import("./jsdoc-types.js").PowerLoggerPayload | null) | null;
+    _output: ((payload: import("./jsdoc-types.js").PowerLoggerPayload | string) => void) | null;
     /**
      * Set the global debug level.
+     *
+     * Coerced with `Number()` and clamped to 0..3; anything that does not coerce
+     * to a finite non-negative number leaves the level at 0. See
+     * {@link coerceDebugLevel} for what the coercion accepts.
+     *
      * @param {number} level - Integer in range 0..3
      * @returns {void}
      */
@@ -73,17 +81,12 @@ export class PowerLogger {
      * Internal helper to emit logs with unified JSON/text formatting.
      * @private
      * @param {number} threshold - minimum debug level required to emit
-     * @param {string} consoleMethod - name of console method to call (error, warn, info, log, debug)
+     * @param {PowerLoggerConsoleMethod} consoleMethod - name of console method to call (error, warn, info, log, debug)
      * @param {string} levelLabel - textual level label for JSON mode
      * @param {any[]} args - original arguments array
+     * @param {PowerLoggerEmitOptions} [opts]
      */
     private _emit;
-    /**
-     * Log an error-level message when debug level is >= 1.
-     * Accepts values or functions (lazy evaluated).
-     * @param {...any} args
-     * @returns {void}
-     */
     /**
      * Report a failure raised by a user-supplied log sink.
      *
@@ -96,6 +99,16 @@ export class PowerLogger {
      * @returns {void}
      */
     _emitSinkError(err: any): void;
+    /**
+     * Log an error-level message when debug level is >= 1.
+     * Accepts values or functions (lazy evaluated).
+     *
+     * Errors are formatted on the way through rather than left to the transport,
+     * so a sink always receives a readable message instead of an `Error` object.
+     *
+     * @param {...any} args
+     * @returns {void}
+     */
     error(...args: any[]): void;
     /**
      * Log a warning-level message when debug level is >= 2.
@@ -149,3 +162,6 @@ export class PowerLogger {
     resetDebugCounters(): void;
 }
 export type PowerLoggerOptions = import("./jsdoc-types.js").PowerLoggerOptions;
+export type PowerLoggerPayload = import("./jsdoc-types.js").PowerLoggerPayload;
+export type PowerLoggerEmitOptions = import("./jsdoc-types.js").PowerLoggerEmitOptions;
+export type PowerLoggerConsoleMethod = import("./jsdoc-types.js").PowerLoggerConsoleMethod;

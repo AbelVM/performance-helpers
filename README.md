@@ -70,6 +70,10 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 - [PowerLogger: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.
 
+## Observability
+
+- [PowerEventLoopMonitor: Event-loop delay and utilization](guides/powerEventLoopMonitor.md). Timer-drift histogram plus Node's `eventLoopUtilization()`, so a latency regression can be attributed to the host instead of guessed at. Zero dependencies, both runtimes; `utilization()` returns `null` where the runtime cannot measure it.
+
 ## Utils
 
 - [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).

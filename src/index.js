@@ -28,6 +28,7 @@ export { PowerLatch } from './helpers/powerLatch.js';
 export { PowerObserver } from './helpers/powerObserver.js';
 export { PowerEventBus } from './helpers/powerEventBus.js';
 export { PowerGCRA } from './helpers/powerGCRA.js';
+export { PowerEventLoopMonitor } from './helpers/powerEventLoopMonitor.js';
 export { PowerRealtimeHub } from './helpers/powerRealtimeHub.js';
 export { PowerWebSocketClient, READY_STATE } from './helpers/powerWebSocketClient.js';
 export {

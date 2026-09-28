@@ -5,6 +5,7 @@
 [Logging](assets/3_Logging.md)
 [Utils](assets/4_Utils.md)
 [Realtime](assets/5_Realtime.md)
+[Observability](assets/6_Observability.md)
 [API](docs/README.md)
 [Benchmark](bench/results.md)
 [Contributing](CONTRIBUTING.md)
