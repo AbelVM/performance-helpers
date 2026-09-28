@@ -94,8 +94,12 @@ cache._policy = policy;
 }
 
 // --- PowerMemoizer / PowerTimedCache --------------------------------------
-const memoizer = new PowerMemoizer({ cacheOptions: { maxEntries: 10 } });
-const memoized: (n: number) => number = memoizer.memoize((n: number) => n * 2);
+const memoizer = new PowerMemoizer(undefined, { cacheOptions: { maxEntries: 10 } });
+// Inferred, not annotated: an explicit `(n: number) => number` annotation here
+// erased the richer return type, so `memoized.original` - which has always
+// existed at runtime (BUG-007) - did not exist as far as the type test was
+// concerned. The annotation was asserting something weaker than the API.
+const memoized = memoizer.memoize((n: number) => n * 2);
 const ran: number = memoized(21);
 const memo: string | undefined = memoized.original?.name;
 void [ran, memo, memoizer.cache, memoizer.stats()];
@@ -136,7 +140,7 @@ pool.shutdown();
 void [dispatched, poolStats];
 
 // --- Limiters -------------------------------------------------------------
-const throttle = new PowerThrottle({ limit: 10, windowMs: 1000, capacity: 10 });
+const throttle = new PowerThrottle({ capacity: 10, refillRate: 10 });
 const took: boolean = throttle.tryConsume(1);
 const availableNow: number = throttle.available();
 void [took, availableNow];
@@ -161,7 +165,7 @@ const dequeued: number | undefined = queue.shift();
 const queueLength: number = queue.length;
 void [dequeued, queueLength];
 
-const semaphore = new PowerSemaphore({ permits: 2 });
+const semaphore = new PowerSemaphore(2);
 void semaphore.acquire().then((release: () => void) => release());
 
 const gate = new PowerPermitGate({ capacity: 2, queueCapacity: 8 });
@@ -179,7 +183,7 @@ void [bulkheadStats, bulkhead.active, bulkhead.pending];
 
 // --- Resilience -----------------------------------------------------------
 const circuit = new PowerCircuit({ threshold: 3, resetTimeout: 1000 });
-const retry = new PowerRetry({ retries: 3, baseDelay: 50 });
+const retry = new PowerRetry({ maxAttempts: 3, baseDelay: 50 });
 const deadline = new PowerDeadline({ timeout: 1000 });
 void [circuit, retry, deadline];
 
@@ -240,13 +244,20 @@ bus.dispose();
 
 const observer = new PowerObserver(0);
 observer.subscribe((next: number) => void next);
-observer.next(1);
+// No `next()`: PowerObserver has no externally callable emit. The public surface
+// is `value` plus `subscribe`/`clear`/`map`/`flush`/`drain`. This line previously
+// asserted a method that has never existed, which is how three fantasy APIs
+// survived in a test meant to describe the real one.
+observer.flush();
+void observer.drain();
 void observer.value;
 
 const logger = new PowerLogger(1);
 logger.debug('hi');
-logger.count('things');
-void logger.getCount('things');
+logger.setDebugLevel(2);
+const level: number = logger.getDebugLevel();
+const debugging: boolean = logger.isDebugLevel(2);
+void [level, debugging, logger.isDebug()];
 
 const bytes: Uint8Array = o2u8({ a: 1 });
 const back: unknown = u82o(bytes);
@@ -255,5 +266,8 @@ void back;
 // --- utils -----------------------------------------------------------------
 const t0: number = nowMs();
 void [t0, measureSync(() => 1), measureAsync(async () => 1)];
-const normalized: Error = normalizeError(new Error('boom'));
+// `normalizeError` normalises *to a plain object* - that is the point of it -
+// so asserting `Error` here was asserting the opposite of the contract.
+const normalized: { error: true; code: string; message: string | undefined; stack: string | undefined } =
+  normalizeError(new Error('boom'));
 void [normalized, formatErrorObj({ code: 'X', message: 'y' })];

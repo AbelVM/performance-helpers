@@ -24,6 +24,10 @@ export class PowerBulkhead {
    * @param {number} [options.maxConcurrency=1] Maximum concurrent tasks per partition.
    * @param {number} [options.queueCapacity=100] Maximum queued tasks across all partitions.
    * @param {Function} [options.partitioner] Function `(key)=>partitionIndex`.
+   * @param {function(*):void} [options.onError] Invoked as `onError(err)`
+   *   whenever a user-supplied `release()` or task hook throws. Added in 2.0;
+   *   without it those failures were silently discarded, because the field was
+   *   read but never assigned.
    */
   constructor(options = {}) {
     const {

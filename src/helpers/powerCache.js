@@ -1654,10 +1654,12 @@ export class PowerMemoizer {
    * declaration error in the published `.d.ts`, not a runtime one.
    *
    * @param {Function} fn - Function to wrap.
+   * @param {F} fn - Function to wrap.
    * @param {Object} [options] - Per-wrapper overrides merged over the defaults.
    * @param {number} [options.ttl]
    * @param {number} [options.weight]
-   * @returns {Function} The memoized wrapper.
+   * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized wrapper.
+   * @template {Function} F
    * @private
    */
   _memoize(fn, { ttl, weight } = {}) {
@@ -1717,9 +1719,12 @@ export class PowerMemoizer {
    * Public API to memoize an arbitrary function using this PowerMemoizer instance's cache.
    * Mirrors the behavior used by the constructor when a function is supplied —
    * returns a callable memoized function with helpers attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
-   * @param {Function} fn - Function to memoize
+   * @param {F} fn - Function to memoize
    * @param {Object} [options] - Optional per-wrapper options { ttl, weight }
-   * @returns {Function} Memoized function
+   * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized
+   *   wrapper, callable like `fn` and
+   *   carrying `get`/`has`/`delete`/`clear`/`stats`/`cache`/`original`.
+   * @template {Function} F
    */
   memoize(fn, options = {}) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
@@ -1859,10 +1864,13 @@ export class PowerTimedCache {
   get(key) {
     return this.cache.get(key);
   }
-  set(key, value, options) {
+  // These forward to the inner `PowerCache` and were declared with required
+  // parameters, so `timed.set(k, v)` - two arguments, which is all the method
+  // needs - failed to type-check with "Expected 3 arguments, but got 2".
+  set(key, value, options = {}) {
     return this.cache.set(key, value, options);
   }
-  has(key, options) {
+  has(key, options = {}) {
     return this.cache.has(key, options);
   }
   delete(key) {
@@ -1874,7 +1882,7 @@ export class PowerTimedCache {
   stats() {
     return this.cache.stats();
   }
-  startCleanup(intervalOrOptions) {
+  startCleanup(intervalOrOptions = undefined) {
     return this.cache.startCleanup(intervalOrOptions);
   }
   stopCleanup() {

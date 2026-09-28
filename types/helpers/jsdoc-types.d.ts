@@ -70,6 +70,42 @@ export type PowerPoolOptions = {
     listenerMaxListeners?: number | undefined;
     weakListeners?: boolean | undefined;
     queueHighThreshold?: number | undefined;
+    /**
+     * - Adaptive
+     * concurrency. `true` enables the default `ewma` policy; an object configures
+     * it. Typed as `AutoScaleOptions` rather than `Object` because the pool reads
+     * `aimdBeta`, `backoffFactor`, `cooldownMs` and friends straight off it, and a
+     * bare `Object` turned every one of those into an error at the use site.
+     */
+    autoScale?: boolean | AutoScaleOptions | undefined;
+    /**
+     * - Wire protocol for
+     * object messages. `'framed'` (default since 2.0) posts a `PowerMessageCodec`
+     * envelope; `'legacy'` restores the 1.x bare-JSON framing for a worker that
+     * has not migrated yet. See the migration note in `guides/powerPool.md`.
+     */
+    messageCodec?: "framed" | "legacy" | undefined;
+};
+/**
+ * Adaptive-concurrency configuration for `PowerPool` (`autoScale`).
+ *
+ * Typed as a named typedef rather than a bare `Object` so the properties the
+ * pool reads are checked where it reads them.
+ */
+export type AutoScaleOptions = {
+    policy?: "ewma" | "aimd" | "vegas" | "gradient2" | undefined;
+    intervalMs?: number | undefined;
+    targetMs?: number | undefined;
+    alpha?: number | undefined;
+    cooldownMs?: number | undefined;
+    hysteresis?: number | undefined;
+    limitMin?: number | undefined;
+    limitMax?: number | undefined;
+    backoffFactor?: number | undefined;
+    backoffMaxMultiplier?: number | undefined;
+    backoffResetMs?: number | undefined;
+    longWindowAlpha?: number | undefined;
+    aimdBeta?: number | undefined;
 };
 /**
  * Worker object shape used internally by `PowerPool`.
@@ -249,6 +285,25 @@ export type PowerCacheOptions = {
      * resists a one-off sequential scan. Defaults to `'lru'`.
      */
     policy?: "lru" | "slru" | undefined;
+};
+/**
+ * A memoized wrapper returned by `PowerMemoizer.memoize()`.
+ *
+ * Callable exactly like the function it wraps, and carrying the cache helpers
+ * plus a link back to the original. Declaring the return type as `Function`
+ * broke both halves for consumers: `Function` has no call signature (so
+ * `memoized(1)` was not assignable to anything) and none of the attached
+ * properties, so `memoized.original` did not exist as far as TypeScript was
+ * concerned - even though both have always worked at runtime.
+ */
+export type MemoizedFunction<F extends Function> = F & {
+    get: (arg0: string) => any;
+    has: (arg0: string) => boolean;
+    delete: (arg0: string) => boolean;
+    clear: () => void;
+    stats: () => Object;
+    cache: Object;
+    original: F;
 };
 /**
  * Options for the PowerChunking helper.

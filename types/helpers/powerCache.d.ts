@@ -577,7 +577,7 @@ export class PowerMemoizer {
     _originalFn: Function | null;
     _receiverIds: WeakMap<WeakKey, any>;
     _nextReceiverId: number;
-    _fnWrapper: Function | undefined;
+    _fnWrapper: import("./jsdoc-types.js").MemoizedFunction<Function> | undefined;
     /**
      * Wrap a function with memoization.
      * @private
@@ -613,10 +613,12 @@ export class PowerMemoizer {
      * declaration error in the published `.d.ts`, not a runtime one.
      *
      * @param {Function} fn - Function to wrap.
+     * @param {F} fn - Function to wrap.
      * @param {Object} [options] - Per-wrapper overrides merged over the defaults.
      * @param {number} [options.ttl]
      * @param {number} [options.weight]
-     * @returns {Function} The memoized wrapper.
+     * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized wrapper.
+     * @template {Function} F
      * @private
      */
     private _memoize;
@@ -624,11 +626,14 @@ export class PowerMemoizer {
      * Public API to memoize an arbitrary function using this PowerMemoizer instance's cache.
      * Mirrors the behavior used by the constructor when a function is supplied —
      * returns a callable memoized function with helpers attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
-     * @param {Function} fn - Function to memoize
+     * @param {F} fn - Function to memoize
      * @param {Object} [options] - Optional per-wrapper options { ttl, weight }
-     * @returns {Function} Memoized function
+     * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized
+     *   wrapper, callable like `fn` and
+     *   carrying `get`/`has`/`delete`/`clear`/`stats`/`cache`/`original`.
+     * @template {Function} F
      */
-    memoize(fn: Function, options?: Object): Function;
+    memoize<F extends Function>(fn: F, options?: Object): import("./jsdoc-types.js").MemoizedFunction<F>;
     /**
      * Retrieve a cached value for the given call args (if present).
      * @param  {...*} args
@@ -709,8 +714,8 @@ export class PowerTimedCache {
     });
     cache: PowerCache;
     get(key: any): any;
-    set(key: any, value: any, options: any): false | PowerCache;
-    has(key: any, options: any): boolean;
+    set(key: any, value: any, options?: {}): false | PowerCache;
+    has(key: any, options?: {}): boolean;
     delete(key: any): boolean;
     clear(): void;
     stats(): {
@@ -722,7 +727,7 @@ export class PowerTimedCache {
         rejected: number;
         poolSize: number;
     };
-    startCleanup(intervalOrOptions: any): void;
+    startCleanup(intervalOrOptions?: undefined): void;
     stopCleanup(): void;
     get size(): number;
     get hitRate(): number;

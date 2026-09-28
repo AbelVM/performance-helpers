@@ -5,28 +5,35 @@
  * Type-debt ratchet (CFG-004).
  *
  * The audit asked for a pre-publish hook that runs lint + typecheck + test. Lint
- * and test are green, so they gate directly. Typecheck is not, and cannot be for
- * some time: `tsconfig.check.json` turns on `checkJs` over a JSDoc that has
- * never been type-checked, and `tsconfig.types.json` compiles the generated
- * declarations as a downstream consumer. Together they report a few hundred
- * pre-existing errors that no single change is responsible for.
+ * and test are green, so they gate directly, and so is the consumer type test:
+ * `tsconfig.types.json` compiles the generated declarations the way a
+ * downstream TypeScript user would, and it is at **zero**, so `verify` runs it
+ * directly rather than routing it through here. That check is the one that
+ * protects the shipped `.d.ts`, and it is now a hard gate.
  *
- * Gating on "zero errors" would mean the hook can never pass, and a hook that
- * can never pass is the same as no hook: `prepublishOnly` was effectively dead
- * before this script, because `test:types` failed and aborted the publish.
- * Dropping the type checks entirely would be worse - 593 errors would rot in
- * silence, which is exactly how BUG-002 (`frameEncodedJson` documented but
- * never exported) shipped.
+ * What remains here is the internal `checkJs` project, which is not at zero and
+ * cannot be fixed without a large unrelated change: it turns on `checkJs` over
+ * JSDoc that has never been type-checked, and it reports a few hundred
+ * pre-existing errors across every module. Gating on zero would mean the hook
+ * can never pass, and a hook that can never pass is the same as no hook -
+ * `prepublishOnly` was effectively dead before this script, because
+ * `test:types` failed and aborted the publish. Dropping the check entirely
+ * would be worse: 542 errors would rot in silence, which is exactly how
+ * BUG-002 (`frameEncodedJson` documented but never exported) shipped.
  *
- * So the type checks run, and they gate on *direction*: the count may fall, but
- * it may not rise. That is checkable today, and it turns the debt into a
- * measurable series instead of an anecdote.
+ * So the check runs, and it gates on *direction*: the count may fall, but it may
+ * not rise. That is checkable today, and it turns the debt into a measurable
+ * series instead of an anecdote.
  *
  *   node scripts/typecheck-ratchet.cjs            # the gate
  *   node scripts/typecheck-ratchet.cjs --verbose  # ... with full tsc output
  *   node scripts/typecheck-ratchet.cjs --update   # print the new BASELINE line
  *
- * @see .github/workflows/ci.yml, package.json "prepublishOnly"
+ * When the internal count reaches zero, delete this script and add
+ * `npm run typecheck` to `verify` directly. It is scaffolding for a check that
+ * is not yet honest, not a permanent fixture.
+ *
+ * @see .github/workflows/ci.yml, package.json "verify"
  */
 
 const { spawnSync } = require('node:child_process');
@@ -36,36 +43,28 @@ const path = require('node:path');
  * The ceiling this repository is allowed to reach. Lower it whenever you fix
  * some. `scripts/typecheck-ratchet.cjs --update` prints the replacement line.
  *
- * 553 = `tsconfig.check.json` (internal `checkJs` debt, pre-existing)
- *  16 = `tsconfig.types.json` (consumer-visible; every one of these is a real
- *       promise the package breaks, so they get fixed first)
+ * 542 = `tsconfig.check.json`, internal `checkJs` debt, all pre-existing.
  *
  * The history of this number is worth keeping, because the wrong move was
- * available twice and taken neither time.
+ * available three times and taken none of them.
  *
- * It started at 593. Raising the JSDoc return type of `assertLimit` off
- * `number|any` - which TypeScript collapses to `any`, and `any` satisfies
- * everything - took it to 615, because it stopped hiding 25 real null-safety
- * diagnostics (QUAL-009). The tempting response was to put the `any` back and
- * keep the number small; that trades the published types for a prettier metric,
- * so instead the ceiling was raised to match reality and the finding was filed.
+ * It started at 593 (563 internal + 30 consumer). Raising the JSDoc return type
+ * of `assertLimit` off `number|any` - which TypeScript collapses to `any`, and
+ * `any` satisfies everything - took it to 615, because it stopped hiding 25 real
+ * null-safety diagnostics (QUAL-009). The tempting response was to put the `any`
+ * back and keep the number small; that trades the published types for a prettier
+ * metric, so instead the ceiling was raised to match reality and the finding was
+ * filed.
  *
- * QUAL-009 is now fixed - `assertLimitRequired` gives the constructors a
- * variant that genuinely returns `number` - and the declaration work took the
- * consumer project from 28 to 16. That is 569: 24 below where this started.
- * The direction is the point. Neither the baseline nor the debt is a vanity
- * metric; they exist to make a regression impossible to miss.
- *
- * When the consumer column reaches zero, add `npm run test:types` to `verify`
- * as a direct gate and delete the consumer half of this script. The ratchet is
- * scaffolding for a check that is not yet honest, not a permanent fixture.
+ * QUAL-009 was then fixed, the declarations stopped leaking `@types/node`, the
+ * duplicated `PowerCacheOptions` list was deleted, and the consumer project went
+ * 30 -> 0 - at which point it stopped being debt and became a gate. 542 is
+ * below the 593 this started at, and the consumer column is no longer here at
+ * all.
  */
-const BASELINE = 569;
+const BASELINE = 542;
 
-const PROJECTS = [
-  { label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' },
-  { label: 'consumer (tsconfig.types.json)', project: 'tsconfig.types.json' },
-];
+const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' }];
 
 // tsc reports `path(line,col): error TS1234: message`. Continuation lines of a
 // multi-line diagnostic do not match, so counting matches counts diagnostics.
@@ -128,7 +127,7 @@ if (total > BASELINE) {
     `\nType-debt ratchet FAILED: ${total} errors, ceiling is ${BASELINE} (+${total - BASELINE}).\n` +
       'New type errors must not ship. Fix them, or - if the new file is itself\n' +
       'known debt - raise the ceiling deliberately with --update and say why in\n' +
-      'review.md. `npm run typecheck` and `npm run test:types` print the detail.\n'
+      'review.md. `npm run typecheck` prints the detail.\n'
   );
   process.exit(1);
 }

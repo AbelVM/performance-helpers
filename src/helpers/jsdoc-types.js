@@ -55,6 +55,37 @@
  * @property {number} [listenerMaxListeners]
  * @property {boolean} [weakListeners]
  * @property {number} [queueHighThreshold]
+ * @property {boolean|AutoScaleOptions} [autoScale=false] - Adaptive
+ *   concurrency. `true` enables the default `ewma` policy; an object configures
+ *   it. Typed as `AutoScaleOptions` rather than `Object` because the pool reads
+ *   `aimdBeta`, `backoffFactor`, `cooldownMs` and friends straight off it, and a
+ *   bare `Object` turned every one of those into an error at the use site.
+ * @property {'framed'|'legacy'} [messageCodec='framed'] - Wire protocol for
+ *   object messages. `'framed'` (default since 2.0) posts a `PowerMessageCodec`
+ *   envelope; `'legacy'` restores the 1.x bare-JSON framing for a worker that
+ *   has not migrated yet. See the migration note in `guides/powerPool.md`.
+ */
+
+/**
+ * Adaptive-concurrency configuration for `PowerPool` (`autoScale`).
+ *
+ * Typed as a named typedef rather than a bare `Object` so the properties the
+ * pool reads are checked where it reads them.
+ *
+ * @typedef {Object} AutoScaleOptions
+ * @property {'ewma'|'aimd'|'vegas'|'gradient2'} [policy='ewma']
+ * @property {number} [intervalMs]
+ * @property {number} [targetMs]
+ * @property {number} [alpha]
+ * @property {number} [cooldownMs]
+ * @property {number} [hysteresis]
+ * @property {number} [limitMin]
+ * @property {number} [limitMax]
+ * @property {number} [backoffFactor]
+ * @property {number} [backoffMaxMultiplier]
+ * @property {number} [backoffResetMs]
+ * @property {number} [longWindowAlpha]
+ * @property {number} [aimdBeta]
  */
 
 /**
@@ -208,6 +239,28 @@ export {};
  * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits
  *   the list into probation and protected segments and promotes on access, which
  *   resists a one-off sequential scan. Defaults to `'lru'`.
+ */
+
+/**
+ * A memoized wrapper returned by `PowerMemoizer.memoize()`.
+ *
+ * Callable exactly like the function it wraps, and carrying the cache helpers
+ * plus a link back to the original. Declaring the return type as `Function`
+ * broke both halves for consumers: `Function` has no call signature (so
+ * `memoized(1)` was not assignable to anything) and none of the attached
+ * properties, so `memoized.original` did not exist as far as TypeScript was
+ * concerned - even though both have always worked at runtime.
+ *
+ * @template {Function} F
+ * @typedef {F & {
+ *   get: function(string): any,
+ *   has: function(string): boolean,
+ *   delete: function(string): boolean,
+ *   clear: function(): void,
+ *   stats: function(): Object,
+ *   cache: Object,
+ *   original: F
+ * }} MemoizedFunction
  */
 
 /**

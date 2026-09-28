@@ -127,8 +127,17 @@ export class PowerWebSocketClient {
      * @returns {BackpressureMode}
      */
     get backpressureMode(): BackpressureMode;
-    /** @returns {WebSocketReadyState} The socket's numeric ready state. */
-    get readyState(): WebSocketReadyState;
+    /**
+     * @returns {0|1|2|3} The socket's ready state, mirroring the platform
+     *   `WebSocket.readyState` constants (`READY_STATE` above). Spelled as the
+     *   literal union rather than `WebSocketReadyState`, which is a `lib.dom`
+     *   alias - referencing it made the shipped declaration depend on a DOM lib
+     *   that a Node consumer may not have. Two corrections landed here in one
+     *   pass: an earlier revision claimed this was a state *name* and declared it
+     *   `string` (producing 11 "no overlap" diagnostics on every
+     *   `_state === READY_STATE.X` comparison), and the next used the DOM alias.
+     */
+    get readyState(): 0 | 1 | 2 | 3;
     /** @returns {boolean} Whether the socket is open and accepting data. */
     get isOpen(): boolean;
     /**

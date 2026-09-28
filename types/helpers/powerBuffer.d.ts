@@ -1,4 +1,4 @@
-export function o2u8(obj: any, preStringified: any): Uint8Array;
+export function o2u8(obj: any, preStringified?: string): Uint8Array;
 export function u82o(buf: ArrayBuffer | ArrayBufferView): any;
 export function o2b(obj: any): ArrayBuffer;
 export function b2o(buf: ArrayBuffer | ArrayBufferView): any;

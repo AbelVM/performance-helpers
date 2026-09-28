@@ -71,6 +71,9 @@ function getDecoder() {
  * - Otherwise `JSON.stringify` is encoded as UTF-8.
  *
  * @param {*} obj - Value to encode.
+ * @param {string} [preStringified] - A pre-computed JSON string for `obj`, so a
+ *   caller that already has one (typically as a cache key) does not pay for a
+ *   second `JSON.stringify`. Optional: omit it and `obj` is stringified here.
  * @returns {Uint8Array} UTF-8 encoded bytes.
  * @throws {Error} When no encoder is available.
  * @public

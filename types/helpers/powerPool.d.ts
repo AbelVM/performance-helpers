@@ -108,7 +108,7 @@ export class PowerPool {
         backoffFactor: number;
         backoffMaxMultiplier: number;
         backoffResetMs: number;
-        policy: any;
+        policy: "ewma" | "aimd" | "vegas" | "gradient2" | undefined;
         limitMin: number;
         limitMax: number;
         longWindowAlpha: number;

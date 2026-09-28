@@ -52,7 +52,11 @@ export class PowerSemaphore {
   /**
    * Acquire a permit asynchronously.
    * Resolves immediately when one is available; otherwise waits in FIFO order.
-   * @returns {Promise<Function>} Promise resolving to the release callback.
+   * @returns {Promise<function():void>} Promise resolving to the release
+   *   callback. Spelled as a call signature rather than `Function` because
+   *   `Function` is not assignable to `() => void`, so `.then((release) =>
+   *   release())` - the documented way to use it - failed to type-check for
+   *   consumers.
    */
   acquire() {
     return this._gate.acquire();
