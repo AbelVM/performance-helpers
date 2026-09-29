@@ -1,20 +1,48 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
 
 describe('PowerTTLMap', () => {
-  // The margins in these four are deliberately wide. They were 2-10ms against
-  // real wall-clock sleeps, which passed on an idle machine and failed
-  // whenever `verify` happened to be running a fresh `vite build` first: a
-  // 10ms TTL asserted after an 8ms sleep is a 2ms race against the scheduler.
-  // `PowerTTLMap` reads `nowMs()` rather than anything injectable, so the
-  // honest options are fake timers or a wide margin; wide margin chosen here
-  // because the whole file still finishes in well under half a second.
+  // TEST-008. This file previously used real wall-clock sleeps with margins
+  // wide enough to absorb them: a 60ms TTL asserted after a 120ms sleep, a 10ms
+  // TTL after 30ms. Those passed on an idle machine and failed whenever
+  // `verify` happened to be running a fresh `vite build` first - a 10ms TTL
+  // asserted after an 8ms sleep is a race against the scheduler, and the fix
+  // was to widen the sleep rather than remove the race.
+  //
+  // The file's own note said the honest options were "fake timers or a wide
+  // margin", and took the margin. This takes the other one. `PowerTTLMap` reads
+  // `nowMs()`, and `vi.advanceTimersByTimeAsync` moves the high-resolution
+  // clock, so expiry becomes an explicit number rather than a hope. The wide
+  // margins are gone: 120ms of real sleep per case became 61ms of clock, and
+  // the assertions can now sit *just* past the TTL, which is where a boundary
+  // bug would show up. A margin is slack you cannot tighten; a clock is not.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * Advance the clock by `ms`, letting any timer callbacks run.
+   *
+   * `PowerTTLMap` stores `expiresAt = nowMs() + ttl + 1` and expires on
+   * `nowMs() > expiresAt`, so a TTL of `t` is only past after **`t + 2`** ms —
+   * the internal `+ 1` is a margin of its own, and an earlier draft that used
+   * `t + 1` produced a suite where nothing was ever expired. The margins below
+   * are that tight deliberately: a clock makes it possible to test the
+   * boundary rather than merely clear it, which is the point of the conversion.
+   *
+   * @param {number} ms
+   * @returns {Promise<void>}
+   */
+  const tick = (ms) => vi.advanceTimersByTimeAsync(ms);
 
   it('set/get respects TTL and returns undefined after expiry', async () => {
     const m = new PowerTTLMap();
     m.set('a', 1, 60);
     expect(m.get('a')).toBe(1);
-    await new Promise((r) => setTimeout(r, 120));
+    await tick(62); // past the 60ms TTL *and* its internal +1 margin
     expect(m.get('a')).toBeUndefined();
   });
 
@@ -22,7 +50,7 @@ describe('PowerTTLMap', () => {
     const m = new PowerTTLMap();
     m.set('b', 2, 60);
     expect(m.has('b')).toBe(true);
-    await new Promise((r) => setTimeout(r, 120));
+    await tick(62);
     expect(m.has('b')).toBe(false);
   });
 
@@ -31,7 +59,7 @@ describe('PowerTTLMap', () => {
     m.set('x', 'x', 60);
     m.set('y', 'y', 300);
     expect(m.size).toBe(2);
-    await new Promise((r) => setTimeout(r, 120));
+    await tick(62);
     // 'x' has expired but is still resident. Reading `.size` is a pure O(1)
     // property read — it must not collect anything as a side effect.
     expect(m.size).toBe(2);
@@ -51,7 +79,7 @@ describe('PowerTTLMap', () => {
     const m = new PowerTTLMap({ onExpire: (k) => called.push([k, 'val']) });
     m.set('x', 'x', 10);
     m.set('y', 'y', 10);
-    await new Promise((r) => setTimeout(r, 30));
+    await tick(12);
     // A property read with a callback side effect is an operation wearing a
     // property's syntax; this pins that reading it stays free of that.
     expect(m.size).toBe(2);
@@ -75,10 +103,10 @@ describe('PowerTTLMap', () => {
   it('touch refreshes TTL', async () => {
     const m = new PowerTTLMap(60);
     m.set('t', 123); // defaultTTL 60
-    await new Promise((r) => setTimeout(r, 20));
+    await tick(20);
     expect(m.touch('t')).toBe(true);
     // Only 20ms of the refreshed 60ms has elapsed, so the value must survive.
-    await new Promise((r) => setTimeout(r, 20));
+    await tick(20);
     expect(m.get('t')).toBe(123);
   });
 
@@ -100,7 +128,7 @@ describe('PowerTTLMap', () => {
     const m = new PowerTTLMap(0, { onExpire });
     m.set('o', 'val', 10);
     // wait for expiry
-    await new Promise((r) => setTimeout(r, 20));
+    await tick(12);
     // Collection is what fires the callback, and it is now an explicit call.
     m.purge();
     expect(called).toEqual([['o', 'val']]);
@@ -112,7 +140,7 @@ describe('PowerTTLMap', () => {
     expect(m.touch('missing')).toBe(false);
 
     m.set('gone', 1, 5);
-    await new Promise((resolve) => setTimeout(resolve, 15));
+    await tick(7);
 
     expect(m.touch('gone')).toBe(false);
     expect(m.has('gone')).toBe(false);
@@ -124,7 +152,7 @@ describe('PowerTTLMap', () => {
     m.set('b', 2, 50);
     m.set('c', 3);
 
-    await new Promise((resolve) => setTimeout(resolve, 15));
+    await tick(7);
 
     expect(Array.from(m.entries())).toEqual([
       ['b', 2],
@@ -152,13 +180,13 @@ describe('PowerTTLMap', () => {
     const m = new PowerTTLMap();
     m.set('a', 1, { ttl: 20 });
     expect(m.get('a')).toBe(1);
-    await new Promise((r) => setTimeout(r, 30));
+    await tick(22);
     expect(m.get('a')).toBeUndefined();
 
     m.set('b', 2);
     expect(m.touch('b', { ttl: 20 })).toBe(true);
     expect(m.get('b')).toBe(2);
-    await new Promise((r) => setTimeout(r, 30));
+    await tick(22);
     expect(m.get('b')).toBeUndefined();
   });
 
@@ -166,7 +194,7 @@ describe('PowerTTLMap', () => {
     const called = [];
     const m = new PowerTTLMap({ defaultTTL: 10, onExpire: (k, v) => called.push([k, v]) });
     m.set('o', 'val'); // uses defaultTTL from options
-    await new Promise((r) => setTimeout(r, 20));
+    await tick(12);
     m.purge();
     expect(called).toEqual([['o', 'val']]);
   });
@@ -189,7 +217,7 @@ describe('PowerTTLMap', () => {
     expect(m.get('persist')).toBe(1);
 
     m.set('temp', 2, 5);
-    await new Promise((resolve) => setTimeout(resolve, 15));
+    await tick(7);
 
     expect(() => m.get('temp')).not.toThrow();
     expect(m.get('temp')).toBeUndefined();
