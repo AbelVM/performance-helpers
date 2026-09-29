@@ -72,7 +72,7 @@ Environment variables (defaults shown)
 - `BENCH_AUTOSCALE_CACHE_KEYS` (default: `10`) — unique key count for autoscale + cache duplicate-key benchmark
 - `BENCH_POOL_RUNS` (default: `3`) — repeat each pool/scenario variant N times and report the result closest to the median wall-clock time; set to `3` for more stable pool numbers at the cost of a ~3× longer run
 - `BENCH_RUNS` (default: `9`) — repeat each helper micro-benchmark N times and report the **trimmed median** (one sample dropped from each end once N ≥ 5); raises to 9 from 5 because at 5 runs a single GC pause moves the reported median by more than most of the deltas this harness is asked to justify
-- `BENCH_SEED` (default: `0x5eed1234`) — seed for the workload generator. Every workload — load profiles, task ordering, Box-Muller sampling — is built from this one seeded PRNG, so two runs with the same seed measure the *same work* and are directly comparable. Set it deliberately when you want a different workload
+- `BENCH_SEED` (default: `0x5eed1234`) — seed for the workload generator. Every workload — load profiles, task ordering, Box-Muller sampling — is built from this one seeded PRNG, so two runs with the same seed measure the _same work_ and are directly comparable. Set it deliberately when you want a different workload
 - `BENCH_HELPER_OPS` (default: `100000`) — operation count for each helper micro-benchmark variant
 
 ## `claims.js` — feature claims, not throughput
@@ -90,6 +90,30 @@ The `zipf` workload drives every policy with a **byte-identical seeded key strea
 
 **`zipf` currently reports a failure.** `admission: 'tynilfu'` is meant to protect a working set from a scan; on a cold cache it does the opposite, measuring a 2.5% hit rate against plain LRU's 66.4%. The release note's original claim for this feature has been withdrawn accordingly. Run the benchmark rather than trusting either the old note or this paragraph.
 
+## `baseline.js` — a timing gate that knows it is on a machine
+
+`run.js` measures a 28% median min/max spread on a typical machine, so a hand-written "within ±20% of the committed baseline" gate is not a weak gate — it is an unreliable one, and the fastest way to get a flaky gate ignored is to ship one. This is the gate that was specified anyway, with the threshold **derived rather than chosen**.
+
+```bash
+npm run bench:baseline       # measure this machine and record its baseline
+npm run bench:gate           # measure and compare; exit 1 only on a reproduced regression
+npm run bench:baseline:show  # print the recorded baseline
+```
+
+Three things make it different from the ±20% version:
+
+- **The threshold is each site's own recorded spread**, so a clean tree passes by construction and a site calibrated at 80% spread is not held to the same bar as one at 8%. A constant chosen in advance is a coin flip; a threshold measured on the machine is a measurement.
+- **Baselines are per-machine and gitignored**, in `bench/baselines/<hash>.json`. The key hashes hostname, platform, arch, CPU model, core count and Node version. A committed absolute baseline is a claim about every other machine's hardware, which is the mistake this design exists to avoid — and the files end up in CI artifacts, so the hash keeps a hostname out of them.
+- **There are three answers, not two.** A run is `PASS`, `FAIL`, or `INCONCLUSIVE` — and _inconclusive is never a failure_. It covers both a machine whose level has drifted (the median delta across all sites is the signal, so one real regression cannot hide inside it) and a machine noisier than it was calibrated. Measured during development: a clean tree reported six unrelated helpers 44–48% slower than a baseline recorded minutes earlier, and a gate that failed on that would have been wrong.
+
+A `FAIL` also **re-measures before reporting**. Nine samples, trimmed one from each end, still admits a GC pause landing on one measurement — one site out of 25 came back +48.9% against a 7.8% threshold on an unmodified tree. A real regression is still there on the second run; a blip is not, and the gate says `INCONCLUSIVE` rather than failing. It costs a second pass only when something was already reported, and nothing at all when the tree is clean.
+
+**Mutation-checked, because a gate that always passes is worse than none.** A deliberate second `get` inside `PowerCache.get` is caught and reproduced (`cacheHitMs: 9.9 ms → 16.0 ms, +62%` against a 17.6% threshold); a clean tree is not. Two versions of this gate failed that check first — one that had no cache site to move at all, and one whose threshold arithmetic turned a 60% band into a 3000% allowance. The sites it guards are `PowerCache` (`get` on hits, `set` on misses) and `PowerThrottle.tryConsume`: the two the item names, and the two that had no band.
+
+The gate measures the harness's `helpers` mode only. The full run takes the better part of an hour, which is too long to run before landing a change, and the pool scenarios are dominated by worker start-up and message transport, where the spread is far wider. Override with `BENCH_GATE_MODE=all` for a change big enough to want the slower run.
+
+CI has no baseline to compare against on a fresh runner, so `bench:gate` **exits 0 and says so** rather than failing a run it cannot judge. Cache `bench/baselines/` as an artifact to get a real verdict.
+
 ## Reading a run honestly
 
 Every generated report opens with a **Measurement quality** section, and it is the part to read before any number in the file:
@@ -103,7 +127,7 @@ The outlier policy is a **symmetric** one-from-each-end trim, not "discard anyth
 Tips and notes
 
 - Start with small values during iteration: `BENCH_TASKS=2 BENCH_ITERS=10000` to validate changes quickly
-- Use `BENCH_HELPER_OPS=10000` for a fast smoke test of all helpers, and `node bench/run.js helpers` to run *only* the helper micro-benchmarks — the pool and scenario phases dominate wall-clock time, and `helpers` is the fast way to iterate on them
+- Use `BENCH_HELPER_OPS=10000` for a fast smoke test of all helpers, and `node bench/run.js helpers` to run _only_ the helper micro-benchmarks — the pool and scenario phases dominate wall-clock time, and `helpers` is the fast way to iterate on them
 - Use `BENCH_POOL_TIMEOUT=0` when you expect long runs and don't want the harness to fall back to the plain `worker_threads` implementation
 - Use `BENCH_POOL_RUNS=3` for more stable pool benchmark numbers on a noisy machine (runs each pool variant 3 times, reports median)
 - Use `BENCH_RUNS=15` or higher when you need to resolve a small delta; check the reported noise floor to confirm it worked

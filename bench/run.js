@@ -1755,6 +1755,104 @@ async function runBenchmarkPowerQueue(ops) {
   };
 }
 
+// ── PowerCache: the sites TEST-006's timing gate exists to protect ───────────
+/**
+ * `PowerCache` was not among the helper micro-benchmarks, which is why the
+ * first version of the gate in `bench/baseline.js` passed a deliberate
+ * constant-factor slowdown in `PowerCache.get` without noticing: there was no
+ * cache site in the band set for it to move. A gate that cannot see the code it
+ * was built to guard is a gate that always passes, and an always-passing gate
+ * is worse than none, because it is indistinguishable from one that works.
+ *
+ * Both sites are recorded through `benchVariantRepeat`, so they carry the same
+ * symmetric-trimmed bands as everything else in the harness, and a regression
+ * here shows up in the same JSON the gate reads.
+ *
+ * @param {number} ops - Operations per timed repeat.
+ * @returns {Promise<{name: string, ops: number, variants: object[]}>}
+ */
+async function benchPowerCacheHelpers(ops) {
+  const size = Math.max(64, Math.min(ops, 4096));
+  // A hit is the case the gate cares about: `get` is the hot path for every
+  // caller, and a miss is dominated by the miss branch rather than the shared
+  // read path, so a slowdown in the read logic only shows on hits.
+  const cache = new PowerCache({ maxEntries: size, defaultTTL: 60000 });
+  const keys = Array.from({ length: size }, (_, i) => `gate:${i}`);
+  for (const k of keys) cache.set(k, k.length);
+
+  const hitMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) cache.get(keys[i % size]);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'cacheHitMs'
+  );
+
+  // A miss is measured too, because the admission path is where a structural
+  // change (the W-TinyLFU window, for one) shows up, and a gate that only saw
+  // hits would miss every one of them.
+  const missCache = new PowerCache({ maxEntries: size, defaultTTL: 60000 });
+  const missKeys = Array.from({ length: size }, (_, i) => `gate-miss:${i}`);
+  const missMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    async () => {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) missCache.set(missKeys[i % size], i);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'cacheMissSetMs'
+  );
+
+  return {
+    name: 'PowerCache',
+    ops,
+    variants: [
+      { label: `get x${ops} (all hits)`, totalMs: hitMs, opsPerSec: ops / (hitMs / 1000) },
+      { label: `set x${ops} (all misses)`, totalMs: missMs, opsPerSec: ops / (missMs / 1000) },
+    ],
+  };
+}
+
+// ── PowerThrottle: the second call site TEST-006 names ───────────────────────
+/**
+ * `PowerThrottle.tryConsume` is named in TEST-006 alongside `PowerCache.get` as
+ * the hot path the timing gate is meant to protect, and it had no band of its
+ * own either — `underRateMs` and `overRateMs` measure `PowerRateLimit` *through*
+ * a throttle, so a slowdown inside `tryConsume` is present but entangled with
+ * the limiter's own work and cannot be attributed to one or the other.
+ *
+ * @param {number} ops - Operations per timed repeat.
+ * @returns {Promise<{name: string, ops: number, variants: object[]}>}
+ */
+async function benchPowerThrottleHelpers(ops) {
+  // `refillRate: 0` and a capacity well above `ops` so every consume is a hit:
+  // this measures the permit path, not the clock or the refill arithmetic.
+  const tryConsumeMs = await benchVariantRepeat(
+    BENCH_RUNS,
+    () => {
+      const throttle = new PowerThrottle({ capacity: ops * 2, tokens: ops * 2, refillRate: 0 });
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i++) throttle.tryConsume(1);
+      return Number(process.hrtime.bigint() - t0) / 1e6;
+    },
+    'throttleTryConsumeMs'
+  );
+
+  return {
+    name: 'PowerThrottle',
+    ops,
+    variants: [
+      {
+        label: `tryConsume x${ops} (all granted)`,
+        totalMs: tryConsumeMs,
+        opsPerSec: ops / (tryConsumeMs / 1000),
+      },
+    ],
+  };
+}
+
 // ── Cache eviction under tight capacity ──────────────────────────────────────
 async function runCacheEvictionPressure(tasks, iterations) {
   // maxEntries = 20 % of unique keys → heavy eviction on every miss
@@ -2203,6 +2301,11 @@ async function runAllHelperBenchmarks() {
     ['PowerDeadline', () => runBenchmarkPowerDeadline(HELPER_OPS)],
     ['PowerSlidingWindow', () => runBenchmarkPowerSlidingWindow(HELPER_OPS)],
     ['PowerQueue', () => runBenchmarkPowerQueue(HELPER_OPS)],
+    // Added for the TEST-006 timing gate, which was blind to the cache:
+    // `PowerCache` and `PowerThrottle` were the two call sites the item names
+    // and neither had a band to move.
+    ['PowerCache', () => benchPowerCacheHelpers(HELPER_OPS)],
+    ['PowerThrottle', () => benchPowerThrottleHelpers(HELPER_OPS)],
   ];
 
   for (const [name, fn] of runners) {
@@ -2639,6 +2742,13 @@ async function main() {
       gcBetweenRuns: GC_AVAILABLE,
       // Filled in after the phases run; see the assignment at the end of main().
       noise: null,
+      // Per-call-site bands, same timing as `noise`. Present so a regression
+      // gate has something machine-readable to compare against: `bench/baseline.js`
+      // (TEST-006 option (c)) records these per machine and checks a later run
+      // against them, which is only possible if the per-site numbers survive
+      // into the JSON. The aggregate above is what a human reads; this is what
+      // the gate reads.
+      bands: null,
     },
     config: {
       mode,
@@ -2902,6 +3012,14 @@ async function main() {
   // most needs.
   if (report.measurement) {
     report.measurement.noise = summariseMeasurementBands();
+    report.measurement.bands = [...MEASUREMENT_BANDS.values()].map((b) => ({
+      label: b.label,
+      median: Number(b.median.toFixed(6)),
+      min: Number(b.min.toFixed(6)),
+      max: Number(b.max.toFixed(6)),
+      spreadPct: Number(b.spreadPct.toFixed(2)),
+      samples: b.samples,
+    }));
   }
 
   const fname = 'bench/results.md';

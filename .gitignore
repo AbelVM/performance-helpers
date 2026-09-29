@@ -15,6 +15,7 @@ example/
 review.md
 review2.md
 .zvec-grep/
+.vitest/
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
@@ -152,3 +153,8 @@ vite.config.ts.timestamp-*
 # script), so it is not source. The hooks themselves - .husky/pre-commit - are
 # committed.
 .husky/_
+
+# Per-machine benchmark baselines (TEST-006 gate). A committed baseline is a
+# claim about every other machine's hardware, which is the mistake the
+# per-machine design exists to avoid. See bench/baseline.js.
+bench/baselines/
