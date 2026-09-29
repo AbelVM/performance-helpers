@@ -83,6 +83,42 @@ describe('review.md plan table', () => {
     expect(true).toBe(true);
   });
 
+  it('the notes cell ends with a section reference', () => {
+    // A partial check on the thing `test/reviewTable.test.js` otherwise cannot
+    // do: the rows disagree with the header about which column is which (see
+    // the "does not check column meaning" test), so an append to the wrong cell
+    // passes the column *count* check while quietly misfiling the text.
+    //
+    // It cost two appends' worth of confusion to find this: the TEST-008 notes
+    // landed in a cell that looked like the notes and was not, and the row kept
+    // its stale "52 waits" line the whole time. The notes cell is the one that
+    // ends with `§x.y`, so an append that does not end there is visible.
+    //
+    // It is a heuristic, not a schema: rows whose notes legitimately end
+    // elsewhere will need this relaxed deliberately rather than silently.
+    const withRef = [];
+    const without = [];
+    for (const line of lines) {
+      if (!PLAN_ROW.test(line)) continue;
+      const cells = line.split('|');
+      const last = cells[cells.length - 2]?.trim() ?? '';
+      (/§[\d.]/.test(last) ? withRef : without).push(line.slice(2, 16).trim());
+    }
+    // Recorded as a baseline rather than asserted as a rule, because it is not
+    // one: most rows do not end with a section reference, and that is the
+    // misalignment the sibling test describes. Asserting either direction would
+    // fail, and a test that always fails is worse than no test.
+    //
+    // What this buys is visibility. Editing the notes cell of a row that did
+    // end with a section reference and appending prose after it moves one row
+    // from `withRef` to `without` — which is exactly how both of tonight's
+    // misfilings started, and neither was visible to the column-count check.
+    expect({ withRef: withRef.length, without: without.length }).toEqual({
+      withRef: 36,
+      without: 64,
+    });
+  });
+
   it('has a plan row for every open item it claims to track', () => {
     // A sanity floor rather than an exact count: the table grows, and a test
     // that pins the number makes every legitimate addition a failure.
