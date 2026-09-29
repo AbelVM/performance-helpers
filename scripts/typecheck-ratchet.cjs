@@ -69,8 +69,18 @@ const path = require('node:path');
  * fell because `PowerMemoizer`'s hand-duplicated copy of the `PowerCacheOptions`
  * key list went away, and because `PowerRateLimit`'s `RateLimiterLike` gained
  * the `reset` member two call sites were already using.
+ *
+ * 301 -> 300 with TEST-003's `WorkerAgnostic` fix. The async-factory guard sat
+ * inside a `typeof result === 'string'` branch that a Promise can never
+ * satisfy, so it was dead code; the checker had flagged the `typeof` test as
+ * narrowing to a string, and moving the guard out to a thenable test at the top
+ * of the function is what removed the error. Worth noting as a pattern: the
+ * diagnostic was real, but it described a *consequence* of the dead branch
+ * rather than the deadness itself, and reading it as "this comparison is
+ * unnecessary" rather than "nothing after this line runs" is the mistake the
+ * ratchet invites.
  */
-const BASELINE = 301;
+const BASELINE = 300;
 
 const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' }];
 

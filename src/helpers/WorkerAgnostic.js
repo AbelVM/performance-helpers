@@ -202,17 +202,22 @@ function createFromFunction(workerSource, WorkerCtor, options, env) {
  * @private
  */
 function coerceFactoryResult(result, WorkerCtor, options, env) {
+  // An `async` factory resolves to a Promise, and `typeof` reports a Promise as
+  // 'object' — so it has to be rejected as a *thenable* test, and it cannot
+  // live inside a `typeof result === 'string'` branch where it could never be
+  // reached. It was there, which meant the guard never fired: an async factory
+  // produced a Promise as its "worker", and every later `postMessage` then
+  // failed against an object with no such method, several frames from the
+  // mistake.
+  if (result && typeof result.then === 'function') {
+    throw new TypeError(
+      'WorkerAgnostic: an async worker factory was passed. Construct the worker synchronously, or await the factory yourself and pass the instance.'
+    );
+  }
   if (result && typeof result === 'object' && typeof result.postMessage === 'function') {
     return result;
   }
   if (typeof result === 'string') {
-    // An `async` factory resolves to a Promise, which `typeof` reports as
-    // 'object' - it must not be mistaken for a worker instance.
-    if (result && typeof result.then === 'function') {
-      throw new TypeError(
-        'WorkerAgnostic: an async worker factory was passed. Construct the worker synchronously, or await the factory yourself and pass the instance.'
-      );
-    }
     return env === 'node'
       ? new (typeof WorkerCtor === 'function' ? WorkerCtor() : WorkerCtor)(result, options)
       : createWebWorkerFromString(result, options);
