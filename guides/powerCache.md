@@ -334,6 +334,26 @@ of tests exercised a configuration that never occurs in production. That is
 fixed, and the reasoning is kept in `review.md` under BENCH-002 rather than
 deleted: a review that silently drops its own wrong conclusions is not a review.
 
+#### The fix, and why it is not written yet
+
+The mechanism is known: W-TinyLFU's admission **window** — a small
+unconditional LRU in front of the filtered space, so scan traffic dies in the
+window and the filter only ever arbitrates that window's victim against a
+main-space victim. The cold-start collapse is impossible by construction,
+because a new key is never refused outright.
+
+Two things are genuinely undecided, and both are decisions rather than
+mechanics: the **window size** (a 1 %-of-`maxEntries` window is 0.4 entries on
+a 40-entry cache, which rounds to the current broken behaviour), and whether
+`admission: 'tinylfu'` should be a **no-op under `policy: 'slru'`** — SLRU
+already has a probation region doing the same job, and stacking them currently
+produces the worst variant measured.
+
+The full argument, including the two measured attempts and the measurements
+that killed three other hypotheses, is in
+[the design note](../design/0001-tinylfu-admission-window.md). Until it is
+resolved, the numbers above stand and the option stays off by default.
+
 ### `hasEqual` and deep comparison limits
 
 `hasEqual(key, value, options)` deep-compares a stored value against an
