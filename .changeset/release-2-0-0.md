@@ -189,6 +189,20 @@ pipeline.
     6 requests on the wire — and a hedge draws a budget token like any retry.
     Off by default because it raises average load and only pays off if `fn`
     honours its `AbortSignal`.
+- **`admission: 'tynilfu'` is now a no-op under `policy: 'slru'`,** and composing the two scan-resistant options no longer
+  produces the worse of each. SLRU's probation segment is the same mechanism the sketch provides — both absorb one-shot traffic
+  before it reaches the main region — and stacking them is not a weaker version of either but a worse cache. Measured on
+  `node bench/claims.js zipf`, `slru` + `tinylfu` retained **70.9 %** of the working set against `slru` alone's **89.4 %**, so a
+  user reaching for both got the worse of each. Asking for `slru` now gives you `slru`, unchanged, and no sketch is built, so
+  the option costs nothing there. **Breaking, because the combination now does _less_** — but it is doing the right thing, and
+  `slru` on its own is the fastest scan-resistant configuration in the benchmark by a wide margin.
+  **The W-TinyLFU admission window this option was heading towards is not in this release.** Its mechanics are implemented and
+  verified, and it fixes the cold-start collapse — but it still measures _worse than plain LRU_ on working-set hit rate
+  (59.6 % against 75.0 %), so it did not meet its own acceptance criteria and shipping it under the same name would have been
+  the wrong trade. `design/0001-tinylfu-admission-window.md` has the full story: the mechanism, the seven rules the
+  implementation needed, the three retracted hypotheses, and the cheap experiment that would settle whether a frequency
+  filter earns its keep here at all.
+
 - **`PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` and `PowerRateLimit` can now be told what time it is,
   and a composition reads the clock once instead of once per limiter.** `nowMs()` reads _two_ clocks per
   call - the high-resolution one and `Date.now()`, the second purely to check they have not diverged under

@@ -287,6 +287,26 @@ comes from `slru`, which shipped earlier and is not experimental.
 sketch costs memory and a hash per access; the mechanism is right and the wiring
 is not yet.
 
+#### `tinylfu` is a no-op under `policy: 'slru'`
+
+SLRU's probation segment is the same mechanism the sketch provides — both
+absorb one-shot traffic before it can reach the main region — and stacking them
+is not a weaker version of either but a worse cache. Measured on the workload
+above:
+
+| Configuration                            | Working-set hit rate |     Survivors |
+| ---------------------------------------- | -------------------: | ------------: |
+| `policy: 'slru'`                         |               89.4 % |     33.0 / 40 |
+| `policy: 'slru'`, `admission: 'tynilfu'` |           **89.4 %** | **33.0 / 40** |
+
+Before this, the combination measured **70.9 %** — worse than plain LRU — so
+composing "the two scan-resistant options" produced the worse of each rather
+than the better. Asking for SLRU now gives you SLRU, unchanged, and the option
+costs nothing there: no sketch is built, so there is no per-access hash.
+
+This is filed under **Breaking**, because the combination now does _less_ than
+it used to. It is doing the right thing.
+
 #### The confirmed defect
 
 The admission check refuses when the incumbent's estimate is `>=` the

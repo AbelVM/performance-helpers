@@ -110,14 +110,55 @@ describe('PowerCache { admission: tinylfu }', () => {
     expect(cache._rejectedAdmission).toBeGreaterThan(0);
   });
 
-  it('works with the LRU policy, the SLRU policy, and an explicit undefined', () => {
-    for (const policy of ['lru', 'slru']) {
-      const cache = new PowerCache({ maxEntries: 10, policy, admission: 'tinylfu' });
-      cache.set('a', 1);
-      expect(cache.get('a')).toBe(1);
-      expect(cache._sketch).not.toBeNull();
-    }
+  it('builds a sketch under LRU and **not** under SLRU', () => {
+    // **Breaking, deliberately.** SLRU's probation segment is the same mechanism
+    // the sketch provides - both absorb one-shot traffic before it reaches the
+    // main region - and stacking them measured as the worst variant rather than a
+    // weaker one: `slru` + `tinylfu` retained 70.9 % of the working set against
+    // `slru` alone's 89.4 % on `node bench/claims.js zipf`. A user composing
+    // "the two scan-resistant options" got the worse of each.
+    //
+    // This test previously asserted `_sketch` was non-null under both policies,
+    // pinning the behaviour being removed. It is written the other way on
+    // purpose, and it is what keeps the combination stable if someone re-adds
+    // the sketch for `slru`.
+    const lru = new PowerCache({ maxEntries: 10, policy: 'lru', admission: 'tinylfu' });
+    lru.set('a', 1);
+    expect(lru.get('a')).toBe(1);
+    expect(lru._sketch).not.toBeNull();
+
+    const slru = new PowerCache({ maxEntries: 10, policy: 'slru', admission: 'tinylfu' });
+    slru.set('a', 1);
+    expect(slru.get('a')).toBe(1);
+    expect(slru._sketch).toBeNull();
+    // That it is *still SLRU* is asserted by the next test, behaviourally.
+    // There is no public `policy` getter to check, and reaching for a private
+    // field would pin an implementation detail that the behavioural comparison
+    // already covers more honestly.
+
     const off = new PowerCache({ maxEntries: 10, admission: undefined });
     expect(off._sketch).toBeNull();
+  });
+
+  it('leaves slru behaviour identical with and without the option', () => {
+    // The strongest form of the claim: not "the sketch is null" but "you cannot
+    // tell the difference", measured by driving both caches through the same
+    // workload and comparing results. A weaker test would pass while some other
+    // part of the slru path still consulted the option.
+    const drive = (cache) => {
+      for (let i = 0; i < 20; i += 1) cache.set(`k${i % 8}`, i);
+      for (let i = 0; i < 40; i += 1) cache.get(`k${i % 8}`);
+      for (let i = 0; i < 60; i += 1) cache.set(`scan-${i}`, i);
+      return {
+        keys: [...cache.keys()].sort(),
+        size: cache.size,
+        stats: cache.stats(),
+      };
+    };
+    const withOption = drive(
+      new PowerCache({ maxEntries: 10, policy: 'slru', admission: 'tinylfu' })
+    );
+    const without = drive(new PowerCache({ maxEntries: 10, policy: 'slru' }));
+    expect(withOption).toEqual(without);
   });
 });

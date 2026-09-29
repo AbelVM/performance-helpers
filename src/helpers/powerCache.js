@@ -228,8 +228,27 @@ export class PowerCache {
      * @type {SmallLfuSketch|null}
      * @private
      */
+    // **`admission: 'tinylfu'` is a no-op under `policy: 'slru'`.**
+    //
+    // SLRU's probation segment is the same mechanism the sketch provides: both
+    // absorb one-shot traffic before it can reach the main region. Stacking them
+    // is not a weaker version of either, it is a worse cache - measured on the
+    // paired Zipf + scan workload (`node bench/claims.js zipf`), `slru` +
+    // `tinylfu` retained **70.9 %** of the working set against `slru` alone's
+    // **89.4 %**, and plain LRU's 75.0 %. Composing "the two scan-resistant
+    // options" produced the worse of each rather than the better.
+    //
+    // Not building the sketch is the smallest change that makes the combination
+    // predictable: a user who asks for SLRU gets SLRU. The cost is a hash and a
+    // memory probe per access, which is what not building it saves.
+    //
+    // The broader W-TinyLFU admission window that this option was heading
+    // towards is **not** in this release - the mechanism is correct but still
+    // measures worse than plain LRU on this workload, so it did not meet its own
+    // acceptance criteria. `design/0001-tinylfu-admission-window.md` has the
+    // full story, including why.
     this._sketch =
-      admission === 'tinylfu'
+      admission === 'tinylfu' && this._policy === 'lru'
         ? new SmallLfuSketch({
             // The half-life has to be sized against the working set, not left
             // at the sketch's own default of 10 operations. At 10 a reset
