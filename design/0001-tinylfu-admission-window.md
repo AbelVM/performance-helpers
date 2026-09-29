@@ -295,6 +295,46 @@ The third trap and the second share a root: the window lives at the tail of the
 main list precisely so that main space's eviction cursor is untouched by it, and
 that sharing is what makes these edges reachable.
 
+### A second attempt, and what it got right before it stopped
+
+Started from this note rather than from a constructor, which is the point of
+writing it. It got three things right that the first attempt had wrong, and
+each is a mistake worth naming because none of them produces an error:
+
+**Rule 2b — "full" means the _total_ count, window included.** The first
+attempt tested main space alone. That is the natural reading and it is wrong:
+the window is admission slack, not capacity on top of `maxEntries`, so a
+main-only test reads `36 >= 40`, never arbitrates, admits every scan key, and
+the cache churns through its working set one scan key at a time. Measured: **9 of
+40** survivors against the 30 the test requires.
+
+**The window counts _against_ `maxEntries`.** Excluding it — the same mistake,
+in the eviction sweep this time — grew a `maxEntries: 10` cache to 12. A cache
+reporting `size: 12` under a limit of 10 is lying, and `maxEntries` is the one
+number callers size their working sets against. Caffeine has the same property:
+the window is drawn from the same budget as main space.
+
+**Promotion must unlink before re-appending.** `_append` splices at the tail and
+does not remove, so promoting a still-linked node leaves it in two places at
+once. The list stops being a list, and the symptom is a 40-key warm ending with
+**6** entries instead of 40 — no exception, just a cache that quietly does not
+grow.
+
+With those fixed, scan resistance reached **30 of 40**, against a requirement of
+more than 30 — and then the work stopped, with the tree reverted rather than
+committed red.
+
+**Where the next attempt starts, precisely.** An unresolved window-accounting
+bug: after a warm and a read pass, `_windowSize` reads **negative** (`-16`), so
+`_promoteFromWindow` ran about twenty times against a window that holds four.
+`node.inWindow` is therefore true on more nodes than the window contains, and the
+cause was not root-caused. The next thing to do is **not** another rule — it is to
+find that cause, because a counter that goes negative invalidates every
+measurement taken on top of it. Two suspects worth checking first, in order:
+`_moveToTail` has ten call sites and it is the only place that promotes, so
+whether one `get` can promote twice; and whether a node recycled through
+`_pool` can arrive with `inWindow` still set despite the reset in `_allocNode`.
+
 ## How to validate
 
 Any implementation must clear all four, measured with `bench/claims.js zipf`:
