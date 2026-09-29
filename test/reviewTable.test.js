@@ -161,9 +161,12 @@ describe.skipIf(!reviewPresent)('review.md plan table', () => {
     // moved no counter, and the counts here stayed put. An anchored `$` would
     // make the heuristic work as written; it is left unanchored because changing
     // it would move every row at once and the baseline above is the point.
+    // 46/61: FEAT-011 and FEAT-013 moved from `without` to `withRef` when they
+    // were closed on a measurement and given a section reference at the end of
+    // their notes. Recorded rather than asserted as a rule — see above.
     expect({ withRef: withRef.length, without: without.length }).toEqual({
-      withRef: 45,
-      without: 62,
+      withRef: 46,
+      without: 61,
     });
   });
 

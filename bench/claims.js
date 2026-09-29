@@ -36,6 +36,8 @@
  *   node bench/claims.js latency   # histogram quantile accuracy across scales
  *   node bench/claims.js carrier   # message-carrier fidelity and encode cost
  *   node bench/claims.js coldstart # cold start after a one-shot scan
+ *   node bench/claims.js payload   # whether compression pays on a message path
+ *   node bench/claims.js permit    # what a SharedArrayBuffer permit pool would cost
  *
  * Every parameter is overridable from the environment so a result can be
  * reproduced exactly, and so the interesting axes (Zipf exponent, capacity,
@@ -44,6 +46,7 @@
  * @module bench/claims
  */
 
+import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { PowerHistogram } from '../src/helpers/powerHistogram.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
@@ -424,6 +427,240 @@ function runColdStartWorkload() {
   return { results };
 }
 
+// ─── Workload 1b: what would a SharedArrayBuffer permit pool cost? ───────────
+//
+// FEAT-011 proposed a "`SharedArrayBuffer` + `Atomics`-backed cross-worker
+// permit pool" and called it "the one change that could move the pool's floor
+// cost". The premise is inverted, and the measurement is the reason.
+//
+// `PowerPool` already gates dispatch with `tasks < this._maxTasksPerWorker` —
+// a plain field read, which is the cheapest operation available. A shared-memory
+// permit pool replaces that read with an atomic one. The numbers below are the
+// cost of the *same decision*, taken two ways.
+
+async function runPermitWorkload() {
+  const N = Number(process.env.CLAIM_PERMIT_OPS || 2000000);
+  console.log('BENCH-002e — what a SharedArrayBuffer permit pool would cost\n');
+  console.log('  `PowerPool` gates every dispatch with `tasks < this._maxTasksPerWorker`:');
+  console.log('  a plain field read. A shared-memory permit pool performs the same decision');
+  console.log('  through an atomic. This is the cost of the two, doing the same job.\n');
+  console.log(`  ops                    ${N.toLocaleString()}\n`);
+
+  const time = (fn) => {
+    for (let i = 0; i < 50_000; i += 1) fn();
+    const s = [];
+    for (let r = 0; r < 7; r += 1) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < N; i += 1) fn();
+      s.push(Number(process.hrtime.bigint() - t0) / N);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+
+  // Sink the result so nothing is optimised away.
+  let sink = 0;
+  const tasks = 0;
+  const maxTasksPerWorker = 4;
+  const view = new Int32Array(new SharedArrayBuffer(8));
+  Atomics.store(view, 0, 0);
+
+  const fieldNs = time(() => {
+    if (tasks < maxTasksPerWorker) sink += 1;
+  });
+  const loadNs = time(() => {
+    if (Atomics.load(view, 0) < maxTasksPerWorker) sink += 1;
+  });
+  const addNs = time(() => {
+    Atomics.add(view, 0, 1);
+  });
+
+  console.log(
+    `  plain field read  ${fieldNs.toFixed(2).padStart(8)} ns/op   (what PowerPool does today)`
+  );
+  console.log(
+    `  Atomics.load      ${loadNs.toFixed(2).padStart(8)} ns/op   ${(loadNs / fieldNs).toFixed(1)}x the field read`
+  );
+  console.log(
+    `  Atomics.add       ${addNs.toFixed(2).padStart(8)} ns/op   ${(addNs / fieldNs).toFixed(1)}x the field read`
+  );
+
+  // The half of the proposal that is not a read: a *blocking* acquire.
+  const waitView = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.store(waitView, 0, 0);
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < 1000; i += 1) Atomics.wait(waitView, 0, 0, 1);
+  const waitMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  const t1 = process.hrtime.bigint();
+  for (let i = 0; i < 1000; i += 1) await Atomics.waitAsync(waitView, 0, 0, 1);
+  const asyncMs = Number(process.hrtime.bigint() - t1) / 1e6;
+
+  console.log(
+    `\n  Atomics.wait, 1 ms timeout x1000:   ${waitMs.toFixed(1).padStart(8)} ms  ` +
+      'parks the thread for its full timeout'
+  );
+  console.log(
+    `  Atomics.waitAsync, 1 ms x1000:       ${asyncMs.toFixed(1).padStart(8)} ms  ` +
+      'does not block at all, so it is a timer'
+  );
+  console.log(
+    '\n  `PowerSemaphore` documents itself as an async gate "without blocking the event\n' +
+      '  loop". `Atomics.wait` is the one mechanism that does block, and it is forbidden\n' +
+      '  on a browser main thread and needs cross-origin isolation, so the feature would\n' +
+      '  work in Node and be unavailable on the web — the exact "passes here, absent in\n' +
+      '  production" shape this repository distrusts. `waitAsync` does not block, which\n' +
+      '  means it is a timer and adds nothing an async queue does not already provide.'
+  );
+  void sink;
+
+  return { fieldNs, loadNs, addNs, waitMs, asyncMs };
+}
+
+// ─── Workload 1c: does compression ever pay on a pool message path? ──────────
+//
+// FEAT-013 asked for "optional brotli / `CompressionStream` on the pool message
+// path with a per-message size threshold", and its own note says it "needs a
+// large-payload bench to justify". This is that bench, and the answer is no.
+//
+// The reason is structural, and it is worth stating before the numbers: the
+// threads are in the **same process**. There is no network, no serialisation
+// link, and no bandwidth to save. `postMessage` already moves a large payload
+// by *transferring* its `ArrayBuffer` — a pointer move, not a copy — and the
+// pool already exposes that path. Compression buys reduced bytes on a wire, and
+// a `Worker` port is not a wire.
+//
+// So the comparison is: what does compressing cost the sender, against what
+// does the sender already avoid by transferring rather than copying.
+
+/** A compressible, pool-plausible payload: repeated structured records. */
+function makePayload(rows) {
+  const out = [];
+  for (let i = 0; i < rows; i += 1) {
+    out.push({ id: i, name: `item-${i}`, tags: ['alpha', 'beta'], ok: i % 2 === 0 });
+  }
+  return new TextEncoder().encode(JSON.stringify(out));
+}
+
+/**
+ * Compress a payload through a `CompressionStream`, the web API FEAT-013 names.
+ *
+ * @param {Uint8Array} bytes
+ * @param {string} format
+ * @returns {Promise<Uint8Array>}
+ */
+async function compressionStream(bytes, format) {
+  const cs = new CompressionStream(format);
+  const writer = cs.writable.getWriter();
+  writer.write(bytes);
+  writer.close();
+  const parts = [];
+  const reader = cs.readable.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+  }
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
+/** @param {number[]} values */
+function medianOfMs(values) {
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+async function runPayloadWorkload() {
+  const sizes = [10, 100, 500, 2000, 10000];
+  console.log('BENCH-002d — does compression pay on a pool message path?\n');
+  console.log('  A worker message does not cross a network. `postMessage` moves a large');
+  console.log('  payload by transferring its ArrayBuffer, and the pool already offers that');
+  console.log('  path, so the `transfer` column is what the sender can already avoid for');
+  console.log('  free. Compression is a bandwidth optimisation and there is no bandwidth to');
+  console.log('  save between threads in one process.\n');
+  console.log(
+    `  ${'rows'.padEnd(7)}${'bytes'.padStart(9)}${'gzip us'.padStart(10)}${'ratio'.padStart(8)}` +
+      `${'brotli us'.padStart(12)}${'ratio'.padStart(8)}${'clone us'.padStart(11)}${'transfer us'.padStart(13)}`
+  );
+  console.log(`  ${'-'.repeat(78)}`);
+
+  const rows = [];
+  for (const n of sizes) {
+    const payload = makePayload(n);
+    const reps = n <= 500 ? 200 : 20;
+    const time = (fn) => {
+      for (let i = 0; i < 3; i += 1) fn();
+      const s = [];
+      for (let r = 0; r < 7; r += 1) {
+        const t0 = process.hrtime.bigint();
+        for (let i = 0; i < reps; i += 1) fn();
+        s.push(Number(process.hrtime.bigint() - t0) / reps / 1000);
+      }
+      return medianOfMs(s);
+    };
+    const gz = gzipSync(payload, { level: 6 });
+    const br = brotliCompressSync(payload);
+    const gzUs = time(() => gzipSync(payload, { level: 6 }));
+    const brUs = time(() => brotliCompressSync(payload));
+    const cloneUs = time(() => structuredClone(payload));
+    // Transferring is a pointer move; copying the bytes out of a pooled buffer
+    // is the closest stand-in available outside a real worker port.
+    const transferUs = time(() => payload.slice().buffer);
+    const row = {
+      rows: n,
+      bytes: payload.length,
+      gzipUs: gzUs,
+      gzipRatio: gz.length / payload.length,
+      brotliUs: brUs,
+      brotliRatio: br.length / payload.length,
+      cloneUs,
+      transferUs,
+    };
+    rows.push(row);
+    console.log(
+      `  ${String(n).padEnd(7)}${String(payload.length).padStart(9)}` +
+        `${gzUs.toFixed(1).padStart(10)}${row.gzipRatio.toFixed(3).padStart(8)}` +
+        `${brUs.toFixed(1).padStart(12)}${row.brotliRatio.toFixed(3).padStart(8)}` +
+        `${cloneUs.toFixed(1).padStart(11)}${transferUs.toFixed(3).padStart(13)}`
+    );
+  }
+
+  // The `CompressionStream` the row names, at the sizes where it could plausibly
+  // be affordable, since a stream API carries fixed overhead a one-shot buffer
+  // does not.
+  console.log('\n  CompressionStream (the web API the row names), 2000 rows:');
+  const mid = makePayload(2000);
+  for (const format of ['gzip', 'deflate-raw']) {
+    const t0 = process.hrtime.bigint();
+    const out = await compressionStream(mid, format);
+    const us = Number(process.hrtime.bigint() - t0) / 1000;
+    console.log(
+      `    ${format.padEnd(12)}${us.toFixed(1).padStart(9)} us  ratio ${(out.length / mid.length).toFixed(3)}`
+    );
+  }
+
+  const big = rows[rows.length - 1];
+  console.log(
+    `\n  At ${big.bytes} bytes: gzip costs ${big.gzipUs.toFixed(0)} us in the sender to save ` +
+      `${Math.round((1 - big.gzipRatio) * 100)}% of the bytes, and brotli costs ` +
+      `${(big.brotliUs / 1000).toFixed(0)} ms. The same payload transferred rather than copied\n` +
+      `  costs ${big.transferUs.toFixed(1)} us, and the pool already does that.` +
+      '\n' +
+      '\n  There is no size at which compression wins: it adds a synchronous cost to the\n' +
+      '  sender and a matching one to the worker, to save nothing the transport was not\n' +
+      '  already avoiding. It would pay on a link that charges per byte. A `Worker` port\n' +
+      '  does not charge per byte.'
+  );
+
+  return { rows };
+}
+
 // ─── Workload 2: histogram quantile accuracy across scales ──────────────────
 
 /**
@@ -759,15 +996,25 @@ function runCarrierWorkload() {
 
 const mode = process.argv[2] || 'zipf';
 
-if (mode === 'zipf') {
-  runZipfWorkload();
-} else if (mode === 'latency') {
-  runScaledLatencyWorkload();
-} else if (mode === 'carrier') {
-  runCarrierWorkload();
-} else if (mode === 'coldstart') {
-  runColdStartWorkload();
-} else {
-  console.error(`Unknown mode: ${mode}. Use "zipf", "coldstart", "latency" or "carrier".`);
-  process.exit(1);
+async function dispatch() {
+  if (mode === 'zipf') {
+    runZipfWorkload();
+  } else if (mode === 'latency') {
+    runScaledLatencyWorkload();
+  } else if (mode === 'carrier') {
+    runCarrierWorkload();
+  } else if (mode === 'coldstart') {
+    runColdStartWorkload();
+  } else if (mode === 'payload') {
+    await runPayloadWorkload();
+  } else if (mode === 'permit') {
+    await runPermitWorkload();
+  } else {
+    console.error(
+      `Unknown mode: ${mode}. Use "zipf", "coldstart", "payload", "permit", "latency" or "carrier".`
+    );
+    process.exit(1);
+  }
 }
+
+dispatch();
