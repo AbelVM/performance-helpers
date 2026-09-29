@@ -327,13 +327,58 @@ committed red.
 **Where the next attempt starts, precisely.** An unresolved window-accounting
 bug: after a warm and a read pass, `_windowSize` reads **negative** (`-16`), so
 `_promoteFromWindow` ran about twenty times against a window that holds four.
-`node.inWindow` is therefore true on more nodes than the window contains, and the
-cause was not root-caused. The next thing to do is **not** another rule — it is to
-find that cause, because a counter that goes negative invalidates every
-measurement taken on top of it. Two suspects worth checking first, in order:
-`_moveToTail` has ten call sites and it is the only place that promotes, so
-whether one `get` can promote twice; and whether a node recycled through
-`_pool` can arrive with `inWindow` still set despite the reset in `_allocNode`.
+`node.inWindow` was true on more nodes than the window contained.
+
+**Root-caused, in a standalone model rather than in the cache.** The window is
+_positional_: it is the last `_windowSize` nodes, `_windowStart` to tail. That
+makes the invariant **every splice must land in the right region**, and two of
+the three did not:
+
+1. **A main-space recency bump appended at the tail.** `_moveToTail` on a
+   node already in main space moved it to the MRU end of the _whole list_ —
+   which is inside the window region. The node was not counted and not flagged,
+   so the region and the counter stopped describing the same set.
+2. **The window's promote branch re-appended at the tail.** Same error, in
+   `_evictWindowOldest`: a key promoted out of the window was appended to the
+   tail, putting a main-space node back inside the window region.
+
+`_promoteFromWindow` — the one path that spliced to _immediately before
+`_windowStart`_ — was already correct, which is why the defect looked like a
+counter bug rather than a geometry one: `_windowSize` is the visible symptom of
+a node having crossed the boundary.
+
+**The fix is one shared splice, used in all three places.** A `toMainSpace(node)`
+that unlinks and re-inserts immediately before `_windowStart` (falling back to
+the tail when the window is empty, and fixing `_head`/`_evictionCandidate` when
+there is no main space at all). `append` to the tail is then reserved for
+**window admission** — which is the only thing that belongs there — and
+`_moveToTail` becomes "promote if in the window, else move to the MRU end of
+main space" rather than "always move to the tail".
+
+Verified in the model before touching the cache: `size` 40, `wSize` 4 after a
+40-key warm, `wSize` 0 after a read pass, and an integrity check (the last
+`wSize` nodes are exactly the flagged ones, with `_windowStart` at the boundary)
+reporting `ok` throughout. Before the fix the same check read `BROKEN` _during
+the warm_, before any read happened — which is why the counter ran away on reads
+that were not themselves at fault.
+
+**Worth keeping as a rule:** when a structure is defined by _position_ in a list
+rather than by a field on its members, every mutation of that list has to be
+checked against the boundary. A node carrying a correct boolean can still be on
+the wrong side of it.
+
+**Applied to the cache, the counter is fixed** — `_windowSize` now reads 4 after a
+40-key warm and stays 4 across reads, where it previously went to `-16`. That
+was the goal of the isolated work and it is met. **What is not yet explained is
+the cache's own behaviour with the fix in place**: the same 40-key warm leaves
+`_map.size` at 5, so main space is not accumulating as the model says it should.
+The model's arbitration — no victim on a cold cache, promote unconditionally
+below capacity — matches the code, so the divergence is somewhere in how the
+real cache's eviction sweep, the sketch, or the reuse of `_evictionCandidate`
+interacts with a region boundary the model does not have. **The next step is
+therefore to extend the model to include the sweep**, not to add another rule to
+the cache: the model has now caught one bug the cache hid, and it will only catch
+this one if it covers the same ground.
 
 ## How to validate
 
