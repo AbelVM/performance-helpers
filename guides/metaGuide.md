@@ -441,6 +441,12 @@ reliable way to mislead yourself.
 - `PowerDeadline`: Attempt timeout, total deadline, abort, and retry budget wrapper.
 - `PowerCircuit`: Circuit breaker for unhealthy downstream dependencies.
 
+### Cross-cutting
+
+- **Trace context**: [W3C `traceparent` propagation](traceContext.md) over `PowerPool` messages.
+  Pool-level metadata that touches nothing in the payload, so it composes with everything else here.
+  See [ADR 0001](../adr/0001-versioned-envelope-protocol.md) for the framing it rides on.
+
 ### Events, state, and diagnostics
 
 - `PowerEventBus`: Decoupled pub/sub for in-process events.
@@ -449,17 +455,6 @@ reliable way to mislead yourself.
 - `PowerLogger`: Structured runtime logging.
 - `PowerHistogram`: In-process latency and percentile-style telemetry.
 - `PowerEventLoopMonitor`: Event-loop delay histogram and `eventLoopUtilization()`.
-
-### Realtime: framing, fan-out, and transports
-
-- `PowerMessageCodec`: Versioned `[version][codec][length][payload]` framing; `encodeNative` for
-  in-process `MessagePort`/`Worker` traffic.
-- `PowerRealtimeHub`: Topic fan-out with a per-subscriber bounded queue and a declared
-  slow-consumer policy.
-- `PowerWebSocketClient`: Client side. Back-pressure (watermarks or Streams), heartbeats with RTT,
-  decorrelated-jitter reconnects, connect timeout.
-- `PowerSocketAdapter`: Server side. One interface over a Node `ws` socket, a browser `WebSocket`
-  or a `WebSocketStream`, plus liveness, per-message rate limiting and a graceful `drain()`.
 
 ### Coordination and async building blocks
 
@@ -486,6 +481,12 @@ a socket somebody else accepted, and the other two sit between them.
   `decodeMessage(e.data).value` instead of `u82o(e.data)`.
 - `encodeNative`: for a `MessagePort` or `Worker`, where the platform's structured clone beats any
   serialization and handles `Map`, `Set`, `Date` and cycles losslessly.
+- **Protocol negotiation** (`decodeInbound`, `announceCapabilities`, and
+  `messageCodec: 'negotiated'`): the frame is lossy — a `Map` arrives as `{}`, a `Date` as an ISO
+  string, a `BigInt` makes the message undecodable — so a worker can advertise the native carrier
+  and get that instead, while every worker that does not advertise keeps getting the frame. **Read
+  any pool message with `decodeInbound(data)` and it works on all three carriers**, which is what
+  makes a pool safe to switch on before any worker is ready.
 - `PowerWebSocketClient`: `WebSocket` has **no** back-pressure, so a naive producer fills the
   browser's buffer until the tab dies. This adds watermarks (or Streams where available), heartbeats
   with RTT, decorrelated-jitter reconnects, and a connect timeout. Hand it `sendFrame` as the hub's
@@ -505,15 +506,6 @@ Reach for the framed codec when the transport carries bytes (WebSocket, file, HT
 `encodeNative` when it is an in-process message port. Reach for the hub before writing
 `for (ws of clients) ws.send(...)`: that pattern has no back-pressure and no signal when a client
 falls behind.
-
-- `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
-  envelope, so a byte-stream transport never has to guess whether it received an object or binary.
-  Use it instead of hand-rolling a JSON protocol, and instead of `PowerPool`'s internal sniffing.
-- `encodeNative`: for a `MessagePort` or `Worker`, where the platform's structured clone beats any
-  serialization and handles `Map`, `Set`, `Date` and cycles losslessly.
-
-Reach for the framed codec when the transport carries bytes (WebSocket, file, HTTP body), and
-`encodeNative` when it is an in-process message port.
 
 ---
 

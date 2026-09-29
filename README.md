@@ -62,7 +62,22 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 
 Transport framing and real-time fan-out. These compose: the hub delivers over whatever transport you supply, and the codec is what makes a batch of messages legible to the receiver. Full index: [assets/5_Realtime.md](assets/5_Realtime.md).
 
-- [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` envelope so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`. This is the protocol `PowerPool` speaks by default since 2.0. Workers can also negotiate the native carrier per worker — `messageCodec: 'negotiated'` sends the lossless structured-clone envelope to workers that advertise it, and framed JSON to everyone else.
+- [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` envelope so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`. This is the protocol `PowerPool` speaks by default since 2.0.
+
+  **Protocol negotiation.** The frame is portable and it is lossy: a `Map` arrives as `{}`, a `Date` as an ISO _string_, `Infinity` as `null`, and a `BigInt` makes the whole message undecodable. So a worker can advertise the native structured-clone carrier and get that instead, while every worker that does not advertise keeps getting the frame — one pool, a mixed fleet, and a rollout that can start before any worker is ready:
+
+  ```javascript
+  // pool
+  const pool = new PowerPool(WorkerScript, { messageCodec: 'negotiated' });
+
+  // worker — reads all three carriers, and says what it can decode
+  import { decodeInbound, announceCapabilities } from 'performance-helpers';
+  parentPort.postMessage(announceCapabilities());
+  parentPort.on('message', (data) => handle(decodeInbound(data).value));
+  ```
+
+  It is **not** a speedup, and the release note that claimed 2–5× was withdrawn: a structured clone is a tie for small objects, up to ~1.7× _slower_ for deeply nested structure, and faster only for string-heavy payloads. Fidelity is the reason. `node bench/claims.js carrier` reproduces both tables.
+
 - [PowerRealtimeHub: Topic fan-out with slow-consumer control](guides/powerRealtimeHub.md). Per-subscriber bounded queues and a declared policy (`drop-oldest` / `drop-newest` / `disconnect`) so one slow consumer cannot stall or OOM the process. Transport-agnostic via a `send` adapter; batches over `PowerMessageCodec`.
 
 - [PowerWebSocketClient: Reconnecting client with back-pressure](guides/powerWebSocketClient.md). `WebSocket` has no back-pressure, so this adds it two ways: `bufferedAmount` watermarks (universal, with a backing-off poll and `onPause`/`onResume`) and `WebSocketStream` where available (awaits `writer.ready`). Plus heartbeats with RTT, decorrelated-jitter reconnects, and a connect timeout. Pairs with `PowerRealtimeHub` via `sendFrame`.
@@ -188,6 +203,8 @@ import {
   b2o,
   encodeMessage,
   decodeMessage,
+  decodeInbound,
+  announceCapabilities,
   PowerCache,
   PowerMemoizer,
   PowerTimedCache,

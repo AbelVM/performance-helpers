@@ -16,7 +16,13 @@
  * The pool uses this automatically. You need it directly when you are writing
  * a worker, or when you are debugging what actually crossed the wire.
  */
-import { encodeMessage, decodeMessage, selectCodec, isRawPayload } from 'performance-helpers';
+import {
+  encodeMessage,
+  decodeMessage,
+  decodeInbound,
+  selectCodec,
+  isRawPayload,
+} from 'performance-helpers';
 
 // --- Why the length prefix, demonstrated -----------------------------------
 console.log('The problem with newline-delimited JSON:');
@@ -65,11 +71,14 @@ console.log('    is the difference between a copy and a transfer.\n');
 // --- Building your own codec ----------------------------------------------
 console.log('When you are writing a worker, you decode rather than encode:');
 console.log(`
-  import { decodeMessage } from 'performance-helpers';
+  import { decodeInbound, encodeMessage } from 'performance-helpers';
 
   self.onmessage = ({ data }) => {
-    const { value } = decodeMessage(data);
-    // value is already the object or the Uint8Array the sender passed.
+    // decodeInbound reads all three carriers a pool can send: a framed message,
+    // a native structured-clone envelope, and a 1.x bare-JSON body. One worker
+    // therefore survives the pool switching messageCodec, and survives its
+    // fleet being half-migrated.
+    const { value } = decodeInbound(data);
     self.postMessage(encodeMessage({ ...value, done: true }));
   };
 `);
