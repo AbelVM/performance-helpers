@@ -129,10 +129,25 @@ implementation uses `1 %`). Neither is obviously right for this cache:
   the _burst_, not by the cache. That argues for a fixed floor (say 4–8) with
   an optional ratio above it.
 
-**A proposal, not a decision: `max(4, ceil(maxEntries * 0.01))`, capped at
-`maxEntries / 4` so the window can never become a meaningful fraction of main
-space.** The floor is what fixes the small-cache case; the cap is what keeps
-the filter meaningful on a large one.
+### Decision: `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))`
+
+The floor of 4 is what fixes the small-cache case, and the cap keeps the filter
+meaningful on a large one. Checked against the measurement that motivated it, the
+two formulas differ **exactly** where the benchmark lives:
+
+| `maxEntries` | this formula | naive `floor(max * 0.01)` |
+| -----------: | -----------: | ------------------------: |
+|           10 |        **2** |                         1 |
+|           40 |        **4** |                         1 |
+|          100 |        **4** |                         1 |
+|          500 |            5 |                         5 |
+|        1 000 |           10 |                        10 |
+|      100 000 |        1 000 |                     1 000 |
+
+Above ~500 entries the two agree, which is why the ratio looks adequate in
+Caffeine's published numbers. The entire argument for a floor lives below that —
+and `bench/claims.js zipf` runs at `maxEntries: 40`, squarely in the regime
+where `floor` gives a **one-slot** window and the measured failure happened.
 
 **The naive ratio has already been implemented, measured, and reverted.** An
 attempt used `floor(maxEntries * 0.01)` — Caffeine's ratio, which is where
@@ -177,15 +192,57 @@ obvious one:
   there is exactly one place a newcomer can enter. More correct, more coupling.
 - **(c) Leave them independent** and document that they are alternatives.
 
-(a) is the smallest change and the one the measurements support. It also
-removes a genuine footgun. But it is a behaviour change to a shipped option,
-so it wants its own decision.
+### Decision: (a) — `admission: 'tynilfu'` is a no-op under `policy: 'slru'`
+
+SLRU already wins this workload outright (89.4 % against LRU's 75.0 %), and
+stacking the filter on top measurably _hurts_ it, to 70.9 %. The two mechanisms
+are the same mechanism: running both means the newcomer pays for two admission
+decisions and lands in neither's good space.
+
+Concretely: with `policy: 'slru'` the sketch is not constructed at all, and the
+option is documented as having no effect. This is the smallest change that makes
+the combination predictable, and it removes a genuine footgun — a user composing
+"the two scan-resistant options" currently gets the worse of each.
+
+Option (b) — letting the window _replace_ SLRU's probation region — is the more
+elegant design and is not chosen, because it couples two independently useful
+policies and would make `slru` depend on an admission option it does not
+otherwise need. Option (c), leaving them independent and merely documented, is
+the status quo, and is what the measurement argues against.
+
+**This is a behaviour change to a shipped option**, and it makes the
+combination do _less_ than a user might expect today. It belongs under
+**Breaking**, not Improved, with the measurement quoted.
 
 **3. Whether `tinylfu` should stay shippable at all.** If the window is not
 implemented, the honest position is the current one — off by default,
 documented as not recommended, with the numbers published. That is what the
 release note says today, and it should not change until this note is resolved
 either way.
+
+**Both open decisions are now made**, so this note blocks on neither. What
+remains is implementation, and it is larger than the plan row's 360 LOC implies.
+
+### Scope the implementation must cover
+
+Measured by reading `powerCache.js`, not estimated. The window is a **second LRU
+region**, not a filter tweak, and all of these have to change together:
+
+- a window list with its own head/tail and its own weight accounting —
+  `_currentWeight` is a single pool-wide total today;
+- `maxEntries` / `maxWeight` must apply to **main space only**, or the window
+  silently shrinks the cache's stated capacity;
+- the insert path must land the challenger in the window and arbitrate _there_,
+  rather than insert-then-refuse as it does now;
+- iteration (`keys` / `entries` / `values` / `forEach`), `size` and `stats()`
+  must decide whether the window is visible. Making it visible is arguably more
+  honest, and is the larger change;
+- `dispose()` / `clear()` must free both regions, or the window leaks nodes
+  outside the pool's accounting.
+
+That is a structural change to a hot path, and the four acceptance criteria
+below must be met by the whole thing rather than by a slice. The honest estimate
+is a session of its own plus the benchmark loop, not a patch.
 
 ## How to validate
 
