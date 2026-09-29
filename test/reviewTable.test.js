@@ -26,7 +26,11 @@ const reviewPath = resolve(root, 'review.md');
 const lines = readFileSync(reviewPath, 'utf8').split('\n');
 
 /** Plan rows only — the design section earlier in the file has other tables. */
-const PLAN_ROW = /^\| \*\*(BUG|QUAL|TEST|DOC|FEAT|PERF|BENCH|CFG|DEAD|DEFER|REJ)-\d+\*\* \|/;
+// Whitespace-tolerant on purpose. `prettier --write` runs on this file via the
+// pre-commit hook and re-pads table cells to `|  **ID**  |`, so a
+// single-space pattern silently skipped every padded row — which is how a
+// stray cell survived a check that reported the table clean.
+const PLAN_ROW = /^\|\s*\*\*(BUG|QUAL|TEST|DOC|FEAT|PERF|BENCH|CFG|DEAD|DEFER|REJ)-\d+\*\*\s*\|/;
 
 /** Eight columns: id, status, task, priority, ROI, risk, effort, notes. */
 const COLUMNS = 8;
@@ -114,8 +118,8 @@ describe('review.md plan table', () => {
     // from `withRef` to `without` — which is exactly how both of tonight's
     // misfilings started, and neither was visible to the column-count check.
     expect({ withRef: withRef.length, without: without.length }).toEqual({
-      withRef: 36,
-      without: 64,
+      withRef: 45,
+      without: 62,
     });
   });
 
