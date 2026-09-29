@@ -367,6 +367,58 @@ rather than by a field on its members, every mutation of that list has to be
 checked against the boundary. A node carrying a correct boolean can still be on
 the wrong side of it.
 
+### The last rule, found by extending the model to the sweep
+
+The model only matched the cache's `size: 5` once the eviction sweep was added —
+which is the point of having it. It showed the promote branch displacing a
+main-space entry **on every window overflow, whether or not anything needed to be
+displaced**. Rule 2 above had guarded the _comparison_; nobody had guarded the
+_eviction_. A 40-key warm therefore lost 35 of its keys: one was promoted into
+main space and the next arrival evicted it again, forever.
+
+**The displacement is conditional on the same `atCapacity` as the comparison.**
+Below capacity the challenger is promoted and nothing is displaced; at capacity
+the comparison runs, and the victim is displaced only if the challenger wins.
+
+With it the model gives `size 40, main 36, win 4` after a warm and a read pass,
+and **39 of 40 hot survivors** after a 200-key scan — against 9 before.
+
+### Where the implementation actually stands
+
+Applied to the cache, all three of these hold: the counter never goes negative,
+a 40-key warm reaches 40 entries, and the cache's own scan-resistance test
+passes. `test/powerCache.tinylfu.test.js` is green with three assertions
+rewritten, each pinning behaviour the change deliberately replaces — the tie
+rule is inverted, `_rejectedAdmission` is legitimately 0 (a one-shot key is
+displaced in the window before it ever reaches arbitration, which is the
+mechanism working), and the sketch is no longer built under `slru`.
+
+**And the benchmark gate still says no.** `node bench/claims.js zipf`:
+
+| variant                         | ws hit rate | survivors |
+| ------------------------------- | ----------: | --------: |
+| `lru`                           |      75.0 % | 17.2 / 40 |
+| `lru` + `tinylfu` (with window) |      59.6 % | 18.4 / 40 |
+| `slru`                          |      89.4 % | 33.0 / 40 |
+| `slru` + `tinylfu`              |      89.4 % | 33.0 / 40 |
+
+One criterion of the four is met, and it is a real fix: **`slru` + `tinylfu` is
+now identical to `slru`**, where it used to measure 70.9 % against `slru`'s
+89.4 % — composing the two scan-resistant options no longer gets the worse of
+each. The other two are not: the filter is still **worse than plain LRU** on
+working-set hit rate (59.6 % against 75.0 %), even though it retains marginally
+more keys (18.4 against 17.2). The collapse is gone and cold start recovers,
+but the mechanism does not beat the baseline it was meant to improve on.
+
+**So the implementation was reverted rather than shipped.** The mechanics are now
+correct, and the remaining question is no longer a bug hunt — it is whether a
+frequency filter earns its keep over a plain LRU on this workload at all. That is
+a design question with a cheap experiment attached: raise the window floor and
+see whether retention follows. Shipping a correct-but-worse-than-baseline filter
+under the same name, with the release note still saying "not recommended", would
+be the wrong trade. Shipping the `slru` no-op **alone** is a much smaller change
+and is the one part of this item with a measured win.
+
 **Applied to the cache, the counter is fixed** — `_windowSize` now reads 4 after a
 40-key warm and stays 4 across reads, where it previously went to `-16`. That
 was the goal of the isolated work and it is met. **What is not yet explained is
