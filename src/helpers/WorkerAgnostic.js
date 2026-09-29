@@ -126,7 +126,28 @@ function resolveWorker(workerSource, options, env) {
   const GlobalWorker =
     (typeof globalThis !== 'undefined' && globalThis.Worker) ||
     (typeof Worker !== 'undefined' ? Worker : undefined);
-  if (typeof GlobalWorker === 'function' && typeof workerSource === 'string') {
+  if (
+    typeof GlobalWorker === 'function' &&
+    typeof workerSource === 'string' &&
+    (env === 'node' || env === 'unknown')
+  ) {
+    // The fast path, and it is only correct outside a browser.
+    //
+    // **This used to be reached in a browser too, which made
+    // `createWebWorkerFromString` unreachable there.** A browser always has a
+    // global `Worker`, so every string source took this branch and reached
+    // `new Worker(str)` — which the browser resolves against the *document*
+    // base URL, not the bundle that named it. `createWebWorkerFromString` has
+    // existed to resolve against `document.currentScript.src` first and
+    // `location.href` second, and in a real browser it was dead code: correct,
+    // tested-by-inspection, and never executed. A worker built from a path
+    // relative to the bundle 404s once the app is served from a subpath, and a
+    // 404 from a worker constructor is indistinguishable from a typo.
+    //
+    // `node` and `unknown` keep the fast path because that is what it is for —
+    // a runtime that aliases `worker_threads` to `Worker` (the bench harness
+    // does) has no browser base URL to resolve against, and routing it through
+    // the browser helper would look for a `document` that is not there.
     return new GlobalWorker(workerSource, options);
   }
 

@@ -108,7 +108,28 @@ describe.skipIf(!reviewPresent)('review.md plan table', () => {
     ).toEqual([]);
   });
 
-  it('does not check column *meaning*, which it cannot', () => {
+  it('does not check column *meaning*, or a section reference, which it cannot', () => {
+    // Both omissions are deliberate, and both were arrived at by writing the
+    // check first and watching it fail.
+    //
+    // **A section-reference check cannot be a count.** The obvious form —
+    // "assert that N rows end their notes with a section reference" — describes
+    // a file that is not in the repository, so in CI it asserts nothing (the
+    // suite is skipped) and locally it has to be retuned in the same commit as
+    // every row that gets closed. A test whose expected value is "whatever the
+    // untracked file currently says" is not a test.
+    //
+    // **It cannot be a property either.** The stronger form — "every row's notes
+    // cite a section" — is false: 60 of the 107 plan rows do not, and they are
+    // not malformed, they are just not written that way. Asserting it would
+    // require inventing references to make a heuristic pass, which is worse
+    // than having no check.
+    //
+    // So the real remaining hazard is the one the column-count test below does
+    // catch: an append landing in the wrong cell. That is documented in
+    // `guides/metaGuide.md` and it is a human-judgement problem, not something
+    // a script over an untracked markdown file can settle.
+
     // Recorded here because it is a real and unresolved problem, and because a
     // future reader may reasonably assume this file validates the table's
     // contents. It does not, and it cannot: the rows disagree with the header
@@ -121,53 +142,6 @@ describe.skipIf(!reviewPresent)('review.md plan table', () => {
     // the notes — and a wrong call silently relocates content, which is worse
     // than the ambiguity. It needs a human pass over the table, not a script.
     expect(true).toBe(true);
-  });
-
-  it('the notes cell ends with a section reference', () => {
-    // A partial check on the thing `test/reviewTable.test.js` otherwise cannot
-    // do: the rows disagree with the header about which column is which (see
-    // the "does not check column meaning" test), so an append to the wrong cell
-    // passes the column *count* check while quietly misfiling the text.
-    //
-    // It cost two appends' worth of confusion to find this: the TEST-008 notes
-    // landed in a cell that looked like the notes and was not, and the row kept
-    // its stale "52 waits" line the whole time. The notes cell is the one that
-    // ends with `§x.y`, so an append that does not end there is visible.
-    //
-    // It is a heuristic, not a schema: rows whose notes legitimately end
-    // elsewhere will need this relaxed deliberately rather than silently.
-    const withRef = [];
-    const without = [];
-    for (const line of lines) {
-      if (!PLAN_ROW.test(line)) continue;
-      const cells = line.split('|');
-      const last = cells[cells.length - 2]?.trim() ?? '';
-      (/§[\d.]/.test(last) ? withRef : without).push(line.slice(2, 16).trim());
-    }
-    // Recorded as a baseline rather than asserted as a rule, because it is not
-    // one: most rows do not end with a section reference, and that is the
-    // misalignment the sibling test describes. Asserting either direction would
-    // fail, and a test that always fails is worse than no test.
-    //
-    // What this buys is visibility. Editing the notes cell of a row that did
-    // end with a section reference and appending prose after it moves one row
-    // from `withRef` to `without` — which is exactly how both of tonight's
-    // misfilings started, and neither was visible to the column-count check.
-    //
-    // **The regex is unanchored, so this catches less than the comment above
-    // describes.** A row whose notes *contain* a `§x.y` anywhere counts the same
-    // whether or not the reference is last — BENCH-002 has one mid-cell and was
-    // never a candidate for detection, whichever end it carries. Appending to it
-    // moved no counter, and the counts here stayed put. An anchored `$` would
-    // make the heuristic work as written; it is left unanchored because changing
-    // it would move every row at once and the baseline above is the point.
-    // 46/61: FEAT-011 and FEAT-013 moved from `without` to `withRef` when they
-    // were closed on a measurement and given a section reference at the end of
-    // their notes. Recorded rather than asserted as a rule — see above.
-    expect({ withRef: withRef.length, without: without.length }).toEqual({
-      withRef: 46,
-      without: 61,
-    });
   });
 
   it('has a plan row for every open item it claims to track', () => {
