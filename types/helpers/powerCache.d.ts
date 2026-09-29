@@ -108,6 +108,10 @@ export class PowerCache {
     _probationEnd: CacheNode | null;
     _inflightPromises: Map<any, any>;
     _defaultAsyncTimeout: number;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * Allocate a pool node or create a new one.
      *

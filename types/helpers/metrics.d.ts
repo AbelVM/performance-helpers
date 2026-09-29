@@ -18,6 +18,50 @@
  */
 export function toSeries(helper: string, stats: any): Record<string, number | boolean | null | string>;
 /**
+ * Wire a helper's `stats()` into a collector, and hand back the receipt that
+ * undoes it.
+ *
+ * The receipt is not optional bookkeeping. A collector holds a closure over the
+ * instance, so a disposed pool that is never unregistered is sampled forever -
+ * and after `terminate()` its `getStats()` still answers, so nothing fails
+ * visibly while the series quietly reports a dead object. Passing the receipt
+ * to {@link detach} on teardown is what makes the two halves agree.
+ *
+ * @param {Object} instance - The helper being registered.
+ * @param {string} name - Series prefix. Use a discriminator when more than one
+ *   of the same helper is in one process, e.g. `cache.images`.
+ * @param {Object} [options] - The helper's own options object.
+ * @param {boolean|MetricsCollector} [options.observability] `true` for the
+ *   shared collector, or a collector to register with. Anything else — the
+ *   default `false`, a bad value — registers nothing and costs nothing.
+ * @returns {{unregister: function(): boolean, name: string}|null} The receipt,
+ *   or `null` when the helper is not observable. The receipt carries a bound
+ *   `unregister` rather than the collector, which is what lets every helper's
+ *   `_metrics` field stay a plain object type in the published declarations —
+ *   a bare class name here would be emitted into nine `.d.ts` files with no
+ *   import to resolve it against.
+ * @example
+ * const cache = new PowerCache({ observability: true });
+ * defaultMetrics.snapshot().series; // { 'cache.size': 0, ... }
+ */
+export function attach(instance: Object, name: string, options?: {
+    observability?: boolean | MetricsCollector | undefined;
+}): {
+    unregister: () => boolean;
+    name: string;
+} | null;
+/**
+ * Undo an {@link attach}. Safe to call with `null`, so a helper can call it
+ * from a teardown path that may never have attached.
+ *
+ * @param {{unregister: function(): boolean, name: string}|null} receipt
+ * @returns {boolean} Whether a source was removed.
+ */
+export function detach(receipt: {
+    unregister: () => boolean;
+    name: string;
+} | null): boolean;
+/**
  * FEAT-007, part one of two: a stable shape over the numbers that already exist.
  *
  * Every helper that reports anything does it through its own `stats()`, and
@@ -140,3 +184,12 @@ export class MetricsCollector {
      */
     names(): string[];
 }
+/**
+ * A process-wide collector, used by `observability: true`.
+ *
+ * Deliberately shared rather than per-helper: a caller who opts nine helpers
+ * in wants nine series in *one* snapshot, not nine snapshots they have to
+ * merge. The default is off everywhere, so a process that never asks for this
+ * never allocates a collector or a closure.
+ */
+export const defaultMetrics: MetricsCollector;

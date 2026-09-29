@@ -17,6 +17,7 @@ import { o2u8, u82o } from './powerBuffer.js';
 import { abortReason } from '../utils/abort.js';
 import WorkerAgnostic from './WorkerAgnostic.js';
 import { nowMs } from '../utils/now.js';
+import { attach, detach } from './metrics.js';
 import { setSafeInterval } from '../utils/timers.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
@@ -702,6 +703,9 @@ export class PowerPool {
         this._debugLog?.(e, 'autoScale: interval setup failed');
       }
     }
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays
+    // nothing and allocates no closure.
+    this._metrics = attach(this, 'pool', options);
   }
 
   /**
@@ -3453,6 +3457,8 @@ export class PowerPool {
    * @returns {void}
    */
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     this[Symbol.dispose]();
   }
 

@@ -29,6 +29,10 @@ export class PowerBulkhead {
         gate: PowerPermitGate;
     }[];
     _drainWaiters: PowerQueue;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /** Number of partitions used for workload isolation. */
     get partitions(): number;
     /** Maximum concurrent tasks allowed per partition. */

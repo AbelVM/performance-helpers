@@ -29,6 +29,7 @@
  * @typedef {import('./jsdoc-types.js').PowerRetryBudgetStats} PowerRetryBudgetStats
  */
 import { assertLimitRequired } from '../utils/options.js';
+import { attach } from './metrics.js';
 import {
   DECORRELATED_JITTER_FACTOR,
   DEFAULT_RETRY_BASE_DELAY_MS,
@@ -95,6 +96,10 @@ export class PowerRetryBudget {
     this._retries = 0;
     this._refused = 0;
     this._funded = 0;
+    // FEAT-007: opt-in metrics. The *budget* is observable, not the
+    // `PowerRetry` around it: `PowerRetry` has no counters of its own,
+    // so registering it would produce a series that always reads zero.
+    this._metrics = attach(this, 'retryBudget', options);
   }
 
   /**
@@ -358,6 +363,8 @@ export class PowerRetry {
      * @type {PowerRetryBudget|null}
      */
     this._budget = resolveBudget(budget, 'PowerRetry');
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays
+    // nothing and allocates no closure.
   }
 
   /**

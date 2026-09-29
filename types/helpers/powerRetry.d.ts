@@ -32,6 +32,10 @@ export class PowerRetryBudget {
     _retries: number;
     _refused: number;
     _funded: number;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * The ratio of requests to retries this budget permits, in `(0, 1]`.
      * @returns {number}

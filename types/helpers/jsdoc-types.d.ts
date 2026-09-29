@@ -72,6 +72,13 @@ export type PowerPoolOptions = {
     queueHighThreshold?: number | undefined;
     /**
      * - Hard cap on queued tasks. `Infinity`
+     */
+    maxQueueLength?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
      * (the default) keeps the pre-2.0 behaviour where `queuePolicy: 'enqueue'`
      * grows without bound. With a finite cap the *incoming* task is the one that
      * is refused, because a cap is what the caller asked for; `drop-oldest` is
@@ -79,7 +86,7 @@ export type PowerPoolOptions = {
      * A refused task returns `false`, or rejects with `ERR_POOL_QUEUE_FULL` when
      * the caller is awaiting a response.
      */
-    maxQueueLength?: number | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * - Cap on concurrent `drain()` waits.
      * Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS`
@@ -283,11 +290,18 @@ export type PowerRetryOptions = {
 export type PowerRetryBudgetOptions = {
     /**
      * - Retry tokens granted per request, in
+     */
+    ratio?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
      * `(0, 1]`. 0.2 is the top of the 10-20 % band the Google SRE *Handling
      * Overload* chapter recommends. Values above 1 throw: a budget permitting
      * more retries than requests is the amplification it exists to prevent.
      */
-    ratio?: number | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * - Ceiling on stored tokens, which is the
      * burst allowance. A capacity of 1 would refuse the first retry of a fresh
@@ -612,10 +626,17 @@ export type PowerSocketAdapterRateLimited = (count: number) => void;
 export type PowerSocketAdapterOptions = {
     /**
      * - Transport family. Detected
+     */
+    kind?: "ws" | "websocket" | "stream" | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
      * from the socket's capabilities by default; pass it only to override a
      * misdetection.
      */
-    kind?: "ws" | "websocket" | "stream" | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * -
      * Called for each accepted inbound message. A returned promise is awaited
@@ -736,10 +757,17 @@ export type PowerLoggerConsoleMethod = "error" | "warn" | "info" | "log" | "debu
 export type EventLoopMonitorOptions = {
     /**
      * How often to schedule the probe timer.
+     */
+    intervalMs?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
      * Smaller catches shorter blocks and costs more; the drift is recorded per
      * probe, so 20ms means "worst block seen between two probes 20ms apart".
      */
-    intervalMs?: number | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * Target relative error for the
      * drift histogram's quantiles. Forwarded to `PowerHistogram`.
@@ -817,9 +845,16 @@ export type PowerBulkheadOptions = {
     maxConcurrency?: number | undefined;
     /**
      * Maximum queued tasks across all
-     * partitions.
      */
     queueCapacity?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
+     * partitions.
+     */
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * Maps a key to a partition index.
      */

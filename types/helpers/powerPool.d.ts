@@ -197,6 +197,10 @@ export class PowerPool {
     _minLatencyWindow: number | undefined;
     _lastAdaptiveLimit: number | undefined;
     _congestion: boolean | undefined;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * Log debug information about swallowed errors when debug logging is enabled.
      * @param {*} err - The swallowed error, or falsy when the call is informational.

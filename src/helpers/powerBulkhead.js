@@ -8,6 +8,7 @@ import { assertLimitRequired } from '../utils/options.js';
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
 import { DEFAULT_QUEUE_CAPACITY, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
+import { attach } from './metrics.js';
 
 /**
  * PowerBulkhead
@@ -87,6 +88,8 @@ export class PowerBulkhead {
       gate: new PowerPermitGate({ capacity: this._maxConcurrency, queueCapacity: Infinity }),
     }));
     this._drainWaiters = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
+    this._metrics = attach(this, 'bulkhead', options);
   }
 
   /** Number of partitions used for workload isolation. */

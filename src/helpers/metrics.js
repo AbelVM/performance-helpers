@@ -217,3 +217,81 @@ export class MetricsCollector {
     return [...this._sources.keys()];
   }
 }
+
+/**
+ * A process-wide collector, used by `observability: true`.
+ *
+ * Deliberately shared rather than per-helper: a caller who opts nine helpers
+ * in wants nine series in *one* snapshot, not nine snapshots they have to
+ * merge. The default is off everywhere, so a process that never asks for this
+ * never allocates a collector or a closure.
+ */
+export const defaultMetrics = new MetricsCollector();
+
+/**
+ * Wire a helper's `stats()` into a collector, and hand back the receipt that
+ * undoes it.
+ *
+ * The receipt is not optional bookkeeping. A collector holds a closure over the
+ * instance, so a disposed pool that is never unregistered is sampled forever -
+ * and after `terminate()` its `getStats()` still answers, so nothing fails
+ * visibly while the series quietly reports a dead object. Passing the receipt
+ * to {@link detach} on teardown is what makes the two halves agree.
+ *
+ * @param {Object} instance - The helper being registered.
+ * @param {string} name - Series prefix. Use a discriminator when more than one
+ *   of the same helper is in one process, e.g. `cache.images`.
+ * @param {Object} [options] - The helper's own options object.
+ * @param {boolean|MetricsCollector} [options.observability] `true` for the
+ *   shared collector, or a collector to register with. Anything else — the
+ *   default `false`, a bad value — registers nothing and costs nothing.
+ * @returns {{unregister: function(): boolean, name: string}|null} The receipt,
+ *   or `null` when the helper is not observable. The receipt carries a bound
+ *   `unregister` rather than the collector, which is what lets every helper's
+ *   `_metrics` field stay a plain object type in the published declarations —
+ *   a bare class name here would be emitted into nine `.d.ts` files with no
+ *   import to resolve it against.
+ * @example
+ * const cache = new PowerCache({ observability: true });
+ * defaultMetrics.snapshot().series; // { 'cache.size': 0, ... }
+ */
+export function attach(instance, name, options) {
+  const requested = options?.observability;
+  if (!requested) return null;
+  const collector =
+    requested === true
+      ? defaultMetrics
+      : requested && typeof requested.register === 'function'
+        ? requested
+        : null;
+  if (!collector) return null;
+  const target = /** @type {{getStats?: function(): *, stats?: function(): *}} */ (
+    /** @type {*} */ (instance)
+  );
+  const getStats = target?.getStats;
+  const stats = target?.stats;
+  const read =
+    typeof getStats === 'function'
+      ? () => getStats.call(target)
+      : typeof stats === 'function'
+        ? () => stats.call(target)
+        : null;
+  // A helper with no stats has nothing to report. Registering it would produce
+  // an empty series that reads as "this helper is idle" rather than "this
+  // helper cannot be observed", so it registers nothing.
+  if (!read) return null;
+  collector.register(name, read);
+  return { name, unregister: () => collector.unregister(name) };
+}
+
+/**
+ * Undo an {@link attach}. Safe to call with `null`, so a helper can call it
+ * from a teardown path that may never have attached.
+ *
+ * @param {{unregister: function(): boolean, name: string}|null} receipt
+ * @returns {boolean} Whether a source was removed.
+ */
+export function detach(receipt) {
+  if (!receipt || typeof receipt.unregister !== 'function') return false;
+  return receipt.unregister();
+}

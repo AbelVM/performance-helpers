@@ -87,14 +87,44 @@ if (errors.cache) console.warn('cache stats failed:', errors.cache);
 // series still has pool.*
 ```
 
-## What is not here yet
+## `observability: true`
 
-`observability: true` on the individual helpers — one option that wires a helper
-into a collector for you. It is deliberately not in this release: there are
-nine helpers with `stats()`, and shipping the option for a subset would make
-`observability: true` mean three different things depending on which helper you
-passed it to. Until it lands for all nine, register the sources yourself; that
-is three lines, and it keeps the sampling decision yours.
+Since 2.1.0 the helpers wire themselves in, so the example above becomes:
+
+```js
+const cache = new PowerCache({ observability: true });
+const pool = new PowerPool(workerPath, { observability: true });
+
+defaultMetrics.snapshot().series; // { 'cache.hitRate': …, 'pool.activeTasks': … }
+```
+
+Or pass your own collector to keep several processes' helpers apart:
+
+```js
+const metrics = new MetricsCollector({ prefix: 'worker-3.' });
+new PowerCache({ observability: metrics });
+```
+
+The option is **off by default on every helper**, so the common case allocates
+nothing and a closure is never created. It is also declared in each helper's
+options type, so a typo is a type error rather than a silent no-op.
+
+**One helper deliberately does not respond.** `observability: true` on
+`PowerRetry` is a no-op: it has no counters of its own — the `PowerRetryBudget`
+it holds is the thing with numbers — and an always-zero series would read as
+"this helper is idle", which is a different and wrong claim. Use
+`new PowerRetryBudget({ observability: true })`.
+
+A helper that is disposed, stopped or terminated **detaches itself**, so a
+collector never goes on sampling a dead object. That matters: `terminate()` on a
+pool still answers `getStats()`, so a leaked registration keeps reporting a dead
+pool forever and nothing fails visibly while the series quietly stops moving.
+
+### Which helpers take it
+
+`PowerCache`, `PowerPool`, `PowerBulkhead`, `PowerGCRA`, `PowerEventLoopMonitor`,
+`PowerRealtimeHub`, `PowerSocketAdapter`, `PowerWebSocketClient` and
+`PowerRetryBudget`.
 
 ## See also
 

@@ -29,6 +29,7 @@
  */
 import { encodeMessage, frameEncodedJson } from './powerMessageCodec.js';
 import { nowMs } from '../utils/now.js';
+import { attach, detach } from './metrics.js';
 import { assertLimitRequired } from '../utils/options.js';
 
 /**
@@ -121,6 +122,10 @@ import { assertLimitRequired } from '../utils/options.js';
 /**
  * @typedef {object} HubOptions
  * @property {function(object, Uint8Array):(void|Promise<void>)} send - Required
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  *   transport adapter, called as `send(subscriber, frame)`. Return a promise if
  *   the transport is async; the hub tracks in-flight sends per subscriber.
  * @property {function(object, string):(void|Promise<void>)} [close] - Optional
@@ -208,6 +213,8 @@ export class PowerRealtimeHub {
       disconnected: 0,
       bytesOut: 0,
     };
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
+    this._metrics = attach(this, 'hub', options);
   }
 
   /**
@@ -361,6 +368,8 @@ export class PowerRealtimeHub {
    * @returns {void}
    */
   close() {
+    detach(this._metrics);
+    this._metrics = null;
     if (this._closed) return;
     this._closed = true;
     if (this._flushTimer) {
@@ -384,6 +393,8 @@ export class PowerRealtimeHub {
    */
 
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     this[Symbol.dispose]();
   }
 

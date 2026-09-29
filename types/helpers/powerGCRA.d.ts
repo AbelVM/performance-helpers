@@ -5,6 +5,9 @@
  * @property {number} [burst=0] - Extra tolerance above the steady-state rate, in
  *   operations. `0` allows exactly the steady-state spacing; larger values admit
  *   a short spike of that many extra operations.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this limiter in the shared collector, or pass a collector of
+ *   your own. Off by default, so the common case allocates nothing.
  * @property {function(): number} [now] - Clock override, for tests and for
  *   compositions that read the clock once. Ignored by a composition that
  *   threads its own reading, because an injected clock always wins.
@@ -43,6 +46,10 @@ export class PowerGCRA {
     _now: (() => number);
     /** @type {boolean} */
     _nowExplicit: boolean;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * Try to consume one operation.
      * @param {number} [n=1] - Number of operations to consume.
@@ -143,6 +150,12 @@ export type PowerGCRAOptions = {
      * a short spike of that many extra operations.
      */
     burst?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this limiter in the shared collector, or pass a collector of
+     * your own. Off by default, so the common case allocates nothing.
+     */
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * - Clock override, for tests and for
      * compositions that read the clock once. Ignored by a composition that

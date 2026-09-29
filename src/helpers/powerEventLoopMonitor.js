@@ -1,6 +1,7 @@
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
+import { attach, detach } from './metrics.js';
 import { detectEnv } from './WorkerAgnostic.js';
 
 /**
@@ -93,6 +94,8 @@ export class PowerEventLoopMonitor {
       /** @type {?function():*} */
       this._utilizationSource = null;
     }
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
+    this._metrics = attach(this, 'loop', options);
   }
 
   /**
@@ -112,6 +115,8 @@ export class PowerEventLoopMonitor {
    * @returns {this}
    */
   stop() {
+    detach(this._metrics);
+    this._metrics = null;
     this._running = false;
     if (this._handle !== null) {
       clearTimeout(this._handle);
@@ -237,6 +242,8 @@ export class PowerEventLoopMonitor {
    * @returns {void}
    */
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     this.stop();
     this._onDrift = null;
     this._utilizationSource = null;

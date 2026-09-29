@@ -56,6 +56,10 @@
  * @property {boolean} [weakListeners]
  * @property {number} [queueHighThreshold]
  * @property {number} [maxQueueLength] - Hard cap on queued tasks. `Infinity`
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  *   (the default) keeps the pre-2.0 behaviour where `queuePolicy: 'enqueue'`
  *   grows without bound. With a finite cap the *incoming* task is the one that
  *   is refused, because a cap is what the caller asked for; `drop-oldest` is
@@ -212,6 +216,10 @@ export {};
  *
  * @typedef {Object} PowerRetryBudgetOptions
  * @property {number} [ratio=0.2] - Retry tokens granted per request, in
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  *   `(0, 1]`. 0.2 is the top of the 10-20 % band the Google SRE *Handling
  *   Overload* chapter recommends. Values above 1 throw: a budget permitting
  *   more retries than requests is the amplification it exists to prevent.
@@ -460,6 +468,10 @@ export {};
  *
  * @typedef {Object} PowerSocketAdapterOptions
  * @property {'ws'|'websocket'|'stream'} [kind] - Transport family. Detected
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  *   from the socket's capabilities by default; pass it only to override a
  *   misdetection.
  * @property {function(PowerSocketAdapterMessage): (void|Promise<void>)} [onMessage] -
@@ -537,6 +549,10 @@ export {};
  *
  * @typedef {Object} EventLoopMonitorOptions
  * @property {number} [intervalMs=20] How often to schedule the probe timer.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  *   Smaller catches shorter blocks and costs more; the drift is recorded per
  *   probe, so 20ms means "worst block seen between two probes 20ms apart".
  * @property {number} [relativeAccuracy=0.01] Target relative error for the
@@ -591,6 +607,10 @@ export {};
  * @property {number} [partitions=4] Number of isolated execution partitions.
  * @property {number} [maxConcurrency=1] Maximum concurrent tasks per partition.
  * @property {number} [queueCapacity=100] Maximum queued tasks across all
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  *   partitions.
  * @property {(key:any)=>number} [partitioner] Maps a key to a partition index.
  * @property {(err:any)=>void} [onError] Invoked whenever a user-supplied

@@ -1,8 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { MetricsCollector, toSeries, METRICS_VERSION } from '../src/helpers/metrics.js';
+import {
+  MetricsCollector,
+  toSeries,
+  METRICS_VERSION,
+  defaultMetrics,
+} from '../src/helpers/metrics.js';
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { PowerGCRA } from '../src/helpers/powerGCRA.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerBulkhead } from '../src/helpers/powerBulkhead.js';
+import { PowerRetry, PowerRetryBudget } from '../src/helpers/powerRetry.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -197,5 +204,69 @@ describe('against the real helpers', () => {
     expect(Object.keys(series).some((k) => k.startsWith('gcra.'))).toBe(true);
     expect(errors).toEqual({});
     pool.terminate();
+  });
+});
+
+describe('observability: true on the helpers', () => {
+  // FEAT-007 part two. The point of the "all nine or none" rule is that
+  // `observability: true` means the same thing everywhere, so this is a test
+  // over the whole set rather than per helper: a helper that drifts out of the
+  // agreement fails here rather than in a dashboard.
+  const HELPERS = [
+    ['PowerCache', () => new PowerCache({ observability: true }), 'cache'],
+    ['PowerBulkhead', () => new PowerBulkhead({ observability: true }), 'bulkhead'],
+    ['PowerGCRA', () => new PowerGCRA({ rate: 1, per: 1000, observability: true }), 'gcra'],
+    [
+      'PowerRetryBudget',
+      () => new PowerRetryBudget({ ratio: 0.2, observability: true }),
+      'retryBudget',
+    ],
+  ];
+
+  it.each(HELPERS)('%s registers into the shared collector', (_name, make, prefix) => {
+    defaultMetrics.unregister(prefix);
+    const helper = make();
+    expect(defaultMetrics.names()).toContain(prefix);
+    const { series } = defaultMetrics.snapshot();
+    expect(Object.keys(series).some((k) => k.startsWith(`${prefix}.`))).toBe(true);
+    helper.dispose?.();
+  });
+
+  it('registers nothing by default', () => {
+    // The cost of the feature when nobody asks for it has to be zero, and
+    // "zero" means no series appears — not merely that the numbers are small.
+    const before = defaultMetrics.names().length;
+    new PowerCache();
+    expect(defaultMetrics.names().length).toBe(before);
+  });
+
+  it('ignores a value that is not a collector', () => {
+    const helper = new PowerCache({ observability: 'yes' });
+    // A typo must be inert rather than fatal, and must not create a series
+    // under a name nothing can find.
+    expect(helper._metrics).toBeNull();
+    helper.dispose();
+  });
+
+  it('a helper with no stats() registers nothing rather than an empty series', () => {
+    // `PowerRetry` has no counters of its own — the budget it holds does. An
+    // empty series would read as "this helper is idle", which is a different
+    // and wrong claim.
+    const retry = new PowerRetry({ observability: true });
+    expect(retry._metrics ?? null).toBeNull();
+  });
+
+  it('a disposed helper stops being sampled', () => {
+    const cache = new PowerCache({ observability: true });
+    expect(defaultMetrics.names()).toContain('cache');
+    cache.dispose();
+    // Without this, a collector holds a closure over a dead object forever and
+    // keeps reporting it — which is a series that looks live and is not.
+    expect(defaultMetrics.names()).not.toContain('cache');
+  });
+
+  it('detach is safe on a helper that never attached', () => {
+    const cache = new PowerCache();
+    expect(() => cache.dispose()).not.toThrow();
   });
 });

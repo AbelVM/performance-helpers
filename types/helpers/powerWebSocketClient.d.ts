@@ -52,6 +52,9 @@ export { READY_STATE };
  * error. Five `@property` lines instead of one shorthand, for the same length.
  * @property {PowerHistogram} [rtt] - Histogram for heartbeat RTT. One is
  *   created when omitted.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
  */
 /**
  * Reconnecting WebSocket client with explicit back-pressure.
@@ -124,6 +127,10 @@ export class PowerWebSocketClient {
         reconnects: number;
         heartbeatTimeouts: number;
     };
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * Which back-pressure mechanism is in use.
      *
@@ -457,6 +464,12 @@ export type WebSocketClientOptions = {
      * created when omitted.
      */
     rtt?: PowerHistogram | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     */
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
 };
 import { READY_STATE } from './constants.js';
 import { PowerHistogram } from './powerHistogram.js';

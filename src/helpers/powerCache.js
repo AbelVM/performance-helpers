@@ -53,6 +53,7 @@ const ADMISSION_SAMPLE_MULTIPLE = 200;
  * @public
  */
 import { nowMs } from '../utils/now.js';
+import { attach, detach } from './metrics.js';
 import { assertFunction, assertLimitRequired } from '../utils/options.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import {
@@ -285,6 +286,9 @@ export class PowerCache {
     this._defaultAsyncTimeout = Number.isFinite(Number(defaultAsyncTimeout))
       ? Math.max(0, Math.floor(Number(defaultAsyncTimeout)))
       : 30000;
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays
+    // nothing and allocates no closure.
+    this._metrics = attach(this, 'cache', arguments[0] || {});
   }
 
   /**
@@ -1321,6 +1325,8 @@ export class PowerCache {
    * @returns {void}
    */
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     this[Symbol.dispose]();
   }
 

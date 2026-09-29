@@ -33,6 +33,7 @@
  */
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
+import { attach, detach } from './metrics.js';
 import { assertLimitRequired } from '../utils/options.js';
 import { PowerSlidingWindow } from './powerSlidingWindow.js';
 import { MS_PER_SEC, READY_STATE } from './constants.js';
@@ -227,6 +228,8 @@ export class PowerSocketAdapter {
     this._attach();
     this._resetIdleTimer();
     this._scheduleHeartbeat();
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
+    this._metrics = attach(this, 'socket', options);
   }
 
   /**
@@ -470,6 +473,8 @@ export class PowerSocketAdapter {
    * @returns {void}
    */
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     if (this._disposed) return;
     this._disposed = true;
     this._clearTimers();

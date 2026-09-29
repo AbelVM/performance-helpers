@@ -27,6 +27,10 @@ export class PowerRealtimeHub {
         disconnected: number;
         bytesOut: number;
     };
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * Subscribe to a topic.
      *
@@ -300,10 +304,17 @@ export type HubStats = {
 export type HubOptions = {
     /**
      * - Required
+     */
+    send: (arg0: object, arg1: Uint8Array) => (void | Promise<void>);
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
      * transport adapter, called as `send(subscriber, frame)`. Return a promise if
      * the transport is async; the hub tracks in-flight sends per subscriber.
      */
-    send: (arg0: object, arg1: Uint8Array) => (void | Promise<void>);
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * - Optional
      * adapter called when the hub closes a subscriber for falling behind or on

@@ -62,6 +62,10 @@ export class PowerEventLoopMonitor {
      */
     ready: Promise<void>;
     _utilizationSource: (() => any) | null;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * Begin sampling. Idempotent: a second call while running is a no-op.
      * @returns {this}

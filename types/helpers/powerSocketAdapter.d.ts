@@ -113,6 +113,10 @@ export class PowerSocketAdapter {
         drainTimeouts: number;
         drainedFromDrain: number;
     };
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * The socket's lifecycle state, as a `READY_STATE` constant.
      *

@@ -39,6 +39,7 @@ import { decodeMessage, encodeMessage } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
+import { attach, detach } from './metrics.js';
 import { READY_STATE } from './constants.js';
 import { assertLimitRequired } from '../utils/options.js';
 
@@ -108,6 +109,9 @@ export { READY_STATE };
  * error. Five `@property` lines instead of one shorthand, for the same length.
  * @property {PowerHistogram} [rtt] - Histogram for heartbeat RTT. One is
  *   created when omitted.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
  */
 
 /**
@@ -299,6 +303,8 @@ export class PowerWebSocketClient {
       reconnects: 0,
       heartbeatTimeouts: 0,
     };
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
+    this._metrics = attach(this, 'ws', options);
   }
 
   /**
@@ -405,6 +411,8 @@ export class PowerWebSocketClient {
    */
 
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     this[Symbol.dispose]();
   }
 
