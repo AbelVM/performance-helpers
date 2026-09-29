@@ -1,3 +1,4 @@
+import { assertLimitRequired } from '../utils/options.js';
 import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
 
 /**
@@ -31,9 +32,17 @@ export class PowerEventBus {
   constructor(options = {}) {
     /** @type {Map<string, EventBusBucket>} */
     this._listeners = new Map();
-    this._maxListeners = Number.isFinite(Number(options.maxListeners))
-      ? Math.max(0, Number(options.maxListeners))
-      : 0; // 0 means unlimited
+    // `0` means unlimited, which is a real configuration and is kept. What was
+    // wrong was the guard around it: `maxListeners: -5` produced `0`, and `0`
+    // means *unlimited*. So a typo'd or arithmetic-mangled limit silently
+    // removed the cap entirely - the one failure mode where being permissive
+    // makes the leak worse rather than better.
+    this._maxListeners = assertLimitRequired(options.maxListeners, {
+      name: 'maxListeners',
+      className: 'PowerEventBus',
+      min: 0,
+      fallback: 0,
+    });
     this._weak = Boolean(options.weak);
     /** @type {?(FinalizationRegistry<EventBusWeakToken>)} */
     this._fr = null;

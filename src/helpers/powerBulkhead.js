@@ -4,6 +4,7 @@
  * Use `PowerBulkhead` to execute tasks in partitioned concurrency lanes so a
  * heavy or noisy partition cannot starve other partitions.
  */
+import { assertLimitRequired } from '../utils/options.js';
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
 import { DEFAULT_QUEUE_CAPACITY, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
@@ -40,9 +41,44 @@ export class PowerBulkhead {
     // assigned, so those failures were silently discarded.
     this._onError = typeof onError === 'function' ? onError : null;
 
-    this._partitions = Math.max(1, Math.floor(Number(partitions) || 4));
-    this._maxConcurrency = Math.max(1, Math.floor(Number(maxConcurrency) || 1));
-    this._queueCapacity = Math.max(0, Math.floor(Number(queueCapacity) || DEFAULT_QUEUE_CAPACITY));
+    // All three are limits, and each was coerced into a plausible-looking number
+    // rather than reporting a bad configuration:
+    //
+    //   partitions: 0        -> Math.max(1, 0 || 4)     = 4
+    //   maxConcurrency: 0    -> Math.max(1, 0 || 1)     = 1
+    //   queueCapacity: 0     -> Math.max(0, 0 || 100)   = 100
+    //
+    // The first two are the same mistake `PowerPermitGate.capacity` already
+    // stopped making: a bulkhead configured to allow nothing is how you switch a
+    // dependency off, and `0` silently became 1 - the exact opposite of the
+    // stated intent. The third is the more surprising one, because it is the
+    // *opposite* error: `PowerPermitGate` documents `queueCapacity: 0` as a
+    // legal request ("refuse immediately instead of queueing"), and this
+    // silently turned that request into the full default queue. A value that
+    // reads as "no queue" and produces the largest queue the class supports is
+    // not a coercion, it is a contradiction.
+    //
+    // So: `partitions` and `maxConcurrency` are `>= 1` and throw; `queueCapacity`
+    // is `>= 0` and **0 is honoured**, because a queue that refuses to hold
+    // anything is a real configuration, not a mistake.
+    this._partitions = assertLimitRequired(partitions, {
+      name: 'partitions',
+      className: 'PowerBulkhead',
+      min: 1,
+      fallback: 4,
+    });
+    this._maxConcurrency = assertLimitRequired(maxConcurrency, {
+      name: 'maxConcurrency',
+      className: 'PowerBulkhead',
+      min: 1,
+      fallback: 1,
+    });
+    this._queueCapacity = assertLimitRequired(queueCapacity, {
+      name: 'queueCapacity',
+      className: 'PowerBulkhead',
+      min: 0,
+      fallback: DEFAULT_QUEUE_CAPACITY,
+    });
     this._partitioner = typeof partitioner === 'function' ? partitioner : null;
     this._nextPartition = 0;
     this._pendingCount = 0;

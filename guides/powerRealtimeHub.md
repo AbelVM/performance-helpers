@@ -137,3 +137,12 @@ hub.close();
 - A `send` adapter that throws or rejects is reported through `onError` and does not affect other subscribers.
 - A throwing `handler` is likewise isolated and reported, rather than taking down the flush for everyone.
 - `publish` after `close()` returns `0`; `subscribe` after `close()` throws.
+
+## Validation
+
+`batchDelayMs` is validated. `0` means "flush the batch immediately" and is kept.
+A negative delay is not a fast flush — it is a `setTimeout` that fires
+immediately by accident — and a `NaN` previously reached `0` through
+`Number(x) || 0`, so a caller who passed a computed value got immediate
+flushing and would have looked for the bug in the hub rather than in the
+argument. Both now throw.

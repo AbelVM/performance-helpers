@@ -13,6 +13,7 @@
  * latch.countDown();
  * await latch.wait(); // resolves when count reaches 0
  */
+import { assertLimitRequired } from '../utils/options.js';
 import { PowerDefer } from './powerDefer.js';
 
 export class PowerLatch {
@@ -27,7 +28,16 @@ export class PowerLatch {
    *   rejection reason by {@link PowerLatch#abort}.
    */
   constructor(count = 1, options = {}) {
-    this._count = Math.max(0, Number(count) || 0);
+    // `0` is a real state - a latch that is already complete - and is kept. A
+    // negative count, or a `NaN` that `|| 0` turned into zero, is not a latch
+    // that finishes early; it is one nobody can reason about, because `wait()`
+    // returns immediately and nothing is ever actually waited for.
+    this._count = assertLimitRequired(count, {
+      name: 'count',
+      className: 'PowerLatch',
+      min: 0,
+      fallback: 0,
+    });
     /** @type {Map<number, PowerLatchWaiter>} */
     this._waiters = new Map();
     this._nextWaiterToken = 1;

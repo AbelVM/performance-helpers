@@ -40,6 +40,7 @@ import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
 import { READY_STATE } from './constants.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /** @typedef {'connecting'|'open'|'closing'|'closed'} WebSocketReadyState */
 
@@ -182,13 +183,70 @@ export class PowerWebSocketClient {
       // it as an unknown global is exactly the runtime check we want.
       (typeof WebSocketStream !== 'undefined' ? /** @type {*} */ (WebSocketStream) : null);
     this._codec = codec;
-    this._connectTimeoutMs = Math.max(0, Math.floor(Number(connectTimeoutMs) || 0));
-    this._highWaterMark = Math.max(0, Number(highWaterMarkBytes) || 0);
-    this._lowWaterMark = Math.max(0, Number(lowWaterMarkBytes) || 0);
-    this._pollBase = Math.max(1, Math.floor(Number(pollIntervalMs) || 20));
-    this._pollMax = Math.max(this._pollBase, Math.floor(Number(maxPollIntervalMs) || 250));
-    this._heartbeatIntervalMs = Math.max(0, Math.floor(Number(heartbeatIntervalMs) || 0));
-    this._heartbeatTimeoutMs = Math.max(0, Math.floor(Number(heartbeatTimeoutMs) || 0));
+    // Split by what `0` *means* here, because the two are not the same mistake.
+    //
+    // **Requests** - `0` is a documented way to turn a mechanism off, and the
+    // coercion accidentally got these right:
+    //   `heartbeatIntervalMs: 0` disables heartbeats, `heartbeatTimeoutMs: 0`
+    //   disables the liveness deadline, `highWaterMarkBytes: 0` / `0` watermarks
+    //   disable backpressure, `connectTimeoutMs: 0` means "wait as long as it
+    //   takes". Coercing any of these to a default would be the bug.
+    //
+    // **Not requests** - `0` here means "spin", so accepting it is wrong, and the
+    // old `Number(x) || default` silently substituted a default the caller never
+    // asked for:
+    //   `pollIntervalMs: 0`   -> 20   (a 0 ms poll is a busy loop)
+    //   `maxPollIntervalMs: 0` -> 250
+    //
+    // Non-finite and negative were coerced everywhere, in both groups, and are
+    // configuration errors. A `pollIntervalMs` of `NaN` did not produce a slow
+    // poll - it produced the default, silently, and the backoff curve built on
+    // top of it was then tuned to nothing the caller chose.
+    this._connectTimeoutMs = assertLimitRequired(connectTimeoutMs, {
+      name: 'connectTimeoutMs',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      fallback: 0,
+    });
+    this._highWaterMark = assertLimitRequired(highWaterMarkBytes, {
+      name: 'highWaterMarkBytes',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      fallback: 0,
+    });
+    this._lowWaterMark = assertLimitRequired(lowWaterMarkBytes, {
+      name: 'lowWaterMarkBytes',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      fallback: 0,
+    });
+    this._pollBase = assertLimitRequired(pollIntervalMs, {
+      name: 'pollIntervalMs',
+      className: 'PowerWebSocketClient',
+      min: 1,
+      fallback: 20,
+    });
+    this._pollMax = Math.max(
+      this._pollBase,
+      assertLimitRequired(maxPollIntervalMs, {
+        name: 'maxPollIntervalMs',
+        className: 'PowerWebSocketClient',
+        min: 1,
+        fallback: 250,
+      })
+    );
+    this._heartbeatIntervalMs = assertLimitRequired(heartbeatIntervalMs, {
+      name: 'heartbeatIntervalMs',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      fallback: 0,
+    });
+    this._heartbeatTimeoutMs = assertLimitRequired(heartbeatTimeoutMs, {
+      name: 'heartbeatTimeoutMs',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      fallback: 0,
+    });
     this._maxReconnectAttempts = maxReconnectAttempts;
     this._reconnectBaseMs = Math.max(1, Math.floor(Number(reconnectBaseMs) || 500));
     this._reconnectMaxMs = Math.max(

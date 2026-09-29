@@ -1,3 +1,4 @@
+import { assertLimitRequired } from '../utils/options.js';
 /**
  * Shared subscriber set helper used by event buses and observable stores.
  *
@@ -42,10 +43,17 @@ export class PowerSubscriberSet {
    */
   constructor(options = {}) {
     const { weak = false, maxListeners = 0 } = options || {};
+    // `0` is the documented "unlimited"; see the note below the assignment.
     this._weak = Boolean(weak);
-    this._maxListeners = Number.isFinite(Number(maxListeners))
-      ? Math.max(0, Math.floor(Number(maxListeners)))
-      : 0;
+    // As in `PowerEventBus`: `0` is the documented "unlimited" and is kept, but
+    // the old `Math.max(0, ...)` turned any negative into `0` - which here means
+    // *no limit at all*, so a mistake made the cap disappear.
+    this._maxListeners = assertLimitRequired(maxListeners, {
+      name: 'maxListeners',
+      className: 'PowerSubscriberSet',
+      min: 0,
+      fallback: 0,
+    });
     /** @type {Set<SubscriberEntry>} */
     this._listeners = new Set();
     /** @type {WeakMap<SubscriberListener, SubscriberListener>} original -> once-wrapper */

@@ -134,3 +134,20 @@ An unexpected close triggers reconnection with **decorrelated-jitter** backoff (
 - All internal timers go through `unref()` in Node, so a forgotten client does not keep a process alive.
 - Pass `WebSocketImpl` for a non-global implementation, or to inject a test double.
 - `lowWaterMarkBytes > highWaterMarkBytes` is a construction error, not a runtime surprise.
+
+## Validation
+
+The numeric options are validated, and they are split by what `0` _means_,
+because the two cases are not the same mistake:
+
+| Option                                      | `0` means                | `0` is                 |
+| ------------------------------------------- | ------------------------ | ---------------------- |
+| `heartbeatIntervalMs`, `heartbeatTimeoutMs` | disable the mechanism    | a request — kept       |
+| `highWaterMarkBytes`, `lowWaterMarkBytes`   | disable backpressure     | a request — kept       |
+| `connectTimeoutMs`                          | wait as long as it takes | a request — kept       |
+| `pollIntervalMs`, `maxPollIntervalMs`       | **spin**                 | not a request — throws |
+
+`pollIntervalMs: 0` was previously `Number(0) || 20`, so a caller who passed
+`0` got `20` — and the backoff curve built on top of it was tuned to nothing
+they had chosen. Non-finite and negative values now throw for every option
+above, where previously a `NaN` produced the default silently.

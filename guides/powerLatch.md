@@ -4,9 +4,9 @@ Counting barrier primitive. Resolves pending waiters when the internal count rea
 
 ## Constructor
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `count` | `number` | `1` | Initial count required before the latch is released. |
+| Option  |     Type | Default | Description                                          |
+| ------- | -------: | ------: | ---------------------------------------------------- |
+| `count` | `number` |     `1` | Initial count required before the latch is released. |
 
 ## API
 
@@ -19,7 +19,7 @@ Counting barrier primitive. Resolves pending waiters when the internal count rea
 - `remaining` (getter) — Returns the current remaining count as a `number`.
 
 - `done` (getter) — Boolean flag that is `true` when the remaining count is zero.
- 
+
 - `decrementUnlessZero()` — Decrement the latch by `1` only if the current count is greater than zero. Returns the remaining count. Useful when callers must avoid negative counts.
 
 - `abort(reason?)` — Immediately reject all pending `wait()` promises. An optional `reason` (any value) will be used as the rejection reason; when omitted a standard `Error` with `code === 'EABORT'` is used. Calling `abort()` sets the latch into an aborted state and subsequent `wait()` calls reject.
@@ -79,7 +79,9 @@ await p.catch((err) => console.log('wait rejected', err.code || err.message));
 const controller = new AbortController();
 const latch2 = new PowerLatch(1);
 setTimeout(() => controller.abort(new Error('client aborted')), 50);
-await latch2.wait({ signal: controller.signal }).catch((err) => console.log('aborted via signal', err.code));
+await latch2
+  .wait({ signal: controller.signal })
+  .catch((err) => console.log('aborted via signal', err.code));
 
 // wait with timeout
 const latch3 = new PowerLatch(1);
@@ -92,3 +94,11 @@ await latch3.wait(100).catch((err) => console.log('timed out', err.code));
 - **Callback safety:** errors thrown by your `onAbort` callback are swallowed by the implementation to avoid breaking caller code.
 - **Abort reason:** when `abort()` rejects waiters without a custom reason, the rejection reason will carry `code === 'EABORT'`.
 
+## Validation
+
+The initial `count` is validated. `0` is a real state — a latch that is already
+complete, whose `wait()` resolves immediately — and is kept. What changed in
+2.0: `Math.max(0, Number(count) || 0)` turned a `NaN` into `0`, so a caller who
+passed a computed count got a latch that silently did not latch: `wait()`
+returned at once and nothing was ever waited for. A negative, non-finite, or
+`Infinity` count now throws.

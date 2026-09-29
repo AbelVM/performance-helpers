@@ -27,6 +27,44 @@ pipeline.
   `PowerCircuit`'s `maxTimeout`, which is derived from `timeout` only when
   omitted so an explicit `maxTimeout: 0` still throws.
 
+- **The last six constructors now validate their numeric options**, closing BUG-024's
+  "still hand-rolled in ~10 constructors". Thirteen of seventeen had already moved to the
+  shared `assertLimitRequired`; `PowerBulkhead`, `PowerEventBus`, `PowerSubscriberSet`,
+  `PowerRealtimeHub`, `PowerLatch` and `PowerWebSocketClient` had not. **They were not
+  wrong in the same direction, which is why a single blanket rule would have broken half
+  of them.**
+
+  - **`PowerBulkhead`'s `queueCapacity: 0` produced the _largest_ queue the class supports.**
+    `Math.max(0, Number(x) || 100)` turns `0` into `100`. `PowerPermitGate` documents
+    `queueCapacity: 0` as a legal request — "refuse immediately instead of queueing" — and
+    this quietly turned that request into the full default. A value that reads as "no
+    queue" and produces the biggest queue is a contradiction, not a coercion. **`0` is now
+    honoured.** `partitions: 0` produced `4` (you asked for one partition, you got four)
+    and `maxConcurrency: 0` produced `1` — the same mistake `PowerPermitGate.capacity` had
+    already stopped making, where a bulkhead configured to allow nothing silently admitted
+    one task. Both now throw.
+  - **`maxListeners: -5` meant _unlimited_.** On `PowerEventBus` and `PowerSubscriberSet`,
+    `Math.max(0, -5)` is `0`, and `0` is the documented "no cap". So a typo silently
+    **removed the limit that exists to bound a listener leak** — the one direction where
+    being permissive makes the failure worse rather than better. `0` is kept, negatives and
+    non-finite values now throw.
+  - **`pollIntervalMs: 0` meant `20`.** A zero poll interval is a busy loop, not a
+    request, and the backoff curve built on top of it was tuned to a default the caller
+    never chose. It now throws. The options where `0` _does_ switch a mechanism off —
+    `heartbeatIntervalMs`, `heartbeatTimeoutMs`, `highWaterMarkBytes`,
+    `lowWaterMarkBytes`, `connectTimeoutMs` — keep accepting it.
+  - **`PowerLatch`'s count and `PowerRealtimeHub`'s `batchDelayMs`** accepted a `NaN` as
+    `0` by way of `|| 0`. A `NaN` latch silently does not latch: `wait()` returns at once
+    and nothing is ever waited for. A `NaN` batch delay flushes immediately, which looks
+    like a bug in the hub rather than a bad argument. Both now throw on negative and
+    non-finite values; `0` is still a real state for each.
+
+  `test/optionValidation.remaining.test.js` asserts the _specific_ coercion each option
+  had, not a generic `toThrow()` — a throw-only test would have passed against the
+  original code for a different reason — and proves the surviving `0` cases through
+  behaviour (a cap that raises on overflow, a latch that resolves, a hub that flushes)
+  rather than by adding getters that exist only for a test.
+
 - **`PowerPool`'s `minSize`, `maxSize` and `idleTimeout` are now validated too**, and the
   failure mode they had was worse than a wrong default: `Math.max(0, value)` is
   silent when `value` is not a number, because the result is `NaN` and **every

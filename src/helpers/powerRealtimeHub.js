@@ -29,6 +29,7 @@
  */
 import { encodeMessage, frameEncodedJson } from './powerMessageCodec.js';
 import { nowMs } from '../utils/now.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /**
  * What to do when a subscriber's queue is full.
@@ -176,7 +177,16 @@ export class PowerRealtimeHub {
     this._send = send;
     this._close = typeof close === 'function' ? close : null;
     this._batch = batch !== false;
-    this._batchDelayMs = Math.max(0, Math.floor(Number(batchDelayMs) || 0));
+    // `0` is a request - flush the batch immediately - and stays legal. A
+    // negative delay is not a fast flush, it is a `setTimeout` that fires
+    // immediately by accident, and `NaN` became `0` by way of `|| 0`, so both
+    // were accepted as a configuration the caller never wrote.
+    this._batchDelayMs = assertLimitRequired(batchDelayMs, {
+      name: 'batchDelayMs',
+      className: 'PowerRealtimeHub',
+      min: 0,
+      fallback: 0,
+    });
     this._codec = codec;
     this._onError = typeof onError === 'function' ? onError : null;
     this._now = typeof now === 'function' ? now : nowMs;
