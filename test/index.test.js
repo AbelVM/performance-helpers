@@ -261,17 +261,33 @@ describe('documentation coverage (TEST-001 companion)', () => {
   });
 
   it('every assets index file is reachable from navigation.md', () => {
-    const nav = readFileSync(resolve(root, 'assets/navigation.md'), 'utf8');
+    const navPath = resolve(root, 'assets/navigation.md');
+    const nav = readFileSync(navPath, 'utf8');
+    // Resolve each link *from the file that contains it* rather than looking
+    // for the path as a literal substring. The literal check passed for years
+    // while every link in this file was broken: `navigation.md` links are
+    // relative to `assets/`, so a working link reads `[Caching](1_Caching.md)`
+    // and a broken one reads `[Caching](assets/1_Caching.md)` — and it was the
+    // broken form the assertion was matching.
+    //
+    // `test/docsLinks.test.js` now checks every link in the repository. This
+    // test stays because it asserts something that one does not: that the
+    // navigation page reaches *each index*, not merely that its links resolve.
+    const linked = new Set(
+      [...nav.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => resolve(dirname(navPath), m[1]))
+    );
     const files = [
-      'assets/1_Caching.md',
-      'assets/2_Parallelizing.md',
-      'assets/3_Logging.md',
-      'assets/4_Utils.md',
-      'assets/5_Realtime.md',
+      '1_Caching.md',
+      '2_Parallelizing.md',
+      '3_Logging.md',
+      '4_Utils.md',
+      '5_Realtime.md',
+      '6_Observability.md',
     ];
     for (const f of files) {
-      expect(existsSync(resolve(root, f)), `${f} should exist`).toBe(true);
-      expect(nav, `navigation.md should link ${f}`).toContain(f);
+      const abs = resolve(root, 'assets', f);
+      expect(existsSync(abs), `assets/${f} should exist`).toBe(true);
+      expect(linked.has(abs), `navigation.md should reach assets/${f}`).toBe(true);
     }
   });
 });

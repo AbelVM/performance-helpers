@@ -425,6 +425,11 @@ If something is already misbehaving rather than undecided, start at
 [Troubleshooting](troubleshooting.md) — it leads with the pure-ESM `preloadNode()` failure,
 which is the most likely first-run problem and is specific to one environment.
 
+If what you want is to know _why_ something is shaped the way it is rather than how to use it, see
+[`adr/`](../adr/README.md). Those are design decisions, kept out of the guides on purpose: a decision
+record is the reasoning as it stood at a point in time, and reading one as current guidance is a
+reliable way to mislead yourself.
+
 ### Rate limiting and resilience
 
 - `PowerThrottle`: Token-bucket style rate limiter.
