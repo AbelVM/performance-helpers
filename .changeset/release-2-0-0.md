@@ -203,6 +203,28 @@ pipeline.
   implementation needed, the three retracted hypotheses, and the cheap experiment that would settle whether a frequency
   filter earns its keep here at all.
 
+- **`PowerPool`'s message path no longer copies every payload in order to avoid being copied.** The encode cache
+  handed out a fresh `u8.slice()` per message so the buffer could be **transferred** rather than copied by the structured
+  clone — which looks like the fast path, since a transfer is zero-copy. It is the opposite, and the reason is worth
+  stating: the copy being avoided is a **native** one and the copy being paid is an **interpreted** `memcpy` of the whole
+  payload. Measured over a Zipf-ish repeat mix of 200 × 200-byte messages, one variable at a time:
+
+  | path                                                     | per message |
+  | -------------------------------------------------------- | ----------: |
+  | encode + cache, `slice()`, transfer (the old default)    |     2942 ns |
+  | encode + cache, hand the cached buffer over to be copied | **1557 ns** |
+  | encode every time, `slice()`, transfer (no cache)        |     3441 ns |
+
+  The slice cost ~1385 ns. **The encode cache is emphatically not the problem** — dropping it costs ~1900 ns, nearly
+  twice what the slice costs — so it stays and the slice goes. `prepareBuffers(items, { clone })` now defaults to
+  `clone: false`, which hands over the cached buffer with no transfer list so the runtime copies it and the cache entry is
+  never detached. Pass `{ clone: true }` for a private transferable copy, as before.
+  **No pool-level speedup is claimed.** Five runs of the end-to-end `postMessage` path on this machine gave 1847/3506/
+  3654/3288/2562 ns before and 2658/2745/2016/2650/1879 ns after — overlapping ranges spanning nearly 2×, consistent with
+  the 28 % median spread BENCH-001 measured here. The figure above is the isolated prepare path; the end-to-end path is too
+  noisy on this hardware to confirm or refute it, and saying otherwise would be the same overclaim BENCH-001's note warns
+  about.
+
 - **`PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` and `PowerRateLimit` can now be told what time it is,
   and a composition reads the clock once instead of once per limiter.** `nowMs()` reads _two_ clocks per
   call - the high-resolution one and `Date.now()`, the second purely to check they have not diverged under
