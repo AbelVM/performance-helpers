@@ -9,12 +9,31 @@ export class PowerScheduler {
         onError?: ((error: unknown) => void) | null;
     });
     _flushFn: Function;
-    _scheduling: string;
+    /** @type {'microtask'|'macrotask'|'yield'} */
+    _scheduling: "microtask" | "macrotask" | "yield";
     _onError: ((error: unknown) => void) | null;
     _scheduled: boolean;
-    _timer: MacrotaskHandle | null;
+    _timer: MacrotaskHandle | {
+        cancel: () => void;
+    } | null;
     /** Whether a flush is currently scheduled. */
     get scheduled(): boolean;
+    /**
+     * The strategy this scheduler was *configured* with, and whether the runtime
+     * can actually honour it.
+     *
+     * Both halves, because they can differ: `scheduling: 'yield'` falls back to a
+     * macrotask where `scheduler.yield()` does not exist, and without this a
+     * caller has no way to know it is running on the fallback. The fallback is a
+     * degradation in *ordering*, not correctness — the flush still happens
+     * promptly — which is exactly why it should be visible rather than silent.
+     *
+     * @returns {{scheduling: 'microtask'|'macrotask'|'yield', supported: boolean}}
+     */
+    get strategy(): {
+        scheduling: "microtask" | "macrotask" | "yield";
+        supported: boolean;
+    };
     /**
      * Schedule the flush callback once.
      * @returns {void}

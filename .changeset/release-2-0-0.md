@@ -408,6 +408,24 @@ required is the worker reply shape.
   them measures as the worst variant. **Scope, stated honestly:** the window is a second LRU region with its
   own weight accounting, so `maxEntries`/`maxWeight`, iteration, `size`, `stats()` and disposal all have to
   change together. It is a structural change to a hot path, not a patch, and it is **not** in this release.
+- **`PowerScheduler` gained `scheduling: 'yield'`** and **rejects an unknown `scheduling` value.** `scheduler.yield()`
+  is the browser-native way to hand control back to the event loop, and it is prioritised ahead of the rendering and task
+  queues — which is what makes it the right primitive for a scheduler whose whole job is to run _promptly_. The feature is
+  detected once at module load rather than per flush, and where it does not exist (Node, Firefox until recently) the
+  strategy falls back to a macrotask: a degradation in **ordering**, not correctness, and one that is now visible through
+  the new `strategy` getter (`{ scheduling, supported }`) rather than silent. **An unrecognised `scheduling` now throws.**
+  The old line was `scheduling === 'macrotask' ? 'macrotask' : 'microtask'`, so `'idle'`, `'macrotask '` with a trailing
+  space, or `'Macrotask'` all silently selected the **fastest** strategy for a caller who had asked for something else — a
+  typo in a performance option making the code faster is the worst direction for it to go wrong.
+  **`requestIdleCallback` was considered and refused**, for a reason about the contract rather than the implementation: a
+  scheduler promises its flush _happens_, promptly, and `drain()`/`flush()` are meaningless against a callback that may never
+  run. Idle work belongs in something that does not promise latency. This closes ALG-007.
+  **A generation counter was written, mutation-tested, and deleted.** A `scheduler.yield()` continuation is already queued
+  and returns only a promise, so `flush()` and `cancel()` cannot un-schedule it and a staleness counter looks necessary.
+  Removing it entirely left all seven yield-path tests green — an _equivalent mutant_, caught by mutation testing rather
+  than by reading. `_run()`'s existing `if (!this._scheduled) return` already does the job. Machinery no test can
+  distinguish from its absence is machinery nobody maintains.
+
   `maxEntries` and `clear()` are still honoured exactly.
   **The withdrawal originally reached this note but not the guide** — `guides/powerCache.md`
   still carried a benchmark table asserting `policy: 'lru'` + `admission: 'tinylfu'`
@@ -415,6 +433,7 @@ required is the worker reply shape.
   **15.2 / 40**. The table has been replaced with the measured numbers and marked
   experimental, since a reader consulting the guide is the one most likely to act
   on the number. If you read the earlier claim, it was wrong.
+
 - **`PowerPool` `{ maxQueueLength }`** — the pool's missing backpressure story.
   `queuePolicy` decided what happened when the pool was saturated but never
   whether that situation could _keep going_: with the default `'enqueue'` and no

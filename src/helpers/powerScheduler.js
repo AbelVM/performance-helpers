@@ -52,6 +52,29 @@ function getMacrotaskChannel() {
 }
 
 /**
+ * Schedule one cooperative yield, as fast as the runtime allows.
+ *
+ * `scheduler.yield()` is the browser-native way to hand control back to the
+ * event loop without a macrotask's cost, and it is *prioritised ahead of* the
+ * rendering and task queues — which is what makes it the right tool for a
+ * scheduler whose whole job is to run promptly. Where it does not exist (Node,
+ * Firefox until recently) the macrotask path is used, which is a real
+ * degradation in ordering but not in correctness: the flush still runs, just in
+ * a later queue.
+ *
+ * Detected **once at module load**, not per call. The property is a stable
+ * feature of the runtime, and probing it on every flush would add a property
+ * read to the hot path to learn something that cannot change.
+ *
+ * @type {boolean}
+ */
+const HAS_SCHEDULER_YIELD =
+  typeof globalThis !== 'undefined' &&
+  typeof globalThis.scheduler === 'object' &&
+  globalThis.scheduler !== null &&
+  typeof globalThis.scheduler.yield === 'function';
+
+/**
  * @typedef {{cancel: () => void}} MacrotaskHandle
  */
 
@@ -106,8 +129,28 @@ export class PowerScheduler {
     if (typeof flushFn !== 'function') {
       throw new TypeError('PowerScheduler requires a flush function');
     }
+    const scheduling = options.scheduling;
+    if (
+      scheduling !== undefined &&
+      scheduling !== 'microtask' &&
+      scheduling !== 'macrotask' &&
+      scheduling !== 'yield'
+    ) {
+      // A closed set rather than `=== 'macrotask' ? ... : 'microtask'`: a typo
+      // would otherwise silently pick the *fastest* strategy for a scheduler
+      // that was asked for something else.
+      throw new TypeError(
+        'PowerScheduler: `scheduling` must be one of microtask, macrotask, yield ' +
+          `(received ${String(scheduling)}).`
+      );
+    }
     this._flushFn = flushFn;
-    this._scheduling = options.scheduling === 'macrotask' ? 'macrotask' : 'microtask';
+    // Annotated rather than inferred: without it the field narrows to
+    // `'microtask' | 'macrotask'` and every later `=== 'yield'` check is a
+    // compile error, which is how a strategy you just validated can end up
+    // unreachable to the type checker.
+    /** @type {'microtask'|'macrotask'|'yield'} */
+    this._scheduling = scheduling === undefined ? 'microtask' : scheduling;
     this._onError = typeof options.onError === 'function' ? options.onError : null;
     this._scheduled = false;
     this._timer = null;
@@ -119,6 +162,25 @@ export class PowerScheduler {
   }
 
   /**
+   * The strategy this scheduler was *configured* with, and whether the runtime
+   * can actually honour it.
+   *
+   * Both halves, because they can differ: `scheduling: 'yield'` falls back to a
+   * macrotask where `scheduler.yield()` does not exist, and without this a
+   * caller has no way to know it is running on the fallback. The fallback is a
+   * degradation in *ordering*, not correctness — the flush still happens
+   * promptly — which is exactly why it should be visible rather than silent.
+   *
+   * @returns {{scheduling: 'microtask'|'macrotask'|'yield', supported: boolean}}
+   */
+  get strategy() {
+    return {
+      scheduling: /** @type {'microtask'|'macrotask'|'yield'} */ (this._scheduling),
+      supported: this._scheduling !== 'yield' || HAS_SCHEDULER_YIELD,
+    };
+  }
+
+  /**
    * Schedule the flush callback once.
    * @returns {void}
    */
@@ -127,6 +189,34 @@ export class PowerScheduler {
     this._scheduled = true;
 
     if (this._scheduling === 'macrotask') {
+      this._timer = scheduleMacrotask(() => this._run());
+      return;
+    }
+    if (this._scheduling === 'yield' && HAS_SCHEDULER_YIELD) {
+      // `scheduler.yield()` returns a promise that resolves when the continuation
+      // is resumed, and there is **no handle to detach** — the yield is already
+      // queued. So `flush()` and `cancel()` cannot un-schedule it, and this
+      // looked like it needed a generation counter to make the continuation go
+      // stale.
+      //
+      // It does not. `_run()` opens with `if (!this._scheduled) return`, and
+      // both `flush()` and `cancel()` clear `_scheduled` before returning, so an
+      // abandoned continuation finds the schedule already closed and does
+      // nothing. A generation counter here was an **equivalent mutant**: removing
+      // it entirely left all 7 yield-path tests green. The `cancel` handle is
+      // kept only so the two strategies share one teardown shape, and it is
+      // honestly a no-op.
+      this._timer = { cancel: () => {} };
+      Promise.resolve(globalThis.scheduler.yield()).then(() => {
+        this._timer = null;
+        this._run();
+      });
+      return;
+    }
+    if (this._scheduling === 'yield') {
+      // Requested but unsupported here. Falling back to a macrotask is a
+      // degradation in *ordering* only: the flush still happens promptly, and
+      // `strategy.supported` reports the substitution rather than hiding it.
       this._timer = scheduleMacrotask(() => this._run());
       return;
     }

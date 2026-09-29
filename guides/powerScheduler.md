@@ -6,9 +6,9 @@ Use `PowerScheduler` when you need a shared `schedule()`, `flush()`, and `cancel
 
 ## Constructor
 
-| option       |         type | default      | description   |
-| ------------ | -----------: | ------------ | ------------- |
-| `scheduling` | `'microtask' | 'macrotask'` | `'microtask'` | Scheduling mode used to defer the flush callback. `microtask` uses `queueMicrotask`, and `macrotask` uses `setTimeout(fn, 0)`. |
+| option       |                                    type | default       | description                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------ | --------------------------------------: | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scheduling` | `'microtask' \| 'macrotask' \| 'yield'` | `'microtask'` | Scheduling mode used to defer the flush callback. `microtask` uses `queueMicrotask`; `macrotask` posts to a `MessageChannel`; `yield` uses `scheduler.yield()` where it exists and falls back to a macrotask where it does not. An unrecognised value **throws** — it used to be `=== 'macrotask' ? 'macrotask' : 'microtask'`, so a typo silently selected the _fastest_ strategy. |
 
 ## API
 
@@ -42,6 +42,58 @@ await Promise.resolve();
 - `PowerScheduler` is a small utility for helpers like `PowerBatch` and `PowerObserver` that need consistent delayed execution and a flush API.
 - Use `flush()` in tests or shutdown paths to make deferred work deterministic.
 - Use `cancel()` when queued work should be discarded instead of executed.
+
+## `yield` scheduling, and why there is no `idle` mode
+
+`scheduling: 'yield'` uses **`scheduler.yield()`**, the browser-native way to
+hand control back to the event loop. It is prioritised ahead of the rendering
+and task queues, which is what makes it the right primitive for a scheduler
+whose job is to run _promptly_ — a flush that yields gets the same priority a
+microtask would, without the microtask's "never yields to input" property.
+
+The feature is detected **once at module load**, not per flush: it is a stable
+property of the runtime, and probing it on every flush would add a property read
+to the hot path to learn something that cannot change.
+
+Where it does not exist (Node, and Firefox until recently) the strategy falls
+back to a macrotask. That is a degradation in **ordering**, not correctness — the
+flush still happens promptly — and it is visible rather than silent:
+
+```javascript
+const s = new PowerScheduler(flush, { scheduling: 'yield' });
+s.strategy; // { scheduling: 'yield', supported: false }
+```
+
+`strategy` reports what was _requested_ and whether the runtime can honour it.
+Reporting only the request would make the substitution invisible, which is the
+thing worth avoiding.
+
+### Why not `requestIdleCallback`
+
+`requestIdleCallback` was considered for this row and **refused**, for a reason
+that is about the contract rather than the implementation: a scheduler's whole
+promise is that a scheduled flush _happens_, promptly, and `drain()`/`flush()`
+are meaningless if the callback may never run at all. Idle callbacks are for
+"do this when there is slack" — genuinely useful, and a different primitive with
+a different contract.
+
+If you want idle work, drive it from something that does not promise latency —
+a chunked cleanup loop that yields between batches, rather than a scheduler
+flush.
+
+### Cancellation is logical, not structural
+
+A `scheduler.yield()` continuation is already queued the moment it is requested
+and returns only a promise: **there is no handle to detach**. So `flush()` and
+`cancel()` cannot un-schedule it. They do not need to — `_run()` opens with
+`if (!this._scheduled) return`, and both clear `_scheduled` first, so an
+abandoned continuation arrives, finds the schedule closed, and does nothing.
+
+That is worth stating because the obvious implementation is a generation
+counter, and one was written. Removing it entirely left all seven yield-path
+tests green: an **equivalent mutant**, caught by mutation testing rather than by
+reading. It was deleted rather than kept as belt-and-braces, because machinery
+that no test can distinguish from its absence is machinery nobody will maintain.
 
 ## Macrotask scheduling is not `setTimeout(0)`
 
