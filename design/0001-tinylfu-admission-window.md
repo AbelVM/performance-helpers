@@ -244,6 +244,57 @@ That is a structural change to a hot path, and the four acceptance criteria
 below must be met by the whole thing rather than by a slice. The honest estimate
 is a session of its own plus the benchmark loop, not a patch.
 
+### Three rules the implementation must get, found by attempting it
+
+A first attempt was made and **reverted** — it reached 4 of the acceptance
+criteria, was still failing scan resistance (9 survivors against the 30 the test
+requires), and had not touched `clear`/`dispose`, iteration, `size` or `stats`.
+Reverting rather than committing a red tree was the right call, but three rules
+came out of it that the design above did **not** state, and rediscovering them by
+running the test one at a time is exactly the cost this note exists to remove.
+
+**1. The challenger wins ties (`>` not `>=`) — but only inside the window.** The
+old rule refused a brand-new key at estimate 0 against an incumbent also at 0, so
+everything was refused. Inside the window the challenger is an _established_ key:
+it was admitted and has been there long enough to be challenged, so a tie means
+"no evidence either is better" and discarding it discards the only evidence the
+filter has. Keeping `>=` here is not a small pessimism — measured, a caller that
+fills a cache and _then_ reads it lost every key written after the first few,
+because they all tie at estimate 1.
+
+**2. Only arbitrate once main space is full.** This rule is not in W-TinyLFU's
+_description_ and it is the one the implementation could not do without. While
+main space has room the filter has nothing to protect, and a frequency
+comparison during a bulk fill has no signal to work from — every freshly-written
+key sits at estimate 1, so every comparison is a tie and the churn evicts the
+entry the previous `set` just promoted. Measured: a 40-key warm ended with **5**
+entries instead of 40. Caffeine's `admit` makes the same check
+(`mainSpace.size() < maximum` admits unconditionally); it is why its warm-up
+works at all.
+
+**3. `victim === challenger` is the cold cache, not an error.** With no main
+space yet, the eviction candidate is the head, and the head is the window's own
+oldest node. Comparing it with itself is meaningless, and _evicting_ it is
+catastrophic: the unlink removes the challenger from `_map` and it never comes
+back. Measured as a fresh cache silently losing every key after the first few.
+
+**Two implementation traps that produced a silently inert feature rather than an
+error**, recorded because both would again look like "the filter is just weak":
+
+- **Reading constructor state before it is assigned.** The window was armed from
+  `this._sketch` several lines above the sketch's own construction, so the window
+  was inert and the only symptom was a passing test suite.
+- **Advancing a cursor after the unlink it was derived from.** `_windowStart` was
+  updated _after_ the node it pointed at had been unlinked and its links nulled,
+  so the first promotion dereferenced null. The fix — advance the cursor first —
+  is the general rule, and the head case needs its own guard: when the window's
+  oldest node _is_ the head, `prev` is null and splicing through it throws. The
+  first promotion of a cold cache hits exactly that case.
+
+The third trap and the second share a root: the window lives at the tail of the
+main list precisely so that main space's eviction cursor is untouched by it, and
+that sharing is what makes these edges reachable.
+
 ## How to validate
 
 Any implementation must clear all four, measured with `bench/claims.js zipf`:
