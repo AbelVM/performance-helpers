@@ -21,6 +21,7 @@ export class PowerTTLMap {
     constructor(defaultTTL?: number | PowerTTLMapOptions, options?: PowerTTLMapOptions);
     _defaultTTL: number;
     _onExpire: ((key: any, value: any) => void) | null;
+    _now: () => number;
     /** @type {Map<any, TTLMapEntry>} */
     _map: Map<any, TTLMapEntry>;
     /** @type {Map<any, number>} */

@@ -39,6 +39,10 @@ export class PowerTTLMap {
     }
     this._defaultTTL = Number(opts?.defaultTTL ?? ttl) || 0; // ms; 0 = no expiry
     this._onExpire = typeof opts?.onExpire === 'function' ? opts.onExpire : null;
+    // Injected clock, matching the limiters (PERF-007). Without it, testing
+    // expiry means a real `setTimeout`, and a real `setTimeout` is a flake:
+    // the assertion has to beat the clock rather than state what it means.
+    this._now = typeof opts?.now === 'function' ? opts.now : nowMs;
     /** @type {Map<any, TTLMapEntry>} */
     this._map = new Map();
     // Track keys that have an expiry to allow faster purging of expired
@@ -73,7 +77,7 @@ export class PowerTTLMap {
   set(key, value, ttl) {
     const ms = this._resolveTtl(ttl, this._defaultTTL);
     // add a small slack (+1ms) to account for timer scheduling jitter
-    const expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
+    const expiresAt = ms > 0 ? this._now() + ms + 1 : 0;
     const prevExpiry = this._expirations.get(key) || 0;
     this._map.set(key, { value, expiresAt });
     if (expiresAt) this._expirations.set(key, expiresAt);
@@ -128,7 +132,7 @@ export class PowerTTLMap {
    */
   _checkExpire(key, entry) {
     if (!entry) return true;
-    if (entry.expiresAt && nowMs() > entry.expiresAt) {
+    if (entry.expiresAt && this._now() > entry.expiresAt) {
       this._expireKey(key, entry);
       return true;
     }
@@ -206,14 +210,14 @@ export class PowerTTLMap {
   touch(key, ttl) {
     const entry = this._map.get(key);
     if (!entry) return false;
-    if (entry.expiresAt && nowMs() > entry.expiresAt) {
+    if (entry.expiresAt && this._now() > entry.expiresAt) {
       this._expireKey(key, entry);
       return false;
     }
     const prevExpiry = entry.expiresAt || 0;
     const ms = this._resolveTtl(ttl, this._defaultTTL);
     // add a small slack (+1ms) to account for timer scheduling jitter
-    entry.expiresAt = ms > 0 ? nowMs() + ms + 1 : 0;
+    entry.expiresAt = ms > 0 ? this._now() + ms + 1 : 0;
     if (entry.expiresAt) this._expirations.set(key, entry.expiresAt);
     else this._expirations.delete(key);
     this._updateNextExpiryOnWrite(prevExpiry, entry.expiresAt);
@@ -256,7 +260,7 @@ export class PowerTTLMap {
    */
   get expiredCount() {
     if (!this._map.size || !this._expirations.size) return 0;
-    const now = nowMs();
+    const now = this._now();
     let expired = 0;
     for (const exp of this._expirations.values()) {
       if (exp && now > exp) expired++;
@@ -278,7 +282,7 @@ export class PowerTTLMap {
     // One clock read for both the count and the sweep, so an entry that expires
     // between the two cannot make the returned number disagree with what was
     // actually removed.
-    const now = nowMs();
+    const now = this._now();
     let removed = 0;
     for (const exp of this._expirations.values()) {
       if (exp && now > exp) removed++;
@@ -337,7 +341,7 @@ export class PowerTTLMap {
    * @returns {IterableIterator<[any, any]>}
    */
   *entries() {
-    const now = nowMs();
+    const now = this._now();
     for (const [k, entry] of this._map) {
       if (entry.expiresAt && now > entry.expiresAt) {
         this._expireKey(k, entry);

@@ -4,10 +4,11 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 
 ## Constructor
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `defaultTTL` | `number` (ms) | `0` | Default TTL applied when `set(key, value)` is called without a `ttl`. `0` disables expiry. |
-| `onExpire` | `Function` | `undefined` | Optional callback called when an entry expires: `(key, value) => void`. Callback errors are swallowed. |
+| Option       |           Type |     Default | Description                                                                                                                                                                                                                                                                                    |
+| ------------ | -------------: | ----------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `defaultTTL` |  `number` (ms) |         `0` | Default TTL applied when `set(key, value)` is called without a `ttl`. `0` disables expiry.                                                                                                                                                                                                     |
+| `onExpire`   |     `Function` | `undefined` | Optional callback called when an entry expires: `(key, value) => void`. Callback errors are swallowed.                                                                                                                                                                                         |
+| `now`        | `() => number` |   `nowMs()` | Injected clock in milliseconds, matching the rate limiters. Expiry is the one behaviour here that cannot be observed without a clock, so this is what turns "assert it expired after 150 ms" from a sleep into an exact assertion — see [Testing](#testing-expires-against-an-injected-clock). |
 
 ## API
 
@@ -58,3 +59,43 @@ m.onExpire = (key, value) => {
 
 if (m.has('img-1')) console.log('preview ready');
 ```
+
+## Testing: expires against an injected clock
+
+Everything else here is synchronously observable. Expiry is not — it is the one
+behaviour that only happens as the clock moves, so testing it the obvious way
+means sleeping and then racing the clock:
+
+```js
+// Flaky on a loaded machine, and slow on a fast one.
+const m = new PowerTTLMap({ defaultTTL: 100 });
+m.set('k', 1);
+await new Promise((r) => setTimeout(r, 150));
+expect(m.get('k')).toBeUndefined();
+```
+
+Pass `now` and the assertion states what it means instead of guessing how long
+to wait:
+
+```js
+let clock = 0;
+const m = new PowerTTLMap({ defaultTTL: 100, now: () => clock });
+m.set('k', 1);
+clock = 100;
+expect(m.get('k')).toBe(1); // alive AT its TTL
+clock = 102;
+expect(m.get('k')).toBeUndefined();
+```
+
+That second assertion is the part worth internalising: an entry is stored with
+`expiresAt = now + ttl + 1` and read back as `now > expiresAt`, so it survives
+_at_ exactly its TTL and lapses immediately after. A test that expects it gone at
+`clock = 100` will fail, and the reason is a deliberate off-by-one — an entry
+that vanished exactly at its TTL would be shorter-lived than the caller asked
+for. `test/invariants.test.js` pins all three of those positions so a later
+"simplification" of the `+ 1` fails rather than passing quietly.
+
+The same option exists on `PowerThrottle`, `PowerGCRA`, `PowerSlidingWindow`
+and `PowerRateLimit`, where it is checked by a shared precedence rule: an
+injected clock always wins over a per-call `now`, because a limiter that faked
+its clock is a limiter under test.

@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { PowerCache } from '../src/helpers/powerCache.js';
+import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 import { PowerGCRA } from '../src/helpers/powerGCRA.js';
 import { PowerBatch } from '../src/helpers/powerBatch.js';
@@ -302,6 +303,71 @@ describe('PowerQueue operation counts', () => {
       const c = new PowerQueue(cap)._capacity;
       expect((c & (c - 1)) === 0).toBe(true);
     }
+  });
+});
+
+describe('PowerTTLMap operation counts', () => {
+  const map = (opts) => new PowerTTLMap(opts);
+  let clock = 0;
+  beforeEach(() => {
+    clock = 0;
+  });
+
+  it('exposes exactly the entries that have not expired', () => {
+    const m = map({ defaultTTL: 100, now: () => clock });
+    m.set('a', 1);
+    m.set('b', 2, { ttl: 1000 });
+    expect(m.size).toBe(2);
+    clock = 150;
+    // Lazy expiry: the entry is still *counted* until something asks for it,
+    // but asking must find it gone. Both halves matter — eager expiry costs a
+    // timer per key, and lazy-without-filtering leaks expired entries forever.
+    expect(m.get('a')).toBeUndefined();
+    expect(m.size).toBe(1);
+    expect([...m.keys()]).toEqual(['b']);
+  });
+
+  it('honours a per-key TTL over the default', () => {
+    const m = map({ defaultTTL: 1000, now: () => clock });
+    m.set('short', 1, { ttl: 10 });
+    m.set('long', 2);
+    clock = 100;
+    expect(m.get('short')).toBeUndefined();
+    expect(m.get('long')).toBe(2);
+  });
+
+  it('never expires a key stored without a TTL', () => {
+    const m = map({ now: () => clock });
+    m.set('forever', 1);
+    clock = 10_000_000;
+    // `expiresAt` is 0 rather than `Infinity`, and 0 is the falsy
+    // "never expires" test at every read site — a change that made it
+    // `Infinity` would leave a NaN comparison in exactly one place.
+    expect(m.get('forever')).toBe(1);
+    expect(m.size).toBe(1);
+  });
+
+  it('expires on the far side of the boundary, not at it', () => {
+    const m = map({ defaultTTL: 100, now: () => clock });
+    m.set('k', 1);
+    clock = 100;
+    // `set` stores `now + ttl + 1` and reads test `now > expiresAt`, so an
+    // entry is alive *at* its TTL and gone after it. The off-by-one is
+    // deliberate and load-bearing: an entry that vanished exactly at its TTL
+    // would be shorter-lived than the caller asked for.
+    expect(m.get('k')).toBe(1);
+    clock = 101;
+    expect(m.get('k')).toBe(1);
+    clock = 102;
+    expect(m.get('k')).toBeUndefined();
+  });
+
+  it('reports a size that excludes entries swept by a full purge', () => {
+    const m = map({ defaultTTL: 10, now: () => clock });
+    for (let i = 0; i < 5; i++) m.set(`k${i}`, i);
+    clock = 100;
+    m.purge?.();
+    expect(m.size).toBe(0);
   });
 });
 

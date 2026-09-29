@@ -513,6 +513,14 @@ export type PowerTTLMapOptions = {
      */
     defaultTTL?: number | undefined;
     onExpire?: ((key: any, value: any) => void) | undefined;
+    /**
+     * Injected clock, as the limiters take (PERF-007).
+     * Expiry is the one behaviour in this class that cannot be observed without
+     * a clock, so a test that wants to assert "expired after 150 ms" had either
+     * to sleep or to be dropped. `new PowerTTLMap({ now: () => clock })` makes
+     * the assertion exact.
+     */
+    now?: (() => number) | undefined;
 };
 /**
  * What `PowerTTLMap` stores per key: the value plus the absolute `nowMs()` at
