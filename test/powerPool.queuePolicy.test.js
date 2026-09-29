@@ -53,38 +53,45 @@ function saturatedPool(queuePolicy, maxQueueLength = 2) {
 }
 
 describe('PowerPool queue policy at capacity', () => {
-  it('drop-oldest evicts the head to make room for the newcomer', () => {
-    const pool = saturatedPool('drop-oldest');
-    expect(pool.postMessage('n1')).toBe(true);
-    expect(pool.postMessage('n2')).toBe(true);
-    // The head was evicted, so what survives is the work that arrived most
-    // recently. The queue length does *not* grow toward `maxQueueLength` - see
-    // the test below that pins that, and TEST-003's note on the discrepancy.
-    expect(pool.queue.length).toBe(1);
-    expect(pool.queue.toArray().map((q) => q.message)).toEqual(['n2']);
-  });
-
-  it('drop-oldest keeps the queue at one entry whatever maxQueueLength says', () => {
+  it('drop-oldest is self-bounding at one entry, and that is deliberate', () => {
     const pool = saturatedPool('drop-oldest', 100);
     for (let i = 0; i < 10; i++) pool.postMessage(String(i));
-    // `guides/powerPool.md:109` says this policy "evicts one and admits one, so
-    // the cap never turns it into a refusal" - true - but also that "the queue
-    // holds a steady number", which reads as a number that grows toward the cap.
-    // It does not: `_enqueueOrReject` shifts unconditionally whenever the queue
-    // is non-empty, with no capacity check, so the steady state is 1 and
-    // `maxQueueLength: 100` is silently inert for this policy.
+    // The queue never climbs. BUG-016 found this while wiring `maxQueueLength`
+    // and accepted it deliberately: `drop-oldest` is already self-bounding, it
+    // evicts one and admits one, "so the cap must not - and does not - turn it
+    // into a refusal". `test/powerPool.hardening.test.js:96` pins it too.
     //
-    // Pinned as-is rather than "fixed" here. The single-message path and
-    // `_reserveQueueSlots` disagree about what "evict to make room" means, and
-    // picking one is a contract change, not a test fix. See TEST-003.
+    // Read that together with `maxQueueLength: 100` and it is easy to conclude
+    // the cap is broken. It is not - the policy keeps its meaning, which is to
+    // drop rather than refuse - but the *number* was never written down
+    // anywhere a caller would look, and a reader who sets 100 and observes one
+    // is being misled. `guides/powerPool.md` now says so.
     expect(pool.queue.length).toBe(1);
     expect(pool.queue.toArray().map((q) => q.message)).toEqual(['9']);
+  });
+
+  it('drop-oldest evicts the head so the newest work is what runs', () => {
+    const pool = saturatedPool('drop-oldest');
+    expect(pool.postMessage('a')).toBe(true);
+    expect(pool.postMessage('b')).toBe(true);
+    // Accepted work is discarded in favour of the newest arrival, which is the
+    // whole trade the policy names.
+    expect(pool.queue.toArray().map((q) => q.message)).toEqual(['b']);
+  });
+
+  it('drop-oldest never refuses, however far past the cap it is pushed', () => {
+    const pool = saturatedPool('drop-oldest', 1);
+    for (let i = 0; i < 20; i++) expect(pool.postMessage(String(i))).toBe(true);
+    // The defining property: evict rather than refuse, so a caller using this
+    // policy never sees `false` and never has to handle a rejection.
+    expect(pool.queue.length).toBe(1);
+    expect(pool.queue.toArray().map((q) => q.message)).toEqual(['19']);
   });
 
   it('drop-oldest rejects the evicted task when it was awaiting a response', () => {
     const pool = saturatedPool('drop-oldest');
     const first = pool.postMessage({ n: 1 }, undefined, { awaitResponse: true });
-    pool.postMessage('n2');
+    pool.postMessage('b');
     // The evicted entry had a pending response, so its promise must settle -
     // a dropped task whose promise never settles is a caller waiting forever.
     return expect(first).rejects.toThrow(/dropped by policy/);
