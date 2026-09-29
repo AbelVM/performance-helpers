@@ -1,4 +1,4 @@
-import { it, expect } from 'vitest';
+import { it, expect, vi } from 'vitest';
 import { PowerPool } from '../src/helpers/powerPool.js';
 
 it('handles rapid resize operations without losing tasks', async () => {
@@ -37,18 +37,23 @@ it('handles rapid resize operations without losing tasks', async () => {
 
     // ensure pool can accept work after resizing turbulence
     pool.resize(2);
-    // small settle time for workers to be created
-    await new Promise((r) => setTimeout(r, 20));
+    // There was a 20 ms "settle time for workers to be created" here, and it
+    // was waiting for something that does not happen: `resize()` sets the
+    // bounds, and workers are created on demand, so immediately after a resize
+    // the pool has exactly as many as it had before. Converting the sleep to
+    // `vi.waitFor` on the worker count made that visible immediately, which is
+    // the whole argument for converting rather than deleting sleeps by hand.
+    // The next assertion is the real condition, and it is waited on below.
 
     // dispatch some messages
     const total = 40;
     for (let i = 0; i < total; i++) pool.postMessage({ i });
 
-    // allow some time for processing
-    await new Promise((r) => setTimeout(r, 1000));
-    // allow for possible extra internal/control messages; ensure at least
-    // the expected number of task responses were processed.
-    expect(processed).toBeGreaterThanOrEqual(total);
+    // Was a 1000 ms grace period. `processed` may include extra internal
+    // control messages, hence `>=`; the wait is for it to arrive, not to pass.
+    await vi.waitFor(() => {
+      expect(processed).toBeGreaterThanOrEqual(total);
+    });
   } finally {
     pool.terminate();
   }

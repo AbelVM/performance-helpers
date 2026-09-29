@@ -116,8 +116,12 @@ describe('PowerPool.batch APIs', () => {
     const pool = new PowerPool(SlowUnderlying, { size: 1, taskQueue: false });
     try {
       const p = pool.postMessage({ req: 1 }, undefined, { awaitResponse: true, timeout: 1000 });
-      // ensure pending entry is established
-      await new Promise((r) => setTimeout(r, 10));
+      // Was "ensure pending entry is established" via a 10 ms sleep. The
+      // entry is what stopThePressBatch has to find, so waiting on it states
+      // the precondition rather than hoping a timer covers it.
+      await vi.waitFor(() => {
+        expect(pool._pendingResponses.size).toBeGreaterThan(0);
+      });
       const batch = [{ message: { control: 'x' } }, { message: { control: 'y' } }];
       const forwarded = pool.stopThePressBatch(batch, { recreateWorkers: true });
       expect(Array.isArray(forwarded)).toBe(true);

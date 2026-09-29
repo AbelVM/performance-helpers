@@ -65,6 +65,12 @@ class LegacyWorker {
   terminate() {}
 }
 
+// A shared settle primitive, deliberately not a `vi.waitFor`: it is used
+// before an *action* whose effect is not a single readable condition (posting a
+// frame, running a control message), so there is nothing to poll for. Where a
+// test's wait is "let this state become true", that is `vi.waitFor`; this is
+// the other shape — "let the runtime get a turn" — and the distinction is worth
+// keeping explicit rather than converting both to the same call.
 const tick = () => new Promise((r) => setTimeout(r, 10));
 
 describe('PowerPool framed protocol is the default (2.0)', () => {
