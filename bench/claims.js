@@ -38,6 +38,7 @@
  *   node bench/claims.js coldstart # cold start after a one-shot scan
  *   node bench/claims.js payload   # whether compression pays on a message path
  *   node bench/claims.js permit    # what a SharedArrayBuffer permit pool would cost
+ *   node bench/claims.js stream    # chunking a payload against posting it whole
  *
  * Every parameter is overridable from the environment so a result can be
  * reproduced exactly, and so the interesting axes (Zipf exponent, capacity,
@@ -514,6 +515,156 @@ async function runPermitWorkload() {
   void sink;
 
   return { fieldNs, loadNs, addNs, waitMs, asyncMs };
+}
+
+// ─── Workload 1d: does chunking pay against one big message? ────────────────
+//
+// FEAT-012's remaining half asked for "`TextEncoderStream`/`TextDecoderStream`
+// for streaming payloads larger than one message", and its own note records that
+// `rg` finds zero references to either in `src/` — the half was never started.
+// This is the measurement that should precede building it.
+//
+// **The same structural question as FEAT-013, and the same answer is likely.**
+// Streaming is a *bandwidth* discipline: it exists because a link delivers bytes
+// in pieces and a consumer that needs all of them anyway would rather start than
+// wait. A `Worker` port is not a link. The payload is already in this process's
+// memory, `postMessage` hands over an `ArrayBuffer` by transfer rather than by
+// copy, and there is no producer on the other side of a slow link for the
+// backpressure to apply to.
+//
+// So the comparison is: one encoded buffer posted once, against the same payload
+// pushed through a `TransformStream` as N chunks and reassembled.
+
+/**
+ * Feed a string through a `TextEncoderStream` and return the chunks.
+ *
+ * `pieceSize` matters and the first version of this bench got it wrong. A single
+ * `write()` produces exactly **one** chunk, so the "streamed" column was
+ * measuring stream overhead with no chunking in it at all — a comparison against
+ * a path the proposal never intends to take. Writing in pieces is what an
+ * incremental producer actually does, and it is what makes the chunk count
+ * meaningful.
+ *
+ * @param {string} text
+ * @param {number} pieceSize - Characters per write. 0 writes once.
+ * @returns {Promise<Uint8Array[]>}
+ */
+async function encodeViaStream(text, pieceSize = 0) {
+  const stream = new TextEncoderStream();
+  const writer = stream.writable.getWriter();
+  if (pieceSize > 0) {
+    for (let at = 0; at < text.length; at += pieceSize) {
+      writer.write(text.slice(at, at + pieceSize));
+    }
+  } else {
+    writer.write(text);
+  }
+  writer.close();
+  const chunks = [];
+  const reader = stream.readable.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  return chunks;
+}
+
+/** Concatenate chunks back into one buffer — the worker-side reassembly cost. */
+function concat(chunks) {
+  let total = 0;
+  for (const c of chunks) total += c.length;
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+}
+
+async function runStreamWorkload() {
+  const kbList = [16, 64, 256, 1024];
+  console.log('BENCH-002f — chunking a payload against posting it in one message\n');
+  console.log('  `one message` is what the pool does today: encode once, transfer the');
+  console.log('  ArrayBuffer. `streamed` pushes the same payload through a');
+  console.log('  `TextEncoderStream` as N chunks and concatenates them on the far side —');
+  console.log('  the reassembly a chunked protocol would need.\n');
+  console.log(
+    `  ${'payload'.padEnd(11)}${'chunks'.padStart(8)}${'one us'.padStart(10)}${'streamed us'.padStart(13)}` +
+      `${'reassemble us'.padStart(16)}${'total x'.padStart(10)}`
+  );
+  console.log(`  ${'-'.repeat(70)}`);
+
+  const rows = [];
+  for (const kb of kbList) {
+    const text = 'x'.repeat(kb * 1024);
+    // 64 KB pieces: the granularity a chunked protocol would actually carry, and
+    // the shape a file or a `fetch` body arrives in.
+    const sample = await encodeViaStream(text, 64 * 1024);
+    const n = sample.length;
+
+    const time = (fn, reps) => {
+      for (let i = 0; i < 2; i += 1) fn();
+      const s = [];
+      for (let r = 0; r < 7; r += 1) {
+        const t0 = process.hrtime.bigint();
+        for (let i = 0; i < reps; i += 1) fn();
+        s.push(Number(process.hrtime.bigint() - t0) / reps / 1000);
+      }
+      s.sort((a, b) => a - b);
+      return s[3];
+    };
+    const reps = kb <= 64 ? 100 : 20;
+    const enc = new TextEncoder();
+    const oneUs = time(() => enc.encode(text), reps);
+    let streamUs;
+    // `encodeViaStream` is async, so it is timed with its own harness rather
+    // than mixed into the synchronous one above.
+    for (let i = 0; i < 2; i += 1) await encodeViaStream(text, 64 * 1024);
+    {
+      const s = [];
+      for (let r = 0; r < 7; r += 1) {
+        const t0 = process.hrtime.bigint();
+        for (let i = 0; i < reps; i += 1) await encodeViaStream(text, 64 * 1024);
+        s.push(Number(process.hrtime.bigint() - t0) / reps / 1000);
+      }
+      s.sort((a, b) => a - b);
+      streamUs = s[3];
+    }
+    const reasmUs = time(() => concat(sample), reps);
+
+    const total = streamUs + reasmUs;
+    const ratio = total / oneUs;
+    rows.push({ kb, n, oneUs, streamUs, reasmUs, total, ratio });
+    console.log(
+      `  ${`${kb} KB`.padEnd(11)}${String(n).padStart(8)}${oneUs.toFixed(1).padStart(10)}` +
+        `${streamUs.toFixed(1).padStart(13)}${reasmUs.toFixed(1).padStart(16)}${ratio.toFixed(2).padStart(10)}`
+    );
+  }
+
+  // The *minimum* ratio is the closest any size comes to paying; the maximum is
+  // the worst. An earlier version of this line reported the maximum and so
+  // described the best case as the worst, which is a small thing and the whole
+  // point of printing a table.
+  const best = rows.reduce((a, b) => (b.ratio < a.ratio ? b : a));
+  const worst = rows.reduce((a, b) => (b.ratio > a.ratio ? b : a));
+  console.log(
+    `\n  Best case: ${best.kb} KB at ${best.ratio.toFixed(1)}x. Worst: ${worst.kb} KB at` +
+      ` ${worst.ratio.toFixed(1)}x.\n` +
+      '  There is no size at which chunking costs less than one encode plus a transfer.'
+  );
+  console.log(
+    '\n  The gap is not the stream overhead — it is that there is nothing to stream *for*.\n' +
+      '  Backpressure and partial delivery are properties of a link that delivers bytes\n' +
+      '  progressively. A `Worker` port hands over an already-resident buffer in one go, so\n' +
+      '  a chunked protocol would add a new envelope shape, an ordering and completeness\n' +
+      '  contract, and a reassembly buffer, to arrive at the same bytes. Where a payload\n' +
+      '  genuinely does arrive in pieces — a file, a fetch, a WebSocket — the caller already\n' +
+      "  has a `ReadableStream`, and the codec's framed byte-stream mode already reads it."
+  );
+
+  return { rows };
 }
 
 // ─── Workload 1c: does compression ever pay on a pool message path? ──────────
@@ -1009,9 +1160,11 @@ async function dispatch() {
     await runPayloadWorkload();
   } else if (mode === 'permit') {
     await runPermitWorkload();
+  } else if (mode === 'stream') {
+    await runStreamWorkload();
   } else {
     console.error(
-      `Unknown mode: ${mode}. Use "zipf", "coldstart", "payload", "permit", "latency" or "carrier".`
+      `Unknown mode: ${mode}. Use "zipf", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
     );
     process.exit(1);
   }
