@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
 import { PowerCircuit } from '../src/helpers/powerCircuit.js';
 import { PowerObserver } from '../src/helpers/powerObserver.js';
@@ -11,12 +11,39 @@ import { PowerSubscriberSet } from '../src/helpers/powerSubscriberSet.js';
  * user's mapper twice per write, a comparison whose cycle guard cannot leak
  * across calls, and a disposal that actually releases its finalization registry.
  */
+
+// TEST-008. The four waits below were `setTimeout(r, 25)` against a 5 ms TTL -
+// a 5x margin bought with wall-clock time, on the theory that a wider sleep is
+// safer. It is the opposite: the wait is a macrotask, so its duration depends on
+// how busy the loop is, and a 25 ms sleep is a race with the scheduler that
+// happens to pass on an idle machine. Fake timers make "past the TTL" a number
+// instead of a hope.
+//
+// `PowerTTLMap` stores `expiresAt = nowMs() + ttl + 1` and expires on
+// `nowMs() > expiresAt`, so a TTL of `t` is only past after **`t + 2`** ms -
+// the same boundary `powerTTLMap.test.js` pins, and the reason an earlier
+// conversion at `t + 1` produced a suite where nothing ever expired.
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+/**
+ * Advance the clock past a TTL of `ttl` ms.
+ *
+ * @param {number} ttl
+ * @returns {Promise<void>}
+ */
+const pastTtl = (ttl) => vi.advanceTimersByTimeAsync(ttl + 2);
+
 describe('PowerTTLMap size is a pure read (BUG-022)', () => {
   it('is O(1) and never sweeps: expired entries stay resident', async () => {
     const m = new PowerTTLMap();
     m.set('a', 1, 5);
     m.set('b', 2, 5);
-    await new Promise((r) => setTimeout(r, 25));
+    await pastTtl(5);
     const sweep = vi.spyOn(m, '_sweepExpirations');
     // The whole point: reading a property is not an operation.
     for (let i = 0; i < 5; i++) void m.size;
@@ -29,7 +56,7 @@ describe('PowerTTLMap size is a pure read (BUG-022)', () => {
     const onExpire = vi.fn();
     const m = new PowerTTLMap({ onExpire });
     m.set('a', 1, 5);
-    await new Promise((r) => setTimeout(r, 25));
+    await pastTtl(5);
     for (let i = 0; i < 10; i++) {
       expect(m.size).toBe(1);
       expect(m.expiredCount).toBe(1);
@@ -44,7 +71,7 @@ describe('PowerTTLMap size is a pure read (BUG-022)', () => {
     const m = new PowerTTLMap();
     m.set('live', 1, 10_000);
     m.set('gone', 2, 5);
-    await new Promise((r) => setTimeout(r, 25));
+    await pastTtl(5);
     // Read the counters *before* iterating: `keys()` collects as it goes, so
     // touching it first would expire the entry this is measuring.
     const expired = m.expiredCount;
@@ -59,7 +86,7 @@ describe('PowerTTLMap size is a pure read (BUG-022)', () => {
     m.set('a', 1, 5);
     m.set('b', 2, 5);
     m.set('c', 3, 10_000);
-    await new Promise((r) => setTimeout(r, 25));
+    await pastTtl(5);
     expect(m.purge()).toBe(2);
     expect(m.purge()).toBe(0);
     expect(m.size).toBe(1);

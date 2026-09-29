@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PowerMemoizer } from '../src/helpers/powerCache.js';
 
 describe('PowerMemoizer', () => {
@@ -58,13 +58,23 @@ describe('PowerMemoizer', () => {
       calls++;
       return x;
     };
-    const pm = new PowerMemoizer(undefined, { ttl: 5 });
-    const memo = pm.memoize(fn);
-    expect(memo(1)).toBe(1);
-    expect(calls).toBe(1);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(memo(1)).toBe(1);
-    expect(calls).toBe(2);
+    // TEST-008: fake timers for this case only. The two `setTimeout`s earlier in
+    // this file are *inside the factory under test*, so they are subjects rather
+    // than waits and must keep running on the real clock - installing fake
+    // timers file-wide would stop them ever resolving and hang the suite.
+    vi.useFakeTimers();
+    try {
+      const pm = new PowerMemoizer(undefined, { ttl: 5 });
+      const memo = pm.memoize(fn);
+      expect(memo(1)).toBe(1);
+      expect(calls).toBe(1);
+      // Well past the 5 ms TTL, on a clock that cannot drift under load.
+      await vi.advanceTimersByTimeAsync(50);
+      expect(memo(1)).toBe(1);
+      expect(calls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('delete and clear remove cached entries', () => {
