@@ -153,6 +153,12 @@
  * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
  * @property {number|null} [latencyEwma] - EWMA of historical task latency (ms).
  * @property {number[]|import('./powerQueue.js').PowerQueue} [_startTimes] - Queue of start timestamps for inflight tasks (ms).
+ * @property {boolean} tasksSettled - Set once this worker's in-flight tasks have been
+ *   settled in bulk by termination. A `message` already in flight from the worker
+ *   still reaches the pool handler, and without this the global `_activeTasks`
+ *   would be decremented a second time - stealing a count that belongs to a
+ *   *different* worker still doing work, so the pool would report idle while
+ *   tasks were outstanding. BUG-011.
  */
 
 export {};

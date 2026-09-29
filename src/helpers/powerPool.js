@@ -1154,6 +1154,20 @@ export class PowerPool {
     // response that would normally settle them will never arrive.
     if (workerObj.tasks > 0) this._decrementActiveTasks(workerObj.tasks);
     workerObj.tasks = 0;
+    // Mark the worker settled *after* the drain, and before `terminate()`. A
+    // `message` already in flight from this worker will still reach the pool
+    // handler - `terminate()` stops new work, it does not recall a dispatched
+    // event - and without this it would decrement the global counter a second
+    // time for a task that has already been accounted for here.
+    //
+    // The old `Math.max(0, ...)` clamp on `workerObj.tasks` could not prevent
+    // this: it kept the *per-worker* count from going negative, while the
+    // *global* `_activeTasks` was the thing being double-decremented. The count
+    // then fell below the number of tasks actually running, so `getStats()
+    // .activeTasks` under-reported, `_isIdle` could go true with work
+    // outstanding, and `drain()` resolved early against a pool that was not
+    // idle.
+    workerObj.tasksSettled = true;
     try {
       workerObj.worker?.terminate();
     } catch (err) {
@@ -1714,6 +1728,11 @@ export class PowerPool {
       lastActive: nowMs(),
       latencyEwma: null,
       _startTimes: new PowerQueue(),
+      // Set once this worker's in-flight tasks have been settled in bulk, so a
+      // `message` that was already in flight when the worker was terminated does
+      // not decrement the global counter a second time. See `_terminateWorker`
+      // and the guard in the `onmessage` handler. BUG-011.
+      tasksSettled: false,
     };
     // track completed tasks per worker (for termination-time averages)
     workerObj.completedTasks = 0;
@@ -1738,6 +1757,18 @@ export class PowerPool {
     // event into it.
     worker.onmessage = (e) => {
       const now = nowMs();
+      // A late message from a worker whose tasks were already settled in bulk by
+      // `_terminateWorker`. Its accounting is done; decrementing again is what
+      // made the pool look idle while work was outstanding. The rest of the
+      // handler still runs - the response may carry a `correlationId` that a
+      // caller is awaiting, and dropping it would strand that promise.
+      if (workerObj.tasksSettled) {
+        this._debugLog?.(
+          new Error('late message from a settled worker'),
+          'ignoring decrement for already-settled worker'
+        );
+        return;
+      }
       workerObj.tasks = Math.max(0, workerObj.tasks - 1);
       // decrement global active task count for the completed task
       this._decrementActiveTasks(1);

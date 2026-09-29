@@ -27,6 +27,22 @@ pipeline.
   `PowerCircuit`'s `maxTimeout`, which is derived from `timeout` only when
   omitted so an explicit `maxTimeout: 0` still throws.
 
+- **`PowerPool` no longer under-reports `activeTasks` when a terminated worker replies late.** Terminating a
+  worker with tasks in flight settles them in bulk, and a `message` already in flight from that worker still
+  reaches the pool handler afterwards — which decremented the global counter a **second** time. The existing
+  `Math.max(0, …)` clamp could not prevent this: it guarded the _per-worker_ count, while the thing being
+  double-decremented was the _global_ `_activeTasks`. The counter then fell below the number of tasks actually
+  running, so `getStats().activeTasks` under-reported, `_isIdle` could go true with work outstanding, and
+  `drain()` resolved early against a pool that was not idle. Each worker is now marked settled when its tasks
+  are drained, and a late message from it is ignored for accounting purposes.
+  **The bug is only observable when the counter is above zero**, because the clamp absorbs a double decrement
+  against `0` — so a single-worker reproduction passes against the broken code. The late message has to be made
+  to steal a count belonging to a _different, still-working_ worker, which is the user-visible failure; the
+  tests do exactly that and were checked to fail with the fix disabled. One consequence is recorded rather than
+  fixed: the guard returns before correlation-id handling, so a caller awaiting a response from a worker that
+  was terminated late still waits — settling those promises is a separate concern from idempotent accounting.
+  (The `_taskTokenSeq` field that previously claimed to solve this does not exist and never did; its JSDoc was
+  removed rather than implemented, since a per-worker settled flag covers the actual hazard.)
 - **The last six constructors now validate their numeric options**, closing BUG-024's
   "still hand-rolled in ~10 constructors". Thirteen of seventeen had already moved to the
   shared `assertLimitRequired`; `PowerBulkhead`, `PowerEventBus`, `PowerSubscriberSet`,

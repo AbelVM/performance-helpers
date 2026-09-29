@@ -134,6 +134,32 @@ implementation uses `1 %`). Neither is obviously right for this cache:
 space.** The floor is what fixes the small-cache case; the cap is what keeps
 the filter meaningful on a large one.
 
+**The naive ratio has already been implemented, measured, and reverted.** An
+attempt used `floor(maxEntries * 0.01)` — Caffeine's ratio, which is where
+these numbers come from — and it made scan resistance **measurably worse**:
+`test/powerCache.tinylfu.test.js` dropped from above 30/40 retained to 22/40,
+and the tie and refusal-count cases failed with it.
+
+The reason is structural, and it is the strongest evidence available for this
+decision, so it is worth stating precisely. On a small cache
+`floor(maxEntries * 0.01)` clamps to **1**, so the window holds a single key —
+and that key is challenged on the very next insert. **It therefore never
+survives long enough to be seen twice, let alone to accumulate frequency.** The
+unfiltered region has no room to absorb anything; every arrival evicts the
+previous arrival, and the window degenerates into a one-slot buffer with a
+filter attached. A ratio is only meaningful at the large capacities Caffeine's
+figures were measured at.
+
+Two things follow, and both constrain any future attempt:
+
+1. **The window must be sized in absolute terms** — enough to hold the scan
+   burst it exists to absorb — or grown relative to observed arrival rate. A
+   pure ratio cannot work, because the failure mode is _too small_, and no
+   multiplicative term fixes a floor.
+2. **The promotion rule must compare the newcomer against the window's member**,
+   not assume the window drains one entry per insert. A one-slot window with a
+   per-insert drain is the same defect wearing a different hat.
+
 **2. Interaction with `policy: 'slru'`.** The data shows `slru + tynilfu` is
 currently the _worst_ variant measured (70.9 % against `slru` alone's 89.4 %).
 SLRU already has a probationary region that absorbs one-shot traffic, so the
