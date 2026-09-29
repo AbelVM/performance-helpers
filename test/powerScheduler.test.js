@@ -60,8 +60,19 @@ describe('PowerScheduler', () => {
 
     scheduler.schedule();
     expect(scheduler.scheduled).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(called).toBe(1);
+    // The scheduler uses `setImmediate`, and this test used to wait with
+    // `setTimeout(resolve, 0)`. Those are different phases - timers and check -
+    // and Node guarantees no ordering between them when both are scheduled from
+    // the main module, so the assertion raced and failed roughly one run in
+    // three. A fixed sleep is a guess in both directions: on a loaded machine
+    // it can also assert before the callback has run.
+    //
+    // Polling the actual condition is the fix (TEST-008). `scheduler.scheduled`
+    // is asserted after the wait rather than before, so the test ends only once
+    // the flush has actually happened.
+    await vi.waitFor(() => {
+      expect(called).toBe(1);
+    });
     expect(scheduler.scheduled).toBe(false);
   });
 

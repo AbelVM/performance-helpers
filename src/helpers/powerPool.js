@@ -343,6 +343,15 @@ export class PowerPool {
    * @param {number} [options.maxDrainWaiters=100] - Cap on concurrent `drain()` waits, so a caller that drains in a loop cannot accumulate unbounded `idle` listeners. (Internally `DEFAULT_MAX_DRAIN_WAITERS`; not exported.)
    */
   constructor(workerSource, options = {}) {
+    // A default parameter only covers `undefined`, so `new PowerPool(W, null)`
+    // reached the destructuring below with `null` and threw
+    // `TypeError: Cannot read properties of null (reading 'size')` - naming an
+    // internal field rather than the argument the caller got wrong. The options
+    // guard further down explicitly exempts `null` (`arguments[1] != null`),
+    // which is the intent; it just never got the chance to run, because the
+    // destructuring happens first. Normalise here so the guard means what it
+    // says.
+    if (options === null) options = {};
     const hwConcurrency =
       (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ||
       DEFAULT_HARDWARE_CONCURRENCY;
