@@ -117,12 +117,15 @@ export type PowerPoolOptions = {
      */
     maxListeners?: number | undefined;
     /**
-     * - Wire protocol for
-     * object messages. `'framed'` (default since 2.0) posts a `PowerMessageCodec`
-     * envelope; `'legacy'` restores the 1.x bare-JSON framing for a worker that
-     * has not migrated yet. See the migration note in `guides/powerPool.md`.
+     * - Wire
+     * protocol for object messages. `'framed'` (default since 2.0) posts a
+     * `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON framing
+     * for a worker that has not migrated yet; `'negotiated'` behaves exactly like
+     * `'framed'` until a worker advertises the native structured-clone carrier
+     * with `announceCapabilities()`, and sends that carrier to that worker alone.
+     * See the migration note in `guides/powerPool.md`.
      */
-    messageCodec?: "framed" | "legacy" | undefined;
+    messageCodec?: "framed" | "legacy" | "negotiated" | undefined;
 };
 /**
  * Adaptive-concurrency configuration for `PowerPool` (`autoScale`).

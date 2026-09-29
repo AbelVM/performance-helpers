@@ -27,6 +27,13 @@ import {
   decodeMessage,
   encodeMessage,
   isRawPayload,
+  isNativeEnvelope,
+  isCapabilityAnnouncement,
+  encodeNativeEnvelope,
+  collectTransferables,
+  encodeNative,
+  canUseNativeClone,
+  MESSAGE_CODECS,
 } from './powerMessageCodec.js';
 import {
   DEFAULT_HARDWARE_CONCURRENCY,
@@ -207,7 +214,12 @@ class WorkerWrapper {
       typeof msg === 'object' &&
       !ArrayBuffer.isView(msg) &&
       !(msg instanceof ArrayBuffer);
-    if (isPlainObject) {
+    // A native envelope is *already* in wire form. Re-encoding it to JSON bytes
+    // would post a bare body that reads as a legacy message: a worker using
+    // `decodeInbound` would take its legacy branch, parse the bytes, and hand
+    // the task code the envelope instead of the payload — a silent failure with
+    // no error anywhere, which is the worst shape a protocol bug can take.
+    if (isPlainObject && !isNativeEnvelope(msg)) {
       try {
         const u8 = this._pool._encodeForTransfer(message);
         // Clone the encoded bytes before transferring. `_encodeForTransfer`
@@ -526,10 +538,22 @@ export class PowerPool {
      * - `'legacy'` restores the 1.x behaviour: a bare `Uint8Array` of JSON,
      *   sniffed on the way back in. Provided so a worker can be migrated on its
      *   own schedule. See the migration note in guides/powerPool.md.
+     * - `'negotiated'` starts out identical to `'framed'` and upgrades **per
+     *   worker**: a worker that advertises the native carrier with
+     *   `announceCapabilities()` is sent the structured-clone carrier instead,
+     *   which preserves `Map`, `Set`, `Date`, `BigInt` and cycles that the JSON
+     *   frame silently destroys. Workers that do not advertise keep getting the
+     *   frame, so a pool can be switched on before any worker is ready.
      *
-     * @type {'framed'|'legacy'}
+     * @type {'framed'|'legacy'|'negotiated'}
      */
-    this._messageCodec = options.messageCodec === 'legacy' ? 'legacy' : 'framed';
+    this._messageCodec = MESSAGE_CODECS.has(options.messageCodec) ? options.messageCodec : 'framed';
+    /**
+     * Whether this runtime can structured-clone at all. Checked once here so
+     * `'negotiated'` on a runtime without `structuredClone` degrades to the
+     * framed path rather than throwing per message.
+     */
+    this._nativeCloneAvailable = canUseNativeClone();
     /**
      * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
      * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
@@ -804,6 +828,112 @@ export class PowerPool {
   }
 
   /**
+   * Resolve a deferred message into the carrier this specific worker expects.
+   *
+   * This is where protocol negotiation is decided, and the reason it has to be
+   * here rather than in `_prepareForTransfer` is that the target worker is not
+   * known when a message is prepared: a queued item can be handed to any worker
+   * by either drain site. Deciding at dispatch is what makes the decision
+   * *per worker*, which is the whole point — a pool with one upgraded worker
+   * and nine legacy ones is the state this feature exists for.
+   *
+   * Non-deferred items pass straight through, so `'framed'`, `'legacy'` and
+   * every binary message keep their existing path untouched.
+   *
+   * @private
+   * @param {import('./jsdoc-types.js').WorkerObj} obj - Target worker, if known.
+   * @param {{message: *, transfer: (TransferList|undefined), deferred?: boolean}} prepared
+   * @returns {{message: *, transfer: (TransferList|undefined)}}
+   */
+  _encodeForWorker(obj, prepared) {
+    if (!prepared || prepared.deferred !== true) return prepared;
+    if (this._messageCodec === 'negotiated' && obj?.protocol?.native) {
+      const native = this._encodeNativeForWorker(prepared);
+      if (native) return native;
+    }
+    return this._frameObjectForTransfer(prepared.message, prepared.transfer);
+  }
+
+  /**
+   * Wrap a deferred message in the native envelope, or return `null` when this
+   * runtime cannot do it.
+   *
+   * The transfer list is the subtle part. A transfer list names buffers inside
+   * the object being posted, and `postMessage` **detaches** them — so naming
+   * the caller's buffers would detach the caller's data, which is a data-loss
+   * bug that looks like a successful post. When the payload carries no binary
+   * there is nothing to name, and the envelope is posted with no list and no
+   * copy: the platform clones it, which is the whole reason for choosing this
+   * carrier. When it does carry binary, a private copy is made first and *its*
+   * buffers are transferred.
+   *
+   * @private
+   * @param {{message: *, transfer: (TransferList|undefined)}} prepared
+   * @returns {{message: object, transfer: (TransferList|undefined)}|null}
+   */
+  _encodeNativeForWorker(prepared) {
+    if (!this._nativeCloneAvailable) return null;
+    const source = prepared.message;
+    let value = source;
+    let transfer;
+    if (collectTransferables(source).length > 0) {
+      // Private copy: see above. `encodeNative` clones and returns the list for
+      // the copy, which is exactly the pairing that is safe to transfer.
+      const cloned = encodeNative(source);
+      value = cloned.message;
+      transfer = cloned.transfer;
+    }
+    try {
+      return { message: encodeNativeEnvelope(value), transfer };
+    } catch (err) {
+      // A value the platform cannot clone (a function, a proxy, a getter that
+      // throws). Falling back to the frame is right: the frame is the portable
+      // path, and a worker that negotiated `native` still reads it.
+      this._debugLog?.(err, '_encodeNativeForWorker: not cloneable, framing instead');
+      return null;
+    }
+  }
+
+  /**
+   * Record what a worker says it can decode, and announce the change.
+   *
+   * The rules here are deliberately conservative, because a worker that
+   * over-claims costs a broken message and a worker that under-claims costs
+   * nothing but speed:
+   *
+   * - `native` is only granted when the runtime can structured-clone. A worker
+   *   that advertises it on a runtime that cannot is talking about a carrier
+   *   that does not exist here, and honouring that would throw per message.
+   * - `json` is always retained. It is what the pool sends until this
+   *   announcement lands, and a worker that claims `native` alone has not said
+   *   it can read the messages it has already been sent.
+   *
+   * @private
+   * @param {import('./jsdoc-types.js').WorkerObj} obj
+   * @param {{codecs: string[]}} announcement
+   */
+  _applyCapabilities(obj, announcement) {
+    const claimed = Array.isArray(announcement?.codecs) ? announcement.codecs : [];
+    const codecs = ['json'];
+    if (this._nativeCloneAvailable && claimed.includes('native')) codecs.push('native');
+    const native = codecs.includes('native');
+    const previous = obj?.protocol ? { ...obj.protocol } : null;
+    if (previous && previous.native === native && previous.announced) return;
+    if (obj) {
+      obj.protocol = { codecs, native, announced: true };
+    }
+    try {
+      this._bus.emit('pool:protocol', {
+        workerId: obj?.id,
+        codecs,
+        previous: previous?.codecs ?? ['json'],
+      });
+    } catch (e) {
+      this._debugLog?.(e, '_applyCapabilities: bus.emit failed');
+    }
+  }
+
+  /**
    * Post a prepared message to a specific worker object and update bookkeeping.
    * Returns the `pendingPromise` when `wantResponse` is true, otherwise `true` on success.
    * On failure, rejects/cleans up the pending response when applicable and
@@ -818,6 +948,7 @@ export class PowerPool {
    * @private
    */
   _postToWorkerObj(obj, prepared, startTime, wantResponse, correlationKey, pendingPromise) {
+    prepared = this._encodeForWorker(obj, prepared);
     // Bypass the wrapper for "plain object + explicit transfer list".
     //
     // `WorkerWrapper.postMessage` re-encodes a plain-object message to JSON and
@@ -1130,6 +1261,11 @@ export class PowerPool {
       return false;
     }
     const queuedItem = { message: prepared.message, transfer: prepared.transfer };
+    // A deferred item is still un-encoded, and the drain site resolves the
+    // carrier for whichever worker ends up taking it. Dropping this flag would
+    // post the caller's object raw, which is the one outcome negotiation is not
+    // allowed to produce.
+    if (prepared.deferred === true) queuedItem.deferred = true;
     if (wantResponse && correlationKey) queuedItem.correlationId = correlationKey;
     this.queue.push(queuedItem);
     try {
@@ -1618,65 +1754,96 @@ export class PowerPool {
       !(msg instanceof ArrayBuffer);
     if (isPlainObject) {
       if (zeroCopy) return { message: msg, transfer: tr };
-      try {
-        // `_encodeForTransfer` returns the cached JSON body; framing is a cheap
-        // header wrap, so the encode cache is still what absorbs the
-        // stringify/encode cost.
-        const body = this._encodeForTransfer(msg);
-        const u8 = this._messageCodec === 'framed' ? frameEncodedJson(body) : body;
-        const buf = u8.slice();
-        let transferList = tr;
-        if (!transferList || (Array.isArray(transferList) && transferList.length === 0)) {
-          transferList = [buf.buffer];
-        } else if (!Array.isArray(transferList)) {
-          if (transferList.length === 0) {
-            transferList = [buf.buffer];
-          } else {
-            const arr = [];
-            let found = false;
-            for (const item of transferList) {
-              arr.push(item);
-              if (item === buf.buffer) found = true;
-            }
-            if (!found) arr.push(buf.buffer);
-            transferList = arr;
-          }
-        } else {
-          let found = false;
-          for (const item of transferList) {
-            if (item === buf.buffer) {
-              found = true;
-              break;
-            }
-          }
-          if (!found) transferList = [...transferList, buf.buffer];
-        }
-        return { message: buf, transfer: transferList };
-      } catch (err) {
-        // Falling back to the raw object is deliberate: if `JSON.stringify`
-        // throws (a circular reference, a BigInt) the message is still
-        // postable, because the transport structured-clones whatever it cannot
-        // JSON-encode, and refusing it would break a working caller.
-        //
-        // What made this a *silent* protocol downgrade - and hid BUG-029 for so
-        // long - is that nothing was reported. A framing failure in framed mode
-        // means the worker will not see the envelope it is documented to
-        // receive, so say so at the point it happens rather than letting it
-        // surface much later as "unsupported protocol version" inside
-        // `decodeMessage`, which points nowhere near the cause.
-        this._debugLog?.(err, '_prepareForTransfer: could not frame, posting raw');
-        if (this._messageCodec === 'framed') {
-          this._logger?.warn?.(
-            'PowerPool: message could not be framed and was posted unframed ' +
-              '(messageCodec is "framed"). A worker using decodeMessage() will ' +
-              'reject it. Cause: ' +
-              (err instanceof Error ? err.message : String(err))
-          );
-        }
-        return { message: msg, transfer: tr };
+      // Under `'negotiated'` the carrier is a per-worker decision, and the
+      // target worker is not known yet on the enqueue path — a queued item can
+      // land on any worker. Deferring the encode to dispatch is what makes
+      // per-worker negotiation possible at all, and it is also what stops a
+      // native worker being charged for a JSON encode it never uses.
+      if (this._messageCodec === 'negotiated') {
+        return { message: msg, transfer: tr, deferred: true };
       }
+      return this._frameObjectForTransfer(msg, tr);
     }
     return { message: msg, transfer: tr };
+  }
+
+  /**
+   * Encode a plain-object message as a framed JSON body.
+   *
+   * Split out of `_prepareForTransfer` so the deferred (`'negotiated'`) path and
+   * the direct path share one implementation: two copies of the transfer-list
+   * munging would drift, and the transfer list is where a leak lives.
+   *
+   * @private
+   * @param {object} msg
+   * @param {TransferList|undefined} tr
+   * @returns {{message: *, transfer: (TransferList|undefined)}}
+   */
+  _frameObjectForTransfer(msg, tr) {
+    try {
+      // `_encodeForTransfer` returns the cached JSON body; framing is a cheap
+      // header wrap, so the encode cache is still what absorbs the
+      // stringify/encode cost.
+      const body = this._encodeForTransfer(msg);
+      // `'negotiated'` reaches here only for a worker that did not advertise,
+      // and for that worker the answer is the frame — the same bytes a
+      // `'framed'` pool posts. Branching on `!== 'legacy'` rather than
+      // `=== 'framed'` is what keeps the fallback carrier identical between
+      // the two modes; a third mode added later inherits it.
+      const u8 = this._messageCodec === 'legacy' ? body : frameEncodedJson(body);
+      const buf = u8.slice();
+      let transferList = tr;
+      if (!transferList || (Array.isArray(transferList) && transferList.length === 0)) {
+        transferList = [buf.buffer];
+      } else if (!Array.isArray(transferList)) {
+        if (transferList.length === 0) {
+          transferList = [buf.buffer];
+        } else {
+          const arr = [];
+          let found = false;
+          for (const item of transferList) {
+            arr.push(item);
+            if (item === buf.buffer) found = true;
+          }
+          if (!found) arr.push(buf.buffer);
+          transferList = arr;
+        }
+      } else {
+        let found = false;
+        for (const item of transferList) {
+          if (item === buf.buffer) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) transferList = [...transferList, buf.buffer];
+      }
+      return { message: buf, transfer: transferList };
+    } catch (err) {
+      // Falling back to the raw object is deliberate: if `JSON.stringify`
+      // throws (a circular reference, a BigInt) the message is still
+      // postable, because the transport structured-clones whatever it cannot
+      // JSON-encode, and refusing it would break a working caller.
+      //
+      // What made this a *silent* protocol downgrade - and hid BUG-029 for so
+      // long - is that nothing was reported. A framing failure in framed mode
+      // means the worker will not see the envelope it is documented to
+      // receive, so say so at the point it happens rather than letting it
+      // surface much later as "unsupported protocol version" inside
+      // `decodeMessage`, which points nowhere near the cause.
+      this._debugLog?.(err, '_prepareForTransfer: could not frame, posting raw');
+      // Every mode except `'legacy'` promises the worker an envelope it can
+      // decode, so a framing failure is a broken promise in all three.
+      if (this._messageCodec !== 'legacy') {
+        this._logger?.warn?.(
+          'PowerPool: message could not be framed and was posted unframed ' +
+            `(messageCodec is "${this._messageCodec}"). A worker using ` +
+            'decodeMessage() will reject it. Cause: ' +
+            (err instanceof Error ? err.message : String(err))
+        );
+      }
+      return { message: msg, transfer: tr };
+    }
   }
 
   /**
@@ -1855,6 +2022,10 @@ export class PowerPool {
       lastActive: nowMs(),
       latencyEwma: null,
       _startTimes: new PowerQueue(),
+      // What this worker has told the pool it can decode. Starts as "framed
+      // only", which is what a worker that has never announced supports, so an
+      // un-negotiated pool sends exactly what it sent before.
+      protocol: { codecs: ['json'], native: false, announced: false },
       // Set once this worker's in-flight tasks have been settled in bulk, so a
       // `message` that was already in flight when the worker was terminated does
       // not decrement the global counter a second time. See `_terminateWorker`
@@ -1904,8 +2075,14 @@ export class PowerPool {
       // If the worker's response carries a correlationId, resolve any pending Promise.
       try {
         const data = e?.data;
-        if (data && typeof data === 'object' && data.correlationId != null) {
-          const pid = String(data.correlationId);
+        // The id can arrive on the payload (the framed path, and any worker that
+        // echoes it the way the guides show) or on the event (a native envelope,
+        // where the payload may be a Map, a typed array or a frozen object that
+        // must not be written to).
+        const cid = data && typeof data === 'object' ? data.correlationId : undefined;
+        const key = cid != null ? cid : e?.correlationId;
+        if (key != null) {
+          const pid = String(key);
           const resp = Object.prototype.hasOwnProperty.call(data, 'response')
             ? data.response
             : data;
@@ -1923,8 +2100,9 @@ export class PowerPool {
         let x = null;
         try {
           const data = e?.data;
-          if (typeof data?.duration === 'number' && Number.isFinite(data.duration)) {
-            x = Math.max(0, Number(data.duration));
+          const dur = typeof data?.duration === 'number' ? data.duration : e?.duration;
+          if (typeof dur === 'number' && Number.isFinite(dur)) {
+            x = Math.max(0, Number(dur));
           } else if (start != null) {
             x = Math.max(0, now - start);
           }
@@ -1980,8 +2158,9 @@ export class PowerPool {
       ) {
         const item = this.queue.shift();
         try {
-          if (item.transfer) worker.postMessage(item.message, item.transfer);
-          else worker.postMessage(item.message);
+          const dispatch = this._encodeForWorker(workerObj, item);
+          if (dispatch?.transfer?.length) worker.postMessage(dispatch.message, dispatch.transfer);
+          else worker.postMessage(dispatch?.message);
           workerObj._startTimes.push(now);
           workerObj.tasks++;
           this._activeTasks++;
@@ -2029,9 +2208,29 @@ export class PowerPool {
       // support both browser-like MessageEvent (with .data) and Node 'message' callbacks (data passed directly)
       const data = e?.data !== undefined ? e.data : e;
       let decoded = data;
+      /** @type {any} - the native envelope, when the reply arrived on that carrier */
+      let inboundMeta = null;
+      // A capability announcement is pool-internal protocol traffic: it is
+      // consumed here and deliberately *not* forwarded to `message` listeners,
+      // which never sent it and would have to recognise it to be correct. It is
+      // also not a task, so it must not touch the task accounting below.
+      if (isCapabilityAnnouncement(data)) {
+        this._applyCapabilities(workerObj, data);
+        return;
+      }
+      if (isNativeEnvelope(data)) {
+        // The payload is unwrapped here so that nothing above this layer — user
+        // `onmessage` handlers, correlation matching, latency sampling — has to
+        // know which carrier a reply arrived on. Only `correlationId` and
+        // `duration` are lifted, onto the event rather than onto the payload:
+        // the payload belongs to the worker, and mutating it to carry pool
+        // bookkeeping is the kind of thing that breaks on a frozen object.
+        decoded = data.value;
+        inboundMeta = data;
+      }
       if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
         try {
-          if (this._messageCodec === 'framed') {
+          if (this._messageCodec !== 'legacy') {
             // No sniffing: the envelope says what the payload is, so a binary
             // frame is handed over intact instead of being JSON.parse'd.
             decoded = decodeMessage(data).value;
@@ -2049,6 +2248,13 @@ export class PowerPool {
       }
       const ev =
         e?.data !== undefined && decoded === data ? e : { data: decoded, originalEvent: e };
+      if (inboundMeta) {
+        // Pool bookkeeping the reply would otherwise lose. Read by correlation
+        // matching and the latency sampler; see the comment at the unwrap above
+        // for why these live on the event instead of on the payload.
+        if (inboundMeta.correlationId != null) ev.correlationId = inboundMeta.correlationId;
+        if (typeof inboundMeta.duration === 'number') ev.duration = inboundMeta.duration;
+      }
       if (typeof worker.onmessage === 'function') {
         try {
           worker.onmessage(ev);
@@ -3490,6 +3696,18 @@ export class PowerPool {
       lastActive: w.lastActive,
     }));
 
+    // Negotiation state, per worker, so an operator can see whether the pool has
+    // actually upgraded — and a mixed fleet is the normal state during a
+    // rollout, so the counts are the useful part: "2 of 9 on native" is the
+    // answer to "is negotiation on", and `messageCodec` alone cannot give it.
+    const negotiated = this.workers.filter((w) => w.protocol?.native).length;
+    const protocol = {
+      mode: this._messageCodec,
+      nativeAvailable: this._nativeCloneAvailable,
+      nativeWorkers: negotiated,
+      workers: this.workers.map((w) => ({ id: w.id, codecs: w.protocol?.codecs ?? ['json'] })),
+    };
+
     const now = nowMs();
     const liveDuration = this._createdAt != null ? Math.max(0, now - this._createdAt) : 0;
     const totalWorkersCreated = this._totalWorkersCreated || this.workers.length;
@@ -3528,6 +3746,7 @@ export class PowerPool {
 
     return {
       status,
+      protocol,
       performance: {
         poolLiveDuration: liveDuration,
         totalWorkersCreated,
@@ -3814,8 +4033,10 @@ export class PowerPool {
       while (remainingSlots > 0 && queue.length > 0) {
         const item = queue.shift();
         try {
-          if (item.transfer?.length) workerObj.worker.postMessage(item.message, item.transfer);
-          else workerObj.worker.postMessage(item.message);
+          const dispatch = this._encodeForWorker(workerObj, item);
+          if (dispatch?.transfer?.length)
+            workerObj.worker.postMessage(dispatch.message, dispatch.transfer);
+          else workerObj.worker.postMessage(dispatch?.message);
           if (typeof workerObj._startTimes?.push === 'function') workerObj._startTimes.push(now);
           this._markPendingWorker(item.correlationId, workerObj.id);
           workerObj.tasks++;

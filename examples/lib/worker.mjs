@@ -16,12 +16,27 @@
  * 2. The message arrives **framed**, as a `Uint8Array`, not as your object.
  *    The pool encodes every plain object into a codec envelope before posting
  *    it, so `data.someField` is `undefined` and the body never runs correctly.
- *    Decode it with `decodeMessage`.
+ *    Decode it with `decodeInbound`, which reads every carrier the pool can
+ *    send — the frame, a native structured-clone envelope, and a 1.x bare-JSON
+ *    body — so this worker keeps working if the pool's `messageCodec` changes
+ *    and if some of its workers have been upgraded and some have not.
+ *
+ *    If this worker also wants the native carrier, which preserves `Map`,
+ *    `Set`, `Date`, `BigInt` and cycles that the frame turns into `{}` or a
+ *    string, add one line at start-up and give the pool
+ *    `messageCodec: 'negotiated'`:
+ *
+ *        parentPort.postMessage(announceCapabilities());
+ *
+ *    The pool asks nothing and sends no control message; it records what a
+ *    worker volunteers and keeps posting frames to everyone else. That is why
+ *    switching a pool to `'negotiated'` before any worker is ready is safe.
  *
  * 3. **Echoing `correlationId` is not optional.** When the caller asks for
  *    `awaitResponse`, the pool attaches an id to the outgoing message and
  *    matches the reply by it. A reply without one cannot be attributed, and
- *    the caller's promise sits there until it times out.
+ *    the caller's promise sits there until it times out. Reply on the same
+ *    carrier the message arrived on.
  *
  * 4. An **ESM worker with imports is not ready when `new Worker()` returns.**
  *    The pool posts as soon as the worker exists, which is fine for a worker
@@ -34,20 +49,25 @@
  * needs to show is *not* happening.
  */
 import { parentPort } from 'node:worker_threads';
-import { decodeMessage, encodeMessage } from 'performance-helpers';
+import { decodeInbound, encodeMessage } from 'performance-helpers';
 
 parentPort.on('message', (data) => {
-  const { value } = decodeMessage(data);
+  const { codec, value } = decodeInbound(data);
   const { n } = value;
 
   let total = 0;
   for (let i = 0; i < n; i += 1) total += i;
 
+  const body = {
+    ...value, // carries `correlationId` back untouched
+    total,
+    threadId: parentPort.threadId,
+  };
+  // Reply on the carrier the message arrived on, which is what the migration
+  // guide asks for: a pool cannot read a frame as a bare body, or the reverse.
   parentPort.postMessage(
-    encodeMessage({
-      ...value, // carries `correlationId` back untouched
-      total,
-      threadId: parentPort.threadId,
-    })
+    codec === 'native'
+      ? { __pp: 1, kind: 'envelope', value: body, correlationId: body.correlationId }
+      : encodeMessage(body)
   );
 });

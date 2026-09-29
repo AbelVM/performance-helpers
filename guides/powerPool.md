@@ -4,24 +4,24 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 
 ## Constructor
 
-| option                                                  |                                                type |                                        default | description                                                                                                                                                                                                                                                                                                                        |
-| ------------------------------------------------------- | --------------------------------------------------: | ---------------------------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workerSource`                                          |                                `Function \| string` |                                              — | Either a Worker factory/constructor (callable) or a relative path string passed to `new Worker(new URL(path, import.meta.url))`.                                                                                                                                                                                                   |
-| `options.size`                                          |                                            `number` | `min(navigator.hardwareConcurrency \|\| 2, 2)` | Initial number of workers to spawn.                                                                                                                                                                                                                                                                                                |
-| `options.minSize`                                       |                                            `number` |                                            `1` | Minimum workers to keep alive.                                                                                                                                                                                                                                                                                                     |
-| `options.maxSize`                                       |                                            `number` |                `Math.max(size, hwConcurrency)` | Maximum workers allowed in the pool.                                                                                                                                                                                                                                                                                               |
-| `options.workerOptions`                                 |                                            `Object` |                                           `{}` | Options forwarded to the Worker constructor when using a string `workerSource`.                                                                                                                                                                                                                                                    |
-| `options.maxTasksPerWorker`                             |                                            `number` |                                     `Infinity` | Soft capacity per worker before it is considered busy.                                                                                                                                                                                                                                                                             |
-| `options.idleTimeout`                                   |                                            `number` |                                        `60000` | Milliseconds after which idle workers (beyond `minSize`) are terminated.                                                                                                                                                                                                                                                           |
-| `options.messageCodec`                                  |                              `'framed' \| 'legacy'` |                                     `'framed'` | Wire protocol for object messages. `'framed'` posts a `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON body. See [Migrating to the framed protocol](#migrating-to-the-framed-protocol-breaking-change-in-20).                                                                                                   |
-| `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                     |
-| `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                 |
-| `options.maxQueueLength`                                |                                            `number` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                  |
-| `options.maxDrainWaiters`                               |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be _waiting_ at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners.                                                                                                                              |
-| `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                      |
-| `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                               |
-| `options.weakListeners`                                 |                                           `boolean` |                                        `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests). |
-| `options.autoScale`                                     |                                 `boolean \| Object` |                                        `false` | When provided (or `true`), enables autoscaling. Supply `true` to use defaults, or an object to tune behavior. See the **Autoscaling** section below for properties and tuning recommendations.                                                                                                                                     |
+| option                                                  |                                                type |                                        default | description                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------------------------------------- | --------------------------------------------------: | ---------------------------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workerSource`                                          |                                `Function \| string` |                                              — | Either a Worker factory/constructor (callable) or a relative path string passed to `new Worker(new URL(path, import.meta.url))`.                                                                                                                                                                                                                                                                                                         |
+| `options.size`                                          |                                            `number` | `min(navigator.hardwareConcurrency \|\| 2, 2)` | Initial number of workers to spawn.                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `options.minSize`                                       |                                            `number` |                                            `1` | Minimum workers to keep alive.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `options.maxSize`                                       |                                            `number` |                `Math.max(size, hwConcurrency)` | Maximum workers allowed in the pool.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `options.workerOptions`                                 |                                            `Object` |                                           `{}` | Options forwarded to the Worker constructor when using a string `workerSource`.                                                                                                                                                                                                                                                                                                                                                          |
+| `options.maxTasksPerWorker`                             |                                            `number` |                                     `Infinity` | Soft capacity per worker before it is considered busy.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `options.idleTimeout`                                   |                                            `number` |                                        `60000` | Milliseconds after which idle workers (beyond `minSize`) are terminated.                                                                                                                                                                                                                                                                                                                                                                 |
+| `options.messageCodec`                                  |              `'framed' \| 'legacy' \| 'negotiated'` |                                     `'framed'` | Wire protocol for object messages. `'framed'` posts a `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON body; `'negotiated'` behaves exactly like `'framed'` until a worker advertises the native carrier, then sends that carrier to that worker alone. See [Migrating to the framed protocol](#migrating-to-the-framed-protocol-breaking-change-in-20) and [Protocol negotiation](#protocol-negotiation-negotiated). |
+| `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                                                                                                                           |
+| `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                                                                                                                       |
+| `options.maxQueueLength`                                |                                            `number` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                                                                                                                        |
+| `options.maxDrainWaiters`                               |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be _waiting_ at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners.                                                                                                                                                                                                                                    |
+| `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                                                                                                                            |
+| `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                                                                                                                                     |
+| `options.weakListeners`                                 |                                           `boolean` |                                        `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests).                                                                                                       |
+| `options.autoScale`                                     |                                 `boolean \| Object` |                                        `false` | When provided (or `true`), enables autoscaling. Supply `true` to use defaults, or an object to tune behavior. See the **Autoscaling** section below for properties and tuning recommendations.                                                                                                                                                                                                                                           |
 
 ## API
 
@@ -477,10 +477,81 @@ to let a worker be migrated on its own schedule, not as a permanent setting.
 const pool = new PowerPool(WorkerScript, { messageCodec: 'legacy' });
 ```
 
-| `messageCodec`         | Outbound                     | Inbound                       |
-| ---------------------- | ---------------------------- | ----------------------------- |
-| `'framed'` _(default)_ | `PowerMessageCodec` envelope | `decodeMessage` — no sniffing |
-| `'legacy'`             | bare `Uint8Array` of JSON    | `u82o` — sniffed              |
+| `messageCodec`         | Outbound                            | Inbound                       |
+| ---------------------- | ----------------------------------- | ----------------------------- |
+| `'framed'` _(default)_ | `PowerMessageCodec` envelope        | `decodeMessage` — no sniffing |
+| `'legacy'`             | bare `Uint8Array` of JSON           | `u82o` — sniffed              |
+| `'negotiated'`         | frame, or native carrier per worker | `decodeInbound`               |
+
+## Protocol negotiation (`'negotiated'`)
+
+`messageCodec: 'negotiated'` is `'framed'` plus one thing: a worker that advertises the native
+structured-clone carrier gets that carrier, and every other worker keeps getting the frame.
+
+It exists because the frame is lossy for a class of values. Measured through the shipped path
+(`node bench/claims.js carrier`), a worker using `decodeMessage` receives:
+
+| you post                  | the worker receives                                     |
+| ------------------------- | ------------------------------------------------------- |
+| `new Map([['a', 1]])`     | `{}`                                                    |
+| `new Set([1, 2])`         | `{}`                                                    |
+| `new Date(1234567890123)` | an ISO **string**                                       |
+| `10n`                     | the message posts unframed, then `decodeMessage` throws |
+| `Infinity`, `NaN`         | `null`                                                  |
+
+`Date` is the sharpest: nothing fails at the boundary, and the first `.getTime()` in the worker
+throws somewhere unrelated, long after the `postMessage`.
+
+### Enabling it
+
+Two steps, and they are independent on purpose — the pool can be switched on before any worker is
+ready, which is the whole point of a mixed fleet being a normal state.
+
+```js
+// 1. the pool (any time)
+const pool = new PowerPool(WorkerScript, { messageCodec: 'negotiated' });
+```
+
+```js
+// 2. each worker, one line at start-up
+import { decodeInbound, announceCapabilities } from 'performance-helpers';
+parentPort.postMessage(announceCapabilities());
+```
+
+**The worker advertises; the pool only listens.** The pool never puts a control message on a
+worker's port, because a worker that has not implemented the handshake would run it as a task. The
+only thing negotiation asks of an un-migrated peer is silence.
+
+### What it is not
+
+It is not a speedup, and the release note that claimed 2–5× was wrong. Measured: a tie for small
+objects, up to ~1.7× _slower_ for deeply nested structure, and faster only for string-heavy
+payloads (a 64 KB string goes 171 µs → 8.9 µs). A pool that posted envelopes for the speed would
+have been slower for the payloads a worker actually receives. The fidelity table above is the
+reason to adopt it, and the per-worker decision is what stops a pool adopting it where it does not
+pay.
+
+### Observing it
+
+```js
+pool.getStats().protocol;
+// { mode: 'negotiated', nativeAvailable: true, nativeWorkers: 2,
+//   workers: [{ id: 0, codecs: ['json', 'native'] }, { id: 1, codecs: ['json'] }] }
+```
+
+A `pool:protocol` event fires when a worker's advertised capabilities change. Capability
+announcements are pool-internal protocol traffic: they are consumed rather than forwarded to
+`message` listeners, and they do not touch task accounting.
+
+### Notes
+
+- A worker that advertises still receives **one framed message first** — the one that was in flight
+  before its announcement landed. The ratchet is per message, not per worker lifetime.
+- A message containing an `ArrayBuffer` is copied before it is transferred on the native carrier,
+  so a caller's buffer is never detached by a `postMessage`. This costs a copy; it is the price of
+  not destroying the caller's data.
+- `'negotiated'` needs `structuredClone` at runtime. Without it the mode degrades to the frame
+  rather than throwing, and `protocol.nativeAvailable` reports `false`.
 
 ### Sending a pre-encoded buffer
 

@@ -96,6 +96,117 @@ export function encodeNative(value: any): {
  * @returns {ArrayBuffer[]}
  */
 export function frameTransferList(frame: Uint8Array): ArrayBuffer[];
+/**
+ * Whether a value is a native structured-clone envelope.
+ *
+ * Checked by shape, and that is not sniffing in the sense ADR 0001 rejected:
+ * a discriminator is exactly what a sniffing-free protocol is made of. The
+ * alternative — inferring the carrier from the value — is what the 1.x path
+ * did with `JSON.parse`, and it is what makes a `Date` a string and a `Map` an
+ * object literal.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isNativeEnvelope(value: any): boolean;
+/**
+ * Whether a value is a worker advertising what it can decode.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isCapabilityAnnouncement(value: any): boolean;
+/**
+ * Wrap a value for the native structured-clone carrier.
+ *
+ * Unlike {@link encodeNative} this does **not** clone: the transport clones
+ * whatever it is handed, so cloning here would be a second deep copy for no
+ * benefit. That is why it also computes no transfer list — a transfer list has
+ * to name buffers inside the object being posted, and the only safe way to
+ * post a caller's buffer without detaching it is to post a private copy. A
+ * caller that needs the copy pays for it with {@link encodeNative}; the common
+ * case, a message with no binary in it, pays nothing.
+ *
+ * @param {any} value
+ * @param {Object} [options]
+ * @param {string} [options.correlationId] - Echoed in replies. Top-level, not
+ *   nested, because that is where the pool looks when settling a response.
+ * @returns {{__pp: 1, kind: 'envelope', value: any, correlationId?: string}}
+ */
+export function encodeNativeEnvelope(value: any, options?: {
+    correlationId?: string | undefined;
+}): {
+    __pp: 1;
+    kind: "envelope";
+    value: any;
+    correlationId?: string;
+};
+/**
+ * Build the message a worker posts to advertise the carriers it can decode.
+ *
+ * Post it once, on start-up, before or with the worker's first reply. The pool
+ * records it per worker and posts the native carrier to that worker from the
+ * next message on; every other worker keeps receiving the framed JSON.
+ *
+ * @param {Object} [options]
+ * @param {string[]} [options.codecs=['json','native']] - Carriers this worker
+ *   can decode. `json` is always safe to claim: it is what the pool sends
+ *   until the announcement arrives, so a worker that decodes frames must not
+ *   claim anything else instead.
+ * @returns {{__pp: 1, kind: 'capabilities', codecs: string[], protocol: number}}
+ */
+export function announceCapabilities(options?: {
+    codecs?: string[] | undefined;
+}): {
+    __pp: 1;
+    kind: "capabilities";
+    codecs: string[];
+    protocol: number;
+};
+/**
+ * Every `ArrayBuffer` reachable from a value, for a transfer list.
+ *
+ * Depth-limited, and it walks object properties only. Both limits fail in the
+ * safe direction: a buffer it cannot reach is copied by the platform rather
+ * than transferred, which is slower and never wrong. Widening the walk is a
+ * performance change to make deliberately, not a correctness fix.
+ *
+ * @param {any} value
+ * @param {number} [maxDepth=8]
+ * @returns {ArrayBuffer[]} Unique buffers, in encounter order.
+ */
+export function collectTransferables(value: any, maxDepth?: number): ArrayBuffer[];
+/**
+ * Read any message the pool can send, whatever carrier it arrived on.
+ *
+ * This is the worker half of protocol negotiation, and it exists because the
+ * three-way fallback it replaces was copy-pasted into every worker in the
+ * wild — the try-the-frame-and-fall-back-to-bare-JSON dance, re-derived each
+ * time and slightly differently each time.
+ *
+ * Order matters and is not arbitrary:
+ *
+ * 1. A **native envelope** first. It is an object, so a byte test would not
+ *    see it, but checking it first costs one property read.
+ * 2. Then a **framed message**, and only when its version byte claims version
+ *    1. That is not sniffing either — it is the version check the frame format
+ *    exists for. It is also what makes the fallback below safe to attempt on
+ *    every message: no JSON document can start with `0x01`, so a legacy body
+ *    can never be mistaken for a frame, and a version-2 frame still reports the
+ *    version error it actually is.
+ * 3. Then a **legacy bare-JSON body**, for a pool still on `messageCodec:
+ *    'legacy'`.
+ *
+ * @param {any} data - `e.data`, or the payload of a bare `'message'` callback.
+ * @returns {{codec: 'native'|'json'|'raw'|'legacy', value: any, correlationId: (string|undefined)}}
+ * @throws {TypeError} When the input is a byte stream that is neither a valid
+ *   frame nor valid JSON.
+ */
+export function decodeInbound(data: any): {
+    codec: "native" | "json" | "raw" | "legacy";
+    value: any;
+    correlationId: (string | undefined);
+};
 /** Current protocol version written into every frame. */
 export const MESSAGE_PROTOCOL_VERSION: 1;
 /**
@@ -127,6 +238,21 @@ export const CODECS: Readonly<{
 /** Number of bytes in the frame header. */
 export const HEADER_BYTES: 6;
 /**
+ * The `PowerPool` wire modes this module knows how to speak.
+ *
+ * A pool validates its `messageCodec` against this set so a typo
+ * (`'framd'`) degrades to the documented default instead of silently
+ * selecting a protocol the caller did not ask for.
+ *
+ * @readonly
+ * @type {Set<'framed'|'legacy'|'negotiated'>}
+ */
+export const MESSAGE_CODECS: Set<"framed" | "legacy" | "negotiated">;
+/** Key marking a protocol message posted *by* a worker to the pool. */
+export const NATIVE_ENVELOPE_KEY: "__pp";
+/** Version of the negotiation envelope itself, independent of the frame version. */
+export const NATIVE_PROTOCOL_VERSION: 1;
+/**
  * Namespace object, for `import { PowerMessageCodec } from ...` and for
  * `PowerMessageCodec.encodeMessage(...)` call sites.
  */
@@ -136,6 +262,7 @@ export const PowerMessageCodec: Readonly<{
         JSON: 0;
         RAW: 2;
     }>;
+    MESSAGE_CODECS: Set<"framed" | "legacy" | "negotiated">;
     HEADER_BYTES: 6;
     encodeMessage: typeof encodeMessage;
     decodeMessage: typeof decodeMessage;
@@ -145,5 +272,13 @@ export const PowerMessageCodec: Readonly<{
     selectCodec: typeof selectCodec;
     isRawPayload: typeof isRawPayload;
     frameTransferList: typeof frameTransferList;
+    NATIVE_ENVELOPE_KEY: "__pp";
+    NATIVE_PROTOCOL_VERSION: 1;
+    isNativeEnvelope: typeof isNativeEnvelope;
+    isCapabilityAnnouncement: typeof isCapabilityAnnouncement;
+    encodeNativeEnvelope: typeof encodeNativeEnvelope;
+    announceCapabilities: typeof announceCapabilities;
+    collectTransferables: typeof collectTransferables;
+    decodeInbound: typeof decodeInbound;
 }>;
 export default PowerMessageCodec;

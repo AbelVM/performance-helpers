@@ -1,6 +1,5 @@
 import { PowerPool } from './powerPool.js';
-import { u82o } from './powerBuffer.js';
-import { decodeMessage } from './powerMessageCodec.js';
+import { decodeInbound } from './powerMessageCodec.js';
 import { normalizeError } from '../utils/errors.js';
 import {
   CHUNKS_PER_WORKER_TARGET,
@@ -165,21 +164,11 @@ function makeInlineWorkerConstructor(fn) {
     }
 
     postMessage(message) {
-      let decoded = message;
-      try {
-        if (message && (message instanceof ArrayBuffer || ArrayBuffer.isView(message))) {
-          // PowerPool frames its messages (messageCodec 'framed' is the
-          // default), so try the envelope first and fall back to a bare JSON
-          // body for a caller that still posts the legacy shape.
-          try {
-            decoded = decodeMessage(message).value;
-          } catch {
-            decoded = u82o(message);
-          }
-        }
-      } catch (e) {
-        decoded = message;
-      }
+      // `decodeInbound` reads all three carriers — a framed message, a native
+      // envelope, and a 1.x bare-JSON body. This block was the third copy of
+      // that try-the-frame-and-fall-back dance in the codebase; the others are
+      // `test/fixtures/echo.worker.js` and every worker in the wild.
+      const decoded = decodeInbound(message).value;
       const chunk = decoded?.chunk ? decoded.chunk : decoded;
       const self = this;
       setTimeout(async () => {

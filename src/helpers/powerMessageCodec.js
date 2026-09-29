@@ -34,8 +34,21 @@
  * - {@link encodeMessage} / {@link decodeMessage} — **framed bytes**, for
  *   transports that carry a byte stream (WebSocket, files, HTTP bodies).
  *   Codecs: {@link CODECS.JSON}, {@link CODECS.RAW}.
- * - {@link encodeNative} — **native structured clone**, for a `MessagePort` or
- *   `Worker`, where the platform does the work and no framing is needed at all.
+ * - {@link encodeNative} / {@link encodeNativeEnvelope} — **native structured
+ *   clone**, for a `MessagePort` or `Worker`, where the platform does the work
+ *   and no framing is needed at all. Lossless for `Map`, `Set`, `Date`,
+ *   `BigInt`, cycles and binary, which the JSON frame is not — see the
+ *   negotiation section below for the measurement.
+ *
+ * ## Negotiation
+ *
+ * Which carrier to use is not a property of the value, so this module does not
+ * decide it: a worker advertises the carriers it can decode with
+ * {@link announceCapabilities}, `PowerPool` records that per worker, and posts
+ * the native carrier to that worker alone. A worker that never announces keeps
+ * receiving framed JSON, so the feature is opt-in at both ends and cannot break
+ * a peer that does not know it exists. {@link decodeInbound} is the worker-side
+ * read that handles all three carriers.
  *
  * @module powerMessageCodec
  * @public
@@ -64,6 +77,18 @@ export const CODECS = Object.freeze({
 
 /** Number of bytes in the frame header. */
 export const HEADER_BYTES = 6;
+
+/**
+ * The `PowerPool` wire modes this module knows how to speak.
+ *
+ * A pool validates its `messageCodec` against this set so a typo
+ * (`'framd'`) degrades to the documented default instead of silently
+ * selecting a protocol the caller did not ask for.
+ *
+ * @readonly
+ * @type {Set<'framed'|'legacy'|'negotiated'>}
+ */
+export const MESSAGE_CODECS = new Set(['framed', 'legacy', 'negotiated']);
 
 const CODEC_BY_ID = new Map([
   [CODECS.JSON, 'json'],
@@ -309,6 +334,221 @@ export function frameTransferList(frame) {
   return [frame.buffer];
 }
 
+// ─── Protocol negotiation ───────────────────────────────────────────────────
+//
+// Everything above describes how to put a value on the wire. It does not say
+// which carrier to use, because that is not a property of the *value* — it is a
+// property of the two processes at either end. A pool that frames everything
+// has decided, on the worker's behalf, that JSON is a lossless description of
+// every value it will ever be handed.
+//
+// It is not. Measured against the shipped `framed` path:
+//
+// | value sent            | what the worker receives |
+// | --------------------- | ------------------------ |
+// | `new Map([['a', 1]])` | `{}`                     |
+// | `new Set([1, 2])`     | `{}`                     |
+// | `/ab+c/i`             | `{}`                     |
+// | `new Date(0)`         | `"1970-01-01T00:00:00.000Z"` — a **string** |
+// | `10n`                 | whole message posted unframed, then `decodeMessage` throws |
+// | `Infinity`, `NaN`     | `null`                   |
+// | `[1, , 3]`            | `[1, null, 3]`           |
+//
+// `Date` is the sharpest of these, because the failure is not visible at the
+// boundary: the worker gets a string that *looks* like a date, and the first
+// `.getTime()` throws somewhere unrelated, long after the postMessage.
+//
+// The fix is not "make JSON better" — it is to stop assuming. The native
+// structured-clone carrier preserves every one of the values above, and the
+// platform provides it on exactly the boundary this module already targets.
+//
+// **The exchange is one-directional on purpose: the worker announces, the pool
+// listens.** A pool-asks handshake would have to *send* something an unaware
+// worker would interpret as a task, which is worse than not negotiating — ADR
+// 0001 rejected negotiation for precisely this reason ("it requires the very
+// thing that is unavailable in a failing first run — a working message
+// channel"). Reversing the direction removes the objection: a worker that has
+// never heard of negotiation simply never announces, and the pool keeps posting
+// the framed JSON it posts today. Negotiation cannot fail a peer that does not
+// opt in, because the only thing it asks of a peer is silence.
+
+/** Key marking a protocol message posted *by* a worker to the pool. */
+export const NATIVE_ENVELOPE_KEY = '__pp';
+
+/** Version of the negotiation envelope itself, independent of the frame version. */
+export const NATIVE_PROTOCOL_VERSION = 1;
+
+/**
+ * Whether a value is a native structured-clone envelope.
+ *
+ * Checked by shape, and that is not sniffing in the sense ADR 0001 rejected:
+ * a discriminator is exactly what a sniffing-free protocol is made of. The
+ * alternative — inferring the carrier from the value — is what the 1.x path
+ * did with `JSON.parse`, and it is what makes a `Date` a string and a `Map` an
+ * object literal.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isNativeEnvelope(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    value[NATIVE_ENVELOPE_KEY] === NATIVE_PROTOCOL_VERSION &&
+    value.kind === 'envelope' &&
+    'value' in value
+  );
+}
+
+/**
+ * Whether a value is a worker advertising what it can decode.
+ *
+ * @param {any} value
+ * @returns {boolean}
+ */
+export function isCapabilityAnnouncement(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    value[NATIVE_ENVELOPE_KEY] === NATIVE_PROTOCOL_VERSION &&
+    value.kind === 'capabilities' &&
+    Array.isArray(value.codecs)
+  );
+}
+
+/**
+ * Wrap a value for the native structured-clone carrier.
+ *
+ * Unlike {@link encodeNative} this does **not** clone: the transport clones
+ * whatever it is handed, so cloning here would be a second deep copy for no
+ * benefit. That is why it also computes no transfer list — a transfer list has
+ * to name buffers inside the object being posted, and the only safe way to
+ * post a caller's buffer without detaching it is to post a private copy. A
+ * caller that needs the copy pays for it with {@link encodeNative}; the common
+ * case, a message with no binary in it, pays nothing.
+ *
+ * @param {any} value
+ * @param {Object} [options]
+ * @param {string} [options.correlationId] - Echoed in replies. Top-level, not
+ *   nested, because that is where the pool looks when settling a response.
+ * @returns {{__pp: 1, kind: 'envelope', value: any, correlationId?: string}}
+ */
+export function encodeNativeEnvelope(value, options = {}) {
+  const envelope = { [NATIVE_ENVELOPE_KEY]: NATIVE_PROTOCOL_VERSION, kind: 'envelope', value };
+  if (options.correlationId != null) envelope.correlationId = String(options.correlationId);
+  return envelope;
+}
+
+/**
+ * Build the message a worker posts to advertise the carriers it can decode.
+ *
+ * Post it once, on start-up, before or with the worker's first reply. The pool
+ * records it per worker and posts the native carrier to that worker from the
+ * next message on; every other worker keeps receiving the framed JSON.
+ *
+ * @param {Object} [options]
+ * @param {string[]} [options.codecs=['json','native']] - Carriers this worker
+ *   can decode. `json` is always safe to claim: it is what the pool sends
+ *   until the announcement arrives, so a worker that decodes frames must not
+ *   claim anything else instead.
+ * @returns {{__pp: 1, kind: 'capabilities', codecs: string[], protocol: number}}
+ */
+export function announceCapabilities(options = {}) {
+  const codecs =
+    Array.isArray(options.codecs) && options.codecs.length
+      ? options.codecs.filter((c) => c === 'json' || c === 'native')
+      : ['json', 'native'];
+  return {
+    [NATIVE_ENVELOPE_KEY]: NATIVE_PROTOCOL_VERSION,
+    kind: 'capabilities',
+    codecs: codecs.includes('json') ? codecs : ['json', ...codecs],
+    protocol: NATIVE_PROTOCOL_VERSION,
+  };
+}
+
+/**
+ * Every `ArrayBuffer` reachable from a value, for a transfer list.
+ *
+ * Depth-limited, and it walks object properties only. Both limits fail in the
+ * safe direction: a buffer it cannot reach is copied by the platform rather
+ * than transferred, which is slower and never wrong. Widening the walk is a
+ * performance change to make deliberately, not a correctness fix.
+ *
+ * @param {any} value
+ * @param {number} [maxDepth=8]
+ * @returns {ArrayBuffer[]} Unique buffers, in encounter order.
+ */
+export function collectTransferables(value, maxDepth = 8) {
+  const found = [];
+  const seen = new Set();
+  const walk = (v, depth) => {
+    if (!v || depth > maxDepth) return;
+    if (v instanceof ArrayBuffer) {
+      if (!seen.has(v)) {
+        seen.add(v);
+        found.push(v);
+      }
+      return;
+    }
+    if (ArrayBuffer.isView(v)) {
+      if (!seen.has(v.buffer)) {
+        seen.add(v.buffer);
+        found.push(v.buffer);
+      }
+      return;
+    }
+    if (typeof v === 'object') {
+      for (const key of Object.keys(v)) walk(v[key], depth + 1);
+    }
+  };
+  walk(value, 0);
+  return found;
+}
+
+/**
+ * Read any message the pool can send, whatever carrier it arrived on.
+ *
+ * This is the worker half of protocol negotiation, and it exists because the
+ * three-way fallback it replaces was copy-pasted into every worker in the
+ * wild — the try-the-frame-and-fall-back-to-bare-JSON dance, re-derived each
+ * time and slightly differently each time.
+ *
+ * Order matters and is not arbitrary:
+ *
+ * 1. A **native envelope** first. It is an object, so a byte test would not
+ *    see it, but checking it first costs one property read.
+ * 2. Then a **framed message**, and only when its version byte claims version
+ *    1. That is not sniffing either — it is the version check the frame format
+ *    exists for. It is also what makes the fallback below safe to attempt on
+ *    every message: no JSON document can start with `0x01`, so a legacy body
+ *    can never be mistaken for a frame, and a version-2 frame still reports the
+ *    version error it actually is.
+ * 3. Then a **legacy bare-JSON body**, for a pool still on `messageCodec:
+ *    'legacy'`.
+ *
+ * @param {any} data - `e.data`, or the payload of a bare `'message'` callback.
+ * @returns {{codec: 'native'|'json'|'raw'|'legacy', value: any, correlationId: (string|undefined)}}
+ * @throws {TypeError} When the input is a byte stream that is neither a valid
+ *   frame nor valid JSON.
+ */
+export function decodeInbound(data) {
+  if (isNativeEnvelope(data)) {
+    return { codec: 'native', value: data.value, correlationId: data.correlationId };
+  }
+  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+    const bytes = toBytes(data);
+    // Only a body that *claims* to be version 1 is decoded as a frame, so a
+    // version-2 frame or a truncated one reports the error it actually is
+    // rather than a JSON syntax error from the fallback.
+    if (bytes.length >= HEADER_BYTES && bytes[0] === MESSAGE_PROTOCOL_VERSION) {
+      const frame = decodeMessage(bytes);
+      return { codec: frame.codec, value: frame.value, correlationId: undefined };
+    }
+    return { codec: 'legacy', value: u82o(bytes), correlationId: undefined };
+  }
+  return { codec: 'raw', value: data, correlationId: undefined };
+}
+
 /**
  * Coerce the accepted binary inputs to a `Uint8Array` without copying when
  * possible.
@@ -332,6 +572,7 @@ function toBytes(input) {
 export const PowerMessageCodec = Object.freeze({
   MESSAGE_PROTOCOL_VERSION,
   CODECS,
+  MESSAGE_CODECS,
   HEADER_BYTES,
   encodeMessage,
   decodeMessage,
@@ -341,6 +582,14 @@ export const PowerMessageCodec = Object.freeze({
   selectCodec,
   isRawPayload,
   frameTransferList,
+  NATIVE_ENVELOPE_KEY,
+  NATIVE_PROTOCOL_VERSION,
+  isNativeEnvelope,
+  isCapabilityAnnouncement,
+  encodeNativeEnvelope,
+  announceCapabilities,
+  collectTransferables,
+  decodeInbound,
 });
 
 export default PowerMessageCodec;

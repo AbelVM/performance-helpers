@@ -81,6 +81,38 @@ still silent.
 code, and it requires the very thing that is unavailable in a failing first run
 — a working message channel.
 
+### Amendment (FEAT-012): negotiation, with the direction reversed
+
+The rejection above was correct **as written** and the reasoning still stands: a
+pool-asks handshake has to put a control message on a worker's port, and in the
+failing first run there is no worker to answer it — or, worse, a worker that
+does not implement it and runs the handshake as a task.
+
+Negotiation shipped anyway, with the exchange reversed: **the worker advertises,
+the pool only listens.** A worker that understands the protocol posts its
+capabilities once at start-up; a worker that does not stays silent, and silence
+is the only thing negotiation asks of it. The objection is answered by removing
+the requirement, not by arguing that the requirement is smaller than it looked.
+
+What made it worth revisiting is the fidelity table. The frame is not merely a
+slower carrier, it is a _lossy_ one: a `Map` arrives as `{}`, a `Date` as an ISO
+string, `BigInt` throws. The decision to frame was a decision to describe every
+message as JSON, and that description is wrong for values a worker will
+reasonably be handed. Negotiation is how the pool stops assuming.
+
+Two constraints from this ADR held throughout, and are why the feature is
+opt-in at both ends:
+
+- **Framing stays the default.** An existing pool sending to an existing worker
+  must not change behaviour because a new option exists.
+- **The carrier is explicit on both sides.** A native envelope is a marked
+  object, read by shape — not sniffed. Sniffing was context (2) above, and this
+  feature is not a route back to it.
+
+The speed claim that originally motivated the row was measured and is false; see
+`node bench/claims.js carrier` and `guides/powerMessageCodec.md`. Fidelity is
+the justification, which is why the decision is per worker rather than per pool.
+
 ## Where this is visible
 
 `guides/powerMessageCodec.md` is the reference. The framing is a _published_

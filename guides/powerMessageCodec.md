@@ -99,6 +99,77 @@ for await (const chunk of stream) {
 }
 ```
 
+## Negotiation: the carrier is a per-worker decision
+
+The frame is the default because it is portable. It is also lossy, silently, for a class of values a worker will reasonably be handed. Measured through the shipped path (`node bench/claims.js carrier`):
+
+| value sent                | what the worker receives                                      |
+| ------------------------- | ------------------------------------------------------------- |
+| `new Map([['a', 1]])`     | `{}`                                                          |
+| `new Set([1, 2])`         | `{}`                                                          |
+| `/ab+c/i`                 | `{}`                                                          |
+| `new Date(1234567890123)` | an ISO **string**                                             |
+| `10n`                     | the whole message posts unframed, then `decodeMessage` throws |
+| `Infinity`, `NaN`         | `null`                                                        |
+| `[1, , 3]`                | `[1, null, 3]` — a hole becomes `null`                        |
+
+`Date` is the sharpest one, because nothing fails at the boundary: the worker gets a string that looks like a date, and the first `.getTime()` throws somewhere unrelated, long after the `postMessage`.
+
+`messageCodec: 'negotiated'` fixes this without changing what any other worker receives. **The worker advertises; the pool only listens.**
+
+```javascript
+// worker
+import { parentPort } from 'node:worker_threads';
+import { decodeInbound, announceCapabilities } from 'performance-helpers';
+
+parentPort.postMessage(announceCapabilities()); // once, at start-up
+
+parentPort.on('message', (data) => {
+  const { codec, value } = decodeInbound(data);
+  // ...
+});
+```
+
+```javascript
+// pool
+const pool = new PowerPool(WorkerUrl, { messageCodec: 'negotiated' });
+```
+
+The pool posts a frame to every worker until one advertises, then the native carrier to that worker alone. A mixed fleet — nine legacy workers and one upgraded — is a normal state during a rollout, and `pool.getStats().protocol` reports it (`nativeWorkers`, and per-worker `codecs`).
+
+**The direction is the design.** A pool-asks handshake would have to put a control message on a worker's port, and any worker that did not implement it would run that message as a task. Asking only that a peer stay quiet cannot break a peer that has never heard of the protocol, which is why ADR 0001's objection — negotiation "requires a working message channel" — does not apply.
+
+### `decodeInbound` is the worker half
+
+```javascript
+const { codec, value, correlationId } = decodeInbound(data);
+```
+
+`codec` is one of `'json'`, `'raw'`, `'native'`, `'legacy'` or `'raw'` (a bare value posted as-is). It replaces the try-the-frame-and-fall-back-to-bare-JSON dance that every worker otherwise re-derives — and that this repository itself had in three places. Only a body whose version byte claims version 1 is decoded as a frame, so a version-2 or truncated frame still reports the error it actually is.
+
+Reply on the carrier the message arrived on. A pool cannot read a frame as a bare body, or the reverse:
+
+```javascript
+parentPort.postMessage(
+  codec === 'native'
+    ? encodeNativeEnvelope({ ...value, result }, { correlationId: value.correlationId })
+    : encodeMessage({ ...value, result })
+);
+```
+
+### It is not a speedup
+
+The release note for this originally claimed 2–5×. `node bench/claims.js carrier` says otherwise:
+
+| payload              |  framed |  native | ratio |
+| -------------------- | ------: | ------: | ----: |
+| small object (210 B) | ~3.4 µs | ~3.8 µs |  1.11 |
+| 1 KB string          | ~4.2 µs | ~1.5 µs |  0.37 |
+| 64 KB string         | ~171 µs | ~8.9 µs |  0.05 |
+| 200 nested objects   |  ~51 µs |  ~87 µs |  1.71 |
+
+A tie for small objects, up to ~1.7× **slower** for deep structure, and faster only for string-heavy payloads. Timings are indicative — BENCH-001 measured a 28% spread on this machine — but the direction is consistent across runs, and a pool that posted envelopes for the speed would have been slower for the payloads a worker actually receives. Negotiation is justified by the fidelity table above, and the per-worker decision is what keeps a pool from adopting it where it does not pay.
+
 ## Errors
 
 `decodeMessage` throws rather than guessing, because a mis-parsed frame is worse than a clear failure:

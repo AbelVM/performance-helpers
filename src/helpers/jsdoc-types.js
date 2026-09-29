@@ -80,10 +80,13 @@
  *   counted for the slow-task / `pool:slow` signal.
  * @property {number} [maxListeners] - Cap on registered pool listeners before
  *   the `MaxListenersExceededWarning` path is taken.
- * @property {'framed'|'legacy'} [messageCodec='framed'] - Wire protocol for
- *   object messages. `'framed'` (default since 2.0) posts a `PowerMessageCodec`
- *   envelope; `'legacy'` restores the 1.x bare-JSON framing for a worker that
- *   has not migrated yet. See the migration note in `guides/powerPool.md`.
+ * @property {'framed'|'legacy'|'negotiated'} [messageCodec='framed'] - Wire
+ *   protocol for object messages. `'framed'` (default since 2.0) posts a
+ *   `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON framing
+ *   for a worker that has not migrated yet; `'negotiated'` behaves exactly like
+ *   `'framed'` until a worker advertises the native structured-clone carrier
+ *   with `announceCapabilities()`, and sends that carrier to that worker alone.
+ *   See the migration note in `guides/powerPool.md`.
  */
 
 /**

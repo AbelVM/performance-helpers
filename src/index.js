@@ -37,6 +37,7 @@ export { PowerSocketAdapter, detectSocketKind } from './helpers/powerSocketAdapt
 export {
   PowerMessageCodec,
   MESSAGE_PROTOCOL_VERSION,
+  MESSAGE_CODECS,
   CODECS,
   HEADER_BYTES,
   encodeMessage,
@@ -47,4 +48,12 @@ export {
   selectCodec,
   isRawPayload,
   frameTransferList,
+  NATIVE_ENVELOPE_KEY,
+  NATIVE_PROTOCOL_VERSION,
+  isNativeEnvelope,
+  isCapabilityAnnouncement,
+  encodeNativeEnvelope,
+  announceCapabilities,
+  collectTransferables,
+  decodeInbound,
 } from './helpers/powerMessageCodec.js';

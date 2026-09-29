@@ -170,10 +170,22 @@ export class PowerPool {
      * - `'legacy'` restores the 1.x behaviour: a bare `Uint8Array` of JSON,
      *   sniffed on the way back in. Provided so a worker can be migrated on its
      *   own schedule. See the migration note in guides/powerPool.md.
+     * - `'negotiated'` starts out identical to `'framed'` and upgrades **per
+     *   worker**: a worker that advertises the native carrier with
+     *   `announceCapabilities()` is sent the structured-clone carrier instead,
+     *   which preserves `Map`, `Set`, `Date`, `BigInt` and cycles that the JSON
+     *   frame silently destroys. Workers that do not advertise keep getting the
+     *   frame, so a pool can be switched on before any worker is ready.
      *
-     * @type {'framed'|'legacy'}
+     * @type {'framed'|'legacy'|'negotiated'}
      */
-    _messageCodec: "framed" | "legacy";
+    _messageCodec: "framed" | "legacy" | "negotiated";
+    /**
+     * Whether this runtime can structured-clone at all. Checked once here so
+     * `'negotiated'` on a runtime without `structuredClone` degrades to the
+     * framed path rather than throwing per message.
+     */
+    _nativeCloneAvailable: boolean;
     /**
      * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
      * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
@@ -215,6 +227,62 @@ export class PowerPool {
         pendingPromise: Promise<any>;
         correlationKey: any;
     };
+    /**
+     * Resolve a deferred message into the carrier this specific worker expects.
+     *
+     * This is where protocol negotiation is decided, and the reason it has to be
+     * here rather than in `_prepareForTransfer` is that the target worker is not
+     * known when a message is prepared: a queued item can be handed to any worker
+     * by either drain site. Deciding at dispatch is what makes the decision
+     * *per worker*, which is the whole point — a pool with one upgraded worker
+     * and nine legacy ones is the state this feature exists for.
+     *
+     * Non-deferred items pass straight through, so `'framed'`, `'legacy'` and
+     * every binary message keep their existing path untouched.
+     *
+     * @private
+     * @param {import('./jsdoc-types.js').WorkerObj} obj - Target worker, if known.
+     * @param {{message: *, transfer: (TransferList|undefined), deferred?: boolean}} prepared
+     * @returns {{message: *, transfer: (TransferList|undefined)}}
+     */
+    private _encodeForWorker;
+    /**
+     * Wrap a deferred message in the native envelope, or return `null` when this
+     * runtime cannot do it.
+     *
+     * The transfer list is the subtle part. A transfer list names buffers inside
+     * the object being posted, and `postMessage` **detaches** them — so naming
+     * the caller's buffers would detach the caller's data, which is a data-loss
+     * bug that looks like a successful post. When the payload carries no binary
+     * there is nothing to name, and the envelope is posted with no list and no
+     * copy: the platform clones it, which is the whole reason for choosing this
+     * carrier. When it does carry binary, a private copy is made first and *its*
+     * buffers are transferred.
+     *
+     * @private
+     * @param {{message: *, transfer: (TransferList|undefined)}} prepared
+     * @returns {{message: object, transfer: (TransferList|undefined)}|null}
+     */
+    private _encodeNativeForWorker;
+    /**
+     * Record what a worker says it can decode, and announce the change.
+     *
+     * The rules here are deliberately conservative, because a worker that
+     * over-claims costs a broken message and a worker that under-claims costs
+     * nothing but speed:
+     *
+     * - `native` is only granted when the runtime can structured-clone. A worker
+     *   that advertises it on a runtime that cannot is talking about a carrier
+     *   that does not exist here, and honouring that would throw per message.
+     * - `json` is always retained. It is what the pool sends until this
+     *   announcement lands, and a worker that claims `native` alone has not said
+     *   it can read the messages it has already been sent.
+     *
+     * @private
+     * @param {import('./jsdoc-types.js').WorkerObj} obj
+     * @param {{codecs: string[]}} announcement
+     */
+    private _applyCapabilities;
     /**
      * Post a prepared message to a specific worker object and update bookkeeping.
      * Returns the `pendingPromise` when `wantResponse` is true, otherwise `true` on success.
@@ -464,6 +532,19 @@ export class PowerPool {
      * @private
      */
     private _prepareForTransfer;
+    /**
+     * Encode a plain-object message as a framed JSON body.
+     *
+     * Split out of `_prepareForTransfer` so the deferred (`'negotiated'`) path and
+     * the direct path share one implementation: two copies of the transfer-list
+     * munging would drift, and the transfer list is where a leak lives.
+     *
+     * @private
+     * @param {object} msg
+     * @param {TransferList|undefined} tr
+     * @returns {{message: *, transfer: (TransferList|undefined)}}
+     */
+    private _frameObjectForTransfer;
     /**
      * Decrement the global active task counter safely.
      * Ensures the counter never goes negative and centralizes error handling.

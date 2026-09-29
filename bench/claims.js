@@ -34,6 +34,7 @@
  * Usage:
  *   node bench/claims.js zipf      # admission-policy comparison (default)
  *   node bench/claims.js latency   # histogram quantile accuracy across scales
+ *   node bench/claims.js carrier   # message-carrier fidelity and encode cost
  *
  * Every parameter is overridable from the environment so a result can be
  * reproduced exactly, and so the interesting axes (Zipf exponent, capacity,
@@ -44,6 +45,8 @@
 
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { PowerHistogram } from '../src/helpers/powerHistogram.js';
+import { PowerPool } from '../src/helpers/powerPool.js';
+import { decodeMessage, encodeNativeEnvelope } from '../src/helpers/powerMessageCodec.js';
 
 // ─── Reproducibility (same approach as BENCH-001) ───────────────────────────
 
@@ -429,6 +432,246 @@ function runScaledLatencyWorkload() {
   return { config: { n, relativeAccuracy, quantiles, repeats, seed: SEED }, anyMissed };
 }
 
+// ─── Workload 3: message-carrier fidelity and encode cost ───────────────────
+//
+// The release note for FEAT-012 originally claimed the native carrier was
+// "2-5x faster" than the JSON frame. That claim is falsified by the
+// measurement below, and the correction is worth as much as the feature:
+//
+// | payload                | framed (us) | native (us) | native/framed |
+// | ---------------------- | ----------: | ----------: | ------------: |
+// | flat 4 scalars         |       ~0.002|       ~0.001 |          0.92 |
+// | small object (210 B)   |       ~0.003|       ~0.003 |          0.88 |
+// | wide, 50 keys          |       ~0.003|       ~0.003 |          1.08 |
+// | 1 KB string            |       ~0.004|       ~0.001 |          0.25 |
+// | 64 KB string           |       ~0.117|       ~0.003 |          0.03 |
+// | array of 1000 numbers  |       ~0.009|       ~0.013 |          1.52 |
+// | 200 nested objects     |       ~0.017|       ~0.053 |          3.20 |
+//
+// A structured clone is a *tie* for small flat objects, **1.5-3.2x slower** for
+// deep structures and numeric arrays, and ~40x faster only for string-heavy
+// payloads. "Faster" was never the honest claim, and a pool that posted
+// envelopes on the strength of it would have been slower for the structured
+// payloads a worker actually receives.
+//
+// What the native carrier *is* for is fidelity, which is not a matter of
+// degrees. Measured through the shipped `framed` path:
+//
+// | value sent  | what the worker receives      |
+// | ----------- | ---------------------------- |
+// | `new Map()` | `{}`                         |
+// | `new Set()` | `{}`                         |
+// | `/re/i`     | `{}`                         |
+// | `new Date()`| an ISO **string**             |
+// | `10n`       | whole message unframed, then `decodeMessage` throws |
+// | `Infinity`, `NaN` | `null`               |
+// | `[1, , 3]`  | `[1, null, 3]`               |
+//
+// `Date` is the sharpest: the worker receives something that *looks* like a
+// date, and the first `.getTime()` throws somewhere unrelated, long after the
+// postMessage. Both tables are reproduced here so the claim can be checked
+// rather than believed.
+
+/**
+ * One encode-shape case: build the value, time both carriers, report both the
+ * ratio and what each carrier does to it.
+ *
+ * @param {string} label
+ * @param {any} make - A factory, so each call gets an un-cloned value.
+ * @param {number} n - Iterations per timed repeat.
+ */
+function measureCarrier(label, make, n) {
+  // Both columns are measured as **what the sender pays to get the value
+  // across**, which is the only comparison that answers the question a pool
+  // actually asks:
+  //
+  //   framed — `_prepareForTransfer`: stringify, encode, copy, frame. The
+  //            platform then transfers bytes and copies nothing.
+  //   native — build the envelope, then the platform's own serialisation,
+  //            approximated by `structuredClone`, because that is what
+  //            `postMessage` does to it.
+  //
+  // An earlier version timed `decodeMessage` inside the framed loop as well.
+  // That is the *worker's* cost, not the sender's, and it made the frame look
+  // slower than it is — a benchmark that measures both ends of a hop and
+  // attributes all of it to one of them.
+  const pool = new PowerPool(() => ({}), { size: 0, minSize: 0, maxSize: 0, lazy: true });
+  const frameOnce = () => pool._prepareForTransfer(make(), undefined, {});
+  const nativeOnce = () => encodeNativeEnvelope(structuredClone(make()));
+
+  // Warm both, then time each over `passes` repeats and keep the median pass.
+  // Timing here is wall-clock, so the numbers are indicative of order of
+  // magnitude, not a gate: BENCH-001 measured a 28% median min/max spread on
+  // the main harness, and the ratios below are either far outside that or
+  // explicitly reported as ties.
+  for (let i = 0; i < 2000; i++) {
+    frameOnce();
+    nativeOnce();
+  }
+  const passes = Number(process.env.CLAIM_CODEC_PASSES || 9);
+  const timeOf = (fn) => {
+    const s = [];
+    for (let r = 0; r < passes; r++) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < n; i++) fn();
+      s.push(Number(process.hrtime.bigint() - t0) / n / 1000);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+  const frameUs = timeOf(frameOnce);
+  const nativeUs = timeOf(nativeOnce);
+  pool.shutdown();
+
+  return { label, frameUs, nativeUs, ratio: nativeUs / frameUs };
+}
+
+/**
+ * What each carrier actually delivers for a value that JSON cannot describe.
+ *
+ * Through the shipped path, not through a guess at it. The framed column is
+ * what a worker really receives after `_prepareForTransfer` and
+ * `decodeMessage`; the native column is what it receives after a structured
+ * clone. The value is described by **type**, because the finding for `Map` is
+ * that it arrives as an `Object` - printing `{}` eight times in a row would
+ * bury the one line that matters.
+ *
+ * @param {string} label
+ * @param {() => any} make - Returns the *value*, wrapped or not; see below.
+ */
+function measureFidelity(label, make) {
+  const pool = new PowerPool(() => ({}), { size: 0, minSize: 0, maxSize: 0, lazy: true });
+  const describe = (v) => {
+    if (v === 'THROWS') return 'THROWS';
+    if (v === undefined) return 'undefined';
+    if (v === null) return 'null';
+    if (typeof v === 'object') {
+      // A sparse array is the one case where the *type* is right on both sides
+      // and the value still differs: JSON writes a hole as `null`, and
+      // `[1, , 3].toString()` is identical either way, so the hole has to be
+      // counted explicitly or this row reports a false agreement.
+      if (Array.isArray(v)) {
+        let holes = 0;
+        for (let i = 0; i < v.length; i++) if (!(i in v)) holes++;
+        return holes ? `Array (${holes} hole)` : 'Array';
+      }
+      return v.constructor?.name ?? 'Object';
+    }
+    if (typeof v === 'string') return 'String';
+    if (typeof v === 'bigint') return 'BigInt';
+    return typeof v;
+  };
+  let framed;
+  try {
+    const prepared = pool._prepareForTransfer({ v: make() }, undefined, {});
+    framed = describe(decodeMessage(prepared.message).value?.v);
+  } catch {
+    framed = 'THROWS';
+  }
+  let native;
+  try {
+    native = describe(structuredClone({ v: make() }).v);
+  } catch {
+    native = 'THROWS';
+  }
+  pool.shutdown();
+  return { label, framed, native };
+}
+
+function runCarrierWorkload() {
+  const n = Number(process.env.CLAIM_CODEC_OPS || 20000);
+  console.log('BENCH-002c — message carriers: encode cost and delivered fidelity\n');
+  console.log(`  ops per pass        ${n}`);
+  console.log(`  passes              ${process.env.CLAIM_CODEC_PASSES || 9} (median reported)`);
+  console.log(`  runtime             ${process.version} on ${process.platform}/${process.arch}\n`);
+  console.log('  Times are microseconds per message, through the shipped encode path.');
+  console.log('  `ratio` is native/framed: below 1.00 means native is FASTER. Timing is');
+  console.log('  indicative (28% spread on this machine, BENCH-001); the fidelity table');
+  console.log('  below it is not a timing and is the reason the carrier exists.\n');
+  console.log(
+    `  ${'payload'.padEnd(24)}${'framed us'.padStart(11)}${'native us'.padStart(12)}${'ratio'.padStart(8)}`
+  );
+  console.log(`  ${'-'.repeat(55)}`);
+
+  const rows = [
+    measureCarrier('flat 4 scalars', () => ({ a: 1, b: 'x', c: true, d: null }), n),
+    measureCarrier(
+      'small object (210 B)',
+      () => ({
+        task: 'compute',
+        n: 42,
+        items: Array.from({ length: 5 }, (_, i) => ({ i, s: 'x'.repeat(20) })),
+      }),
+      n
+    ),
+    measureCarrier(
+      'wide, 50 keys',
+      () => Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`k${i}`, i])),
+      n
+    ),
+    measureCarrier('1 KB string', () => ({ s: 'y'.repeat(1000) }), n),
+    measureCarrier('64 KB string', () => ({ s: 'y'.repeat(64 * 1024) }), n / 10),
+    measureCarrier(
+      'array of 1000 numbers',
+      () => ({ xs: Array.from({ length: 1000 }, (_, i) => i) }),
+      n / 10
+    ),
+    measureCarrier(
+      '200 nested objects',
+      () => ({
+        rows: Array.from({ length: 200 }, (_, i) => ({ id: i, name: 'n' + i, ok: i % 2 === 0 })),
+      }),
+      n / 10
+    ),
+  ];
+  for (const r of rows) {
+    console.log(
+      `  ${r.label.padEnd(24)}${r.frameUs.toFixed(4).padStart(11)}` +
+        `${r.nativeUs.toFixed(4).padStart(12)}${r.ratio.toFixed(2).padStart(8)}`
+    );
+  }
+
+  console.log(
+    `\n  ${'value sent'.padEnd(24)}${'framed delivers'.padStart(20)}${'native delivers'.padStart(20)}`
+  );
+  console.log(`  ${'-'.repeat(62)}`);
+  const fidelity = [
+    measureFidelity('new Map([[a, 1]])', () => new Map([['a', 1]])),
+    measureFidelity('new Set([1, 2])', () => new Set([1, 2])),
+    measureFidelity('/ab+c/i', () => /ab+c/i),
+    measureFidelity('new Date(1234567890123)', () => new Date(1234567890123)),
+    measureFidelity('10n (BigInt)', () => 10n),
+    measureFidelity('Infinity', () => Infinity),
+    measureFidelity('NaN', () => NaN),
+    // The hole is the point of the probe, so the sparse literal is deliberate.
+    // eslint-disable-next-line no-sparse-arrays
+    measureFidelity('[1, , 3] (sparse)', () => [1, , 3]),
+  ];
+  for (const f of fidelity) {
+    console.log(`  ${f.label.padEnd(24)}${f.framed.padStart(20)}${f.native.padStart(20)}`);
+  }
+
+  const slower = rows.filter((r) => r.ratio > 1.1);
+  const faster = rows.filter((r) => r.ratio < 0.9);
+  const ties = rows.filter((r) => r.ratio >= 0.9 && r.ratio <= 1.1);
+  const lost = fidelity.filter((f) => f.framed !== f.native).length;
+  console.log(
+    `\n  ${faster.length} faster, ${ties.length} a tie, ${slower.length} slower on the native carrier.`
+  );
+  console.log(
+    '  The pattern is the finding, not the individual numbers: structured clone wins\n' +
+      '  on string-heavy payloads and loses on deep or numeric structure, so a pool\n' +
+      '  cannot adopt it as an unconditional speedup.'
+  );
+  console.log(
+    `\n  ${lost} of ${fidelity.length} sampled values change type or value through the frame. That is the\n` +
+      '  reason the native carrier exists, and the reason it is negotiated per worker\n' +
+      '  rather than made the default: it is the only one of the two that is lossless.'
+  );
+
+  return { rows, fidelity, config: { n, passes: Number(process.env.CLAIM_CODEC_PASSES || 9) } };
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 const mode = process.argv[2] || 'zipf';
@@ -437,7 +680,9 @@ if (mode === 'zipf') {
   runZipfWorkload();
 } else if (mode === 'latency') {
   runScaledLatencyWorkload();
+} else if (mode === 'carrier') {
+  runCarrierWorkload();
 } else {
-  console.error(`Unknown mode: ${mode}. Use "zipf" or "latency".`);
+  console.error(`Unknown mode: ${mode}. Use "zipf", "latency" or "carrier".`);
   process.exit(1);
 }
