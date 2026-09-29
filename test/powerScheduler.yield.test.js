@@ -2,6 +2,26 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { PowerScheduler } from '../src/helpers/powerScheduler.js';
 
 /**
+ * The `yield` scheduling strategy, which is the one strategy here that
+ * **cannot** be driven by fake timers.
+ *
+ * `scheduler.yield()` returns a promise and has no handle to detach — there is
+ * no timer, nothing to advance, nothing for `vi.advanceTimersByTime` to reach.
+ * That splits this file into two kinds of wait, and the distinction is the
+ * point:
+ *
+ *   - "wait until the flush has happened" — `vi.waitFor`, which polls the
+ *     condition and returns as soon as it holds. A fixed sleep is a guess in
+ *     both directions: too short and the test fails on a loaded machine, too
+ *     long and the suite pays for it on every run.
+ *   - "assert the flush never happens" — a real wait, because there is no
+ *     handle to fake and no condition to poll for. The sleep stays, with the
+ *     reason written down so the next person does not "fix" it by converting
+ *     it to `vi.waitFor`, which would pass vacuously: the condition it polls
+ *     is already true before it starts.
+ */
+
+/**
  * ALG-007: `scheduling: 'yield'` — the third strategy.
  *
  * `scheduler.yield()` is the browser-native way to hand control back to the
@@ -68,7 +88,10 @@ describe("PowerScheduler scheduling: 'yield'", () => {
     const s = new PowerScheduler(flush, { scheduling: 'yield' });
     s.schedule();
     s.schedule(); // coalesced
-    await new Promise((r) => setTimeout(r, 20));
+    await vi.waitFor(() => {
+      expect(flush).toHaveBeenCalledTimes(1);
+    });
+    // And it stays at one: the second `schedule()` was coalesced, not queued.
     expect(flush).toHaveBeenCalledTimes(1);
     s.dispose();
   });
@@ -119,8 +142,9 @@ describe("PowerScheduler scheduling: 'yield'", () => {
     s.schedule();
     s.cancel();
     s.schedule();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(flush).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(flush).toHaveBeenCalledTimes(1);
+    });
     s.dispose();
   });
 
@@ -133,8 +157,9 @@ describe("PowerScheduler scheduling: 'yield'", () => {
       { scheduling: 'yield', onError }
     );
     s.schedule();
-    await new Promise((r) => setTimeout(r, 20));
-    expect(onError).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
     s.dispose();
   });
 

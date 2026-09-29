@@ -57,10 +57,18 @@ monitor.start();
 console.log('\nPowerEventLoopMonitor — 5ms sampling');
 await new Promise((r) => setTimeout(r, 30));
 
-// Block the loop for 40ms and sample across it.
+// Block the loop and sample across it.
+//
+// The block is 100 ms rather than 40, and the assertion below asks for 40. A
+// 5 ms sampler *under-reports* a stall — it can only observe the gap between
+// two of its own ticks, so the figure it records is at most the block length
+// minus a tick, and under load rather less. The first version of this example
+// blocked for 40 ms and asserted 35, which failed roughly one run in five —
+// and it was `test/examples.test.js`, the check added for exactly this
+// purpose, that caught it.
 await new Promise((r) => {
   setTimeout(() => {
-    const end = Date.now() + 40;
+    const end = Date.now() + 100;
     while (Date.now() < end) {
       /* deliberately blocking */
     }
@@ -72,7 +80,7 @@ await new Promise((r) => setTimeout(r, 20));
 const stats = monitor.stats();
 console.log('  mean:', stats.mean?.toFixed(1) ?? stats.mean, 'ms');
 console.log('  p99 :', stats.p99?.toFixed(1) ?? stats.p99, 'ms');
-console.log('  max :', stats.max?.toFixed(1) ?? stats.max, 'ms  <- the 40ms block');
+console.log('  max :', stats.max?.toFixed(1) ?? stats.max, 'ms  <- the 100ms block');
 console.log('  p50 :', stats.p50?.toFixed(1) ?? stats.p50, 'ms');
 console.log('  ^ `max` catching the stall is the useful signal, and `p50` shows why');
 console.log('    it is needed: the mean and the median barely move for a single');
@@ -83,8 +91,8 @@ console.log('    measuring the loop itself to see it.');
 monitor.dispose();
 
 const max = stats.max ?? 0;
-if (!(max >= 35)) {
-  console.error(`\nFAIL: expected the monitor to observe a ~40ms block, saw max=${max}.`);
+if (!(max >= 40)) {
+  console.error(`\nFAIL: expected the monitor to observe the stall, saw max=${max}ms.`);
   process.exit(1);
 }
 console.log('\nOK');

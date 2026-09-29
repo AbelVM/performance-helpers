@@ -178,9 +178,10 @@ describe('PowerPool (mocked worker)', () => {
       // queueing may be implementation-dependent under lazy growth; verify eventual delivery
 
       // wait for both messages to be processed
-      await new Promise((res) => setTimeout(res, 100));
-      expect(received.length).toBeGreaterThanOrEqual(2);
-      expect(pool.queue.length).toBe(0);
+      await vi.waitFor(() => {
+        expect(received.length).toBeGreaterThanOrEqual(2);
+        expect(pool.queue.length).toBe(0);
+      });
     } finally {
       pool.terminate();
     }
@@ -216,9 +217,10 @@ describe('PowerPool (mocked worker)', () => {
       expect(pool.postMessage({ n: 2 })).toBe(true);
       expect(pool.queue.length).toBe(0);
 
-      await new Promise((res) => setTimeout(res, 100));
-      expect(received.length).toBe(2);
-      expect(pool.queue.length).toBe(0);
+      await vi.waitFor(() => {
+        expect(received.length).toBe(2);
+        expect(pool.queue.length).toBe(0);
+      });
     } finally {
       pool.terminate();
     }
@@ -256,9 +258,10 @@ describe('PowerPool (mocked worker)', () => {
       expect(pool.postMessage({ n: 2 })).toBe(true);
       expect(pool.postMessage({ n: 3 })).toBe(false);
 
-      await new Promise((res) => setTimeout(res, 120));
-      expect(received).toEqual([{ n: 1 }, { n: 2 }]);
-      expect(pool.queue.length).toBe(0);
+      await vi.waitFor(() => {
+        expect(received).toEqual([{ n: 1 }, { n: 2 }]);
+        expect(pool.queue.length).toBe(0);
+      });
     } finally {
       pool.terminate();
     }
@@ -296,9 +299,10 @@ describe('PowerPool (mocked worker)', () => {
       expect(pool.postMessage({ n: 2 })).toBe(true);
       expect(pool.postMessage({ n: 3 })).toBe(true);
 
-      await new Promise((res) => setTimeout(res, 120));
-      expect(received).toEqual([{ n: 1 }, { n: 3 }]);
-      expect(pool.queue.length).toBe(0);
+      await vi.waitFor(() => {
+        expect(received).toEqual([{ n: 1 }, { n: 3 }]);
+        expect(pool.queue.length).toBe(0);
+      });
     } finally {
       pool.terminate();
     }
@@ -368,15 +372,17 @@ describe('PowerPool (mocked worker)', () => {
       expect(pool.postMessage({ n: 2 })).toBe(true);
       expect(pool.queue.length).toBe(1);
 
-      await new Promise((res) => setTimeout(res, 80));
-      expect(received).toEqual([{ n: 1 }]);
-      expect(pool.queue.length).toBe(1);
+      await vi.waitFor(() => {
+        expect(received).toEqual([{ n: 1 }]);
+        expect(pool.queue.length).toBe(1);
+      });
 
       pool.resumeQueue();
       expect(pool.queuePaused).toBe(false);
-      await new Promise((res) => setTimeout(res, 80));
-      expect(received).toEqual([{ n: 1 }, { n: 2 }]);
-      expect(pool.queue.length).toBe(0);
+      await vi.waitFor(() => {
+        expect(received).toEqual([{ n: 1 }, { n: 2 }]);
+        expect(pool.queue.length).toBe(0);
+      });
     } finally {
       pool.terminate();
     }
@@ -414,15 +420,17 @@ describe('PowerPool (mocked worker)', () => {
       expect(pool.postMessage({ n: 2 })).toBe(true);
       expect(pool.queue.length).toBe(1);
 
-      await new Promise((res) => setTimeout(res, 80));
-      expect(received).toEqual([{ n: 1 }]);
-      expect(pool.queue.length).toBe(1);
+      await vi.waitFor(() => {
+        expect(received).toEqual([{ n: 1 }]);
+        expect(pool.queue.length).toBe(1);
+      });
 
       pool.resume();
       expect(pool.queuePaused).toBe(false);
-      await new Promise((res) => setTimeout(res, 80));
-      expect(received).toEqual([{ n: 1 }, { n: 2 }]);
-      expect(pool.queue.length).toBe(0);
+      await vi.waitFor(() => {
+        expect(received).toEqual([{ n: 1 }, { n: 2 }]);
+        expect(pool.queue.length).toBe(0);
+      });
     } finally {
       pool.terminate();
     }
@@ -452,8 +460,9 @@ describe('PowerPool (mocked worker)', () => {
       idleCalled = false;
       // now post a task and wait for idle to reoccur
       pool.postMessage({ x: 1 });
-      await new Promise((res) => setTimeout(res, 50));
-      expect(idleCalled).toBe(true);
+      await vi.waitFor(() => {
+        expect(idleCalled).toBe(true);
+      });
     } finally {
       pool.terminate();
     }
