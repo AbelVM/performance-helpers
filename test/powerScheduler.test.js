@@ -157,16 +157,18 @@ describe('PowerScheduler macrotask scheduling (ALG-007)', () => {
     // awaiting one tick first is what makes "macrotask" an observable claim.
     await Promise.resolve();
     expect(seen).toEqual([]);
-    await new Promise((r) => setTimeout(r, 30));
-    expect(seen).toEqual(['flush']);
+    await vi.waitFor(() => {
+      expect(seen).toEqual(['flush']);
+    });
   });
 
   it('coalesces many schedules into one flush', async () => {
     let flushes = 0;
     const s = new PowerScheduler(() => flushes++, { scheduling: 'macrotask' });
     for (let i = 0; i < 50; i++) s.schedule();
-    await new Promise((r) => setTimeout(r, 30));
-    expect(flushes).toBe(1);
+    await vi.waitFor(() => {
+      expect(flushes).toBe(1);
+    });
   });
 
   it('flush() cancels a pending macrotask instead of double-flushing', async () => {
@@ -179,9 +181,10 @@ describe('PowerScheduler macrotask scheduling (ALG-007)', () => {
     s.schedule();
     s.flush(); // run it now, before the posted macrotask gets its turn
     expect(seen).toEqual(['flush']);
-    await new Promise((r) => setTimeout(r, 30));
-    // Still exactly one: the pending post was cancelled, not merely raced.
-    expect(seen).toEqual(['flush']);
+    await vi.waitFor(() => {
+      // Still exactly one: the pending post was cancelled, not merely raced.
+      expect(seen).toEqual(['flush']);
+    });
   });
 
   it('cancel() also cancels a pending macrotask', async () => {
@@ -189,6 +192,10 @@ describe('PowerScheduler macrotask scheduling (ALG-007)', () => {
     const s = new PowerScheduler(() => flushes++, { scheduling: 'macrotask' });
     s.schedule();
     s.cancel();
+    // Real wait, deliberately. This asserts the flush *never* ran, and
+    // `vi.waitFor` cannot express that — its condition is already true before
+    // it starts, so it would return immediately and assert nothing. The
+    // macrotask is a `setImmediate`, so there is no handle to fake either.
     await new Promise((r) => setTimeout(r, 30));
     expect(flushes).toBe(0);
   });
@@ -198,7 +205,11 @@ describe('PowerScheduler macrotask scheduling (ALG-007)', () => {
     // listener that has been removed is simply not there.
     const s = new PowerScheduler(() => {}, { scheduling: 'macrotask' });
     s.schedule();
-    await new Promise((r) => setTimeout(r, 30));
+    await vi.waitFor(() => {
+      expect(s.scheduled).toBe(false);
+    });
+    // The macrotask has landed, so the later flush is operating on an already
+    // delivered post.
     expect(() => s.flush()).not.toThrow();
     expect(() => s.cancel()).not.toThrow();
     expect(() => s.dispose()).not.toThrow();
