@@ -18,3 +18,4 @@
 - [PowerQueue: O(1) ring-buffer queue](../guides/powerQueue.md). A resizable, high-performance queue intended for use in `PowerPool` and other high-throughput scenarios.
 - [PowerSemaphore: Async concurrency gate](../guides/powerSemaphore.md). Lightweight semaphore for limiting concurrent I/O and fan-out workloads.
 - [PowerEventBus: Typed micro event bus](../guides/powerEventBus.md). Lightweight pub/sub for intra-process coordination between helpers.
+- [Trace context: W3C `traceparent` through `PowerPool`](../guides/traceContext.md). How to propagate a trace across a pool boundary — a caller-supplied field the worker echoes, riding the `correlationId` path. The pool deliberately does not read your payloads, and the guide says why that is the cheaper direction.
