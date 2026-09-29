@@ -27,6 +27,7 @@ export { PowerRealtimeHub } from "./helpers/powerRealtimeHub.js";
 export { o2b, o2u8, u82o, b2o } from "./helpers/powerBuffer.js";
 export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./helpers/powerCache.js";
 export { default as WorkerAgnostic, detectEnv, preloadNode } from "./helpers/WorkerAgnostic.js";
+export { MetricsCollector, toSeries, METRICS_VERSION } from "./helpers/metrics.js";
 export { normalizeError, formatErrorObj } from "./utils/errors.js";
 export { nowMs, measureSync, measureAsync } from "./utils/now.js";
 export { PowerRetry, PowerRetryBudget } from "./helpers/powerRetry.js";

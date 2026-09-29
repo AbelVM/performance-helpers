@@ -221,6 +221,11 @@
       "import": "./src/helpers/powerTTLMap.js",
       "default": "./src/helpers/powerTTLMap.js"
     },
+    "./metrics": {
+      "types": "./types/helpers/metrics.d.ts",
+      "import": "./src/helpers/metrics.js",
+      "default": "./src/helpers/metrics.js"
+    },
     "./now": {
       "types": "./types/utils/now.d.ts",
       "import": "./src/utils/now.js",

@@ -81,6 +81,9 @@ describe('API surface', () => {
         'PowerSlidingWindow',
         'PowerSubscriberSet',
         'PowerTTLMap',
+        'MetricsCollector',
+        'toSeries',
+        'METRICS_VERSION',
         'PowerThrottle',
         'PowerTimedCache',
         'PowerWebSocketClient',
@@ -168,7 +171,10 @@ describe('API surface', () => {
     // The pre-existing test covered 3 of these. If this count changes, a
     // subpath was added or removed and this file needs updating deliberately -
     // the count is here so that cannot happen by accident.
-    expect(subpaths.length).toBe(36);
+    // 37 after `./metrics` (FEAT-007). The comment above is the point: this
+    // number is here so a subpath cannot be added or removed by accident, and
+    // the only legitimate way past it is to edit this line on purpose.
+    expect(subpaths.length).toBe(37);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

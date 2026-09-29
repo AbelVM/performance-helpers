@@ -95,6 +95,12 @@ Check the [Quick Guide](guides/metaGuide.md), or the
 misbehaving — it starts with the pure-ESM `preloadNode()` failure, which is the
 most likely thing to go wrong on a first run.
 
+To plot what the helpers report, use [Metrics](guides/metrics.md) rather than
+each helper's own `stats()`: those shapes are different kinds of thing — a
+`PowerCache` reports counters, a `PowerGCRA` mostly configuration, a
+`PowerPool` a nested array per worker — and the snapshot gives them stable,
+versioned names.
+
 ## Quick start
 
 Requirements: Node.js and npm.

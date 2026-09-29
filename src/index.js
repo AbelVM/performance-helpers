@@ -15,6 +15,7 @@ export { PowerSubscriberSet } from './helpers/powerSubscriberSet.js';
 export { PowerSemaphore } from './helpers/powerSemaphore.js';
 export { PowerDefer } from './helpers/powerDefer.js';
 export { PowerTTLMap } from './helpers/powerTTLMap.js';
+export { MetricsCollector, toSeries, METRICS_VERSION } from './helpers/metrics.js';
 export { normalizeError, formatErrorObj } from './utils/errors.js';
 export { nowMs, measureSync, measureAsync } from './utils/now.js';
 export { PowerCircuit } from './helpers/powerCircuit.js';
