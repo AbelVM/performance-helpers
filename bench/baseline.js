@@ -63,15 +63,15 @@ const baselineDir = resolve(benchDir, 'baselines');
 /**
  * Where `bench/run.js` writes its JSON report.
  *
- * Relative to the **current working directory**, not to `bench/` — the harness
- * writes `results.json` and `bench/results.md` as relative paths and assumes it
- * was invoked from the repository root. Reading from `bench/` instead would
- * find nothing and report "the harness did not write its report", which is a
- * confusing way to learn about a working-directory assumption.
+ * `bench/results.json`, beside `bench/results.md`, resolved from the **current
+ * working directory** — the harness writes both with paths relative to the
+ * directory it was invoked from, so this follows the same convention rather than
+ * resolving against `bench/` itself. The gate must be run from the repository
+ * root, and says so if it was not.
  *
  * @returns {string}
  */
-const resultsPath = () => resolve(process.cwd(), 'results.json');
+const resultsPath = () => resolve(process.cwd(), 'bench/results.json');
 
 /**
  * A stable-ish identifier for the machine a baseline belongs to.

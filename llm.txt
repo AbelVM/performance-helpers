@@ -1,0 +1,60 @@
+# performance-helpers
+
+> A dependency-free toolbox of small, fast, Node/browser libraries: a worker pool, an LRU/TTL cache, rate limiters, a concurrency gate, zero-copy buffer helpers, a versioned message codec, and a tiny logger. No runtime dependencies, ESM + CJS bundles, 1.0.3 published with 2.0 unreleased.
+
+A prompt-oriented index of the documentation. For *how* to use the library start at
+the quick guide; for *why* something is shaped the way it is, read the decision
+records — they are the reasoning as it stood at a point in time, and reading one
+as current guidance will mislead you.
+
+## Start here
+
+- [Quick guide and chooser](https://github.com/AbelVM/performance-helpers/blob/main/guides/metaGuide.md): "I have this problem, what do I reach for." Indexes every helper by domain, with combinations and common mistakes.
+- [Troubleshooting](https://github.com/AbelVM/performance-helpers/blob/main/guides/troubleshooting.md): leads with the pure-ESM `preloadNode()` failure, which is the most likely first-run problem.
+- [Errors](https://github.com/AbelVM/performance-helpers/blob/main/guides/errors.md): error codes and what each one means.
+- [Changelog](https://github.com/AbelVM/performance-helpers/blob/main/CHANGELOG.md): including claims that were measured and withdrawn.
+
+## Core
+
+- [PowerPool](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPool.md): worker pool, autoscaling, queue policy, message protocol.
+- [PowerCache](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCache.md): LRU/TTL cache, memoizer, eviction policies, admission filters.
+- [PowerMessageCodec](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerMessageCodec.md): versioned binary framing, native structured clone, per-worker protocol negotiation.
+- [PowerBuffer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBuffer.md): zero-copy `ArrayBuffer` helpers.
+- [WorkerAgnostic](https://github.com/AbelVM/performance-helpers/blob/main/guides/WorkerAgnostic.md): one worker interface over Node and the browser.
+
+## Concurrency, flow control and limits
+
+- [PowerSemaphore](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSemaphore.md), [PowerPermitGate](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPermitGate.md), [PowerBulkhead](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBulkhead.md), [PowerBackpressure](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBackpressure.md)
+- [PowerThrottle](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerThrottle.md), [PowerGCRA](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerGCRA.md), [PowerSlidingWindow](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSlidingWindow.md), [PowerRateLimit](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRateLimit.md)
+- [PowerBatch](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBatch.md), [PowerQueue](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerQueue.md), [PowerChunking](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerChunking.md), [PowerDefer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDefer.md), [PowerLatch](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerLatch.md)
+- [PowerCircuit](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCircuit.md), [PowerRetry](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRetry.md), [PowerDeadline](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDeadline.md), [PowerScheduler](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerScheduler.md), [PowerCron](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCron.md)
+
+## Realtime
+
+- [PowerRealtimeHub](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRealtimeHub.md), [PowerWebSocketClient](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerWebSocketClient.md), [PowerSocketAdapter](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSocketAdapter.md)
+- [Trace context](https://github.com/AbelVM/performance-helpers/blob/main/guides/traceContext.md): W3C `traceparent` propagation over `PowerPool` messages.
+
+## Observability
+
+- [PowerLogger](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerLogger.md), [PowerHistogram](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerHistogram.md), [PowerMetrics](https://github.com/AbelVM/performance-helpers/blob/main/guides/metrics.md), [PowerEventBus](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerEventBus.md), [PowerObserver](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerObserver.md), [PowerSubscriberSet](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSubscriberSet.md), [PowerEventLoopMonitor](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerEventLoopMonitor.md), [PowerTTLMap](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerTTLMap.md), [Autoscale](https://github.com/AbelVM/performance-helpers/blob/main/guides/autoscale.md)
+
+## Utilities
+
+- [now](https://github.com/AbelVM/performance-helpers/blob/main/guides/now.md), [measureSync / measureAsync](https://github.com/AbelVM/performance-helpers/blob/main/guides/now.md)
+
+## Optional: why, and what was tried and rejected
+
+Design decisions, kept out of the guides on purpose. Read these when a decision
+looks arbitrary and you need to know whether it is load-bearing or accidental.
+
+- [ADR 0001 — the pool frames every message in a versioned binary envelope](https://github.com/AbelVM/performance-helpers/blob/main/adr/0001-versioned-envelope-protocol.md) (Accepted)
+- [ADR 0002 — `PowerQueue` is a hand-rolled ring buffer, not an array](https://github.com/AbelVM/performance-helpers/blob/main/adr/0002-ring-buffer-queue.md) (Accepted)
+- [ADR 0003 — a frequency admission filter does not earn its keep on this workload](https://github.com/AbelVM/performance-helpers/blob/main/adr/0003-tinylfu-admission-window.md) (Rejected, with the measurements that killed it)
+
+## Optional: for people working on this repository
+
+- [AGENTS.md](https://github.com/AbelVM/performance-helpers/blob/main/AGENTS.md): conventions, the commands that matter, and the mistakes this project has actually made.
+- [Contributing](https://github.com/AbelVM/performance-helpers/blob/main/CONTRIBUTING.md)
+- [Examples](https://github.com/AbelVM/performance-helpers/blob/main/examples/README.md)
+- [Benchmarks](https://github.com/AbelVM/performance-helpers/blob/main/bench/README.md)
+- [API reference](https://github.com/AbelVM/performance-helpers/tree/main/docs): generated by typedoc and committed.

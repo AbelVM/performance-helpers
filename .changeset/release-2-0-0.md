@@ -714,3 +714,865 @@ of these with `as any`, you can delete the workaround:
 - `o2u8`'s second parameter is now documented and optional.
 - `PowerWebSocketClient.readyState` is typed `0 | 1 | 2 | 3` rather than
   depending on the `lib.dom` alias `WebSocketReadyState`.
+
+**Added in the review cycle**
+
+The items below landed while the plan table in `review.md` was being worked through. Three of them are worth reading even if you skip the rest: two proposals were **closed on a measurement rather than built**, one feature shipped under a justification the row did not predict, and a guard that had been passing for the wrong reason was found by deliberately breaking it.
+
+#### Message protocol
+
+Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
+
+The framed protocol is the default because it is portable. It is also lossy, silently, for a class of values a worker will reasonably be handed. Measured through the shipped path (`node bench/claims.js carrier`), a worker using `decodeMessage` receives:
+
+| you post                  | the worker receives                                     |
+| ------------------------- | ------------------------------------------------------- |
+| `new Map([['a', 1]])`     | `{}`                                                    |
+| `new Set([1, 2])`         | `{}`                                                    |
+| `new Date(1234567890123)` | an ISO **string**                                       |
+| `10n`                     | the message posts unframed, then `decodeMessage` throws |
+| `Infinity`, `NaN`         | `null`                                                  |
+
+`Date` is the sharpest: nothing fails at the boundary, and the first `.getTime()` in the worker throws somewhere unrelated, long after the `postMessage`. Framing every message is a decision to describe every message as JSON, and that description is wrong.
+
+`messageCodec: 'negotiated'` fixes it without changing what any other worker receives. **The worker advertises; the pool only listens:**
+
+```js
+// pool
+const pool = new PowerPool(WorkerScript, { messageCodec: 'negotiated' });
+
+// worker
+import { decodeInbound, announceCapabilities } from 'performance-helpers';
+parentPort.postMessage(announceCapabilities());
+parentPort.on('message', (data) => {
+  const { codec, value } = decodeInbound(data);
+  // ...
+});
+```
+
+The pool posts a frame to every worker until one advertises, then the native structured-clone carrier to that worker alone — which preserves `Map`, `Set`, `Date`, `RegExp`, `BigInt`, `Infinity`, `NaN` and sparse arrays intact. A mixed fleet is a normal state during a rollout, so the pool can be switched on before any worker is ready; `pool.getStats().protocol` reports how many workers have upgraded.
+
+**The direction is the design.** A pool-asks handshake would have to put a control message on a worker's port, and any worker that did not implement it would run that message as a task. Asking only that a peer stay quiet cannot break a peer that has never heard of the protocol.
+
+Also in this release:
+
+- **The "2–5× faster" claim is withdrawn.** It was never measured, and measurement says
+  otherwise: a structured clone is a tie for small objects, up to ~1.7× _slower_ for deeply
+  nested structure, and faster only for string-heavy payloads (a 64 KB string goes 171 µs to
+  8.9 µs). Fidelity is the reason to adopt the native carrier, not speed — which is why it
+  is negotiated per worker rather than made the default. `node bench/claims.js carrier`
+  reproduces the table.
+- `decodeInbound(data)` reads every carrier a pool can send — a framed message, a native
+  envelope, and a 1.x bare-JSON body — in one call. It replaces the
+  try-the-frame-and-fall-back-to-bare-JSON dance that every worker otherwise re-derives, and
+  that this repository had in three places. Only a body whose version byte claims version 1
+  is decoded as a frame, so a version-2 or truncated frame still reports its real error.
+- `encodeNativeEnvelope`, `announceCapabilities`, `isNativeEnvelope`,
+  `isCapabilityAnnouncement`, `collectTransferables`, `NATIVE_ENVELOPE_KEY`,
+  `NATIVE_PROTOCOL_VERSION` and `MESSAGE_CODECS` are exported.
+- A `pool:protocol` event fires when a worker's advertised capabilities change. Capability
+  announcements are consumed by the pool rather than forwarded to `message` listeners, and do
+  not touch task accounting.
+- An unknown `messageCodec` value now resolves to the documented default rather than
+  selecting a protocol the caller did not ask for.
+- A message containing an `ArrayBuffer` is copied before being transferred on the native
+  carrier, so a caller's buffer is never detached by a `postMessage`. This costs a copy, and
+  it is the price of not destroying the caller's data.
+
+Fixes `WorkerAgnostic` silently ignoring a bundle-relative worker path in the
+browser.
+
+**The symptom:** in a browser, `new WorkerAgnostic('./workers/task.js')` passed
+the string straight to `new Worker(...)`, which the browser resolves against the
+**document** base URL rather than the bundle that named it. The worker 404s as
+soon as the app is served from a subpath — and a 404 from a worker constructor is
+indistinguishable from a typo in the path, so the failure reads as your string
+being wrong rather than as a resolution base being wrong.
+
+**The cause:** `resolveWorker` had a fast path returning
+`new GlobalWorker(workerSource, options)` for _any_ string source, placed above
+the environment check. A browser always has a global `Worker`, so every string
+source took that branch. The URL resolution below it —
+`createWebWorkerFromString`, which prefers `document.currentScript.src` and falls
+back to `location.href` — was therefore **dead code in a real browser**: present,
+commented, and never executed by anything.
+
+`browser` and `webworker` now go through that resolution. `node` and `unknown`
+keep the fast path, which is what it is for: a runtime aliasing `worker_threads`
+to `Worker` (the bench harness does) has no browser base URL to resolve against,
+and routing it through the browser helper would look for a `document` that is not
+there.
+
+Also in this release:
+
+- `test/WorkerAgnostic.browser.test.js` covers the path, including the two
+  fallbacks (no `currentScript` → `location.href`; no base URL at all → the raw
+  string) and the `new URL()` rejection fallback.
+- `WorkerAgnostic.js` branch coverage 73.42% → **83.44%** (statements 77.3% →
+  86.52%, lines 81.35% → 89.83%), closing TEST-003's `WorkerAgnostic` target.
+  **The uncovered lines were not merely a metric — they were the only place this
+  bug could be seen.** Lines 47–65 and 91 stay uncovered because they run only in
+  pure ESM, where `require` is genuinely absent; vitest injects `require` into the
+  module _scope_, so stubbing the global does not reach them (verified, not
+  assumed). Their _behaviour_ is tested in a real ESM subprocess by
+  `test/WorkerAgnostic.pureEsm.test.js`. Behaviour versus coverage is the
+  distinction that matters here: one is a contract, the other is a number.
+- `test/reviewTable.test.js` no longer asserts a tally of how many plan rows cite
+  a section reference. `review.md` is gitignored, so the count describes nothing
+  in CI (the suite skips) and had to be retuned in the same commit as every row
+  that was closed. The stronger form — "every row cites a section" — is false:
+  60 of 107 rows do not, and they are not malformed. A test whose expected value
+  is "whatever the untracked file currently says" is not a test.
+
+#### Benchmarks and the timing gate
+
+Runs the W-TinyLFU admission-window experiment, and closes it on a measured
+**no**.
+
+`design/0001-tinylfu-admission-window.md` ended on one question — _raise the
+window floor and see whether retention follows_ — after two implementation
+attempts were reverted. It has now been asked.
+
+The window is implemented in `PowerCache` behind an opt-in `windowSize` option
+(default `0`, so nothing shipped changes), and the sweep runs inside
+`bench/claims.js zipf` rather than in a private script. A standalone harness
+written first produced numbers that disagreed with the benchmark — 58 % against
+its 75 % — and was discarded: the moment the workload stops being the
+benchmark's own, the measurement stops meaning anything.
+
+**The first sweep read negative, and it was an artifact.** All seven window
+sizes (1–32) landed within a point of the shipped no-window behaviour, which
+reads as "a frequency filter earns nothing here". It was not that. Two boundary
+bugs were producing the result, both found by the tests the experiment required,
+and neither raised an error:
+
+- Arbitration judged the entry count **after** the insert, so the last key of
+  every fill contended with a main-space victim it should have been promoted
+  past, and a 40-key warm ended at **39** entries.
+- `_windowOldest()` walked a fixed number of steps, which is correct only while
+  the window is full. A challenger that loses arbitration is dropped and the
+  window is briefly one short, at which point the walk crossed into main space
+  and a recency bump landed _behind_ a key inserted fifty sets later, silently
+  destroying main space's recency order.
+
+Fixing the first moved `windowSize: 1` from 70.9 % to **76.5 %** — from below
+plain LRU to above it. **A negative sweep result deserves a second look before it
+is believed.** This one looked like a finding about the mechanism and was a
+finding about a boundary.
+
+Corrected, retention follows the floor and then runs away from it:
+
+| variant                | ws hit rate | survivors |
+| ---------------------- | ----------: | --------: |
+| `lru`                  |      75.0 % | 17.2 / 40 |
+| `admission: 'tinylfu'` |      70.8 % | 15.2 / 40 |
+| `+ windowSize: 1`      |  **76.5 %** | 15.4 / 40 |
+| `+ windowSize: 16`     |      70.3 % | 18.8 / 40 |
+| `policy: 'slru'`       |  **89.4 %** | 33.0 / 40 |
+
+Small windows maximise the hit rate; large windows maximise the survivor count
+and lose it, because a bigger window admits more scan keys into main space and
+more working-set keys survive the run having been displaced and re-admitted
+during it.
+
+**The cold-start case is not met at any window size**, and it is the case the
+window was built for. `node bench/claims.js coldstart` — a cold 40-entry cache
+flooded with 460 one-shot keys, then the working set worked five times:
+
+| variant                |   hit rate |
+| ---------------------- | ---------: |
+| `lru`                  | **80.0 %** |
+| `admission: 'tinylfu'` |      0.0 % |
+| best window size       |      2.0 % |
+
+A working-set key arriving into a cold sketch ties with the scan keys already
+resident, and a tie is not a win — so the filter refuses exactly the traffic it
+should admit, indefinitely, because a key that is never admitted never
+accumulates the frequency that would let it win. TinyLFU needs history, and a
+cold cache flooded by a one-shot scan is the workload built specifically to deny
+it.
+
+The design note's gate was four criteria, all or nothing. **Two of four are
+met**, so the window does not ship as a recommended option: `windowSize` stays
+`0` by default and is documented as not recommended, and `policy: 'slru'`
+remains the measured answer to scan resistance at 89.4 %.
+
+Also in this release:
+
+- `node bench/claims.js coldstart` is a new workload measuring cold start
+  separately from the sustained mix, because the two answer differently and
+  reporting only the second is what made the sustained result look like a win.
+- `node bench/claims.js zipf` now includes the window-floor sweep by default.
+  `CLAIM_WINDOW_SWEEP=0` turns it off.
+- Twelve tests in `test/powerCache.window.test.js` pin the invariants the
+  mechanism rests on: a 40-key warm reaches 40, the window and the counter
+  always describe the same set of nodes, `size` never exceeds `maxEntries`, and
+  `onEvict` fires on window evictions.
+
+Adds a per-machine performance-regression gate, and closes TEST-006's remaining
+half.
+
+The item specified "a coarse CI check: `PowerCache.get` and
+`PowerThrottle.tryConsume` within ±20 % of a committed baseline". That is not
+what shipped, because it cannot work: BENCH-001 measured a **28.61 % median
+min/max spread** (p95 85 %) on this machine, so a ±20 % gate would fail on a
+clean tree about as often as it passed. The fastest way to get a flaky gate
+ignored is to ship one.
+
+What shipped is a gate whose threshold is **derived rather than chosen**:
+
+```bash
+npm run bench:baseline       # measure this machine and record its baseline
+npm run bench:gate           # measure and compare
+```
+
+- **The threshold is each site's own recorded spread**, so a clean tree passes
+  by construction and a site calibrated at 80 % spread is not held to the same
+  bar as one at 8 %.
+- **Baselines are per-machine and gitignored**, in `bench/baselines/<hash>.json`.
+  A committed absolute baseline is a claim about every other machine's hardware.
+- **Three answers, not two.** `PASS`, `FAIL`, or `INCONCLUSIVE` — and
+  _inconclusive is never a failure_. It covers a machine whose level has drifted
+  (detected by the median delta across all sites, so one real regression cannot
+  hide inside it) and one noisier than it was calibrated.
+- **A failure re-measures before it is reported.** Nine samples trimmed one from
+  each end still admit a GC pause landing on one measurement; a real regression
+  survives the second run and a blip does not.
+
+**Mutation-checked, because a gate that always passes is worse than none.** A
+deliberate second `get` inside `PowerCache.get` is caught and reproduced
+(`cacheHitMs` 9.9 ms → 16.0 ms, +62 % against a 17.6 % threshold); a clean tree
+is not. Two earlier versions of this gate failed that check and were fixed
+rather than shipped:
+
+- One had **no cache site to move at all**. The helper benchmarks covered twelve
+  helpers and neither `PowerCache` nor `PowerThrottle` was among them — the two
+  the item names. It passed a deliberate constant-factor slowdown in
+  `PowerCache.get` and reported `PASS`. Both are now measured, through the same
+  `benchVariantRepeat` trimming as everything else.
+- One turned a site's recorded 60 % band into a 3000 % allowance through a
+  units error, and passed a 64 % regression.
+
+Also:
+
+- `bench/run.js` writes `measurement.bands` — every per-site median, min, max
+  and spread — into `results.json`. Previously only the aggregate survived,
+  which made per-site gating impossible.
+- `test/benchBaseline.test.js` covers the decision logic: pass, fail, both
+  inconclusive paths, the per-site threshold being the recorded spread, and a
+  single regression not being hidden by the machine-shift check.
+- The gate measures the harness's `helpers` mode. The full run takes the better
+  part of an hour, which is too long to run before landing a change;
+  `BENCH_GATE_MODE=all` overrides.
+- On a fresh CI runner with no baseline, `bench:gate` exits 0 and says why. A
+  missing measurement is not a regression, and exiting 1 would put a red X on a
+  run that told the truth.
+
+Adds `observability: true` to the helpers that report stats.
+
+Since 2.1.0 a helper can register its own `stats()` with a metrics collector,
+so the three-line setup from the previous release is now one option:
+
+```js
+import { defaultMetrics } from 'performance-helpers/metrics';
+
+const cache = new PowerCache({ observability: true });
+const pool = new PowerPool(workerPath, { observability: true });
+
+defaultMetrics.snapshot().series; // { 'cache.hitRate': …, 'pool.activeTasks': … }
+```
+
+Or pass your own collector, with an optional prefix so several processes' helpers
+stay apart:
+
+```js
+const metrics = new MetricsCollector({ prefix: 'worker-3.' });
+new PowerCache({ observability: metrics });
+```
+
+Available on `PowerCache`, `PowerPool`, `PowerBulkhead`, `PowerGCRA`,
+`PowerEventLoopMonitor`, `PowerRealtimeHub`, `PowerSocketAdapter`,
+`PowerWebSocketClient` and `PowerRetryBudget`.
+
+**Off by default on every one of them**, so the common case allocates nothing
+and no closure is created. Declared in each helper's options type, so a typo is a
+type error rather than a silent no-op.
+
+**`PowerRetry` deliberately does not respond.** It has no counters of its own —
+the `PowerRetryBudget` it holds is the thing with numbers — and an always-zero
+series would read as "this helper is idle", which is a different and wrong
+claim. Use `new PowerRetryBudget({ observability: true })`.
+
+**Helpers detach on teardown.** A disposed, stopped or terminated helper
+removes its own registration, because a collector that keeps sampling a dead
+helper is worse than one that never had it: `terminate()` on a pool still
+answers `getStats()`, so a leaked registration keeps reporting a dead pool
+forever and nothing fails visibly while the series quietly stops moving.
+
+Adds the measurement that closes FEAT-012's streaming half without building it.
+
+`node bench/claims.js stream` compares posting a payload in one message against
+pushing the same payload through a `TextEncoderStream` in pieces and
+reassembling it — the work a chunked protocol would require.
+
+| payload | chunks | one message |   streamed | reassemble | total |
+| ------- | -----: | ----------: | ---------: | ---------: | ----: |
+| 16 KB   |      1 |     15.7 µs |   226.6 µs |     2.0 µs | 14.6× |
+| 64 KB   |      1 |     87.9 µs |   598.6 µs |    17.4 µs |  7.0× |
+| 256 KB  |      4 |    252.0 µs |  2530.4 µs |    13.4 µs | 10.1× |
+| 1024 KB |     16 |    800.0 µs | 10280.0 µs |    59.3 µs | 12.9× |
+
+No size pays, and the gap is not stream overhead — it is that there is nothing
+to stream _for_. Streaming is a bandwidth discipline: it exists because a link
+delivers bytes progressively and a consumer that needs all of them would rather
+start than wait. A `Worker` port is not a link. The payload is already resident
+in this process's memory, `postMessage` hands over its `ArrayBuffer` by transfer
+rather than by copy, and there is no slow producer on the far side for
+backpressure to apply to. A chunked protocol would add an envelope shape, an
+ordering and completeness contract, and a reassembly buffer, to arrive at the
+same bytes.
+
+Where a payload genuinely does arrive in pieces — a file, a `fetch` body, a
+`WebSocket` — the caller already has a `ReadableStream`, and `PowerMessageCodec`
+already reads frames off one. That is where the capability lives, and it shipped
+in 2.0.
+
+This is the same structural finding as FEAT-013 (compression) in the same
+session: a proposal to optimise a transport that does not charge for what the
+optimisation saves.
+
+Adds `performance-helpers/metrics`: a stable, versioned shape over the numbers
+the helpers already report.
+
+Every helper that reports anything does it through its own `stats()`, and those
+shapes are not merely different — they are different _kinds_ of thing. A
+`PowerCache` reports counters. A `PowerGCRA` reports mostly _configuration_
+(`rate`, `per`, `burst`) plus one state variable. An `PowerEventLoopMonitor`
+reports measurements. A `PowerPool` carries a _nested array_ of per-worker
+objects. Plotting cache hit rate beside event-loop p99 means knowing all of
+that, and re-learning it whenever a helper's internals move.
+
+```js
+import { MetricsCollector } from 'performance-helpers/metrics';
+
+const metrics = new MetricsCollector();
+metrics.register('cache', () => cache.stats());
+metrics.register('pool', () => pool.getStats());
+
+const { version, collectedAt, series } = metrics.snapshot();
+series['cache.hitRate'];
+series['pool.activeTasks'];
+```
+
+Three rules make a flat `series` map work across all four shapes, and each is a
+decision rather than an implementation detail:
+
+- **`null` is kept**, so "never called" and "not reported" stay distinguishable.
+- **Arrays are omitted.** Joining them would put an unbounded number of series
+  in the map; per-worker detail stays on `pool.getStats()`.
+- **`Infinity` and `NaN` become strings.** `Infinity` is how a rate limit says
+  "unlimited", and coercing it to 0 would read as a measurement.
+
+Snapshotting is explicit and pull-based — a sink that fires on every operation
+becomes a performance problem, and one that samples on a timer is a timer you
+cannot turn off. A source that throws is recorded under `errors` and the rest is
+still collected.
+
+**This adds no counters.** Every number reported already exists in some
+`stats()`; the module supplies a shape, and a second source of truth would
+drift from the first.
+
+Not included: an `observability: true` option on the individual helpers. There
+are nine helpers with `stats()`, and shipping that option for a subset would
+make `observability: true` mean three different things depending on which helper
+you passed it to. Until it lands for all nine, register sources yourself.
+
+Closes two features on a measurement rather than a guess, and adds the
+benchmarks that did it.
+
+Both rows carried a precondition — "needs a large-payload bench to justify",
+"the one change that could move the pool's floor cost" — and neither had been
+run. Now they have, and both premises turned out to be wrong.
+
+**FEAT-013 (compression on the message path) is not built.** `node bench/claims.js payload`:
+
+> A `Worker` port is not a wire. The threads are in the same process — no
+> network, no serialisation link, no bandwidth to save. `postMessage` already
+> moves a large payload by _transferring_ its `ArrayBuffer`, and the pool
+> already offers that path.
+
+At 650 KB, gzip costs **1183 µs** in the sender to save 92% of the bytes, and
+brotli costs **417 ms**; transferring rather than copying costs **30 µs**, and
+the pool already does that. At 596 bytes brotli costs 653 µs for a 596-byte
+message, because the cost is not proportional to the saving. `CompressionStream`
+— the web API the row named — is _worse_ than the one-shot API, at 7692 µs
+against 230 µs for the same payload: a stream carries fixed per-call overhead,
+which is the wrong shape for a message where the whole payload is in hand at
+once. There is no size threshold that makes this pay.
+
+It would pay on a link that charges per byte — a `WebSocket`, `fetch`, or a
+worker on another host. `PowerMessageCodec`'s framed byte-stream mode already
+covers those, and `bench/claims.js` already demonstrates reading frames off a
+stream.
+
+**FEAT-011 (a `SharedArrayBuffer` permit pool) is not built.** `node bench/claims.js permit`:
+
+> `PowerPool` gates every dispatch with `tasks < this._maxTasksPerWorker` — a
+> plain field read at **1.82 ns/op**. A shared-memory permit pool makes the same
+> decision through an atomic: `Atomics.load` at **11.65 ns/op**, `Atomics.add` at
+> **11.23 ns/op**.
+
+That is 6.4× more expensive at the one place the pool would consult it, and the
+pool's floor cost is worker creation and message transport rather than permit
+accounting. The blocking half is worse: `PowerSemaphore` documents itself as an
+async gate that does not block the event loop, and 1000 `Atomics.wait` calls of
+1 ms measured **1055.7 ms** — it parks the thread for its full timeout, exactly
+the behaviour that exists to be avoided. `Atomics.waitAsync` does not block, so
+it is a timer and adds nothing an async queue does not already provide. And
+`Atomics.wait` is forbidden on a browser main thread while `SharedArrayBuffer`
+needs cross-origin isolation, so the feature would work in Node and be silently
+unavailable on the web.
+
+The capability itself is not unreasonable — a global cap across a fleet is
+already `size × maxTasksPerWorker`, enforced centrally. Sharing a budget across
+_independent_ workers is a real need, but it is a new helper with a new API,
+specified from a use case rather than from a mechanism.
+
+**TEST-006 is complete.** Both halves are done: the counter-based guard
+(operation counts, machine-independent) and the timing gate, whose threshold is
+derived from a measured per-machine spread rather than chosen in advance. It
+reports `PASS`, `FAIL` or `INCONCLUSIVE`, and inconclusive is never a failure —
+so a busy machine cannot produce a red build. A `FAIL` re-measures before
+reporting, because a single GC pause is not a regression. It is
+mutation-checked: a deliberate constant-factor slowdown in `PowerCache.get` is
+caught and reproduced, and a clean tree is not.
+
+Rejects an `awaitResponse` promise when the worker that owes it is retired.
+
+If a worker was terminated while it still had in-flight `awaitResponse`
+requests, the pool decremented the task counter and terminated the worker but
+left the caller's promise outstanding. The response was never coming, so the
+promise sat until `awaitResponseTimeout` — 30 seconds by default, and **forever**
+under `awaitResponseTimeout: Infinity`. Every other path that abandons a pending
+response (queue eviction, post failure, pool-growth failure, shutdown) already
+rejected it.
+
+It now rejects immediately with a new code:
+
+```js
+try {
+  const result = await pool.postMessage(payload, undefined, { awaitResponse: true });
+} catch (err) {
+  if (err.code === 'ERR_POOL_WORKER_TERMINATED') {
+    // The work was accepted and is now lost with its worker.
+  }
+}
+```
+
+This is reachable without the caller doing anything, because a worker can be
+retired by `resize()`, idle reaping (`idleTimeout`), autoscale shrinking the
+fleet, or `stopThePress()`.
+
+Also in this release:
+
+- `PowerPoolShutdownError` now carries `code === 'ERR_POOL_TERMINATED'`, matching
+  the synchronous throw from a dispatch method on a shut-down pool. It previously
+  had no `code`, so a caller following the `switch (err.code)` pattern in
+  `guides/errors.md` fell through to `default` for the case most likely to be
+  hit — shutting down while promises are outstanding. `err.name` is unchanged.
+- `new PowerPool(Worker, null)` no longer throws
+  `TypeError: Cannot read properties of null (reading 'size')`. The options
+  guard already exempted `null`, but the option destructuring ran before it.
+
+#### Cache, chunking and guides
+
+Acts on three deferred items, and records a measurement that did not survive.
+
+**DEFER-002 — `PowerChunker` no longer defers chunks through a timer.**
+`PowerChunking` is not a fallback path; it builds inline workers in every
+environment, so the scheduler behind it runs on every batch. It still yields —
+`setImmediate` is a macrotask, and a microtask would starve the event loop, which
+is why the item was deferred in the first place. It drains FIFO, so chunk order
+is preserved.
+
+Node clamps a zero timer delay to 1 ms, which makes the choice look enormous in
+isolation: `setTimeout(fn, 0)` costs 1057 µs per turn against `setImmediate`'s
+1.74 µs. **That 608× does not survive contact with the real workload.**
+`PowerChunker` posts every chunk as a batch, so the timers all expire together
+and fire in one pass — the 1 ms floor is paid once per batch, not once per
+chunk. End to end, 2000 items, median of three:
+
+| `poolSize` | `setTimeout(fn, 0)` | `setImmediate(fn)` |
+| ---------: | ------------------: | -----------------: |
+|          1 |              1.5 ms |             0.8 ms |
+|          4 |              0.8 ms |             0.9 ms |
+|          8 |              0.7 ms |             0.8 ms |
+
+Within noise. The change is kept for intent rather than speed: `setImmediate` is
+the primitive that means "run this soon without waiting for a timer", and it drops
+a Node timer dependency. **A timing assertion was written for it, passed, and was
+deleted rather than loosened — because it also passed with the fix reverted.** A
+timing test that cannot fail on the regression it names is decoration. The four
+tests that remain pin what a faster scheduler is most likely to lose: the work is
+deferred rather than synchronous, every item is processed once, order is
+preserved, and `drain()`'s summary is unchanged.
+
+**DEFER-003 — `hasEqual`'s prototype strictness is now documented.** A class
+instance and a plain object with identical own properties compare `false`; two
+instances of the same class compare `true`. Verified before writing it down.
+`guides/powerCache.md` now shows the case with a worked example, says why it is
+deliberate, and points at `compareFn`. The decision is unchanged — only the
+documentation that was missing.
+
+**DEFER-004 — `hasEqual` is now documented as not counting as a use.** The row
+recorded the decision as "documented"; the _behaviour_ was not, which is what a
+user meets. A scan of `hasEqual` calls evicts a working set under a small cache,
+and the guide never said so. It now does, alongside `peek`, with the reason: an
+equality check is usually not "recent use", and treating it as one would let a
+lookup pattern reshape the eviction order.
+
+**DEAD-003 is closed as will-not-do.** `docs/` must be tracked — the project
+website links into it — so untracking it would take the site down with nothing to
+replace it. A previous session reached the same conclusion by doing it and
+reverting. The 1.7 MB of generated typedoc is the price of a working
+documentation site, and any future proposal should carry the replacement host and
+pipeline before it touches `.gitignore`.
+
+Fixes an unreachable guard that let an async worker factory through.
+
+`WorkerAgnostic`'s check for an `async` worker factory sat inside a
+`typeof result === 'string'` branch — a branch a Promise can never satisfy,
+since `typeof` reports a thenable as `'object'`. The guard never ran.
+
+The visible symptom was a failure several frames from the mistake: an async
+factory produced a Promise in place of a worker, and the error the caller saw
+was `postMessage is not a function`, pointing at the wrapper rather than at the
+factory that caused it.
+
+```js
+// Before: silently produced a Promise as its "worker".
+new WorkerAgnostic(async () => new Worker('./w.js'));
+
+// After:
+new WorkerAgnostic(async () => new Worker('./w.js'));
+// TypeError: WorkerAgnostic: an async worker factory was passed. Construct the
+// worker synchronously, or await the factory yourself and pass the instance.
+```
+
+The check is now a thenable test at the top of the coercion, so it also covers
+a hand-rolled thenable rather than only a real Promise.
+
+Also adds `test/WorkerAgnostic.pureEsm.test.js`, which verifies the pure-ESM
+`preloadNode()` contract for the first time. Those code paths run only when
+`require` is genuinely absent, which vitest never produces — so the behaviour is
+tested by importing the real module in a real `node --input-type=module`
+subprocess and asserting the documented error, post-preload success, and
+idempotency. The troubleshooting guide described that failure on the strength
+of reasoning alone; it is now evidence.
+
+Adds an injectable clock to `PowerCache`, completing the family.
+
+`PowerThrottle`, `PowerGCRA`, `PowerSlidingWindow`, `PowerRateLimit` and
+`PowerTTLMap` have taken a `now` option since 2.0. `PowerCache` was the last
+one without it, and it is the helper where it mattered most: TTL expiry is the
+only behaviour it has that cannot be observed synchronously, so testing it
+meant a sleep — a guess in both directions, since too short asserts on a live
+entry and too long taxes every run.
+
+```js
+let clock = 0;
+const cache = new PowerCache({ defaultTTL: 100, now: () => clock });
+cache.set('k', 'v');
+clock = 100;
+cache.get('k'); // 'v'  — alive AT its TTL
+clock = 102;
+cache.get('k'); // undefined
+```
+
+`now` is declared in `PowerCacheOptions`, so a typo is a type error. Existing
+callers are unaffected: the default is `nowMs()` exactly as before.
+
+The change is one binding in the constructor and `nowMs()` → `this._now()` at
+seven read sites. One of those is on the read path and is conditional
+(`!ignoreExpiry && node.expiresAt ? this._now() : 0`), so an entry with no TTL
+still reads the clock zero times — a property the cache had before this and
+still has.
+
+The two sleeps in `test/powerCache.getorset.test.js` that let a 1 ms TTL lapse
+are now exact, which is the point: they asserted "not yet", a condition
+`vi.waitFor` cannot poll for, so a sleep was the only tool available and a
+guess was the only option it offered.
+
+Ten constructors now publish a real options type instead of a bare `Object`.
+
+`PowerDeadline`, `PowerPermitGate`, `PowerBackpressure`, `PowerHistogram`,
+`PowerScheduler`, `PowerSubscriberSet`, `PowerTTLMap`, `PowerRateLimit`,
+`PowerMemoizer`/`PowerTimedCache` and `WorkerAgnostic` were typed as
+`@param {Object} [options]`, so the published `.d.ts` checked nothing about what
+you passed. They now accept named options types, and two errors surface:
+
+- `PowerScheduler`'s options type omitted `scheduling: 'yield'`, which the
+  constructor has always accepted. It is now declared.
+- `PowerRateLimit`'s limiter parameter was emitted as a structural blob with
+  every member and its comment repeated twice; it is now the named
+  `RateLimiterLike`, and that type gained the optional `reset()` member the
+  composer's `reset()` calls.
+
+If you were passing an option these helpers do not read — `timeout` on
+`PowerDeadline`, for instance, which bounds with `attemptTimeout` and
+`totalTimeout` — that call is now a compile error. Nothing that worked
+correctly changes: the new types only reject options that were being silently
+ignored.
+
+#### Fixes and smaller work
+
+Fixes `new PowerPool(Worker, null)` throwing an error about an internal field.
+
+The constructor's options guard explicitly exempts `null`
+(`arguments[1] != null`), but the option destructuring runs before it, and a
+default parameter only covers `undefined`. Passing `null` therefore reached the
+destructuring and threw:
+
+```
+TypeError: Cannot read properties of null (reading 'size')
+```
+
+which names an internal field rather than the argument the caller got wrong,
+and the guard written to allow the case never got the chance to run. `null` is
+now normalised to `{}` before the destructuring, so the guard means what it
+says. Omitting the argument, or passing an object, is unchanged.
+
+Fixes every link in the documentation site's navigation, and adds two design
+decision records.
+
+`assets/navigation.md` is the VuePress navigation page, and every one of its
+links was written relative to the repository root while the file itself lives
+in `assets/` — so none of them resolved. The review had recorded exactly one of
+them as broken on the assumption that only that one was wrong; there were
+eleven.
+
+The tell was that the neighbouring pages got it right: `assets/1_Caching.md`
+links with `../guides/powerCache.md`. One directory, two conventions.
+
+All links are fixed, and `test/docsLinks.test.js` now checks every relative
+markdown link in the repository (53 files) against the file that contains it,
+failing with the offending path rather than a count. It reports the specific
+mistake:
+
+```
+"LICENSE.md (resolves from the repo root, not from assets/navigation.md)"
+```
+
+The existing assertion in `test/index.test.js` that navigation reaches each
+index had to change: it matched the _literal string_ `assets/1_Caching.md`,
+which is the broken form. A working link from inside `assets/` reads
+`1_Caching.md`, so the test was passing on the exact bug it appeared to guard.
+
+Also adds `adr/`, two architecture decision records:
+
+- **0001** — why every pool message crosses the wire in a
+  `[version][codec][length][payload]` envelope rather than NDJSON or bare
+  structured clone.
+- **0002** — why `PowerQueue` is a power-of-two ring buffer with bitmask
+  indexing, including the measurement that killed the proposed
+  `toArray()`-based "optimisation" in `PERF-006` (563 µs against 14.8 ns).
+
+These live at the repository root rather than in `guides/` because a decision
+record is the reasoning as it stood at a point in time, and reading one as
+current guidance misleads. They are not in `package.json`'s `files`, so none of
+it reaches an installing user.
+
+Documentation only. No API change.
+
+Corrects a documented `postMessage` call that does not work.
+
+`guides/errors.md` showed the pool's Promise API as
+`postMessage(msg, { awaitResponse: true })`. `options` is the **third**
+parameter, after `transfer`, so the object landed in the transfer slot. With a
+plain-object message the pool never inspects the transfer list, so
+`awaitResponse` was silently dropped and the call returned `true` instead of a
+Promise — a caller awaiting a worker response got a boolean and no diagnostic.
+With a typed array the same mistake threw `TypeError: tr is not iterable`.
+
+The guide now shows the three-argument form and explains why the shorthand
+fails. No behaviour changes.
+
+Documents what the `drop-oldest` queue policy actually does.
+
+`guides/powerPool.md` said the policy "evicts one and admits one, so the queue
+holds a steady number" without saying which number. It is one: the pool evicts
+whenever the queue is non-empty, not only when the queue is at the cap, so
+`maxQueueLength` does not raise it. A reader who set `maxQueueLength: 100` with
+`queuePolicy: 'drop-oldest'` and observed a queue of length 1 had no way to tell
+whether that was intended.
+
+The behaviour is unchanged and was already deliberate — BUG-016 found the
+self-bounding and accepted it, and it is what keeps this policy from refusing
+work the way `'enqueue'` does at the cap. The guide now states the number, and
+says what to use instead if you want a bounded backlog that fills before it
+starts dropping.
+
+Documents W3C trace propagation through `PowerPool`, and why it needs nothing
+from the library.
+
+`guides/traceContext.md` gives the recipe — a `traceparent` in the payload, the
+worker echoes it, `als.run` per message on the worker side so nothing has to be
+threaded through your own signatures — and the test that proves it
+(`test/traceContext.test.js`).
+
+The row this came from asked for trace propagation _in_ `PowerPool`. The reframe
+is the finding: the pool already round-trips a field the caller names —
+`correlationId` — and touches nothing else in a payload. A trace rides that same
+path with no pool change, no option and no version.
+
+The obvious alternative, a metadata channel in the frame, would break every
+hand-written worker. The frame is a 6-byte header at protocol version 1, and
+workers read those bytes directly; `examples/lib/worker.mjs` and every user's
+worker included. Growing a per-message metadata concept into the pool also
+moves toward the failure [adr/0001](../adr/0001-versioned-envelope-protocol.md)
+was written to prevent: the 1.x decoder guessed at message content and misparsed
+a payload that was valid as two different things.
+
+Documentation only. No API change.
+
+Adds a performance-regression guard that is not a timing gate.
+
+The plan called for a ±20 % wall-clock check on `PowerCache.get` and
+`PowerThrottle.tryConsume`. That is not implementable here, and the reason is
+measured: BENCH-001 recorded a **28.71 % median min/max spread** across 22
+timed variants (p95 113 %) on this machine. A ±20 % gate against that fails on
+a clean tree and passes on a real regression about as often as not, and a gate
+that cries wolf gets deleted after its first false alarm. More repeats do not
+help — the spread is dominated by sub-millisecond variants, where timer
+resolution is a large fraction of the measurement.
+
+`test/invariants.test.js` therefore guards the thing the item was aimed at —
+accidental _algorithmic_ regressions — using the library's own operation
+counters, which are integers and do not move with machine speed:
+
+- `PowerCache` reads are pure: a miss evicts nothing, a set on a full cache
+  evicts exactly one, a cap is exact, and the evictions account for the
+  difference. An oversized value is rejected _without_ evicting on its behalf.
+- `PowerThrottle` admits exactly `capacity`, and refills proportionally with a
+  fractional carry rather than crediting whole intervals.
+- `PowerGCRA` admits `burst + 1` — `burst` is additional tolerance, not a
+  total.
+- `PowerBatch` splits on exactly `maxSize`, delivers every item exactly once,
+  and preserves order within and across batches.
+- `PowerQueue` preserves FIFO under interleaved push and shift, and grows by
+  doubling.
+- `PowerPool` holds its queue cap, accepts exactly `maxQueueLength` under the
+  `enqueue` policy, and its task accounting returns to zero.
+
+Verified to have teeth by mutating the source twice: replacing
+`newCap = oldCap << 1` with `oldCap + 2` fails the growth progression, and
+making a cache miss bump `_evictions` fails both read-purity tests.
+
+**What this does not catch: a constant-factor slowdown.** If `cache.get` became
+30 % slower per call, every assertion here still passes. That needs a timing
+gate with a per-machine baseline and a threshold set from a measured p95, which
+is the remaining part of the item.
+
+Tests only. No behaviour change.
+
+Adds runnable examples, one per helper family.
+
+`examples/` contains nine short scripts — cache, ratelimit, resilience, pool,
+batch, backpressure, observability, realtime, codec — plus a runner:
+
+```sh
+npm run example              # list them
+npm run example cache        # run one
+npm run example -- --all     # run every one
+```
+
+They are executed by `test/examples.test.js` on every `npm test`, so they
+cannot drift from the API. This is the point: every example in the directory
+was wrong the first time it ran, and none of the mistakes were visible by
+reading the code. Three library traps are now documented where a reader meets
+them:
+
+- A Node ESM worker silently ignores `self.onmessage` — and
+  `globalThis.onmessage`. Nothing throws; the handler is simply never called
+  and every reply times out. Use `parentPort`.
+- `PowerPool` accepts a worker factory or a string, not a `URL` object, while
+  Node's `Worker` rejects a `file://` string. Only an absolute path satisfies
+  both.
+- With `batch: true` (the default) `PowerRealtimeHub` delivers **an array** of
+  messages per frame. A client expecting one message per frame reads
+  `undefined` from every field, which looks like a slow-consumer problem and
+  is not one.
+
+One deliberate behaviour worth knowing, which the examples show rather than
+hide: the library `unref()`s its timers, so neither `PowerBackpressure`'s
+refill nor `PowerRealtimeHub`'s flush will hold a Node process open. That is
+right for a library — a rate limiter should not keep a finished CLI alive — but
+it means a script whose only remaining work is a pending refill will exit
+instead of waiting.
+
+Documentation only. No API change.
+
+De-flakes the two test files with the most fixed sleeps, and fixes a
+`review.md` structural problem.
+
+**`test/powerPool.test.js`** — 9 fixed sleeps → `vi.waitFor`, 0 remaining.
+**`test/powerScheduler.yield.test.js`** — 7 → 4.
+
+`vi.useFakeTimers()` is the wrong tool for most of these. `vi.waitFor` is
+correct for "wait until X happened": it polls the condition and returns the
+moment it holds, where a fixed sleep guesses in both directions. Fake timers
+are correct only for "assert nothing fires within N ms".
+
+The 4 that remain in the yield file are not convertible, and the reason is
+specific: `scheduler.yield()` returns a promise with **no handle to detach**,
+so there is nothing for `advanceTimersByTime` to reach. Those tests assert the
+flush _never_ runs, which `vi.waitFor` cannot express — its condition is
+already true before it starts, so it would pass **vacuously**. The file header
+now says so, to stop the conversion being made and the evidence deleted.
+
+Suite-wide fixed waits: 62 → 52.
+
+**`examples/observability.mjs` was flaky** — it blocked the event loop for
+40 ms and asserted the monitor saw a 35 ms stall, failing about one run in five.
+A 5 ms sampler can only observe the gap between two of its own ticks, so it
+under-reports. Now blocks for 100 ms and asserts 40. `test/examples.test.js`,
+the CI check added in 2.0.0, caught it.
+
+**`review.md`**: seven rows had a notes column split by a literal `|`, which
+silently drops a column while the row still renders. `test/reviewTable.test.js`
+now checks the column count and the trailing pipe, with teeth verified by
+deliberately adding one. A second, unfixed problem is recorded in the file
+itself: the rows disagree with the table's own header about what a column
+holds, which needs a human pass rather than a script.
+
+Adds an injectable clock to `PowerTTLMap`, completing the set.
+
+`PowerThrottle`, `PowerGCRA`, `PowerSlidingWindow` and `PowerRateLimit` have
+accepted a `now` option since 2.0 (PERF-007). `PowerTTLMap` did not, and it is
+the one helper where that matters most: expiry is the only behaviour it has
+that cannot be observed synchronously, so testing it meant either sleeping and
+racing the clock, or dropping the test.
+
+```js
+let clock = 0;
+const m = new PowerTTLMap({ defaultTTL: 100, now: () => clock });
+m.set('k', 1);
+clock = 100;
+m.get('k'); // 1  — alive AT its TTL
+clock = 102;
+m.get('k'); // undefined
+```
+
+That second boundary is the useful part, and it is a deliberate off-by-one: an
+entry is stored as `expiresAt = now + ttl + 1` and read back as
+`now > expiresAt`, so it survives exactly at its TTL and lapses immediately
+after. `test/invariants.test.js` now pins all three positions, so a later
+"simplification" of that `+ 1` fails loudly instead of quietly shortening every
+entry by a millisecond.
+
+Five invariants are restored that had to be dropped earlier precisely because
+the helper had no clock — they would have needed a wall clock, which is the
+flake TEST-008 exists to remove. That is now recorded as done in the plan.
+
+Documentation only beyond the new option; no behaviour changes for existing
+callers.

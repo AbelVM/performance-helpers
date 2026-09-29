@@ -548,10 +548,18 @@ function heapKb() {
   return Math.round(process.memoryUsage().heapUsed / 1024);
 }
 
-/** Load the previous results.json at the repository root, or null. */
+/**
+ * Load the previous run's JSON report, or null on a first run.
+ *
+ * This is what makes a run comparable to the last one, so it is committed
+ * alongside `bench/results.md` at release time. It used to live at the
+ * repository root, written with a bare relative path — generated benchmark
+ * output in the project root, next to `package.json` and `README.md`, where
+ * nothing else generated is. It belongs with the other result.
+ */
 function loadPreviousResults() {
   try {
-    return JSON.parse(readFileSync('results.json', 'utf8'));
+    return JSON.parse(readFileSync('bench/results.json', 'utf8'));
   } catch {
     return null;
   }
@@ -2709,8 +2717,10 @@ function formatMd(report, filename, prevDeltaMap = new Map()) {
     }
   }
 
-  // write raw JSON file alongside the markdown and add a link to it at the end
-  const jsonFilename = 'results.json';
+  // Write the raw JSON beside the markdown report, not at the repository root.
+  // `formatMd` writes `bench/results.md` with an explicit `bench/` prefix, so
+  // matching it keeps the two in one place and one convention.
+  const jsonFilename = 'bench/results.json';
   try {
     writeFileSync(jsonFilename, JSON.stringify(report, null, 2), 'utf8');
   } catch (err) {
