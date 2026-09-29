@@ -131,6 +131,13 @@ export class PowerCache {
     /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
     policy = 'lru',
     admission = 'none',
+    /**
+     * Injected clock in milliseconds, matching the limiters (PERF-007) and
+     * `PowerTTLMap`. Expiry is the one behaviour in this class that cannot be
+     * observed synchronously, so this is what turns "assert it expired after
+     * 100 ms" from a sleep into an exact assertion.
+     */
+    now,
   } = {}) {
     // Basic options validation: when an explicit options argument is provided it must be an object
     if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
@@ -164,6 +171,10 @@ export class PowerCache {
       ? weightFn
       : () => 1;
     this.defaultTTL = defaultTTL;
+    // Injected clock, matching the limiters (PERF-007) and `PowerTTLMap`. It
+    // is read through `this._now()` at seven sites, all of which are "what time
+    // is it" reads with no other argument, so this is the whole change.
+    this._now = typeof now === 'function' ? now : nowMs;
     this.rejectOversized = Boolean(rejectOversized);
     this.onEvict = typeof onEvict === 'function' ? onEvict : null;
     this.onError = typeof onError === 'function' ? onError : null;
@@ -457,7 +468,7 @@ export class PowerCache {
     }
     // Only sample the clock when we need to check expiry to avoid unnecessary
     // system calls on non-expiry paths.
-    const now = !ignoreExpiry && node.expiresAt ? nowMs() : 0;
+    const now = !ignoreExpiry && node.expiresAt ? this._now() : 0;
     if (now && node.expiresAt <= now) {
       if (allowExpired) return node;
       this._removeExpiredNode(node, now);
@@ -703,7 +714,7 @@ export class PowerCache {
    * @returns {this|false} `this` on success, or `false` when insertion was rejected due to oversize.
    */
   set(key, value, { ttl = this.defaultTTL, weight = null } = {}) {
-    const now = nowMs();
+    const now = this._now();
     const expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
     // Compute weight once and validate it before mutating bookkeeping.
     const w = this._computeWeight(value, weight);
@@ -869,7 +880,7 @@ export class PowerCache {
     factory,
     { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
   ) {
-    const now = nowMs();
+    const now = this._now();
     const node = this._fetchValidNode(key, {
       countMiss: false,
       allowExpired: staleWhileRevalidate,
@@ -926,7 +937,7 @@ export class PowerCache {
    * @returns {this}
    */
   setMany(entries, { ttl = undefined, weight = undefined } = {}) {
-    const now = nowMs();
+    const now = this._now();
     const expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
     for (const pair of entries) {
       if (!pair) continue;
@@ -982,7 +993,7 @@ export class PowerCache {
   touch(key, ttl = undefined) {
     const node = this._fetchValidNode(key);
     if (!node) return false;
-    const now = nowMs();
+    const now = this._now();
     if (ttl !== undefined) {
       node.expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
     }
@@ -1013,7 +1024,7 @@ export class PowerCache {
       return Promise.resolve(this.getOrSet(key, asyncFactory, { ttl, weight }));
     }
 
-    const now = nowMs();
+    const now = this._now();
     const node = this._map.get(key);
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
@@ -1237,7 +1248,7 @@ export class PowerCache {
    * @returns {number} Number of nodes scanned
    */
   cleanupExpiredUpTo(maxScan = Infinity) {
-    const now = nowMs();
+    const now = this._now();
     let scanned = 0;
     // Resume from the previous cursor when possible to avoid re-scanning from head.
     // `_cleanupCursorValid` is toggled by mutation paths that affect the cursor,

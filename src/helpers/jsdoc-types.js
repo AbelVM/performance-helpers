@@ -710,6 +710,10 @@ export {};
  * @property {number} [maxCleanupPerTick]
  * @property {boolean} [eagerCleanupOnRead]
  * @property {number} [defaultAsyncTimeout] - Default timeout (ms) applied to
+ * @property {() => number} [now] Injected clock in milliseconds, matching the limiters
+ *   (PERF-007) and `PowerTTLMap`. Expiry is the one behaviour here that cannot be
+ *   observed synchronously, so this is what turns "assert it expired after 100 ms"
+ *   from a sleep into an exact assertion. See `guides/powerCache.md`.
  *   `getOrSetAsync` when a caller omits its own `timeout`.
  * @property {?(function(*, string):void)} [onError] - Invoked as `onError(err, message)`
  *   whenever an internal failure is swallowed: a throwing `onEvict`/`onExpire`

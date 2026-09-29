@@ -1,6 +1,23 @@
 import { expect } from 'chai';
-import { describe, it } from 'vitest';
+import { describe, it, vi } from 'vitest';
 import { PowerChunker } from '../src/helpers/powerChunking.js';
+
+/**
+ * Wait until the pool has reported at least one error.
+ *
+ * These tests used to `await Promise.resolve()` and then sleep. The
+ * microtask drain was doing the real work - the failure is raised across
+ * several microtask hops - and the sleep was a fallback that only made a
+ * failure slower. Polling the actual condition says what is meant and is
+ * fast when the work is quick.
+ *
+ * @param {Array} errors - The error array the listener under test fills.
+ * @returns {Promise<void>}
+ */
+const reported = (errors) =>
+  vi.waitFor(() => {
+    expect(errors.length).to.be.greaterThan(0);
+  });
 
 describe('PowerChunking error handling', () => {
   it('emits per-item normalized error objects for sync throws and async rejections', async () => {
@@ -65,8 +82,7 @@ describe('PowerChunking error handling', () => {
     const errors = [];
     pool.addEventListener('error', (err) => errors.push(err));
 
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reported(errors);
 
     expect(errors.length).to.be.greaterThan(0);
     expect(errors[0]).to.include({ code: 'ECHUNKDISPATCH', mode: 'batch' });
@@ -92,8 +108,7 @@ describe('PowerChunking error handling', () => {
     const errors = [];
     pool.addEventListener('error', (err) => errors.push(err));
 
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reported(errors);
 
     const batchErrors = errors.filter(
       (err) => err && err.code === 'ECHUNKDISPATCH' && err.mode === 'batch'
@@ -134,8 +149,7 @@ describe('PowerChunking error handling', () => {
     const errors = [];
     pool.addEventListener('error', (err) => errors.push(err));
 
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reported(errors);
 
     expect(
       errors.some((err) => err && err.code === 'ECHUNKDISPATCH' && err.mode === 'stream')
@@ -165,8 +179,7 @@ describe('PowerChunking error handling', () => {
     const errors = [];
     pool.addEventListener('error', (err) => errors.push(err));
 
-    await Promise.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await reported(errors);
 
     expect(
       errors.some((err) => err && err.code === 'ECHUNKDISPATCH' && err.mode === 'stream-iterate')

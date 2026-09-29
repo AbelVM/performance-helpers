@@ -62,9 +62,14 @@ describe('PowerCache getOrSet APIs', () => {
   });
 
   it('getOrSet staleWhileRevalidate returns stale value and refreshes in background', async () => {
-    const c = new PowerCache({ defaultTTL: 1 });
+    let clock = 0;
+    const c = new PowerCache({ defaultTTL: 1, now: () => clock });
     c.set('a', 1, { ttl: 1 });
-    await new Promise((r) => setTimeout(r, 5));
+    // Exact now: `PowerCache` takes the same `now` injection the limiters and
+    // `PowerTTLMap` do, so the entry goes stale on a number the test chose
+    // rather than on a sleep it has to out-wait. This asserted "not yet", which
+    // `vi.waitFor` cannot poll for and which a sleep could only approximate.
+    clock = 5;
 
     let resolveRefresh;
     const refreshFactory = vi.fn(
@@ -82,8 +87,9 @@ describe('PowerCache getOrSet APIs', () => {
     expect(stale).toBe(1);
     expect(c._inflightPromises.has('a')).toBe(true);
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(refreshFactory).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(refreshFactory).toHaveBeenCalledTimes(1);
+    });
 
     resolveRefresh(2);
     await c._inflightPromises.get('a');
@@ -92,9 +98,10 @@ describe('PowerCache getOrSet APIs', () => {
   });
 
   it('getOrSetAsync staleWhileRevalidate returns stale value and refreshes in background', async () => {
-    const c = new PowerCache({ defaultTTL: 1 });
+    let clock = 0;
+    const c = new PowerCache({ defaultTTL: 1, now: () => clock });
     c.set('x', 'old', { ttl: 1 });
-    await new Promise((r) => setTimeout(r, 5));
+    clock = 5;
 
     const asyncFactory = vi.fn(() => Promise.resolve('fresh'));
     const result = await c.getOrSetAsync('x', asyncFactory, {
