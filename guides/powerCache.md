@@ -406,6 +406,35 @@ incoming one. It has two explicit limits and an escape hatch.
 | `maxNodes`     |   `number` | `10000` | Ceiling on how many pairs one comparison will examine.                                        |
 | `compareFn`    | `function` |  `null` | `(a, b) => boolean \| undefined`. Return `undefined` for "no opinion" and the walk continues. |
 
+**A class instance never matches a plain object.** Two values with identical
+own properties compare `false` when their prototypes differ:
+
+```javascript
+class Token {
+  constructor(id) {
+    this.id = id;
+  }
+}
+cache.set('t', new Token(1));
+cache.hasEqual('t', { id: 1 }); // false — different prototype
+cache.hasEqual('t', new Token(1)); // true
+```
+
+This is deliberate. A prototype is part of what a value _is_: a `Token` and a
+bare object literal with the same fields do not satisfy the same contract, and
+a cache that called them equal would hand back the wrong one. Two _different_
+classes are a different case — they are unequal for the same reason.
+
+If your value has private state or its own notion of equality, the prototype
+check is not the obstacle; use `compareFn` below.
+
+**`hasEqual` does not count as a use.** It reads the entry and leaves its
+recency untouched, exactly like `peek`. A scan of `hasEqual` calls will
+therefore evict the working set under a small cache, in the same way a scan of
+`get` calls would — which is the point: an equality check is usually not "recent
+use", and treating it as one would let a lookup pattern reshape the eviction
+order. If you want both, `get` is the call that should do it.
+
 **Why a node budget, not just a depth limit.** Depth says nothing about width: a
 flat array of 50 000 scalars recurses at _depth 2_ and never trips a depth limit,
 and comparing two of them blocked the event loop for tens of milliseconds on what
