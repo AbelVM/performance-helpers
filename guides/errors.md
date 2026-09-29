@@ -23,7 +23,9 @@ Helpers such as `measureAsync()` attach a `durationMs` property to thrown errors
 
 ## Correlation ids and pending responses
 
-When using the pool's Promise-based `postMessage(..., { awaitResponse: true })` API, the pool attaches a `correlationId` to the outgoing message and tracks pending responses. The same `correlationId` will normally be present in the worker response. If you implement your own worker handlers, echo `correlationId` back inside the response payload so the pool can resolve the proper Promise.
+When using the pool's Promise-based `postMessage(message, undefined, { awaitResponse: true })` API, the pool attaches a `correlationId` to the outgoing message and tracks pending responses. The same `correlationId` will normally be present in the worker response. If you implement your own worker handlers, echo `correlationId` back inside the response payload so the pool can resolve the proper Promise.
+
+Note the three arguments. `options` is the **third** parameter, after `transfer`, so the two-argument shorthand `postMessage(msg, { awaitResponse: true })` does not work: the object lands in the `transfer` slot and the call fails with `TypeError: tr is not iterable`, which names neither the argument nor the mistake.
 
 Worker-side example:
 
@@ -48,17 +50,17 @@ If your pool still runs with `messageCodec: 'legacy'`, use `u82o(e.data)` here i
 
 ## Pool refusal codes
 
-Some `PowerPool` failures are not exceptions thrown at you — they are *refusals*, and the pool signals them with a stable `err.code` so you can branch on them without string-matching a message. Every code below means **the pool is healthy; it declined this particular piece of work**, and the right response differs for each one. Treating them as generic errors and retrying blindly is the common mistake: retrying a `QUEUE_FULL` refusal is precisely the load that filled the queue.
+Some `PowerPool` failures are not exceptions thrown at you — they are _refusals_, and the pool signals them with a stable `err.code` so you can branch on them without string-matching a message. Every code below means **the pool is healthy; it declined this particular piece of work**, and the right response differs for each one. Treating them as generic errors and retrying blindly is the common mistake: retrying a `QUEUE_FULL` refusal is precisely the load that filled the queue.
 
-| `err.code` | Raised by | What it means | What to do |
-| --- | --- | --- | --- |
-| `ERR_POOL_QUEUE_FULL` | `postMessage` / `postMessageBatch` / `stopThePress` | The task queue is at `options.maxQueueLength`. The incoming task did not fit. | **Shed load.** Return a 429, drop the request, or apply backoff. Retrying immediately re-sends the same task into a full queue. |
-| `ERR_POOL_DRAIN_TIMEOUT` | `drain({ timeout })` | The pool did not become idle within `timeout` ms. | **Retry or give up.** Something is still running — inspect `getStats().activeTasks` and the per-worker `tasks` counts to find out what. |
-| `ERR_POOL_DRAIN_TOO_MANY_WAITERS` | `drain()` | `options.maxDrainWaiters` drains are already waiting. | **Stop draining.** You are draining in a loop, which is the bug this bound exists to catch. Drain once and share the result. |
-| `ERR_POOL_DUPLICATE_CORRELATION_ID` | `postMessageBatch`, `postMessage` | Two requests claim the same `correlationId`. | **Fix the id generator.** Nothing was dispatched, so no state needs unwinding — this is a naming collision, not a runtime failure. |
-| `ERR_POOL_TERMINATED` | any dispatch method | The pool has been shut down. | Do not retry. Create a new pool. |
+| `err.code`                          | Raised by                                           | What it means                                                                 | What to do                                                                                                                              |
+| ----------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ERR_POOL_QUEUE_FULL`               | `postMessage` / `postMessageBatch` / `stopThePress` | The task queue is at `options.maxQueueLength`. The incoming task did not fit. | **Shed load.** Return a 429, drop the request, or apply backoff. Retrying immediately re-sends the same task into a full queue.         |
+| `ERR_POOL_DRAIN_TIMEOUT`            | `drain({ timeout })`                                | The pool did not become idle within `timeout` ms.                             | **Retry or give up.** Something is still running — inspect `getStats().activeTasks` and the per-worker `tasks` counts to find out what. |
+| `ERR_POOL_DRAIN_TOO_MANY_WAITERS`   | `drain()`                                           | `options.maxDrainWaiters` drains are already waiting.                         | **Stop draining.** You are draining in a loop, which is the bug this bound exists to catch. Drain once and share the result.            |
+| `ERR_POOL_DUPLICATE_CORRELATION_ID` | `postMessageBatch`, `postMessage`                   | Two requests claim the same `correlationId`.                                  | **Fix the id generator.** Nothing was dispatched, so no state needs unwinding — this is a naming collision, not a runtime failure.      |
+| `ERR_POOL_TERMINATED`               | any dispatch method                                 | The pool has been shut down.                                                  | Do not retry. Create a new pool.                                                                                                        |
 
-A refused task that was *not* awaiting a response returns `false` rather than throwing, so a plain `postMessage` caller sees a falsy return instead of a code. The codes are only observable through the Promise path (`awaitResponse` or an explicit `correlationId`):
+A refused task that was _not_ awaiting a response returns `false` rather than throwing, so a plain `postMessage` caller sees a falsy return instead of a code. The codes are only observable through the Promise path (`awaitResponse` or an explicit `correlationId`):
 
 ```js
 // Boolean form - check the return value.
@@ -82,6 +84,6 @@ try {
 }
 ```
 
-Two of these codes are worth calling out as *good news*: `ERR_POOL_DUPLICATE_CORRELATION_ID` from a batch is thrown **before anything is dispatched**, so a collision cannot leave half the batch on the wire and the other half orphaned. And `ERR_POOL_DRAIN_TIMEOUT` / `ERR_POOL_DRAIN_TOO_MANY_WAITERS` abandon only the *wait* — the pool keeps dispatching and keeps serving every other caller, so treating them as fatal to the pool is a mistake.
+Two of these codes are worth calling out as _good news_: `ERR_POOL_DUPLICATE_CORRELATION_ID` from a batch is thrown **before anything is dispatched**, so a collision cannot leave half the batch on the wire and the other half orphaned. And `ERR_POOL_DRAIN_TIMEOUT` / `ERR_POOL_DRAIN_TOO_MANY_WAITERS` abandon only the _wait_ — the pool keeps dispatching and keeps serving every other caller, so treating them as fatal to the pool is a mistake.
 
 See [Bounding the queue](powerPool.md#bounding-the-queue) for how to produce the first one deliberately, and the `drain()` entry in [PowerPool's API](powerPool.md#api) for the second and third.
