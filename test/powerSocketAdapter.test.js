@@ -245,9 +245,9 @@ describe('PowerSocketAdapter normalisation', () => {
     const adapter = new PowerSocketAdapter(stream, { onMessage: (m) => seen.push(m) });
     stream.push('a');
     stream.push(new ArrayBuffer(2));
-    // Let the reader loop drain.
-    await new Promise((r) => setTimeout(r, 0));
-    expect(seen.map((m) => m.data)).toEqual(['a', new ArrayBuffer(2)]);
+    await vi.waitFor(() => {
+      expect(seen.map((m) => m.data)).toEqual(['a', new ArrayBuffer(2)]);
+    });
     // A stream carries no frame type, so `isBinary` is inferred from the value.
     expect(seen[0].isBinary).toBe(false);
     expect(seen[1].isBinary).toBe(true);
@@ -260,9 +260,10 @@ describe('PowerSocketAdapter normalisation', () => {
     const adapter = new PowerSocketAdapter(stream, { onClose });
     expect(adapter.readyState).toBe(READY_STATE.OPEN);
     stream.end();
-    await new Promise((r) => setTimeout(r, 5));
-    expect(adapter.readyState).toBe(READY_STATE.CLOSED);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(adapter.readyState).toBe(READY_STATE.CLOSED);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
     adapter.dispose();
   });
 
@@ -399,6 +400,9 @@ describe('PowerSocketAdapter dispose', () => {
   it('cancels a stream reader', async () => {
     const stream = new FakeWebSocketStream();
     const adapter = new PowerSocketAdapter(stream, {});
+    // Real wait, deliberately: this asserts the reader was *cancelled*, and
+    // `vi.waitFor` cannot express a negative — its condition is already true
+    // before it starts.
     await new Promise((r) => setTimeout(r, 0));
     adapter.dispose();
     expect(stream.cancelled).toBe(true);
@@ -694,10 +698,11 @@ describe('PowerSocketAdapter error handling', () => {
       drainTimeoutMs: 1000,
     });
     ws.emit('message', 'x', false);
-    await new Promise((r) => setTimeout(r, 0));
-    // Otherwise the drain would wait out its full timeout for work that is
-    // already finished - and then report a timeout that did not happen.
-    expect(adapter.stats().pending).toBe(0);
+    await vi.waitFor(() => {
+      // Otherwise the drain would wait out its full timeout for work that is
+      // already finished - and then report a timeout that did not happen.
+      expect(adapter.stats().pending).toBe(0);
+    });
     await expect(adapter.drain()).resolves.toBe(true);
     adapter.dispose();
   });

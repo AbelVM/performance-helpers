@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PowerChunker } from '../src/helpers/powerChunking.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { o2u8 } from '../src/helpers/powerBuffer.js';
@@ -98,15 +98,18 @@ describe('PowerChunker branches extra', () => {
       worker.addEventListener('message', onMessage);
 
       worker.postMessage(o2u8({ chunk: [2], correlationId: 'buf-1' }));
-      await new Promise((resolve) => setTimeout(resolve, 10));
-
-      expect(seen[0]).toMatchObject({
-        processed: 1,
-        results: [3],
-        correlationId: 'buf-1',
+      await vi.waitFor(() => {
+        expect(seen[0]).toMatchObject({
+          processed: 1,
+          results: [3],
+          correlationId: 'buf-1',
+        });
       });
 
       worker.removeEventListener('message', onMessage);
+      // The listener was removed, so nothing may arrive. Polling for it would
+      // be vacuous — the condition is already true — so this is the one shape
+      // `vi.waitFor` cannot express, and the real wait stays.
       worker.postMessage(o2u8({ chunk: [5] }));
       await new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -132,15 +135,17 @@ describe('PowerChunker branches extra', () => {
       };
 
       worker.postMessage({ chunk: [1] });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(errors.some((err) => /message handler failed/.test(String(err && err.message)))).toBe(
-        true
-      );
+      await vi.waitFor(() => {
+        expect(
+          errors.some((err) => /message handler failed/.test(String(err && err.message)))
+        ).toBe(true);
+      });
 
       worker.onmessage = (e) => messages.push(e.data);
       worker.postMessage(o2u8(null));
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(errors.length).toBeGreaterThanOrEqual(2);
+      await vi.waitFor(() => {
+        expect(errors.length).toBeGreaterThanOrEqual(2);
+      });
 
       worker.terminate();
       worker.postMessage({ chunk: [9] });
