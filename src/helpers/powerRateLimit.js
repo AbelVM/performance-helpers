@@ -22,6 +22,20 @@ import { resolveComposerNow } from '../utils/limiterClock.js';
 /** @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions */
 
 /**
+ * Declared at module level, not inside the class, for two reasons.
+ *
+ * A `@typedef` block sitting between the class opening and the constructor's
+ * `@param` block is not attached to anything, and TypeScript then inlines the
+ * type structurally into the declaration - which for {@link RateLimiterLike} is
+ * a dozen members with comment bodies, emitted twice. And a typedef that is
+ * *local* is inlined even when it is attached, because the emitter cannot name
+ * a type it does not export.
+ *
+ * @typedef {import('./jsdoc-types.js').PowerRateLimitOptions} PowerRateLimitOptions
+ * @typedef {import('./jsdoc-types.js').RateLimiterLike} RateLimiterLike
+ */
+
+/**
  * PowerRateLimit
  *
  * Compose multiple rate limiters and provide a unified `tryConsume`/`reserve` API.
@@ -31,58 +45,6 @@ import { resolveComposerNow } from '../utils/limiterClock.js';
  * @public
  */
 export class PowerRateLimit {
-  /**
-  /**
- * The slice of a limiter's surface that `PowerRateLimit` composes.
- *
- * Declared as an interface rather than `Object` because the composer's whole
- * job is calling these three members; typing the array as `Object[]` made every
- * one of those calls an error and, worse, meant a limiter that only had
- * `tryConsume` would still be accepted.
- *
-/**
- * Options for `PowerRateLimit`.
- *
- * @typedef {Object} PowerRateLimitOptions
- * @property {boolean} [atomic=false] Attempt all-or-nothing semantics across the
- *   composed limiters. Requires each to expose `available()`.
- * Per-call `tryConsume(n, options)` also accepts a `{ now }` number - read
- * **once per composed call** and threaded into every leg (PERF-007). There is
- * deliberately no constructor `now` here: on the limiters `now` is a *function*,
- * and having one name mean a function in one place and a number in another on
- * the same class is a trap. The composer needs no injected clock of its own,
- * because the per-call value covers every use the limiters' injection does.
- */
-
-  /**
-   * The slice of a limiter's surface that `PowerRateLimit` composes.
-   *
-   * Declared as an interface rather than `Object` because the composer's whole
-   * job is calling these members; typing the array as `Object[]` made every one
-   * of those calls an error and, worse, meant a limiter that only had
-   * `tryConsume` would still be accepted.
-   *
-   * @typedef {Object} RateLimiterLike
-   * @property {function(number=, LimiterNowOptions=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume -
-   *   The optional second argument carries a single `now` for the whole
-   *   composition (PERF-007). A limiter that did not inject its own clock
-   *   should honour it; one that did must ignore it, or a limiter under test
-   *   silently changes clock mid-run. A limiter that takes only `n` is fine -
-   *   it simply reads its own clock.
-   * @property {function(number=): {n: number}|number|boolean|null} [reserve]
-   *   A token to pass to `release` when it reserves a slot, `false` when it
-   *   cannot, `null` when it has no reservation concept. `PowerGCRA` returns a
-   *   number; `PowerThrottle` returns `{ n }`.
-   * @property {function(*):void} [release]
-   * @property {function(number):void} [addTokens]
-   * @property {function(number):void} [rollback]
-   * @property {number|function(LimiterNowOptions=): number} [available] A count, or a method that
-   *   returns one. Both `PowerGCRA` and `PowerThrottle` expose `available()` as
-   *   a *method* - the first draft of this typedef said `number`, and the
-   *   consumer type test caught it by refusing to accept either helper as a
-   *   limiter.
-   */
-
   /**
    * @param {RateLimiterLike[]} limiters - Limiter instances to compose. Each
    *   must provide `tryConsume(n)`; `reserve`, `release`, `addTokens`,

@@ -201,7 +201,7 @@ export class PowerDeadline {
 
   /**
    * Create a configured `PowerDeadline` instance.
-   * @param {Object} [options] Default options applied to every `run()` invocation.
+   * @param {PowerDeadlineOptions} [options] Default options applied to every `run()` invocation.
    */
   constructor(options = {}) {
     this._options = options || {};

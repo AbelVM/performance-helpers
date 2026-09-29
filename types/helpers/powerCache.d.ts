@@ -551,23 +551,10 @@ export class PowerMemoizer {
     /**
      * Create a PowerMemoizer.
      * @param {Function} [fn] - Optional function to memoize immediately.
-     * @param {Object} [options]
-     * @param {function(...*):string} [options.keyResolver] - Function that maps the wrapped call args to a cache key. Defaults to `JSON.stringify` on args.
-     *   Note: `JSON.stringify(args)` is convenient but can be expensive for large or deeply-nested
-     *   arguments. If the wrapped function is on a hot path, provide a custom `keyResolver`
-     *   that cheaply and deterministically maps arguments to keys (for example, join simple
-     *   scalar args with a separator or use a fast hashing function).
-     * @param {Object} [options.cacheOptions] - Options forwarded to the underlying `PowerCache` constructor. Supported keys: `maxEntries` (number), `maxWeight` (number), `weightFn` (function(value):number), `defaultTTL` (number, ms), `maxPoolSize` (number), `rejectOversized` (boolean), `onEvict` (function(key, value, reason)), `onExpire` (function(key, value)), `initialPoolSize` (number), `maxCleanupPerTick` (number). See `PowerCache` constructor JSDoc for details.
-     * @param {number} [options.ttl] - Default TTL (ms) used when constructing the memoized wrapper for `fn`.
-     * @param {number} [options.weight] - Default weight used when constructing the memoized wrapper for `fn`.
+     * @param {PowerMemoizerOptions} [options]
      */
-    constructor(fn?: Function, options?: {
-        keyResolver?: ((...arg0: any[]) => string) | undefined;
-        cacheOptions?: Object | undefined;
-        ttl?: number | undefined;
-        weight?: number | undefined;
-    });
-    keyResolver: typeof simpleArgsKey;
+    constructor(fn?: Function, options?: PowerMemoizerOptions);
+    keyResolver: (...arg0: any[]) => string;
     cache: PowerCache;
     _inflight: Map<any, any>;
     _defaultMemoizeOptions: {};
@@ -698,18 +685,9 @@ export class PowerMemoizer {
 export class PowerTimedCache {
     /**
      * @param {number} ttl - Default TTL in milliseconds for entries.
-     * @param {Object} [options]
-     * @param {number} [options.maxEntries] - Forwarded to `PowerCache`.
-     * @param {number} [options.interval] - Cleanup interval (ms) for automatic cleanup.
-     * @param {number} [options.maxCleanupPerTick] - Max nodes scanned per cleanup tick.
-     * @param {Object} [options.cacheOptions] - Additional options forwarded to `PowerCache`.
+     * @param {PowerTimedCacheOptions} [options]
      */
-    constructor(ttl: number, { maxEntries, interval, maxCleanupPerTick, cacheOptions }?: {
-        maxEntries?: number | undefined;
-        interval?: number | undefined;
-        maxCleanupPerTick?: number | undefined;
-        cacheOptions?: Object | undefined;
-    });
+    constructor(ttl: number, { maxEntries, interval, maxCleanupPerTick, cacheOptions }?: PowerTimedCacheOptions);
     cache: PowerCache;
     get(key: any): any;
     set(key: any, value: any, options?: {}): false | PowerCache;
@@ -743,3 +721,5 @@ export class PowerTimedCache {
 }
 export type CacheNode = import("./jsdoc-types.js").CacheNode;
 export type PowerCacheOptions = import("./jsdoc-types.js").PowerCacheOptions;
+export type PowerMemoizerOptions = import("./jsdoc-types.js").PowerMemoizerOptions;
+export type PowerTimedCacheOptions = import("./jsdoc-types.js").PowerTimedCacheOptions;

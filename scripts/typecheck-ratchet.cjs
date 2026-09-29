@@ -61,8 +61,16 @@ const path = require('node:path');
  * 30 -> 0 - at which point it stopped being debt and became a gate. 542 is
  * below the 593 this started at, and the consumer column is no longer here at
  * all.
+ *
+ * 305 -> 303 -> 301 as the constructors moved onto named option types (QUAL-001).
+ * Each one stopped declaring `@param {Object}`, which had been a hole the
+ * checker could not report: an `Object` parameter is compatible with every
+ * argument, so it never produced a diagnostic and never fixed one. Two errors
+ * fell because `PowerMemoizer`'s hand-duplicated copy of the `PowerCacheOptions`
+ * key list went away, and because `PowerRateLimit`'s `RateLimiterLike` gained
+ * the `reset` member two call sites were already using.
  */
-const BASELINE = 303;
+const BASELINE = 301;
 
 const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' }];
 

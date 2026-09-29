@@ -20,10 +20,10 @@ export class PowerDeadline {
     static run(fn: Function, options?: PowerDeadlineOptions): Promise<any>;
     /**
      * Create a configured `PowerDeadline` instance.
-     * @param {Object} [options] Default options applied to every `run()` invocation.
+     * @param {PowerDeadlineOptions} [options] Default options applied to every `run()` invocation.
      */
-    constructor(options?: Object);
-    _options: Object;
+    constructor(options?: PowerDeadlineOptions);
+    _options: import("./jsdoc-types.js").PowerDeadlineOptions;
     /**
      * Run a function with the configured deadline options merged with per-call options.
      * @param {Function} fn Async function to execute.

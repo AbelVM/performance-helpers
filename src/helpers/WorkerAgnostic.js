@@ -15,6 +15,11 @@
 // PowerPool (and any other consumer) can therefore treat workers identically
 // across runtimes without environment-specific branching.
 
+/**
+ * @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike
+ * @typedef {import('./jsdoc-types.js').WorkerAgnosticOptions} WorkerAgnosticOptions
+ */
+
 // Lazily obtain a CommonJS `require` WITHOUT a *static* `import 'module'`
 // (which browser bundlers such as Vite/webpack/esbuild cannot resolve). In
 // CJS-transpiled contexts (vitest) a global `require` exists and is used
@@ -274,9 +279,9 @@ class WorkerAgnostic {
    *   invoked (or constructed with `new`) to obtain the underlying worker-like
    *   object. When a string is provided it is used to construct the appropriate
    *   native Worker for the current environment.
-   * @param {Object} [options] - Options forwarded to the native Worker
-   *   constructor (e.g. `{ type: 'module' }` for Node, or worker options for
-   *   the browser).
+   * @param {WorkerAgnosticOptions} [options] - Options forwarded to the native
+   *   Worker constructor (e.g. `{ type: 'module' }` for Node, or worker options
+   *   for the browser).
    */
   constructor(workerSource, options = {}) {
     this.env = detectEnv();

@@ -745,3 +745,188 @@ export {};
  * @property {number} [maxDelay]
  * @property {boolean} [jitter]
  */
+
+/**
+ * Permit-gate options, for `PowerPermitGate` and everything built on it.
+ *
+ * A named type rather than `@param {Object}` plus a stack of `options.*` lines,
+ * which is what the constructor published before: the emitted declaration
+ * carried a bare `Object`, so nothing a caller passed was checked.
+ *
+ * @typedef {Object} PowerPermitGateOptions
+ * @property {number} [capacity=1] Permits held. `0` throws rather than being
+ *   read as "unset" - a gate configured to allow nothing is how a dependency
+ *   gets switched off, and silently becoming open is the worst direction for
+ *   it to fail in.
+ * @property {number} [queueCapacity=Infinity] Waiters allowed to block. `0`
+ *   refuses immediately instead of queueing. `Infinity` means unbounded.
+ * @property {number} [initialTokens=capacity] Permits available at
+ *   construction. `0` is legal and meaningful - "start with nothing and let it
+ *   refill" is the point of a token bucket - and is clamped to `capacity`.
+ */
+
+/**
+ * Backpressure options for `PowerBackpressure`, which extends the permit gate
+ * with a refill schedule.
+ *
+ * `capacity` and `queueCapacity` come from {@link PowerPermitGateOptions} but
+ * default differently here (100 and 1000, not 1 and `Infinity`), so both are
+ * redeclared rather than inherited: an intersection would publish the wrong
+ * default in the one place a caller reads them.
+ *
+ * @typedef {Object} PowerBackpressureOptions
+ * @property {number} [capacity=100] Maximum number of concurrent permits.
+ * @property {number} [queueCapacity=1000] Maximum number of waiting producers.
+ *   `Infinity` queues without bound.
+ * @property {number} [initialTokens=capacity] Initial available permits. `0` is
+ *   legal and means "nothing may run until the first refill".
+ * @property {number} [lowWaterMark] Available-permit level below which adaptive
+ *   refill begins. Defaults to `25 %` of `capacity`.
+ * @property {number} [refillAmount] Permits added per refill tick while under
+ *   pressure. Defaults to `10 %` of `capacity`, at least 1.
+ * @property {number} [refillInterval=200] Milliseconds between refill ticks.
+ * @property {boolean|BackpressureAdaptiveOptions} [adaptive=false] AIMD
+ *   tuning of `refillAmount`. Off by default, so the constant-behaviour path is
+ *   unchanged unless asked for.
+ */
+
+/**
+ * Options for `PowerHistogram`.
+ *
+ * @typedef {Object} PowerHistogramOptions
+ * @property {number} [relativeAccuracy=0.01] Target relative error for every
+ *   quantile, in `(0, 1)`. Smaller is more accurate and uses more buckets;
+ *   outside the range throws.
+ * @property {number} [maxValue=10000] Advisory upper bound. Values above it are
+ *   still stored faithfully, and are only counted in `outOfRangeCount`.
+ * @property {number} [minValue=0] Advisory lower bound, counted in
+ *   `belowRangeCount`.
+ * @property {number} [bucketCount] Legacy option, retained so existing calls
+ *   keep working. It no longer sizes a dense array - read the `bucketCount`
+ *   getter for the number of *occupied* buckets.
+ */
+
+/**
+ * Options for `PowerScheduler`.
+ *
+ * @typedef {Object} PowerSchedulerOptions
+ * @property {'microtask'|'macrotask'|'yield'} [scheduling] How the flush is
+ *   scheduled. `'yield'` is the cooperative primitive added in 2.0. An
+ *   unrecognised value throws rather than falling back to the fastest strategy.
+ * @property {?((error:unknown)=>void)} [onError] Called when a flush throws. A
+ *   throwing `onError` is swallowed.
+ */
+
+/**
+ * Subscriber-set options for `PowerSubscriberSet`.
+ *
+ * Distinct from {@link PowerEventBusOptions}, which it does not extend, because
+ * the set has no `event` dimension: `maxListeners` caps the whole set rather
+ * than one event's bucket.
+ *
+ * @typedef {Object} PowerSubscriberSetOptions
+ * @property {boolean} [weak=false] Store listeners behind `WeakRef`, so a
+ *   listener no longer referenced elsewhere can be collected.
+ * @property {number} [maxListeners=0] Cap on the set. `0` (the default) is
+ *   unlimited. A negative throws: clamped to `0` it would have silently
+ *   *removed* the cap, which is the one failure direction a leak guard must not
+ *   have.
+ */
+
+/**
+ * Options for `PowerMemoizer`.
+ *
+ * @typedef {Object} PowerMemoizerOptions
+ * @property {function(...*):string} [keyResolver] Maps the wrapped call's
+ *   arguments to a cache key. Defaults to `JSON.stringify` on the arguments.
+ *   Convenient, but expensive for large or deeply-nested ones; on a hot path
+ *   prefer something cheap and deterministic (join scalar arguments with a
+ *   separator, or hash).
+ * @property {PowerCacheOptions} [cacheOptions] Forwarded to the underlying
+ *   `PowerCache`.
+ * @property {number} [ttl] Default TTL (ms) for wrappers built by this
+ *   memoizer.
+ * @property {number} [weight] Default weight for wrappers built by this
+ *   memoizer.
+ */
+
+/**
+ * Options for `PowerTimedCache`, a `PowerCache` with a fixed TTL and an
+ * automatic cleanup interval.
+ *
+ * @typedef {Object} PowerTimedCacheOptions
+ * @property {number} [maxEntries] Forwarded to `PowerCache`; takes precedence
+ *   over the same key in `cacheOptions`.
+ * @property {number} [interval] Cleanup interval (ms). Omitted, cleanup is
+ *   started with `PowerCache`'s own default.
+ * @property {number} [maxCleanupPerTick] Nodes scanned per cleanup tick.
+ * @property {PowerCacheOptions} [cacheOptions] Additional options forwarded to
+ *   `PowerCache`.
+ */
+
+/**
+ * Options handed straight to the native `Worker` constructor by
+ * `WorkerAgnostic`.
+ *
+ * Typed as an open bag rather than a closed set of keys because that is what it
+ * is: the wrapper forwards whatever it is given to whichever constructor the
+ * environment supplies, so the keys are Node's `WorkerOptions` on one side and
+ * the browser's `WorkerOptions` on the other. The two below are the ones that
+ * actually change behaviour here and are named for discoverability; the index
+ * signature is what stops the type from rejecting the rest.
+ *
+ * @typedef {Object.<string, *>} WorkerAgnosticOptions
+ */
+
+/**
+ * Options for `PowerRateLimit`.
+ *
+ * @typedef {Object} PowerRateLimitOptions
+ * @property {boolean} [atomic=false] Attempt all-or-nothing semantics across the
+ *   composed limiters. Requires each to expose `available()` or an undo
+ *   primitive (`reserve`/`release`, or `addTokens`); when a safe rollback cannot
+ *   be guaranteed the call returns `false`.
+ *
+ * Per-call `tryConsume(n, options)` also accepts a `{ now }` number - read
+ * **once per composed call** and threaded into every leg (PERF-007). There is
+ * deliberately no constructor `now` here: on the limiters `now` is a *function*,
+ * and having one name mean a function in one place and a number in another on
+ * the same class is a trap. The composer needs no injected clock of its own,
+ * because the per-call value covers every use the limiters' injection does.
+ */
+
+/**
+ * The slice of a limiter's surface that `PowerRateLimit` composes.
+ *
+ * Declared as an interface rather than `Object` because the composer's whole
+ * job is calling these members; typing the array as `Object[]` made every one of
+ * those calls an error and, worse, meant a limiter that only had `tryConsume`
+ * would still be accepted.
+ *
+ * It also has to be **exported** to reach the published declaration. A local
+ * typedef is inlined structurally by the emitter, and the inlined form is
+ * unusable: it is a dozen optional members, each with a comment body, repeated
+ * for the constructor parameter and for the `limiters` property.
+ *
+ * @typedef {Object} RateLimiterLike
+ * @property {function(number=, LimiterNowOptions=): (boolean|{ok: boolean, retryAfterMs?: number})} tryConsume -
+ *   The optional second argument carries a single `now` for the whole
+ *   composition (PERF-007). A limiter that did not inject its own clock
+ *   should honour it; one that did must ignore it, or a limiter under test
+ *   silently changes clock mid-run. A limiter that takes only `n` is fine -
+ *   it simply reads its own clock.
+ * @property {function(number=): {n: number}|number|boolean|null} [reserve]
+ *   A token to pass to `release` when it reserves a slot, `false` when it
+ *   cannot, `null` when it has no reservation concept. `PowerGCRA` returns a
+ *   number; `PowerThrottle` returns `{ n }`.
+ * @property {function(*):void} [release]
+ * @property {function(number):void} [addTokens]
+ * @property {function(number):void} [rollback]
+ * @property {number|function(LimiterNowOptions=): number} [available] A count, or a method that
+ *   returns one. Both `PowerGCRA` and `PowerThrottle` expose `available()` as
+ *   a *method* - the first draft of this typedef said `number`, and the
+ *   consumer type test caught it by refusing to accept either helper as a
+ *   limiter.
+ * @property {function():void} [reset] Clear the limiter's state, when it has a
+ *   reset at all. Called by `PowerRateLimit.reset()`.
+ */

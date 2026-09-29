@@ -10,6 +10,8 @@
  */
 export function preloadNode(): Promise<void>;
 export default WorkerAgnostic;
+export type WorkerLike = import("./jsdoc-types.js").WorkerLike;
+export type WorkerAgnosticOptions = import("./jsdoc-types.js").WorkerAgnosticOptions;
 /**
  * A CommonJS-style `require`, synthesised in pure-ESM Node.
  */
@@ -34,13 +36,15 @@ declare class WorkerAgnostic {
      *   invoked (or constructed with `new`) to obtain the underlying worker-like
      *   object. When a string is provided it is used to construct the appropriate
      *   native Worker for the current environment.
-     * @param {Object} [options] - Options forwarded to the native Worker
-     *   constructor (e.g. `{ type: 'module' }` for Node, or worker options for
-     *   the browser).
+     * @param {WorkerAgnosticOptions} [options] - Options forwarded to the native
+     *   Worker constructor (e.g. `{ type: 'module' }` for Node, or worker options
+     *   for the browser).
      */
-    constructor(workerSource: Function | string, options?: Object);
+    constructor(workerSource: Function | string, options?: WorkerAgnosticOptions);
     env: string;
-    options: Object;
+    options: {
+        [x: string]: any;
+    };
     _listeners: Map<any, any>;
     /** @type {import('./jsdoc-types.js').WorkerLike} */
     worker: import("./jsdoc-types.js").WorkerLike;

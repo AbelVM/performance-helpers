@@ -9,6 +9,7 @@ const ORIGINAL = Symbol('PowerSubscriberSet.original');
 /**
  * @typedef {import('./jsdoc-types.js').SubscriberListener} SubscriberListener
  * @typedef {import('./jsdoc-types.js').SubscriberEntry} SubscriberEntry
+ * @typedef {import('./jsdoc-types.js').PowerSubscriberSetOptions} PowerSubscriberSetOptions
  */
 
 /**
@@ -38,8 +39,8 @@ function isWeakEntry(entry) {
  */
 export class PowerSubscriberSet {
   /**
-   * @param {{weak?: boolean, maxListeners?: number}} [options] - `weak` stores
-   *   listeners behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
+   * @param {PowerSubscriberSetOptions} [options] - `weak` stores listeners
+   *   behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
    */
   constructor(options = {}) {
     const { weak = false, maxListeners = 0 } = options || {};

@@ -9,6 +9,10 @@
  * @public
  */
 /**
+ * @typedef {import('./jsdoc-types.js').PowerSchedulerOptions} PowerSchedulerOptions
+ */
+
+/**
  * Schedule one macrotask, as fast as the runtime allows.
  *
  * `setTimeout(fn, 0)` is the obvious choice and it is the slow one. Node clamps
@@ -122,8 +126,7 @@ function cancelMacrotask(handle) {
 export class PowerScheduler {
   /**
    * @param {Function} flushFn Function called when the scheduled work is flushed.
-   * @param {{scheduling?: 'microtask' | 'macrotask', onError?: ((error: unknown) => void) | null}} [options]
-   * Scheduling and error handling options.
+   * @param {PowerSchedulerOptions} [options] Scheduling and error handling options.
    */
   constructor(flushFn, options = {}) {
     if (typeof flushFn !== 'function') {

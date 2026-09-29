@@ -1,13 +1,9 @@
 export class PowerScheduler {
     /**
      * @param {Function} flushFn Function called when the scheduled work is flushed.
-     * @param {{scheduling?: 'microtask' | 'macrotask', onError?: ((error: unknown) => void) | null}} [options]
-     * Scheduling and error handling options.
+     * @param {PowerSchedulerOptions} [options] Scheduling and error handling options.
      */
-    constructor(flushFn: Function, options?: {
-        scheduling?: "microtask" | "macrotask";
-        onError?: ((error: unknown) => void) | null;
-    });
+    constructor(flushFn: Function, options?: PowerSchedulerOptions);
     _flushFn: Function;
     /** @type {'microtask'|'macrotask'|'yield'} */
     _scheduling: "microtask" | "macrotask" | "yield";
@@ -78,3 +74,4 @@ export class PowerScheduler {
 export type MacrotaskHandle = {
     cancel: () => void;
 };
+export type PowerSchedulerOptions = import("./jsdoc-types.js").PowerSchedulerOptions;

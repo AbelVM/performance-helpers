@@ -1,25 +1,9 @@
 export class PowerBackpressure extends PowerPermitGate {
     /**
-     * @param {Object} [options]
-     * @param {number} [options.capacity=100] Maximum number of concurrent permits.
-     * @param {number} [options.queueCapacity=1000] Maximum number of waiting producers.
-     * @param {number} [options.lowWaterMark=Math.ceil(capacity * 0.25)] When available tokens drop below this threshold, adaptive refill begins.
-     * @param {number} [options.refillAmount=Math.max(1, Math.ceil(capacity * 0.1))] Base refill amount when pressure is detected.
-     * @param {number} [options.refillInterval=200] Refill interval in milliseconds.
-     * @param {number} [options.initialTokens=capacity] Initial available permits.
-     * @param {boolean|BackpressureAdaptiveOptions} [options.adaptive=false] AIMD
-     *   tuning of `refillAmount`. Disabled by default, so the constant-behaviour
-     *   path is unchanged unless asked for.
+     * @param {PowerBackpressureOptions} [options] `capacity` and `queueCapacity`
+     *   are inherited from `PowerPermitGate`; the rest tune the refill schedule.
      */
-    constructor(options?: {
-        capacity?: number | undefined;
-        queueCapacity?: number | undefined;
-        lowWaterMark?: number | undefined;
-        refillAmount?: number | undefined;
-        refillInterval?: number | undefined;
-        initialTokens?: number | undefined;
-        adaptive?: boolean | import("./jsdoc-types.js").BackpressureAdaptiveOptions | undefined;
-    });
+    constructor(options?: PowerBackpressureOptions);
     _lowWaterMark: number;
     _refillAmount: number;
     _refillInterval: number;
@@ -84,6 +68,7 @@ export class PowerBackpressure extends PowerPermitGate {
     private _aimdStep;
 }
 export default PowerBackpressure;
-export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
 export type BackpressureAdaptiveOptions = import("./jsdoc-types.js").BackpressureAdaptiveOptions;
+export type PowerBackpressureOptions = import("./jsdoc-types.js").PowerBackpressureOptions;
+export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
 import { PowerPermitGate } from './powerPermitGate.js';

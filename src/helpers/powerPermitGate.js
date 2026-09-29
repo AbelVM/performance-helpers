@@ -6,6 +6,7 @@
  */
 /**
  * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
+ * @typedef {import('./jsdoc-types.js').PowerPermitGateOptions} PowerPermitGateOptions
  */
 import { PowerQueue } from './powerQueue.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
@@ -60,10 +61,7 @@ function detach(entry) {
 
 export class PowerPermitGate {
   /**
-   * @param {Object} [options]
-   * @param {number} [options.capacity=1]
-   * @param {number} [options.queueCapacity=Infinity]
-   * @param {number} [options.initialTokens]
+   * @param {PowerPermitGateOptions} [options]
    */
   constructor(options = {}) {
     const { capacity, queueCapacity, initialTokens } = options || {};

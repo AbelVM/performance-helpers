@@ -1,4 +1,8 @@
 /**
+ * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
+ * @typedef {import('./jsdoc-types.js').TTLMapEntry} TTLMapEntry
+ */
+/**
  * PowerTTLMap
  *
  * Lightweight Map-like store where each key has an optional TTL (milliseconds).
@@ -14,15 +18,11 @@ export class PowerTTLMap {
      *   object `{ defaultTTL, onExpire }` for consistency with the other helpers.
      * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
      */
-    /**
-     * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
-     * @typedef {import('./jsdoc-types.js').TTLMapEntry} TTLMapEntry
-     */
-    constructor(defaultTTL?: number, options?: {});
+    constructor(defaultTTL?: number | PowerTTLMapOptions, options?: PowerTTLMapOptions);
     _defaultTTL: number;
     _onExpire: ((key: any, value: any) => void) | null;
     /** @type {Map<any, TTLMapEntry>} */
-    _map: Map<any, import("./jsdoc-types.js").TTLMapEntry>;
+    _map: Map<any, TTLMapEntry>;
     /** @type {Map<any, number>} */
     _expirations: Map<any, number>;
     _nextExpiryAt: number;
@@ -72,7 +72,7 @@ export class PowerTTLMap {
      * @param {TTLMapEntry} [entry]
      * @returns {boolean}
      */
-    _checkExpire(key: any, entry?: import("./jsdoc-types.js").TTLMapEntry): boolean;
+    _checkExpire(key: any, entry?: TTLMapEntry): boolean;
     /**
      * Get a value, returning `undefined` when missing or expired.
      * @param {any} key
@@ -226,3 +226,5 @@ export class PowerTTLMap {
     [Symbol.dispose](): void;
 }
 export default PowerTTLMap;
+export type PowerTTLMapOptions = import("./jsdoc-types.js").PowerTTLMapOptions;
+export type TTLMapEntry = import("./jsdoc-types.js").TTLMapEntry;

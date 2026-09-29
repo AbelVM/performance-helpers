@@ -6,6 +6,11 @@
 import { nowMs } from '../utils/now.js';
 
 /**
+ * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
+ * @typedef {import('./jsdoc-types.js').TTLMapEntry} TTLMapEntry
+ */
+
+/**
  * PowerTTLMap
  *
  * Lightweight Map-like store where each key has an optional TTL (milliseconds).
@@ -20,10 +25,6 @@ export class PowerTTLMap {
    *   without explicit ttl (0 = no expiry). Accepts either a positional number or an options
    *   object `{ defaultTTL, onExpire }` for consistency with the other helpers.
    * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
-   */
-  /**
-   * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
-   * @typedef {import('./jsdoc-types.js').TTLMapEntry} TTLMapEntry
    */
   constructor(defaultTTL = 0, options = {}) {
     // Allow `new PowerTTLMap({ defaultTTL, onExpire })` (options-object convention).

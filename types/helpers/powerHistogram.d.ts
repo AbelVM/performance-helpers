@@ -1,24 +1,11 @@
+/**
+ * @typedef {import('./jsdoc-types.js').PowerHistogramOptions} PowerHistogramOptions
+ */
 export class PowerHistogram {
     /**
-     * @param {Object} [options]
-     * @param {number} [options.relativeAccuracy=0.01] Target relative error for
-     *   every quantile, in `(0, 1)`. `0.01` is 1%. Smaller is more accurate and
-     *   uses more buckets.
-     * @param {number} [options.maxValue=10000] Advisory upper bound. Values above
-     *   this are still stored faithfully in their own bucket; they are only
-     *   counted in `outOfRangeCount` so a caller can alert on a broken range.
-     * @param {number} [options.minValue=0] Advisory lower bound, counted in
-     *   `belowRangeCount`.
-     * @param {number} [options.bucketCount] Legacy option, retained so existing
-     *   constructor calls keep working. It no longer sizes a dense array - read
-     *   the `bucketCount` getter for the number of *occupied* buckets.
+     * @param {PowerHistogramOptions} [options]
      */
-    constructor(options?: {
-        relativeAccuracy?: number | undefined;
-        maxValue?: number | undefined;
-        minValue?: number | undefined;
-        bucketCount?: number | undefined;
-    });
+    constructor(options?: PowerHistogramOptions);
     _alpha: number;
     _gamma: number;
     _logGamma: number;
@@ -170,3 +157,4 @@ export class PowerHistogram {
     private _sortedIndexList;
 }
 export default PowerHistogram;
+export type PowerHistogramOptions = import("./jsdoc-types.js").PowerHistogramOptions;

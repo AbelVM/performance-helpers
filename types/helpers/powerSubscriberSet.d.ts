@@ -16,13 +16,10 @@ export function cleanupWeakRefs(bucket: any): void;
  */
 export class PowerSubscriberSet {
     /**
-     * @param {{weak?: boolean, maxListeners?: number}} [options] - `weak` stores
-     *   listeners behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
+     * @param {PowerSubscriberSetOptions} [options] - `weak` stores listeners
+     *   behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
      */
-    constructor(options?: {
-        weak?: boolean;
-        maxListeners?: number;
-    });
+    constructor(options?: PowerSubscriberSetOptions);
     _weak: boolean;
     _maxListeners: number;
     /** @type {Set<SubscriberEntry>} */
@@ -150,3 +147,4 @@ export class PowerSubscriberSet {
 }
 export type SubscriberListener = import("./jsdoc-types.js").SubscriberListener;
 export type SubscriberEntry = import("./jsdoc-types.js").SubscriberEntry;
+export type PowerSubscriberSetOptions = import("./jsdoc-types.js").PowerSubscriberSetOptions;

@@ -1,15 +1,8 @@
 export class PowerPermitGate {
     /**
-     * @param {Object} [options]
-     * @param {number} [options.capacity=1]
-     * @param {number} [options.queueCapacity=Infinity]
-     * @param {number} [options.initialTokens]
+     * @param {PowerPermitGateOptions} [options]
      */
-    constructor(options?: {
-        capacity?: number | undefined;
-        queueCapacity?: number | undefined;
-        initialTokens?: number | undefined;
-    });
+    constructor(options?: PowerPermitGateOptions);
     _capacity: number;
     _queueCapacity: number;
     _available: number;
@@ -87,4 +80,5 @@ export class PowerPermitGate {
     [Symbol.dispose](): void;
 }
 export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
+export type PowerPermitGateOptions = import("./jsdoc-types.js").PowerPermitGateOptions;
 import { PowerQueue } from './powerQueue.js';

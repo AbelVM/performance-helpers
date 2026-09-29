@@ -16,6 +16,14 @@ const ADMISSION_SAMPLE_MULTIPLE = 200;
  */
 
 /**
+ * @typedef {import('./jsdoc-types.js').PowerMemoizerOptions} PowerMemoizerOptions
+ */
+
+/**
+ * @typedef {import('./jsdoc-types.js').PowerTimedCacheOptions} PowerTimedCacheOptions
+ */
+
+/**
  * @example
  * // Create a cache with caps and a simple weight function
  * const cache = new PowerCache({
@@ -1754,15 +1762,7 @@ export class PowerMemoizer {
   /**
    * Create a PowerMemoizer.
    * @param {Function} [fn] - Optional function to memoize immediately.
-   * @param {Object} [options]
-   * @param {function(...*):string} [options.keyResolver] - Function that maps the wrapped call args to a cache key. Defaults to `JSON.stringify` on args.
-   *   Note: `JSON.stringify(args)` is convenient but can be expensive for large or deeply-nested
-   *   arguments. If the wrapped function is on a hot path, provide a custom `keyResolver`
-   *   that cheaply and deterministically maps arguments to keys (for example, join simple
-   *   scalar args with a separator or use a fast hashing function).
-   * @param {Object} [options.cacheOptions] - Options forwarded to the underlying `PowerCache` constructor. Supported keys: `maxEntries` (number), `maxWeight` (number), `weightFn` (function(value):number), `defaultTTL` (number, ms), `maxPoolSize` (number), `rejectOversized` (boolean), `onEvict` (function(key, value, reason)), `onExpire` (function(key, value)), `initialPoolSize` (number), `maxCleanupPerTick` (number). See `PowerCache` constructor JSDoc for details.
-   * @param {number} [options.ttl] - Default TTL (ms) used when constructing the memoized wrapper for `fn`.
-   * @param {number} [options.weight] - Default weight used when constructing the memoized wrapper for `fn`.
+   * @param {PowerMemoizerOptions} [options]
    */
   constructor(fn, options = {}) {
     const { keyResolver = simpleArgsKey, cacheOptions = {}, ttl, weight } = options;
@@ -2056,11 +2056,7 @@ export class PowerMemoizer {
 export class PowerTimedCache {
   /**
    * @param {number} ttl - Default TTL in milliseconds for entries.
-   * @param {Object} [options]
-   * @param {number} [options.maxEntries] - Forwarded to `PowerCache`.
-   * @param {number} [options.interval] - Cleanup interval (ms) for automatic cleanup.
-   * @param {number} [options.maxCleanupPerTick] - Max nodes scanned per cleanup tick.
-   * @param {Object} [options.cacheOptions] - Additional options forwarded to `PowerCache`.
+   * @param {PowerTimedCacheOptions} [options]
    */
   constructor(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions = {} } = {}) {
     if (!Number.isFinite(+ttl) || ttl <= 0) throw new TypeError('ttl must be a positive number');

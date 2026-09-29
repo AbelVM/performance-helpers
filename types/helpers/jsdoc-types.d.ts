@@ -1011,3 +1011,276 @@ export type PowerDeadlineOptions = {
     maxDelay?: number | undefined;
     jitter?: boolean | undefined;
 };
+/**
+ * Permit-gate options, for `PowerPermitGate` and everything built on it.
+ *
+ * A named type rather than `@param {Object}` plus a stack of `options.*` lines,
+ * which is what the constructor published before: the emitted declaration
+ * carried a bare `Object`, so nothing a caller passed was checked.
+ */
+export type PowerPermitGateOptions = {
+    /**
+     * Permits held. `0` throws rather than being
+     * read as "unset" - a gate configured to allow nothing is how a dependency
+     * gets switched off, and silently becoming open is the worst direction for
+     * it to fail in.
+     */
+    capacity?: number | undefined;
+    /**
+     * Waiters allowed to block. `0`
+     * refuses immediately instead of queueing. `Infinity` means unbounded.
+     */
+    queueCapacity?: number | undefined;
+    /**
+     * Permits available at
+     * construction. `0` is legal and meaningful - "start with nothing and let it
+     * refill" is the point of a token bucket - and is clamped to `capacity`.
+     */
+    initialTokens?: number | undefined;
+};
+/**
+ * Backpressure options for `PowerBackpressure`, which extends the permit gate
+ * with a refill schedule.
+ *
+ * `capacity` and `queueCapacity` come from {@link PowerPermitGateOptions} but
+ * default differently here (100 and 1000, not 1 and `Infinity`), so both are
+ * redeclared rather than inherited: an intersection would publish the wrong
+ * default in the one place a caller reads them.
+ */
+export type PowerBackpressureOptions = {
+    /**
+     * Maximum number of concurrent permits.
+     */
+    capacity?: number | undefined;
+    /**
+     * Maximum number of waiting producers.
+     * `Infinity` queues without bound.
+     */
+    queueCapacity?: number | undefined;
+    /**
+     * Initial available permits. `0` is
+     * legal and means "nothing may run until the first refill".
+     */
+    initialTokens?: number | undefined;
+    /**
+     * Available-permit level below which adaptive
+     * refill begins. Defaults to `25 %` of `capacity`.
+     */
+    lowWaterMark?: number | undefined;
+    /**
+     * Permits added per refill tick while under
+     * pressure. Defaults to `10 %` of `capacity`, at least 1.
+     */
+    refillAmount?: number | undefined;
+    /**
+     * Milliseconds between refill ticks.
+     */
+    refillInterval?: number | undefined;
+    /**
+     * AIMD
+     * tuning of `refillAmount`. Off by default, so the constant-behaviour path is
+     * unchanged unless asked for.
+     */
+    adaptive?: boolean | BackpressureAdaptiveOptions | undefined;
+};
+/**
+ * Options for `PowerHistogram`.
+ */
+export type PowerHistogramOptions = {
+    /**
+     * Target relative error for every
+     * quantile, in `(0, 1)`. Smaller is more accurate and uses more buckets;
+     * outside the range throws.
+     */
+    relativeAccuracy?: number | undefined;
+    /**
+     * Advisory upper bound. Values above it are
+     * still stored faithfully, and are only counted in `outOfRangeCount`.
+     */
+    maxValue?: number | undefined;
+    /**
+     * Advisory lower bound, counted in
+     * `belowRangeCount`.
+     */
+    minValue?: number | undefined;
+    /**
+     * Legacy option, retained so existing calls
+     * keep working. It no longer sizes a dense array - read the `bucketCount`
+     * getter for the number of *occupied* buckets.
+     */
+    bucketCount?: number | undefined;
+};
+/**
+ * Options for `PowerScheduler`.
+ */
+export type PowerSchedulerOptions = {
+    /**
+     * How the flush is
+     * scheduled. `'yield'` is the cooperative primitive added in 2.0. An
+     * unrecognised value throws rather than falling back to the fastest strategy.
+     */
+    scheduling?: "microtask" | "macrotask" | "yield" | undefined;
+    /**
+     * Called when a flush throws. A
+     * throwing `onError` is swallowed.
+     */
+    onError?: ((error: unknown) => void) | null | undefined;
+};
+/**
+ * Subscriber-set options for `PowerSubscriberSet`.
+ *
+ * Distinct from {@link PowerEventBusOptions}, which it does not extend, because
+ * the set has no `event` dimension: `maxListeners` caps the whole set rather
+ * than one event's bucket.
+ */
+export type PowerSubscriberSetOptions = {
+    /**
+     * Store listeners behind `WeakRef`, so a
+     * listener no longer referenced elsewhere can be collected.
+     */
+    weak?: boolean | undefined;
+    /**
+     * Cap on the set. `0` (the default) is
+     * unlimited. A negative throws: clamped to `0` it would have silently
+     * *removed* the cap, which is the one failure direction a leak guard must not
+     * have.
+     */
+    maxListeners?: number | undefined;
+};
+/**
+ * Options for `PowerMemoizer`.
+ */
+export type PowerMemoizerOptions = {
+    /**
+     * Maps the wrapped call's
+     * arguments to a cache key. Defaults to `JSON.stringify` on the arguments.
+     * Convenient, but expensive for large or deeply-nested ones; on a hot path
+     * prefer something cheap and deterministic (join scalar arguments with a
+     * separator, or hash).
+     */
+    keyResolver?: ((...arg0: any[]) => string) | undefined;
+    /**
+     * Forwarded to the underlying
+     * `PowerCache`.
+     */
+    cacheOptions?: PowerCacheOptions | undefined;
+    /**
+     * Default TTL (ms) for wrappers built by this
+     * memoizer.
+     */
+    ttl?: number | undefined;
+    /**
+     * Default weight for wrappers built by this
+     * memoizer.
+     */
+    weight?: number | undefined;
+};
+/**
+ * Options for `PowerTimedCache`, a `PowerCache` with a fixed TTL and an
+ * automatic cleanup interval.
+ */
+export type PowerTimedCacheOptions = {
+    /**
+     * Forwarded to `PowerCache`; takes precedence
+     * over the same key in `cacheOptions`.
+     */
+    maxEntries?: number | undefined;
+    /**
+     * Cleanup interval (ms). Omitted, cleanup is
+     * started with `PowerCache`'s own default.
+     */
+    interval?: number | undefined;
+    /**
+     * Nodes scanned per cleanup tick.
+     */
+    maxCleanupPerTick?: number | undefined;
+    /**
+     * Additional options forwarded to
+     * `PowerCache`.
+     */
+    cacheOptions?: PowerCacheOptions | undefined;
+};
+/**
+ * Options handed straight to the native `Worker` constructor by
+ * `WorkerAgnostic`.
+ *
+ * Typed as an open bag rather than a closed set of keys because that is what it
+ * is: the wrapper forwards whatever it is given to whichever constructor the
+ * environment supplies, so the keys are Node's `WorkerOptions` on one side and
+ * the browser's `WorkerOptions` on the other. The two below are the ones that
+ * actually change behaviour here and are named for discoverability; the index
+ * signature is what stops the type from rejecting the rest.
+ */
+export type WorkerAgnosticOptions = {
+    [x: string]: any;
+};
+/**
+ * Options for `PowerRateLimit`.
+ */
+export type PowerRateLimitOptions = {
+    /**
+     * Attempt all-or-nothing semantics across the
+     * composed limiters. Requires each to expose `available()` or an undo
+     * primitive (`reserve`/`release`, or `addTokens`); when a safe rollback cannot
+     * be guaranteed the call returns `false`.
+     *
+     * Per-call `tryConsume(n, options)` also accepts a `{ now }` number - read
+     * **once per composed call** and threaded into every leg (PERF-007). There is
+     * deliberately no constructor `now` here: on the limiters `now` is a *function*,
+     * and having one name mean a function in one place and a number in another on
+     * the same class is a trap. The composer needs no injected clock of its own,
+     * because the per-call value covers every use the limiters' injection does.
+     */
+    atomic?: boolean | undefined;
+};
+/**
+ * The slice of a limiter's surface that `PowerRateLimit` composes.
+ *
+ * Declared as an interface rather than `Object` because the composer's whole
+ * job is calling these members; typing the array as `Object[]` made every one of
+ * those calls an error and, worse, meant a limiter that only had `tryConsume`
+ * would still be accepted.
+ *
+ * It also has to be **exported** to reach the published declaration. A local
+ * typedef is inlined structurally by the emitter, and the inlined form is
+ * unusable: it is a dozen optional members, each with a comment body, repeated
+ * for the constructor parameter and for the `limiters` property.
+ */
+export type RateLimiterLike = {
+    /**
+     * -
+     * The optional second argument carries a single `now` for the whole
+     * composition (PERF-007). A limiter that did not inject its own clock
+     * should honour it; one that did must ignore it, or a limiter under test
+     * silently changes clock mid-run. A limiter that takes only `n` is fine -
+     * it simply reads its own clock.
+     */
+    tryConsume: (arg0: number | undefined, arg1: LimiterNowOptions | undefined) => (boolean | {
+        ok: boolean;
+        retryAfterMs?: number;
+    });
+    /**
+     * A token to pass to `release` when it reserves a slot, `false` when it
+     * cannot, `null` when it has no reservation concept. `PowerGCRA` returns a
+     * number; `PowerThrottle` returns `{ n }`.
+     */
+    reserve?: ((arg0?: number | undefined) => {
+        n: number;
+    } | number | boolean | null) | undefined;
+    release?: ((arg0: any) => void) | undefined;
+    addTokens?: ((arg0: number) => void) | undefined;
+    rollback?: ((arg0: number) => void) | undefined;
+    /**
+     * A count, or a method that
+     * returns one. Both `PowerGCRA` and `PowerThrottle` expose `available()` as
+     * a *method* - the first draft of this typedef said `number`, and the
+     * consumer type test caught it by refusing to accept either helper as a
+     * limiter.
+     */
+    available?: number | ((arg0?: LimiterNowOptions | undefined) => number) | undefined;
+    /**
+     * Clear the limiter's state, when it has a
+     * reset at all. Called by `PowerRateLimit.reset()`.
+     */
+    reset?: (() => void) | undefined;
+};

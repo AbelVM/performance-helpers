@@ -192,7 +192,13 @@ void [bulkheadStats, bulkhead.active, bulkhead.pending];
 // reading this test could have copied an option that is silently ignored.
 const circuit = new PowerCircuit({ threshold: 3, timeout: 1000 });
 const retry = new PowerRetry({ maxAttempts: 3, baseDelay: 50 });
-const deadline = new PowerDeadline({ timeout: 1000 });
+// `timeout` was the same trap one line further on, and it is worth reading as
+// a pair: `PowerDeadline` bounds an attempt with `attemptTimeout` and the whole
+// operation with `totalTimeout`, and has never read a `timeout`. This line
+// compiled for as long as the constructor took `Object`, and stopped compiling
+// the moment QUAL-001 gave that constructor its real options type - which is
+// what a types-only change is *for*.
+const deadline = new PowerDeadline({ totalTimeout: 1000 });
 void [circuit, retry, deadline];
 
 // --- PowerHistogram: DDSketch since 2.0 -----------------------------------
