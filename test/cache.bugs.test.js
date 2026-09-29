@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { PowerCache, PowerBulkhead, PowerScheduler, PowerRateLimit } from '../src/index.js';
 // Internal utility - intentionally not part of the public barrel export.
 import { assertLimit, assertFunction } from '../src/utils/options.js';
+import { flush } from './helpers/flush.js';
 
 describe('assertLimit (BUG-024)', () => {
   it('accepts Infinity when allowInfinity is set', () => {
@@ -168,7 +169,7 @@ describe('PowerCache.getOrSetAsync late value (BUG-015)', () => {
     // The factory finally succeeds - the expensive result should still land,
     // so the next caller does not pay the full cost again.
     resolveFactory('LATE');
-    await new Promise((r) => setTimeout(r, 10));
+    await flush();
     expect(c.get('slow')).toBe('LATE');
   });
 
@@ -177,7 +178,7 @@ describe('PowerCache.getOrSetAsync late value (BUG-015)', () => {
     await expect(c.getOrSetAsync('bad', () => Promise.reject(new Error('nope')))).rejects.toThrow(
       'nope'
     );
-    await new Promise((r) => setTimeout(r, 10));
+    await flush();
     expect(c.has('bad')).toBe(false);
   });
 
@@ -192,12 +193,12 @@ describe('PowerCache.getOrSetAsync late value (BUG-015)', () => {
         })
     );
     // The factory itself is invoked on a microtask; let it start first.
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(c._inflightPromises.size).toBe(1);
     c.clear();
     expect(c._inflightPromises.size).toBe(0);
     resolveFactory('v');
-    await new Promise((r) => setTimeout(r, 10));
+    await flush();
   });
 });
 
@@ -213,10 +214,10 @@ describe('PowerBulkhead reset/dispose (BUG-009)', () => {
     });
     const first = bh.run(() => gate);
     // Let the first task reach the gate and take the only permit.
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(bh.active).toBe(1);
     const second = bh.run(() => 'second');
-    await new Promise((r) => setTimeout(r, 0));
+    await flush();
     expect(bh.pending).toBe(1);
 
     bh.reset();
