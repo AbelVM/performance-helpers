@@ -380,6 +380,12 @@ required is the worker reply shape.
   unconditional admission window (the "W") is what should break that tie, and it
   is missing. Treat this entry as experimental rather than a recommendation, and
   run `node bench/claims.js zipf` before trusting any number about it.
+  **The fix is known and is not a comparison operator** — it is W-TinyLFU's admission _window_, a small
+  unconditional LRU in front of the filtered space, so scan traffic dies in the window and the filter only
+  arbitrates that window's victim against a main-space victim. It is written up in
+  `design/0001-tinylfu-admission-window.md`, which also records the two measured attempts, the two retracted
+  hypotheses, the two decisions still open (window size, and whether `tinylfu` should be a no-op under
+  `policy: 'slru'`), and four acceptance criteria for the eventual patch.
   `maxEntries` and `clear()` are still honoured exactly.
   **The withdrawal originally reached this note but not the guide** — `guides/powerCache.md`
   still carried a benchmark table asserting `policy: 'lru'` + `admission: 'tinylfu'`
