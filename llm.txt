@@ -1,60 +1,84 @@
 # performance-helpers
 
-> A dependency-free toolbox of small, fast, Node/browser libraries: a worker pool, an LRU/TTL cache, rate limiters, a concurrency gate, zero-copy buffer helpers, a versioned message codec, and a tiny logger. No runtime dependencies, ESM + CJS bundles, 1.0.3 published with 2.0 unreleased.
+> A dependency-free toolbox of small, fast, Node/browser libraries: a worker pool,
+> an LRU/TTL cache, rate limiters, a concurrency gate, zero-copy buffer helpers,
+> a versioned message codec, and a tiny logger. No runtime dependencies, ESM +
+> CJS bundles, 1.0.3 published with 2.0 unreleased.
 
-A prompt-oriented index of the documentation. For *how* to use the library start at
-the quick guide; for *why* something is shaped the way it is, read the decision
-records — they are the reasoning as it stood at a point in time, and reading one
-as current guidance will mislead you.
+An index, not a tutorial.
+
+**It deliberately does not categorise the guides by subject.** `metaGuide.md`
+already does that, by the problem you are trying to solve, and a second taxonomy
+here would be a third one to keep in step with the first — which is how
+`guides/metaGuide.md` came to carry two "Realtime: framing" sections before they
+were merged.
+
+**It does not duplicate their content either.** Every guide line below is a title
+and that guide's own opening sentence, not a summary written about it, so the
+two can only disagree if the guide changes.
 
 ## Start here
 
-- [Quick guide and chooser](https://github.com/AbelVM/performance-helpers/blob/main/guides/metaGuide.md): "I have this problem, what do I reach for." Indexes every helper by domain, with combinations and common mistakes.
-- [Troubleshooting](https://github.com/AbelVM/performance-helpers/blob/main/guides/troubleshooting.md): leads with the pure-ESM `preloadNode()` failure, which is the most likely first-run problem.
-- [Errors](https://github.com/AbelVM/performance-helpers/blob/main/guides/errors.md): error codes and what each one means.
-- [Changelog](https://github.com/AbelVM/performance-helpers/blob/main/CHANGELOG.md): including claims that were measured and withdrawn.
+- [metaGuide](https://github.com/AbelVM/performance-helpers/blob/main/guides/metaGuide.md): "I have this problem, what do I reach for." Indexes every helper by domain, with combinations, and the mistakes people make.
+- [troubleshooting](https://github.com/AbelVM/performance-helpers/blob/main/guides/troubleshooting.md): Leads with the pure-ESM `preloadNode()` failure, which is the most likely first-run problem.
+- [errors](https://github.com/AbelVM/performance-helpers/blob/main/guides/errors.md): Error codes and what each one means.
+- [powerPool](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPool.md): The worker pool: autoscaling, queue policy, and the message protocol. Start here for anything concurrent.
+- [powerMessageCodec](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerMessageCodec.md): Versioned binary framing, the native structured clone, and per-worker protocol negotiation.
 
-## Core
+## Guides
 
-- [PowerPool](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPool.md): worker pool, autoscaling, queue policy, message protocol.
-- [PowerCache](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCache.md): LRU/TTL cache, memoizer, eviction policies, admission filters.
-- [PowerMessageCodec](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerMessageCodec.md): versioned binary framing, native structured clone, per-worker protocol negotiation.
-- [PowerBuffer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBuffer.md): zero-copy `ArrayBuffer` helpers.
-- [WorkerAgnostic](https://github.com/AbelVM/performance-helpers/blob/main/guides/WorkerAgnostic.md): one worker interface over Node and the browser.
+- [WorkerAgnostic](https://github.com/AbelVM/performance-helpers/blob/main/guides/WorkerAgnostic.md): One worker abstraction that works the same in Node, the browser and a web worker.…
+- [autoscale](https://github.com/AbelVM/performance-helpers/blob/main/guides/autoscale.md): PowerPool supports an optional autoscaling mode to grow or shrink the worker pool based on recent observed task latency (EWMA) and queue pressure.
+- [metrics](https://github.com/AbelVM/performance-helpers/blob/main/guides/metrics.md): A stable shape over the numbers the helpers already report. Every helper that reports anything does it through its own `stats()`, and those.
+- [now](https://github.com/AbelVM/performance-helpers/blob/main/guides/now.md): This guide documents the small timing helpers exported by the library (`nowMs`, `measureSync`, `measureAsync`) and best practices for measuring short-lived work in Node…
+- [powerBackpressure](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBackpressure.md): Producer-facing backpressure controller with adaptive refill. Off by default. With `adaptive: true` the refill amount becomes a congestion.
+- [powerBatch](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBatch.md): Microtask-coalescing dispatcher that collects synchronous `add()` calls and dispatches them as a single batch to the provided handler in the next microtask.
+- [powerBuffer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBuffer.md): Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
+- [powerBulkhead](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBulkhead.md): A partitioned executor that isolates noisy workloads into separate concurrency lanes.…
+- [powerCache](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCache.md): An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an optional reusable node pool.…
+- [powerChunking](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerChunking.md): A small helper that chunks an iterable and processes items via a `PowerPool`. Use `PowerChunker` when you have a large iterable to process and want to.
+- [powerCircuit](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCircuit.md): Simple circuit breaker primitive to protect external services from cascading failures. as `Number(x) || default`, which treats `0` as absent — so `threshold: 0`.
+- [powerCron](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCron.md): A drift-free cron-like scheduler built on `setTimeout` chaining. import { PowerCron } from 'performance-helpers/powerCron';.
+- [powerDeadline](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDeadline.md): Deadline-aware async helper for timeouts, retry budgets, and cancellation metadata. Use `PowerDeadline` when you want to wrap a promise-producing operation with:.
+- [powerDefer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDefer.md): A minimal deferred-promise primitive. Useful for coordination patterns where a promise and its resolvers need to be separated (e.g., signaling, barriers, test harnesses).
+- [powerEventBus](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerEventBus.md): Typed micro event bus for intra-process pub/sub. Useful for wiring multiple helpers (pools, queues, observers) together without coupling.
+- [powerEventLoopMonitor](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerEventLoopMonitor.md): Event-loop delay histogram, plus Node's `eventLoopUtilization()` when the runtime has it. Every latency number in this library is a measurement of *your* operation.…
+- [powerGCRA](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerGCRA.md): Generic Cell Rate Algorithm (GCRA) rate limiter — the cell-based scheduler recommended by the ATM Forum, and the algorithm behind `golang.org/x/time/rate`, Redis's…
+- [powerHistogram](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerHistogram.md): Lock-free in-process histogram for latency telemetry and approximate percentile estimation.
+- [powerLatch](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerLatch.md): Counting barrier primitive. Resolves pending waiters when the internal count reaches zero. import { PowerLatch } from '../src/helpers/powerLatch.js';.
+- [powerLogger](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerLogger.md): Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.…
+- [powerObserver](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerObserver.md): Lightweight reactive value container. Useful for exposing small pieces of state (metrics, counters, flags) without pulling in a full reactivity library.
+- [powerPermitGate](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPermitGate.md): Low-level permit queue helper for building semaphore-like concurrency primitives. that may never come, and it does not hold a queue slot in the meantime.
+- [powerQueue](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerQueue.md): A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-performance replacement for `Array#push`/`Array#shift` when building queues under sustained…
+- [powerRateLimit](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRateLimit.md): Compose multiple rate-limiters and require all to allow consumption before proceeding. Options:.
+- [powerRealtimeHub](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRealtimeHub.md): Topic fan-out with **per-subscriber bounded queues** and an **explicit slow-consumer policy**.
+- [powerRetry](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRetry.md): Retry helper with configurable backoff, jitter, a retry budget, and optional hedged attempts. Use to wrap flaky async operations such as HTTP requests.
+- [powerScheduler](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerScheduler.md): A tiny scheduler helper for coalescing deferred work into a single microtask or macrotask.…
+- [powerSemaphore](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSemaphore.md): Lightweight async concurrency gate for IO-heavy fanout. Use a semaphore when you need to limit the number of concurrent async operations without blocking the event loop.
+- [powerSlidingWindow](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSlidingWindow.md): A sliding-window rate limiter that allows up to `capacity` events per `windowMs`. import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';.
+- [powerSocketAdapter](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSocketAdapter.md): One socket interface over Node `ws`, browser `WebSocket`, and `WebSocketStream` — with liveness, per-message rate limiting, and a graceful drain.
+- [powerSubscriberSet](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSubscriberSet.md): Shared subscriber registry used by `PowerEventBus` and `PowerObserver`. import { PowerSubscriberSet } from '../src/helpers/powerSubscriberSet.js';.
+- [powerTTLMap](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerTTLMap.md): A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on access and iteration.
+- [powerThrottle](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerThrottle.md): A small token-bucket rate limiter useful for pacing work (API calls, renders, or cooperating with `PowerPool`).
+- [powerWebSocketClient](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerWebSocketClient.md): Reconnecting WebSocket client with **explicit back-pressure**, heartbeats, and `PowerMessageCodec` framing.
+- [traceContext](https://github.com/AbelVM/performance-helpers/blob/main/guides/traceContext.md): W3C `traceparent` propagation over `PowerPool` messages, as pool-level metadata that touches nothing in the payload.
 
-## Concurrency, flow control and limits
+## Why it is shaped this way
 
-- [PowerSemaphore](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSemaphore.md), [PowerPermitGate](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPermitGate.md), [PowerBulkhead](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBulkhead.md), [PowerBackpressure](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBackpressure.md)
-- [PowerThrottle](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerThrottle.md), [PowerGCRA](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerGCRA.md), [PowerSlidingWindow](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSlidingWindow.md), [PowerRateLimit](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRateLimit.md)
-- [PowerBatch](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBatch.md), [PowerQueue](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerQueue.md), [PowerChunking](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerChunking.md), [PowerDefer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDefer.md), [PowerLatch](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerLatch.md)
-- [PowerCircuit](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCircuit.md), [PowerRetry](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRetry.md), [PowerDeadline](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDeadline.md), [PowerScheduler](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerScheduler.md), [PowerCron](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCron.md)
-
-## Realtime
-
-- [PowerRealtimeHub](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerRealtimeHub.md), [PowerWebSocketClient](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerWebSocketClient.md), [PowerSocketAdapter](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSocketAdapter.md)
-- [Trace context](https://github.com/AbelVM/performance-helpers/blob/main/guides/traceContext.md): W3C `traceparent` propagation over `PowerPool` messages.
-
-## Observability
-
-- [PowerLogger](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerLogger.md), [PowerHistogram](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerHistogram.md), [PowerMetrics](https://github.com/AbelVM/performance-helpers/blob/main/guides/metrics.md), [PowerEventBus](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerEventBus.md), [PowerObserver](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerObserver.md), [PowerSubscriberSet](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSubscriberSet.md), [PowerEventLoopMonitor](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerEventLoopMonitor.md), [PowerTTLMap](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerTTLMap.md), [Autoscale](https://github.com/AbelVM/performance-helpers/blob/main/guides/autoscale.md)
-
-## Utilities
-
-- [now](https://github.com/AbelVM/performance-helpers/blob/main/guides/now.md), [measureSync / measureAsync](https://github.com/AbelVM/performance-helpers/blob/main/guides/now.md)
-
-## Optional: why, and what was tried and rejected
-
-Design decisions, kept out of the guides on purpose. Read these when a decision
-looks arbitrary and you need to know whether it is load-bearing or accidental.
+Decision records, not guidance. They record reasoning as it stood at a point in
+time; reading one as current advice will mislead you. Two were accepted and one
+was rejected — and the rejected one is the most useful of the three, because it
+carries the measurements that killed the idea.
 
 - [ADR 0001 — the pool frames every message in a versioned binary envelope](https://github.com/AbelVM/performance-helpers/blob/main/adr/0001-versioned-envelope-protocol.md) (Accepted)
 - [ADR 0002 — `PowerQueue` is a hand-rolled ring buffer, not an array](https://github.com/AbelVM/performance-helpers/blob/main/adr/0002-ring-buffer-queue.md) (Accepted)
 - [ADR 0003 — a frequency admission filter does not earn its keep on this workload](https://github.com/AbelVM/performance-helpers/blob/main/adr/0003-tinylfu-admission-window.md) (Rejected, with the measurements that killed it)
 
-## Optional: for people working on this repository
+## Working on this repository
 
-- [AGENTS.md](https://github.com/AbelVM/performance-helpers/blob/main/AGENTS.md): conventions, the commands that matter, and the mistakes this project has actually made.
+- [AGENTS.md](https://github.com/AbelVM/performance-helpers/blob/main/AGENTS.md): conventions, the verification gate, and the mistakes this project has actually made.
 - [Contributing](https://github.com/AbelVM/performance-helpers/blob/main/CONTRIBUTING.md)
 - [Examples](https://github.com/AbelVM/performance-helpers/blob/main/examples/README.md)
 - [Benchmarks](https://github.com/AbelVM/performance-helpers/blob/main/bench/README.md)
-- [API reference](https://github.com/AbelVM/performance-helpers/tree/main/docs): generated by typedoc and committed.
+- [Changelog](https://github.com/AbelVM/performance-helpers/blob/main/CHANGELOG.md)
+- [API reference](https://github.com/AbelVM/performance-helpers/tree/main/docs): generated by typedoc and committed, because the project website links into it.

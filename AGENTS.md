@@ -40,10 +40,10 @@ reason the next proposal does not repeat the work.
 
 ```bash
 npm run verify          # the full gate: lint, test, types, ratchet, build, bundle, drift
-npm test                # vitest run — 1570 tests, 175 files
+npm test                # vitest run — ~1570 tests, ~175 files (the gate, not this number)
 npm run test:coverage   # what CI runs
 npm run test:types      # tsc against the public type tests
-npm run lint            # eslint; 0 errors, ~47 warnings, all pre-existing
+npm run lint            # eslint; 0 errors expected, plus a few dozen pre-existing warnings
 npm run types:generate  # regenerate types/ — required after any JSDoc change
 npm run types:drift     # fails if types/ is out of date
 ```
