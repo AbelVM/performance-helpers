@@ -48,6 +48,17 @@ npm run types:generate  # regenerate types/ — required after any JSDoc change
 npm run types:drift     # fails if types/ is out of date
 ```
 
+The gate is `scripts/verify.mjs`, and it is the **only** list of checks. CI calls
+it rather than keeping its own copy — it did once, and the copies drifted until
+CI was running neither `test:types` nor `check:bundle` (see the comment at the top
+of `.github/workflows/ci.yml`). **To add a check, add it to that script**, not to
+the workflow.
+
+`VERIFY_TEST=test:coverage npm run verify` is what CI runs: the coverage
+thresholds in `vitest.config.js` only apply under `--coverage`, so plain
+`npm test` does not enforce them. That is the only intended difference between
+the two.
+
 `.husky/pre-commit` runs prettier, eslint and lint-staged on staged files, and
 regenerates `types/`. A changeset in `.changeset/` is **not** added
 automatically — write one.

@@ -262,7 +262,7 @@
     "check:bundle": "node scripts/check-bundle-exports.mjs",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.cjs",
     "review:check": "node scripts/review-row.mjs --check",
-    "verify": "npm run lint && npm run test && npm run test:types && npm run typecheck:ratchet && npm run build && npm run check:bundle && npm run types:generate && npm run types:drift",
+    "verify": "node scripts/verify.mjs",
     "prepublishOnly": "npm run verify",
     "changeset": "changeset",
     "changeset:status": "changeset status",

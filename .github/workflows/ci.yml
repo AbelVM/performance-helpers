@@ -1,17 +1,11 @@
-# This job does not run `npm run verify`, and that is deliberate: CI substitutes
-# `test:coverage` for `test` (the thresholds in `vitest.config.js` only apply
-# under `--coverage`), adds a CJS smoke test, and uploads an artifact. It
-# therefore maintains its own list of `npm run` steps, and a hand-maintained
-# duplicate of another script is exactly the thing that rots.
+# CI runs the same gate a maintainer runs: `npm run verify`, with the one
+# documented difference that it substitutes `test:coverage` for `test`.
 #
-# It had rotted. `verify` ran `test:types` and `check:bundle`; this file ran
-# neither, for as long as both existed -- so the generated declarations were
-# checked only on maintainers' machines, and a bundle missing any export other
-# than the two the smoke test names would have shipped. Both are below now.
-#
-# **When you add a step to `verify`, add it here too**, or replace this list with
-# a single `npm run verify` and keep only the coverage substitution. The only
-# documented difference between the two lists is `test:coverage` vs `test`.
+# The step list lives in `scripts/verify.mjs`. This file used to keep its own
+# copy, and the copies drifted -- CI ran neither `test:types` nor `check:bundle`
+# for as long as both existed, so the committed declarations were compiled only on
+# maintainers' machines and a bundle missing 70 of its 72 exports would have
+# passed. **Do not add checks here.** Add them to the gate.
 name: CI
 
 on:
@@ -45,56 +39,24 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      # Ratchets the TypeScript debt instead of merely reporting it.
+      # One call. The step list lives in `scripts/verify.mjs` so there is exactly
+      # one of it, and adding a check to the gate cannot leave CI behind -- which
+      # is how CI ended up running neither `test:types` nor `check:bundle` for as
+      # long as both existed.
       #
-      # `types:generate` only *emits* declarations (`checkJs: false`), so before
-      # this existed the shipped `types/*.d.ts` were never checked at all. They
-      # are now checked two ways, and the two projects are the same two the
-      # release gate runs:
-      #   tsconfig.check.json  internal `checkJs` over JSDoc that has never been
-      #                         type-checked (pre-existing debt)
-      #   tsconfig.types.json  the generated declarations compiled as a
-      #                         downstream TypeScript consumer would
-      #
-      # Neither is at zero and neither can be, without a large unrelated change.
-      # The gate is on *direction*: the count may fall, never rise. That is what
-      # turns ~593 errors into a measurable series instead of a number nobody
-      # looks at again. `node scripts/typecheck-ratchet.cjs --verbose` prints the
-      # full output; `--update` re-baselines after a deliberate increase.
-      - name: Typecheck (debt ratchet)
-        run: npm run typecheck:ratchet
+      # `VERIFY_TEST=test:coverage` is the *only* intended difference from a local
+      # `npm run verify`: the thresholds in `vitest.config.js` only apply under
+      # `--coverage`, so `npm test` on its own does not enforce them.
+      - name: Verify
+        run: npm run verify
+        env:
+          VERIFY_TEST: test:coverage
 
-      # The other of the "same two the release gate runs" that the comment above
-      # refers to. It was missing here: CI compiled the internal `checkJs` project
-      # and never the generated declarations, so `types/*.d.ts` — which are
-      # committed, and which every TypeScript consumer sees — were not checked as
-      # a consumer would see them anywhere except `npm run verify` on a
-      # maintainer's machine and `prepublishOnly` at publish time. The first
-      # notice a declaration is wrong would be a release.
-      - name: Typecheck (generated declarations as a consumer)
-        run: npm run test:types
-
-      # `test` alone does not enforce the thresholds configured in
-      # vitest.config.js - they only apply under `--coverage`.
-      - name: Test with coverage
-        run: npm run test:coverage
-
-      - name: Build
-        run: npm run build
-
-      # Every export, not two of them. `check:bundle` reads the export list from
-      # `src/index.js` and compares it against what the built bundle actually
-      # exposes -- the failure the smoke test below cannot see, because a bundle
-      # missing one of the other 70 exports loads fine and behaves correctly for
-      # everything anyone happened to use. It needs `build` to have run.
-      - name: Verify the bundle exposes every export
-        run: npm run check:bundle
-
-      # The `require` condition now points at the CJS bundle rather than ESM
-      # source, so a broken bundle would only surface for CommonJS consumers.
+      # The one check CI adds rather than inherits. It is behavioural where
+      # `check:bundle` inside the gate is structural: that one proves the bundle
+      # exposes every export, this one proves it *runs* -- loads, constructs, and
+      # computes a correct answer. `dist/` exists by this point because the gate
+      # builds before it finishes.
       - name: Smoke-test the CJS bundle
         # A block scalar, not an inline `node -e "..."`: the script contains
         # colons, which made this file invalid YAML - GitHub Actions would have
@@ -110,12 +72,6 @@ jobs:
             if (!(p > 9e7)) throw new Error('histogram clamped out-of-range data: ' + p);
             console.log('cjs ok, p99.9=' + p);
           "
-
-      # `types/` is committed, so the only way it can drift from `src/` is for
-      # someone to change a JSDoc and forget to regenerate. Regenerate, then
-      # require the tree to be clean.
-      - name: Verify types are in sync with src
-        run: npm run types:generate && npm run types:drift
 
       - name: Upload dist artifact
         uses: actions/upload-artifact@v4

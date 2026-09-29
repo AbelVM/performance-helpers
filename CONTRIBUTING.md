@@ -34,7 +34,15 @@ npm install
 3. Add or update tests for behavior changes.
 4. Update the relevant guide or README entry when user-facing behavior changes.
 5. Add a changeset for anything a consumer can observe (see [Releases](#releases)).
-6. Run `npm run verify` before opening a PR.
+6. Run `npm run verify
+
+# What CI runs. The coverage thresholds in vitest.config.js only apply under
+
+# --coverage, so plain `npm test` does not enforce them; this substitution is the
+
+# only difference between the two.
+
+VERIFY_TEST=test:coverage npm run verify` before opening a PR.
 
 ## Useful commands
 
@@ -114,7 +122,7 @@ source cannot diverge**, and a parity assertion there passes no matter what you
 do to either side — three attempts at one were written and discarded before this
 was the accepted reason.
 
-The check also catches a bundle *older than its sources*, which is the failure
+The check also catches a bundle _older than its sources_, which is the failure
 that actually reaches users: `dist/` is not committed, so a stale bundle
 survives locally and every UMD test then asserts against yesterday's code.
 `npm publish` runs `verify`, so that cannot ship.
@@ -123,12 +131,12 @@ survives locally and every UMD test then asserts against yesterday's code.
 
 Two TypeScript projects exist, and both are wired into the release gate:
 
-| Command | What it checks |
-| --- | --- |
-| `npm run typecheck` | `tsconfig.check.json` - the JSDoc in `src/`, with `checkJs` on. Internal quality. |
-| `npm run test:types` | `tsconfig.types.json` - the generated `types/*.d.ts` compiled the way a downstream TypeScript consumer would compile them, with no `@types/node`. |
-| `npm run typecheck:ratchet` | Both of the above, as a gate on the **total** error count. |
-| `npm run check:bundle` | The built `dist/performance-helpers.cjs` exports everything `src/index.js` declares, and is not older than `src/`. Run by `verify` after `build`; must run *outside* vitest to be meaningful. |
+| Command                     | What it checks                                                                                                                                                                                |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run typecheck`         | `tsconfig.check.json` - the JSDoc in `src/`, with `checkJs` on. Internal quality.                                                                                                             |
+| `npm run test:types`        | `tsconfig.types.json` - the generated `types/*.d.ts` compiled the way a downstream TypeScript consumer would compile them, with no `@types/node`.                                             |
+| `npm run typecheck:ratchet` | Both of the above, as a gate on the **total** error count.                                                                                                                                    |
+| `npm run check:bundle`      | The built `dist/performance-helpers.cjs` exports everything `src/index.js` declares, and is not older than `src/`. Run by `verify` after `build`; must run _outside_ vitest to be meaningful. |
 
 Neither project is at zero, and neither can be fixed in one sitting, so the
 gate is on direction rather than on zero: **the count may fall, never rise.**
@@ -140,7 +148,7 @@ npm run typecheck:ratchet -- --update  # print the new BASELINE line
 ```
 
 `BASELINE` lives at the top of `scripts/typecheck-ratchet.cjs`. If your change
-*fixes* type errors, lower it. If your change *adds* them, fix them - do not
+_fixes_ type errors, lower it. If your change _adds_ them, fix them - do not
 raise the ceiling to make the build pass. A genuine exception (a new file that
 is itself known debt) should raise it, and say so in the PR, so the increase is
 deliberate rather than accidental.
@@ -171,8 +179,8 @@ The loop:
 
 2. Open a PR. CI runs the full gate, including `changeset status`.
 
-3. On merge to `main`, the **Release** workflow opens a *"chore: version
-   packages"* PR containing the version bump, the regenerated `types/*.d.ts`,
+3. On merge to `main`, the **Release** workflow opens a _"chore: version
+   packages"_ PR containing the version bump, the regenerated `types/*.d.ts`,
    and `CHANGELOG.md`. That PR is the reviewable record of what the release
    contains.
 
