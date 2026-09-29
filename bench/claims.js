@@ -257,7 +257,7 @@ function runZipfWorkload() {
     { label: 'lru', policy: 'lru', admission: 'none' },
     { label: 'lru + tynilfu', policy: 'lru', admission: 'tinylfu' },
     // The window-floor sweep (BENCH-002c): the same request stream, replayed
-    // against every candidate window size. `design/0001-tinylfu-admission-window.md`
+    // against every candidate window size. `adr/0003-tinylfu-admission-window.md`
     // ends by asking one question of the window -- raise the floor and see
     // whether retention follows -- so the sweep lives next to the workload that
     // answers it rather than in a private script that can drift from it.

@@ -57,14 +57,18 @@ export class PowerCache {
     _map: Map<any, any>;
     _head: import("./jsdoc-types.js").CacheNode | null;
     _tail: any;
-    _pool: {
-        key: null;
-        value: null;
-        weight: number;
-        expiresAt: number;
-        prev: null;
-        next: null;
-    }[];
+    /**
+     * Recycled nodes, kept to avoid allocating one per insert.
+     *
+     * Annotated because an empty `[]` takes its element type from whatever is
+     * first pushed into it, and the prefill literal below is a *narrower* type
+     * than `CacheNode` — which then made every other push into this pool a type
+     * error. The annotation is the fix; the two prefill fields are the rest of
+     * it.
+     *
+     * @type {CacheNode[]}
+     */
+    _pool: CacheNode[];
     _currentWeight: number;
     _hits: number;
     _misses: number;
@@ -105,7 +109,7 @@ export class PowerCache {
      *
      * It defaults to **`0` — the window is off** — and that is the shipped
      * behaviour of `admission: 'tinylfu'`. See the note below and
-     * `design/0001-tinylfu-admission-window.md`.
+     * `adr/0003-tinylfu-admission-window.md`.
      *
      * Arming is last because it depends on `_sketch` and `_maxEntries`. An
      * earlier version computed it just below the sketch and was then zeroed
@@ -394,7 +398,7 @@ export class PowerCache {
      * space or is dropped, and which one is the only place the sketch arbitrates.
      *
      * Two rules here are not in the W-TinyLFU *description* and both were found
-     * by attempting it (see `design/0001-tinylfu-admission-window.md`):
+     * by attempting it (see `adr/0003-tinylfu-admission-window.md`):
      *
      * - **The challenger wins ties.** A tie means "no evidence either is better",
      *   and discarding the challenger discards the only evidence the filter has.

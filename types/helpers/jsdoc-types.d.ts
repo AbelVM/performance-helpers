@@ -971,6 +971,14 @@ export type CacheNode = {
     expiresAt: number;
     prev: CacheNode | null;
     next: CacheNode | null;
+    /**
+     * - Whether this node sits in the W-TinyLFU
+     * admission window. Off unless `windowSize` is set, and read only by the
+     * window path. Declared here rather than left to the object literal in
+     * `_allocNode`, because a property the typedef does not mention is a property
+     * every other reference to a node has to be narrowed around.
+     */
+    inWindow: boolean;
 };
 /**
  * Options accepted by `PowerCache`.
@@ -1021,7 +1029,7 @@ export type PowerCacheOptions = {
      * window: new keys land there unconditionally and only the window's oldest is
      * arbitrated against the main-space victim. `null` selects the recommended
      * size, `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))`.
-     * See `design/0001-tinylfu-admission-window.md`.
+     * See `adr/0003-tinylfu-admission-window.md`.
      */
     windowSize?: number | null | undefined;
     /**

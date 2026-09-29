@@ -1,10 +1,42 @@
-# 0001 — W-TinyLFU admission window
+# 0003. A frequency admission filter does not earn its keep on this workload
 
-**Status:** Proposed. Blocked on one decision (window size), not on the mechanism.
-**Affects:** `PowerCache` `{ admission: 'tinylfu' }` (`src/helpers/powerCache.js`).
-**Evidence:** `node bench/claims.js zipf`. Every number below is from that run.
+**Status:** Rejected
+**Affects:** `PowerCache` `{ admission: 'tinylfu' }` (`src/helpers/powerCache.js`), and the reasoning behind any future cache admission work
+**Evidence:** `node bench/claims.js zipf`, `node bench/claims.js coldstart`. Every number below is from those runs.
 
-## The problem
+## Decision
+
+`admission: 'tinylfu'` stays as it is — a frequency sketch consulted once, on
+arrival, with no admission window — and `PowerCache` does **not** gain a
+W-TinyLFU window. `windowSize` exists, defaults to `0`, and is documented as not
+recommended.
+
+The mechanism is implemented, correct, and tested. It is not shipped as a
+recommended option because it does not fix the defect that motivated it, and
+because the alternative that already ships beats it.
+
+## Consequences
+
+- **The window is kept, not promoted.** It is reachable behind an opt-in flag so
+  that the measurement in the appendix stays reproducible: a mechanism whose only
+  record is a paragraph in a design note is one refactor away from being
+  rediscovered as promising, which is how the first three attempts at this
+  happened.
+- **`policy: 'slru'` is the answer to scan resistance** on this workload, at
+  89.4 % against plain LRU's 75.0 %.
+- **The cold-start collapse is the reason this is not a tuning problem.** A
+  working-set key arriving into a cold sketch ties with the scan keys already
+  resident, and a tie is not a win — so the filter refuses exactly the traffic
+  it should admit, indefinitely, because a key that is never admitted never
+  accumulates the frequency that would let it win. TinyLFU needs history, and a
+  cold cache flooded by a one-shot scan is the workload built to deny it.
+- **A future proposal should start with a measurement in this shape**, not with
+  the mechanism. Two of the four prior attempts at the window were abandoned on
+  bugs that produced a plausible number rather than an error; see the appendix.
+
+## Context
+
+### The problem
 
 `admission: 'tinylfu'` is measurably **worse than not using it**, which is not
 what an admission filter is for:

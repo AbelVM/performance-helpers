@@ -6,7 +6,7 @@
  * place it is turned on.
  *
  * It exists here for a narrower reason than a performance one. The window-floor
- * sweep in `bench/claims.js zipf` is the experiment that `design/0001-tinylfu-admission-window.md`
+ * sweep in `bench/claims.js zipf` is the experiment that `adr/0003-tinylfu-admission-window.md`
  * ends by asking for, and it cannot be run without an implementation to sweep.
  * **The sweep's answer was negative** — no window size beats plain LRU on that
  * workload — so the honest description of this feature is "measured, not

@@ -68,8 +68,10 @@ export class PowerChunker {
     // an exact chunking strategy; for generic iterables we stream chunks to
     // avoid materializing the entire iterable into memory.
     const isArray = Array.isArray(iterable);
-    const items = isArray ? iterable : null;
-    const total = isArray ? items.length : null;
+    /** @type {any[]|null} */
+    const items = isArray ? /** @type {any[]} */ (iterable) : null;
+    /** @type {number|null} */
+    const total = items ? items.length : null;
 
     const hw =
       (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) ||
@@ -88,26 +90,26 @@ export class PowerChunker {
     // bias by `fnComplexity`. For unknown-length iterables pick a conservative
     // default sized to `poolSize` so we can stream efficiently.
     let chunkSize;
-    if (Number.isFinite(explicitChunkSize) && explicitChunkSize > 0) {
-      chunkSize = Math.max(1, Math.floor(explicitChunkSize));
+    if (Number.isFinite(explicitChunkSize) && (explicitChunkSize ?? 0) > 0) {
+      chunkSize = Math.max(1, Math.floor(explicitChunkSize ?? 1));
     } else if (total != null) {
       chunkSize = Math.max(
         1,
-        Math.floor(total / Math.max(1, poolSize * CHUNKS_PER_WORKER_TARGET)) || 1
+        Math.floor((total ?? 0) / Math.max(1, (poolSize ?? 1) * CHUNKS_PER_WORKER_TARGET)) || 1
       );
     } else {
       // streaming mode default
-      chunkSize = Math.max(1, Math.floor(poolSize));
+      chunkSize = Math.max(1, Math.floor(poolSize ?? 1));
     }
 
-    const explicitProvided = Number.isFinite(explicitChunkSize) && explicitChunkSize > 0;
+    const explicitProvided = Number.isFinite(explicitChunkSize) && (explicitChunkSize ?? 0) > 0;
     if (!explicitProvided) {
       if (fnComplexity === 'light') chunkSize = Math.max(1, Math.floor(chunkSize * 2));
       else if (fnComplexity === 'heavy') chunkSize = Math.max(1, Math.floor(chunkSize / 2));
     }
 
     // If total is small, keep chunkSize small
-    if (total > 0 && total < chunkSize) chunkSize = total;
+    if ((total ?? 0) > 0 && (total ?? 0) < chunkSize) chunkSize = total ?? 1;
 
     // Create a lightweight inline worker constructor tuned to `fn`.
     // Methods are placed on the prototype to avoid per-instance function allocations.
@@ -207,6 +209,9 @@ function makeInlineWorkerConstructor(fn) {
       this._fn = fn;
     }
 
+    /**
+     * @param {any} message
+     */
     postMessage(message) {
       // `decodeInbound` reads all three carriers — a framed message, a native
       // envelope, and a 1.x bare-JSON body. This block was the third copy of
@@ -227,24 +232,28 @@ function makeInlineWorkerConstructor(fn) {
                 const idx = i;
                 pending.push(
                   res
-                    .then((v) => {
-                      results[idx] = v;
-                    })
-                    .catch((err) => {
-                      results[idx] = {
-                        error: true,
-                        code: err?.code || 'ERR_ITEM',
-                        message: err?.message,
-                        stack: err?.stack,
-                      };
-                      if (typeof self.onerror === 'function') {
-                        try {
-                          self.onerror(err);
-                        } catch (ex) {
-                          /* ignore */
+                    .then(
+                      /** @param {any} v */ (v) => {
+                        results[idx] = v;
+                      }
+                    )
+                    .catch(
+                      /** @param {any} err */ (err) => {
+                        results[idx] = {
+                          error: true,
+                          code: err?.code || 'ERR_ITEM',
+                          message: err?.message,
+                          stack: err?.stack,
+                        };
+                        if (typeof self.onerror === 'function') {
+                          try {
+                            self.onerror(err);
+                          } catch (ex) {
+                            /* ignore */
+                          }
                         }
                       }
-                    })
+                    )
                 );
               } else {
                 results[i] = res;
@@ -271,7 +280,7 @@ function makeInlineWorkerConstructor(fn) {
 
           if (typeof self.onmessage === 'function') {
             try {
-              const resp = { processed: chunk.length, results };
+              const resp = { processed: chunk.length, results, correlationId: undefined };
               if (decoded?.correlationId != null) resp.correlationId = decoded.correlationId;
               self.onmessage({ data: resp });
             } catch (e) {
@@ -296,11 +305,19 @@ function makeInlineWorkerConstructor(fn) {
       });
     }
 
+    /**
+     * @param {string} type
+     * @param {any} cb
+     */
     addEventListener(type, cb) {
       if (type === 'message') this.onmessage = cb;
       if (type === 'error') this.onerror = cb;
     }
 
+    /**
+     * @param {string} type
+     * @param {any} cb
+     */
     removeEventListener(type, cb) {
       if (type === 'message' && this.onmessage === cb) this.onmessage = null;
       if (type === 'error' && this.onerror === cb) this.onerror = null;
@@ -312,6 +329,14 @@ function makeInlineWorkerConstructor(fn) {
   };
 }
 
+/**
+ * @param {any} pool
+ * @param {any[]} items
+ * @param {number} total
+ * @param {number} chunkSize
+ * @param {any} postOptions
+ * @param {number} poolSize
+ */
 function dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions, poolSize) {
   const totalChunks = Math.ceil(total / chunkSize);
   if (totalChunks <= 0) return;
@@ -344,6 +369,11 @@ function dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions
   }
 }
 
+/**
+ * @param {any} pool
+ * @param {Iterable<any>} it
+ * @param {number} csize
+ */
 function streamIterableIntoPool(pool, it, csize) {
   let chunkIndex = 0;
   try {
@@ -384,7 +414,14 @@ function streamIterableIntoPool(pool, it, csize) {
   }
 }
 
+/**
+ * @param {any} pool
+ * @param {any[]} failedChunks
+ * @param {string} mode
+ * @param {unknown} [cause]
+ */
 function notifyChunkDispatchFailure(pool, failedChunks, mode, cause) {
+  /** @type {any} */
   const err = new Error(`PowerChunker failed to dispatch ${failedChunks.length} chunk(s)`);
   err.code = 'ECHUNKDISPATCH';
   err.failedChunks = failedChunks.slice();

@@ -192,10 +192,33 @@ export class PowerCache {
     this._map = new Map();
     this._head = null;
     this._tail = null;
+    /**
+     * Recycled nodes, kept to avoid allocating one per insert.
+     *
+     * Annotated because an empty `[]` takes its element type from whatever is
+     * first pushed into it, and the prefill literal below is a *narrower* type
+     * than `CacheNode` — which then made every other push into this pool a type
+     * error. The annotation is the fix; the two prefill fields are the rest of
+     * it.
+     *
+     * @type {CacheNode[]}
+     */
     this._pool = [];
-    // prefill pool to reduce runtime allocations if requested
+    // Prefill pool to reduce runtime allocations if requested. `inWindow` is set
+    // on every prefilled node as well as on freshly allocated ones: a prefilled
+    // node without it would be `undefined` rather than `false`, which behaves
+    // the same today and is exactly the kind of latent divergence that becomes a
+    // bug when someone writes `node.inWindow === false`.
     for (let i = 0; i < Math.min(initialPoolSize || 0, this.maxPoolSize); i++)
-      this._pool.push({ key: null, value: null, weight: 0, expiresAt: 0, prev: null, next: null });
+      this._pool.push({
+        key: null,
+        value: null,
+        weight: 0,
+        expiresAt: 0,
+        prev: null,
+        next: null,
+        inWindow: false,
+      });
 
     this._currentWeight = 0;
     this._hits = 0;
@@ -266,7 +289,7 @@ export class PowerCache {
     // The broader W-TinyLFU admission window that this option was heading
     // towards is **not** in this release - the mechanism is correct but still
     // measures worse than plain LRU on this workload, so it did not meet its own
-    // acceptance criteria. `design/0001-tinylfu-admission-window.md` has the
+    // acceptance criteria. `adr/0003-tinylfu-admission-window.md` has the
     // full story, including why.
     this._sketch =
       admission === 'tinylfu' && this._policy === 'lru'
@@ -291,7 +314,7 @@ export class PowerCache {
      *
      * It defaults to **`0` — the window is off** — and that is the shipped
      * behaviour of `admission: 'tinylfu'`. See the note below and
-     * `design/0001-tinylfu-admission-window.md`.
+     * `adr/0003-tinylfu-admission-window.md`.
      *
      * Arming is last because it depends on `_sketch` and `_maxEntries`. An
      * earlier version computed it just below the sketch and was then zeroed
@@ -884,7 +907,7 @@ export class PowerCache {
    * space or is dropped, and which one is the only place the sketch arbitrates.
    *
    * Two rules here are not in the W-TinyLFU *description* and both were found
-   * by attempting it (see `design/0001-tinylfu-admission-window.md`):
+   * by attempting it (see `adr/0003-tinylfu-admission-window.md`):
    *
    * - **The challenger wins ties.** A tie means "no evidence either is better",
    *   and discarding the challenger discards the only evidence the filter has.

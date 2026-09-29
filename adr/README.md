@@ -33,10 +33,11 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 
 ## Index
 
-| #                                             | Decision                                                     | Status   |
-| --------------------------------------------- | ------------------------------------------------------------ | -------- |
-| [0001](./0001-versioned-envelope-protocol.md) | The pool frames every message in a versioned binary envelope | Accepted |
-| [0002](./0002-ring-buffer-queue.md)           | `PowerQueue` is a hand-rolled ring buffer, not an array      | Accepted |
+| #                                             | Decision                                                             | Status   |
+| --------------------------------------------- | -------------------------------------------------------------------- | -------- |
+| [0001](./0001-versioned-envelope-protocol.md) | The pool frames every message in a versioned binary envelope         | Accepted |
+| [0002](./0002-ring-buffer-queue.md)           | `PowerQueue` is a hand-rolled ring buffer, not an array              | Accepted |
+| [0003](./0003-tinylfu-admission-window.md)    | A frequency admission filter does not earn its keep on this workload | Rejected |
 
 ## Status values
 
@@ -46,3 +47,21 @@ A rejected decision is still worth recording. A reader who proposes the same
 thing next year should find the measurement that killed it rather than repeat
 the work — which is what happened twice in this project's own history, and is
 why `review.md` keeps `PERF-006` and `BENCH-002` rather than closing them.
+
+## There is one of these directories, not two
+
+An earlier layout had both `adr/` and `design/`, with `design/` holding a single
+32 KB working note about one abandoned cache mechanism. It was a duplicate genre
+with a one-file directory: a reader opening either to ask "why is this like
+this?" had no way to know which held the answer, and the answer could turn out to
+be in neither.
+
+Everything of durable value in that note became **0003**, with the
+implementation history kept as its appendix. A rejected decision with a
+measurement attached is the strongest thing this directory can contain, and the
+note it replaced was neither a decision nor short.
+
+So: decision history lives here, and working notes do not get their own
+directory at the root. If a piece of design history is worth keeping, it is
+either a decision (an ADR, shaped as one, with a status) or it belongs in a
+guide — and the test is whether a reader would act differently after reading it.

@@ -341,7 +341,7 @@ The window beats plain LRU on the sustained mix and does nothing for the cold
 one, because a working-set key arriving into a cold sketch ties with the scan
 keys already resident — and a key that is never admitted never accumulates the
 frequency that would let it win. `policy: 'slru'` remains the answer to scan
-resistance. `design/0001-tinylfu-admission-window.md` has the full sweep, the
+resistance. `adr/0003-tinylfu-admission-window.md` has the full sweep, the
 four acceptance criteria, and the two boundary bugs the experiment found.
 
 #### What the sketch itself gets right
@@ -391,7 +391,7 @@ produces the worst variant measured.
 
 The full argument, including the two measured attempts and the measurements
 that killed three other hypotheses, is in
-[the design note](../design/0001-tinylfu-admission-window.md). Until it is
+[the design note (ADR 0003)](../adr/0003-tinylfu-admission-window.md). Until it is
 resolved, the numbers above stand and the option stays off by default.
 
 ### `hasEqual` and deep comparison limits
