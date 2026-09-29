@@ -259,6 +259,16 @@ class WorkerWrapper {
  *
  * Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
  *
+ * Carries `code === 'ERR_POOL_TERMINATED'`, the same code the pool uses for the
+ * synchronous throw from a dispatch method on a shut-down pool. Both mean the
+ * same thing — the pool is finished, so is the work — and `guides/errors.md`
+ * tells callers to branch on `err.code`. Without it, a caller awaiting a
+ * response at shutdown got an error with no code and fell through the
+ * documented `switch` to `default`, which is the case most likely to be hit:
+ * shutting down is exactly when pending promises are still outstanding.
+ * `name` is unchanged, so `err.name === 'PowerPoolShutdownError'` keeps
+ * working.
+ *
  * @class PowerPoolShutdownError
  * @extends {Error}
  * @public
@@ -267,6 +277,7 @@ export class PowerPoolShutdownError extends Error {
   constructor(message = 'PowerPool has been shut down') {
     super(message);
     this.name = 'PowerPoolShutdownError';
+    this.code = 'ERR_POOL_TERMINATED';
   }
 }
 
@@ -836,6 +847,7 @@ export class PowerPool {
       try {
         underlying.postMessage(prepared.message, prepared.transfer);
         if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
+        this._markPendingWorker(correlationKey, obj.id);
         obj.tasks++;
         this._activeTasks++;
         obj.lastActive = startTime;
@@ -858,6 +870,7 @@ export class PowerPool {
       if (prepared.transfer?.length) obj.worker.postMessage(prepared.message, prepared.transfer);
       else obj.worker.postMessage(prepared.message);
       if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
+      this._markPendingWorker(correlationKey, obj.id);
       obj.tasks++;
       this._activeTasks++;
       obj.lastActive = startTime;
@@ -1161,8 +1174,18 @@ export class PowerPool {
     // Tasks the pool believed were in flight on this worker are no longer
     // tracked: `resize()`/`removeWorker()` terminate busy workers too, and the
     // response that would normally settle them will never arrive.
+    //
+    // That last part used to be a comment and nothing else. The count was
+    // decremented, the worker was terminated, and the caller's `awaitResponse`
+    // promise was left to time out on its own — 30 seconds by default, and
+    // forever under `awaitResponseTimeout: Infinity`. Every other path that
+    // abandons a pending response (queue eviction, post failure, pool-growth
+    // failure, shutdown) rejects it, so this was the one way to lose a
+    // response silently. Rejecting here is what makes "the worker is gone"
+    // observable at the moment it happens.
     if (workerObj.tasks > 0) this._decrementActiveTasks(workerObj.tasks);
     workerObj.tasks = 0;
+    this._rejectPendingForWorker(id, reason);
     // Mark the worker settled *after* the drain, and before `terminate()`. A
     // `message` already in flight from this worker will still reach the pool
     // handler - `terminate()` stops new work, it does not recall a dispatched
@@ -1186,6 +1209,69 @@ export class PowerPool {
     this._terminatedWorkerTaskCountsTotal += workerObj.completedTasks || 0;
     this._terminatedWorkerTaskCountsCount += 1;
     return id;
+  }
+
+  /**
+   * Reject every pending response that was dispatched to a worker that is being
+   * retired. The response for those tasks lives in that worker and is never
+   * coming, so the promise is settled here rather than on its timeout.
+   *
+   * Scans the pending map rather than keeping a per-worker index, because the
+   * number of outstanding responses is small and bounded by
+   * `awaitResponseTimeout`, while the index would have to be maintained on the
+   * response path too — and a per-worker index that is updated in one place and
+   * not another silently under-rejects, which is the failure this exists to
+   * prevent.
+   *
+   * @param {number|string|null} workerId - The worker being retired.
+   * @param {string} [reason] - Why, used in the error message only.
+   * @returns {number} How many pending responses were rejected.
+   * @private
+   */
+  _rejectPendingForWorker(workerId, reason = 'unknown') {
+    if (workerId == null || !this._pendingResponses?.size) return 0;
+    const doomed = [];
+    try {
+      for (const [key, entry] of this._pendingResponses) {
+        if (entry?.workerId === workerId) doomed.push(key);
+      }
+    } catch (err) {
+      this._debugLog?.(err, '_rejectPendingForWorker: scan failed');
+      return 0;
+    }
+    for (const key of doomed) {
+      try {
+        this._cleanupPendingResponse(key, {
+          rejectWith: poolRefusal(
+            'ERR_POOL_WORKER_TERMINATED',
+            `postMessage failed: worker ${workerId} was terminated (${reason}) before responding`
+          ),
+        });
+      } catch (err) {
+        this._debugLog?.(err, '_rejectPendingForWorker: cleanup failed');
+      }
+    }
+    return doomed.length;
+  }
+
+  /**
+   * Record which worker a pending response was dispatched to, so retirement
+   * can find it. Stamped after the post succeeds: a response that never left
+   * the pool is not owed anything by the worker it was aimed at.
+   *
+   * @param {string|number|null|undefined} correlationKey - The pending key.
+   * @param {number|string|null} workerId - The worker that received the task.
+   * @returns {void}
+   * @private
+   */
+  _markPendingWorker(correlationKey, workerId) {
+    if (correlationKey == null || workerId == null) return;
+    try {
+      const entry = this._pendingResponses.get(String(correlationKey));
+      if (entry) entry.workerId = workerId;
+    } catch (err) {
+      this._debugLog?.(err, '_markPendingWorker: failed');
+    }
   }
 
   /**
@@ -3725,6 +3811,7 @@ export class PowerPool {
           if (item.transfer?.length) workerObj.worker.postMessage(item.message, item.transfer);
           else workerObj.worker.postMessage(item.message);
           if (typeof workerObj._startTimes?.push === 'function') workerObj._startTimes.push(now);
+          this._markPendingWorker(item.correlationId, workerObj.id);
           workerObj.tasks++;
           remainingSlots--;
           this._activeTasks++;

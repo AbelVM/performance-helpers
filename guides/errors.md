@@ -52,13 +52,14 @@ If your pool still runs with `messageCodec: 'legacy'`, use `u82o(e.data)` here i
 
 Some `PowerPool` failures are not exceptions thrown at you — they are _refusals_, and the pool signals them with a stable `err.code` so you can branch on them without string-matching a message. Every code below means **the pool is healthy; it declined this particular piece of work**, and the right response differs for each one. Treating them as generic errors and retrying blindly is the common mistake: retrying a `QUEUE_FULL` refusal is precisely the load that filled the queue.
 
-| `err.code`                          | Raised by                                           | What it means                                                                 | What to do                                                                                                                              |
-| ----------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `ERR_POOL_QUEUE_FULL`               | `postMessage` / `postMessageBatch` / `stopThePress` | The task queue is at `options.maxQueueLength`. The incoming task did not fit. | **Shed load.** Return a 429, drop the request, or apply backoff. Retrying immediately re-sends the same task into a full queue.         |
-| `ERR_POOL_DRAIN_TIMEOUT`            | `drain({ timeout })`                                | The pool did not become idle within `timeout` ms.                             | **Retry or give up.** Something is still running — inspect `getStats().activeTasks` and the per-worker `tasks` counts to find out what. |
-| `ERR_POOL_DRAIN_TOO_MANY_WAITERS`   | `drain()`                                           | `options.maxDrainWaiters` drains are already waiting.                         | **Stop draining.** You are draining in a loop, which is the bug this bound exists to catch. Drain once and share the result.            |
-| `ERR_POOL_DUPLICATE_CORRELATION_ID` | `postMessageBatch`, `postMessage`                   | Two requests claim the same `correlationId`.                                  | **Fix the id generator.** Nothing was dispatched, so no state needs unwinding — this is a naming collision, not a runtime failure.      |
-| `ERR_POOL_TERMINATED`               | any dispatch method                                 | The pool has been shut down.                                                  | Do not retry. Create a new pool.                                                                                                        |
+| `err.code`                          | Raised by                                           | What it means                                                                                                                   | What to do                                                                                                                              |
+| ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ERR_POOL_QUEUE_FULL`               | `postMessage` / `postMessageBatch` / `stopThePress` | The task queue is at `options.maxQueueLength`. The incoming task did not fit.                                                   | **Shed load.** Return a 429, drop the request, or apply backoff. Retrying immediately re-sends the same task into a full queue.         |
+| `ERR_POOL_DRAIN_TIMEOUT`            | `drain({ timeout })`                                | The pool did not become idle within `timeout` ms.                                                                               | **Retry or give up.** Something is still running — inspect `getStats().activeTasks` and the per-worker `tasks` counts to find out what. |
+| `ERR_POOL_DRAIN_TOO_MANY_WAITERS`   | `drain()`                                           | `options.maxDrainWaiters` drains are already waiting.                                                                           | **Stop draining.** You are draining in a loop, which is the bug this bound exists to catch. Drain once and share the result.            |
+| `ERR_POOL_DUPLICATE_CORRELATION_ID` | `postMessageBatch`, `postMessage`                   | Two requests claim the same `correlationId`.                                                                                    | **Fix the id generator.** Nothing was dispatched, so no state needs unwinding — this is a naming collision, not a runtime failure.      |
+| `ERR_POOL_WORKER_TERMINATED`        | `postMessage` / `postMessageBatch` (Promise form)   | The worker that owed this response was retired — by `resize()`, idle reaping, autoscale, or `stopThePress` — before it replied. | **Retry elsewhere, or give up.** The work is lost, not delayed. Any handler that ran on the worker is gone with it.                     |
+| `ERR_POOL_TERMINATED`               | any dispatch method                                 | The pool has been shut down.                                                                                                    | Do not retry. Create a new pool.                                                                                                        |
 
 A refused task that was _not_ awaiting a response returns `false` rather than throwing, so a plain `postMessage` caller sees a falsy return instead of a code. The codes are only observable through the Promise path (`awaitResponse` or an explicit `correlationId`):
 
@@ -78,11 +79,18 @@ try {
       throw new TooManyRequestsError();
     case 'ERR_POOL_TERMINATED':
       throw new ServiceUnavailableError();
+    case 'ERR_POOL_WORKER_TERMINATED':
+      // The task was dispatched and is now lost with its worker. This is not
+      // a refusal like QUEUE_FULL - the work was accepted - so it is
+      // "retry" or "fail", never "shed load".
+      throw new RetryableServiceError();
     default:
       throw err;
   }
 }
 ```
+
+`ERR_POOL_WORKER_TERMINATED` is the one to be careful about, because it is the only code that means **the work was accepted and then lost**. A worker retired by `resize()`, idle reaping, autoscale or `stopThePress` takes its in-flight tasks with it, so nothing will ever answer those `awaitResponse` promises. The pool rejects them the moment the worker goes rather than letting them sit until `awaitResponseTimeout` — and under `awaitResponseTimeout: Infinity` there is no timeout, so before this the promise simply never settled. Treat it as a lost task: retry on another worker, or surface the failure, but do not read it as the pool shedding load.
 
 Two of these codes are worth calling out as _good news_: `ERR_POOL_DUPLICATE_CORRELATION_ID` from a batch is thrown **before anything is dispatched**, so a collision cannot leave half the batch on the wire and the other half orphaned. And `ERR_POOL_DRAIN_TIMEOUT` / `ERR_POOL_DRAIN_TOO_MANY_WAITERS` abandon only the _wait_ — the pool keeps dispatching and keeps serving every other caller, so treating them as fatal to the pool is a mistake.
 

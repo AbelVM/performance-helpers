@@ -3,12 +3,23 @@
  *
  * Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
  *
+ * Carries `code === 'ERR_POOL_TERMINATED'`, the same code the pool uses for the
+ * synchronous throw from a dispatch method on a shut-down pool. Both mean the
+ * same thing — the pool is finished, so is the work — and `guides/errors.md`
+ * tells callers to branch on `err.code`. Without it, a caller awaiting a
+ * response at shutdown got an error with no code and fell through the
+ * documented `switch` to `default`, which is the case most likely to be hit:
+ * shutting down is exactly when pending promises are still outstanding.
+ * `name` is unchanged, so `err.name === 'PowerPoolShutdownError'` keeps
+ * working.
+ *
  * @class PowerPoolShutdownError
  * @extends {Error}
  * @public
  */
 export class PowerPoolShutdownError extends Error {
     constructor(message?: string);
+    code: string;
 }
 /**
  * @typedef {import('./jsdoc-types.js').WorkerObj} WorkerObj
@@ -321,6 +332,35 @@ export class PowerPool {
      * @private
      */
     private _terminateWorker;
+    /**
+     * Reject every pending response that was dispatched to a worker that is being
+     * retired. The response for those tasks lives in that worker and is never
+     * coming, so the promise is settled here rather than on its timeout.
+     *
+     * Scans the pending map rather than keeping a per-worker index, because the
+     * number of outstanding responses is small and bounded by
+     * `awaitResponseTimeout`, while the index would have to be maintained on the
+     * response path too — and a per-worker index that is updated in one place and
+     * not another silently under-rejects, which is the failure this exists to
+     * prevent.
+     *
+     * @param {number|string|null} workerId - The worker being retired.
+     * @param {string} [reason] - Why, used in the error message only.
+     * @returns {number} How many pending responses were rejected.
+     * @private
+     */
+    private _rejectPendingForWorker;
+    /**
+     * Record which worker a pending response was dispatched to, so retirement
+     * can find it. Stamped after the post succeeds: a response that never left
+     * the pool is not owed anything by the worker it was aimed at.
+     *
+     * @param {string|number|null|undefined} correlationKey - The pending key.
+     * @param {number|string|null} workerId - The worker that received the task.
+     * @returns {void}
+     * @private
+     */
+    private _markPendingWorker;
     /**
      * Throws when the pool has been shut down. Called from every public entry
      * point that would otherwise dispatch, enqueue or grow workers.

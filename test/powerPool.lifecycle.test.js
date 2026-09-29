@@ -59,21 +59,102 @@ describe('PowerPool worker retirement', () => {
     expect(id).toBe(pool.workers[0].id);
   });
 
-  it('does not settle a pending response when its worker is retired', async () => {
-    const pool = makePool({ size: 1, maxSize: 1, awaitResponseTimeout: 30 });
-    // `_terminateWorker` acknowledges that the response "will never arrive"
-    // and drops the task from the global counter — but it does not reject the
-    // caller's promise. So the caller waits out the whole `awaitResponseTimeout`
-    // instead of being told at once, and with `awaitResponseTimeout: Infinity`
-    // (a legal value, since timing options allow it) it waits forever. Every
-    // other path that abandons a pending response — queue eviction, post
-    // failure, shutdown — rejects it.
-    //
-    // Pinned as-is. Rejecting on retirement is the obviously right behaviour
-    // and is a contract change, so it is a decision rather than a tidy-up.
+  it('rejects a pending response when its worker is retired', async () => {
+    const pool = makePool({ size: 1, maxSize: 1, awaitResponseTimeout: 30_000 });
+    // The response for this task lives in the worker being retired and is
+    // never coming. This used to be left to time out: 30 seconds by default,
+    // and forever under `awaitResponseTimeout: Infinity`, because retirement
+    // decremented the task counter and terminated the worker without touching
+    // the caller's promise. Every other path that abandons a pending response
+    // rejects it, so this was the one way to lose a response silently.
+    const pending = pool.postMessage({ a: 1 }, undefined, { awaitResponse: true });
+    pool._terminateWorker(pool.workers[0], 'resize');
+    await expect(pending).rejects.toMatchObject({ code: 'ERR_POOL_WORKER_TERMINATED' });
+  });
+
+  it('rejects at retirement rather than waiting out the timeout', async () => {
+    const pool = makePool({ size: 1, maxSize: 1, awaitResponseTimeout: 30_000 });
     const pending = pool.postMessage({ a: 1 }, undefined, { awaitResponse: true });
     pool._terminateWorker(pool.workers[0], 'test');
-    await expect(pending).rejects.toThrow();
+    // The point of the fix is *when*, not just *that*. A rejection arriving
+    // after the full timeout is indistinguishable to a caller from one that
+    // arrived promptly, so the race is asserted rather than the value.
+    const outcome = await Promise.race([
+      pending.then(
+        () => 'resolved',
+        (e) => e.code
+      ),
+      new Promise((r) => setTimeout(() => r('still waiting'), 250)),
+    ]);
+    expect(outcome).toBe('ERR_POOL_WORKER_TERMINATED');
+  });
+
+  it('leaves a pending response owed by a surviving worker alone', async () => {
+    const pool = makePool({ size: 2, minSize: 2, maxSize: 2, maxTasksPerWorker: 1 });
+    const [a, b] = pool.workers;
+    const onA = pool.postMessage({ which: 'a' }, undefined, {
+      workerId: a.id,
+      awaitResponse: true,
+      timeout: 30_000,
+    });
+    const onB = pool.postMessage({ which: 'b' }, undefined, {
+      workerId: b.id,
+      awaitResponse: true,
+      timeout: 30_000,
+    });
+    pool._terminateWorker(a, 'resize');
+    await expect(onA).rejects.toMatchObject({ code: 'ERR_POOL_WORKER_TERMINATED' });
+
+    // Rejecting every outstanding response would be just as wrong as rejecting
+    // none: this task is still owed a reply by a worker that is running. The
+    // promise is raced against a short timer rather than awaited, because
+    // awaiting one that is *supposed* to stay pending is the thing under test.
+    const outcome = await Promise.race([
+      onB.then(
+        () => 'settled',
+        () => 'settled'
+      ),
+      new Promise((r) => setTimeout(() => r('pending'), 100)),
+    ]);
+    expect(outcome).toBe('pending');
+
+    // Retiring its own worker settles it, which is what makes the previous
+    // assertion about selectivity rather than about a permanent leak.
+    pool._terminateWorker(b, 'resize');
+    await expect(onB).rejects.toMatchObject({ code: 'ERR_POOL_WORKER_TERMINATED' });
+  });
+
+  it('cleans up the entry so a later sweep cannot re-reject it', async () => {
+    const pool = makePool({ size: 1, maxSize: 1 });
+    const pending = pool.postMessage({ a: 1 }, undefined, { awaitResponse: true });
+    pool._terminateWorker(pool.workers[0], 'resize');
+    await expect(pending).rejects.toMatchObject({ code: 'ERR_POOL_WORKER_TERMINATED' });
+    // `_cleanupPendingResponse` deletes the entry. If it did not, the next reap
+    // would find it again and reject a promise that has already settled.
+    expect(pool._pendingResponses.size).toBe(0);
+    expect(pool._rejectPendingForWorker(0, 'again')).toBe(0);
+  });
+
+  it('rejects nothing for a worker with no id', async () => {
+    const pool = makePool({ size: 1, maxSize: 1 });
+    const pending = pool.postMessage({ a: 1 }, undefined, { awaitResponse: true });
+    // A null id is not a key any entry can have been stamped with, so the sweep
+    // must be a no-op rather than matching every unstamped entry.
+    expect(pool._rejectPendingForWorker(null, 'test')).toBe(0);
+    // Shut the pool down here rather than leaving it to the teardown: the
+    // promise is still outstanding, and a rejection with no handler is an
+    // unhandled rejection that fails the whole run rather than this test.
+    //
+    // `ERR_POOL_TERMINATED` rather than the class name: `guides/errors.md`
+    // tells callers to branch on `err.code`, and shutting down is exactly when
+    // pending promises are outstanding, so it is the case that pattern has to
+    // cover. `name` is asserted too, because callers already matching on it
+    // must keep working.
+    pool.terminate();
+    await expect(pending).rejects.toMatchObject({
+      code: 'ERR_POOL_TERMINATED',
+      name: 'PowerPoolShutdownError',
+    });
   });
 
   it('does not double-count tasks when a busy worker is retired', () => {

@@ -270,7 +270,7 @@ async function shutdown() {
 
 - `shutdown()` — performs a full stop: clears the internal reaper interval, terminates workers, clears internal queues, and rejects any pending `awaitResponse` Promises with a `PowerPoolShutdownError`. Use this when you need to ensure no background timers remain and that any callers awaiting responses are notified.
 
-- If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises immediately and removes the associated pending state. This avoids leaked promise bookkeeping during worker teardown or replacement.
+- If a worker is terminated while it still has pending `awaitResponse` requests, the pool rejects those Promises immediately — with `code === 'ERR_POOL_WORKER_TERMINATED'` — and removes the associated pending state. This avoids leaked promise bookkeeping during worker teardown or replacement, and it is the only way you learn that those tasks were lost. **This includes retirements you did not ask for**: `resize()` down, idle reaping (`idleTimeout`), autoscale shrinking the fleet, and `stopThePress()` all terminate workers, and any in-flight `awaitResponse` request on a retired worker is dropped with it. If you need those responses to survive, await them before you resize or drain.
 
 - `terminate()` — delegates to `shutdown()` for consistent behavior. It is safe to call synchronously when tearing down resources; it will also reject pending Promises and clear timers.
 
@@ -297,8 +297,11 @@ try {
   // somewhere else: pool.shutdown() or pool.terminate() may be called
   const resp = await p;
 } catch (err) {
-  if (err && err.name === 'PowerPoolShutdownError') {
+  if (err?.code === 'ERR_POOL_TERMINATED' || err?.name === 'PowerPoolShutdownError') {
     // pool was shut down while awaiting response
+  } else if (err?.code === 'ERR_POOL_WORKER_TERMINATED') {
+    // the worker holding this task was retired — resize, idle reap, autoscale.
+    // The work is lost, not delayed: retry elsewhere or surface the failure.
   } else {
     // other error
   }
