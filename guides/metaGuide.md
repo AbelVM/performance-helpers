@@ -19,6 +19,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 - Prefer the simplest helper that matches the requirement.
 - Add composition helpers only when the system boundary demands them.
 - Reach for low-level primitives like `PowerPermitGate`, `PowerScheduler`, and `PowerSubscriberSet` only when higher-level helpers stop fitting.
+- If you would rather see a working call than read about one, `npm run example <name>` runs a short script per family — see [`examples/`](../examples/README.md). They are executed by the test suite, so they cannot drift from the API.
 
 ---
 

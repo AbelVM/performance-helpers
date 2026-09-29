@@ -35,7 +35,7 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel V\u00e1zquez Montoro",
+  "author": "Abel Vázquez Montoro",
   "type": "module",
   "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
@@ -236,7 +236,7 @@
   "scripts": {
     "build": "vite build",
     "test": "vitest run",
-    "lint": "eslint \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
+    "lint": "eslint \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"examples/**/*.mjs\"",
     "lint:fix": "eslint --fix \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
     "format": "prettier --write \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"*.md\"",
     "prepare": "husky",
@@ -247,6 +247,7 @@
     "bench": "node --expose-gc bench/run.js",
     "bench:pool": "node --expose-gc bench/run.js pool",
     "bench:cache": "node --expose-gc bench/run.js cache",
+    "example": "node scripts/run-example.mjs",
     "types:generate": "tsc --project tsconfig.json --emitDeclarationOnly --declaration --allowJs --outDir types --declarationMap false",
     "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs",
     "types:drift": "git diff --exit-code -- types",

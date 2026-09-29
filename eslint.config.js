@@ -46,8 +46,14 @@ export default [
     },
   },
   {
-    // Benchmarks and throwaway diagnostics are allowed to be less tidy.
-    files: ['bench/**/*.js', 'scripts/**/*.{cjs,mjs}'],
+    // Benchmarks, throwaway diagnostics, and the `examples/` scripts.
+    //
+    // An example's output *is* the deliverable: a script that prints nothing is
+    // not an example, so `no-console` does not apply to it. The scripts are
+    // also linted by the pre-commit hook but were not in the `lint` script's
+    // globs, which meant they were checked by one command and not the other -
+    // and only the hook failed, on a typo, weeks after the file was written.
+    files: ['bench/**/*.js', 'scripts/**/*.{cjs,mjs}', 'examples/**/*.mjs'],
     rules: {
       complexity: 'off',
       'max-lines-per-function': 'off',

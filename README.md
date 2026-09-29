@@ -157,6 +157,17 @@ npm run docs
 
 ## Usage examples
 
+Runnable scripts live in [`examples/`](examples/README.md), one per helper family. They are executed by the test suite, so they cannot drift from the API:
+
+```sh
+npm run example              # list them
+npm run example cache        # run one
+npm run example -- --all     # run every one
+```
+
+The guides below cover the reference material; the examples exist so you can see
+a working call before reading the prose.
+
 Import everything from the package entry:
 
 ```javascript
