@@ -399,9 +399,15 @@ required is the worker reply shape.
   **The fix is known and is not a comparison operator** — it is W-TinyLFU's admission _window_, a small
   unconditional LRU in front of the filtered space, so scan traffic dies in the window and the filter only
   arbitrates that window's victim against a main-space victim. It is written up in
-  `design/0001-tinylfu-admission-window.md`, which also records the two measured attempts, the two retracted
-  hypotheses, the two decisions still open (window size, and whether `tinylfu` should be a no-op under
-  `policy: 'slru'`), and four acceptance criteria for the eventual patch.
+  `design/0001-tinylfu-admission-window.md`, which records the two measured attempts, the two retracted
+  hypotheses, four acceptance criteria for the eventual patch, and the two open decisions — now both made.
+  The window size is `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))`: the floor of 4 matters
+  because an earlier attempt used Caffeine's bare ratio, which on a 40-entry cache clamps to a **one-slot**
+  window and made scan resistance measurably _worse_ (30/40 → 22/40). And `admission: 'tynilfu'` is to be a
+  **no-op under `policy: 'slru'`** — SLRU already has a probation region doing the same job, and stacking
+  them measures as the worst variant. **Scope, stated honestly:** the window is a second LRU region with its
+  own weight accounting, so `maxEntries`/`maxWeight`, iteration, `size`, `stats()` and disposal all have to
+  change together. It is a structural change to a hot path, not a patch, and it is **not** in this release.
   `maxEntries` and `clear()` are still honoured exactly.
   **The withdrawal originally reached this note but not the guide** — `guides/powerCache.md`
   still carried a benchmark table asserting `policy: 'lru'` + `admission: 'tinylfu'`
