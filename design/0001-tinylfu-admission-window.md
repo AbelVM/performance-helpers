@@ -463,3 +463,121 @@ window is a structural change with a size choice, an interaction rule, and its
 own tests, and the 360 LOC in the plan row does not include the two decisions
 above. Writing the code first and picking the window size by experiment would
 be repeating the mistake the three retracted hypotheses represent.
+
+---
+
+## The window-floor experiment, and the answer
+
+The question this note ended on — _raise the window floor and see whether
+retention follows_ — has now been asked, and the answer is **yes, and then no**.
+Retention follows the floor in one direction and runs away from it in the other,
+and which direction you care about decides whether the window is a win.
+
+The sweep runs inside `bench/claims.js zipf`, not in a private script, so there
+is one definition of the workload. (A first attempt at a standalone harness
+produced numbers that disagreed with the benchmark — 58 % against its 75 % — and
+was discarded. That is recorded here because it is the failure mode this note
+warns about: the moment the workload stops being the benchmark's own, the
+measurement stops meaning anything.)
+
+### Sustained Zipf + scan — `node bench/claims.js zipf`
+
+| variant                     | ws hit rate |     survivors |
+| --------------------------- | ----------: | ------------: |
+| `lru`                       |      75.0 % |     17.2 / 40 |
+| `lru` + `tinylfu` (shipped) |      70.8 % |     15.2 / 40 |
+| window = 1                  |  **76.5 %** |     15.4 / 40 |
+| window = 2                  |      75.7 % |     15.6 / 40 |
+| window = 4                  |  **76.2 %** |     16.4 / 40 |
+| window = 8                  |      72.6 % |     17.2 / 40 |
+| window = 16                 |      70.3 % | **18.8 / 40** |
+| window = 25                 |      69.0 % |     18.6 / 40 |
+| window = 32                 |      69.8 % |     17.6 / 40 |
+| `slru`                      |  **89.4 %** |     33.0 / 40 |
+| `slru` + `tinylfu`          |  **89.4 %** |     33.0 / 40 |
+
+Two trends, and they pull against each other:
+
+- **Small windows (1–4) maximise the hit rate.** They beat plain LRU, and they
+  beat the shipped filter by about six points. This is a real result: the filter
+  that currently makes a cache _worse_ than doing nothing is, with a window,
+  better than doing nothing.
+- **Large windows (16–25) maximise the survivor count** and lose the hit rate.
+  A bigger window admits more scan keys into main space, so more working-set
+  keys are still resident at the end — having been displaced and re-admitted
+  repeatedly during the run.
+
+So "retention" is not one number. The hit rate rewards a window small enough to
+absorb the scan; the survivor count rewards one large enough to shelter the
+working set. Against the metric the note gates on — the hit rate — the answer is
+a window of 1 to 4.
+
+### Cold start — `node bench/claims.js coldstart`
+
+The other half, and the case the window was actually built for.
+
+| variant                     |   hit rate | survivors |
+| --------------------------- | ---------: | --------: |
+| `lru`                       | **80.0 %** |     40/40 |
+| `lru` + `tinylfu` (shipped) |      0.0 % |      0/40 |
+| window = 1                  |      1.0 % |      2/40 |
+| window = 8                  |      2.0 % |      9/40 |
+| window = 16                 |      1.5 % |     17/40 |
+
+**The window does not rescue cold start at any size**, and the reason is
+structural rather than a matter of tuning. A working-set key arriving into a cold
+sketch ties with the scan keys already resident, and a tie is not a win — so the
+filter refuses precisely the traffic it should admit, and refuses it forever
+because a key that is never admitted never accumulates the frequency that would
+let it win. TinyLFU needs history, and a cold cache flooded by a one-shot scan
+is the one workload built specifically to deny it.
+
+This is the defect that motivated the item, and it survives the mechanism built
+to fix it.
+
+### Two more bugs, found by the tests this experiment required
+
+Both are the same defect class this note has been recording, and both produced a
+_plausible_ number rather than an error:
+
+- **Arbitration judged the count after the insert.** `_arbitrateWindow` tested
+  `size >= maxEntries` once the newcomer was already in the list, so the last key
+  of every fill contended with a main-space victim it should have been promoted
+  past. A 40-key warm ended at **39**.
+- **`_windowOldest()` walked a fixed number of steps.** Correct only while the
+  window is full. A challenger that loses arbitration is dropped and the window
+  is briefly one short, at which point the walk reached past the boundary into
+  main space — and a main-space recency bump for `k-6` landed _behind_ a key
+  inserted fifty sets later, silently destroying main space's recency order.
+  Membership is the tail run of flagged nodes, at every fill level.
+
+The first of those is what made the _first_ sweep look negative. Window sizes 1
+through 32 all landed within a point of the shipped behaviour, which read as
+"the filter earns nothing" — and that reading was an artifact of a cache that
+ended every fill one entry short. Fixing it moved window=1 from 70.9 % to
+**76.5 %**, from below plain LRU to above it.
+
+**A negative sweep result deserves a second look before it is believed.** The
+first one looked like a finding about the mechanism, and was a finding about a
+boundary.
+
+### Where this leaves the item
+
+The note's gate was four criteria, all or nothing. Measured:
+
+| criterion                                      | result                                                                           |
+| ---------------------------------------------- | -------------------------------------------------------------------------------- |
+| 1. Cold start beats plain LRU                  | **not met** — 2.0 % against 80.0 % at the best size                              |
+| 2. Sustained at or above the 77.0 % doorkeeper | **not met** — 76.5 % at the best size, by half a point                           |
+| 3. `slru` stays at 89.4 %                      | met — unchanged                                                                  |
+| 4. No counter regression                       | met — `test/smallLfu.test.js` and the new `test/powerCache.window.test.js` green |
+
+Two of four, and criterion 1 by a margin no window size moves. So the window
+**does not ship as a recommended option**, and `windowSize` stays `0` by default
+and documented as not recommended. `slru` remains the measured answer to
+scan resistance, at 89.4 %.
+
+What is kept is the evidence: the implementation behind an opt-in flag, the
+sweep in the benchmark, the cold-start case as its own workload, and the tests
+that keep the two honest. A mechanism whose only record is a paragraph in a
+design note is one refactor away from being rediscovered as promising.

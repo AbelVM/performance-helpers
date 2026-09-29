@@ -1014,6 +1014,17 @@ export type PowerCacheOptions = {
      */
     admission?: "none" | "tinylfu" | undefined;
     /**
+     * - Size of the W-TinyLFU admission
+     * window, used only with `admission: 'tinylfu'`. `0` (the default) is the
+     * shipped behaviour, which refuses a challenger outright rather than routing it
+     * through a window. A positive value makes the last `windowSize` entries the
+     * window: new keys land there unconditionally and only the window's oldest is
+     * arbitrated against the main-space victim. `null` selects the recommended
+     * size, `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))`.
+     * See `design/0001-tinylfu-admission-window.md`.
+     */
+    windowSize?: number | null | undefined;
+    /**
      * - Eviction policy. `'slru'` (opt-in) splits
      * the list into probation and protected segments and promotes on access, which
      * resists a one-off sequential scan. Defaults to `'lru'`.

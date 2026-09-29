@@ -320,10 +320,29 @@ The fix is **not** a comparison operator. Changing `>=` to `>` was implemented
 and measured: it improved the sustained mix (70.9 % → 77.0 %, finally beating
 plain LRU) but moved the cold-start case only from 2.5 % to 2.7 %, so a scan
 walks the working set — the exact failure the feature exists to prevent. It was
-reverted. The correct mechanism is W-TinyLFU's admission _window_: a small
-region at the MRU end that accepts new keys unconditionally, so scan traffic is
+reverted.
+
+The mechanism that _is_ built is W-TinyLFU's admission _window_: a small region
+at the MRU end that accepts new keys unconditionally, so scan traffic is
 absorbed there and the filter arbitrates only that window's victim against a
-main-space victim. That is not built.
+main-space victim. It is **off by default** (`windowSize: 0`) and documented as
+not recommended, because it fixes the sustained case and not the cold one:
+
+| variant                | sustained ws hit rate | cold-start hit rate |
+| ---------------------- | --------------------: | ------------------: |
+| `lru`                  |                75.0 % |          **80.0 %** |
+| `admission: 'tinylfu'` |                70.8 % |               0.0 % |
+| + `windowSize: 1`      |            **76.5 %** |               1.0 % |
+| + `windowSize: 16`     |                70.3 % |               1.5 % |
+| `policy: 'slru'`       |            **89.4 %** |                   — |
+
+Both columns are `node bench/claims.js zipf` and `node bench/claims.js coldstart`.
+The window beats plain LRU on the sustained mix and does nothing for the cold
+one, because a working-set key arriving into a cold sketch ties with the scan
+keys already resident — and a key that is never admitted never accumulates the
+frequency that would let it win. `policy: 'slru'` remains the answer to scan
+resistance. `design/0001-tinylfu-admission-window.md` has the full sweep, the
+four acceptance criteria, and the two boundary bugs the experiment found.
 
 #### What the sketch itself gets right
 

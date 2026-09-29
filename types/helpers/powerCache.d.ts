@@ -38,7 +38,7 @@ export class PowerCache {
      * @param {PowerCacheOptions} [options]
      * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, admission, now, }?: PowerCacheOptions, ...args: any[]);
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, eagerCleanupOnRead, defaultAsyncTimeout, onError, policy, admission, windowSize, now, }?: PowerCacheOptions, ...args: any[]);
     maxEntries: number;
     maxWeight: number;
     maxPoolSize: number;
@@ -95,6 +95,38 @@ export class PowerCache {
      * @private
      */
     private _sketch;
+    /**
+     * Size of the W-TinyLFU admission window, or `0` for no window.
+     *
+     * The window is the last `windowSize` entries of the recency list: new keys
+     * land there unconditionally, and only the window's oldest entry is
+     * arbitrated against the main-space victim. That is what lets a one-shot
+     * scan be absorbed in a region it cannot displace the working set from.
+     *
+     * It defaults to **`0` — the window is off** — and that is the shipped
+     * behaviour of `admission: 'tinylfu'`. See the note below and
+     * `design/0001-tinylfu-admission-window.md`.
+     *
+     * Arming is last because it depends on `_sketch` and `_maxEntries`. An
+     * earlier version computed it just below the sketch and was then zeroed
+     * again by the declaration further down, so the option silently did nothing
+     * and every test that turned it on failed for the same uninteresting reason.
+     *
+     * @type {number}
+     * @private
+     */
+    private _windowSize;
+    /**
+     * MRU end of the admission window, or `null` when the list is shorter than
+     * the window. Derived rather than tracked: `_windowOldest()` walks back
+     * from the tail, because every attempt that maintained this pointer
+     * incrementally got it wrong. The window is *positional*, and a node
+     * carrying a correct `inWindow` flag can still be on the wrong side of the
+     * boundary.
+     * @type {CacheNode|null}
+     * @private
+     */
+    private _windowStart;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -273,6 +305,119 @@ export class PowerCache {
      * @returns {void}
      */
     private _moveToTail;
+    /**
+     * The oldest node in the admission window, or `null` when the window is empty.
+     *
+     * Derived from the tail run of flagged nodes rather than maintained as a
+     * pointer, and derived by *following the flag* rather than by walking back a
+     * fixed number of steps. Both halves matter:
+     *
+     * - A pointer has to be updated by every mutation of the list. Every attempt
+     *   that maintained one missed a mutation, and produced a counter reading
+     *   negative some distance from the splice that caused it.
+     * - A fixed walk of `windowSize` steps is only right while the window is
+     *   **full**. A challenger that loses arbitration is dropped and the window is
+     *   briefly one short, at which point the walk reaches past the boundary into
+     *   main space: `main space, k-47, k-6, window` with the window's two
+     *   survivors after it, which put a recency bump for `k-6` *behind* a key
+     *   inserted fifty sets later and quietly destroyed the recency order of main
+     *   space. The window is "the flagged run at the tail" at every fill level,
+     *   and that is what this returns.
+     *
+     * The flag is the source of truth for _membership_ because it is set in
+     * exactly one place (admission) and cleared in exactly one (promotion or
+     * drop). List consistency against it is checked by `test/powerCache.window.test.js`,
+     * which is the half this cannot verify on its own.
+     *
+     * @private
+     * @returns {CacheNode|null}
+     */
+    private _windowOldest;
+    /**
+     * The eviction candidate in main space: the entry just below the window.
+     *
+     * `null` when the window holds the whole list, which is the cold-cache case
+     * the note calls out: with no main space there is nothing to compare against,
+     * and evicting a node against *itself* would remove it from `_map` and lose
+     * it permanently.
+     *
+     * @private
+     * @returns {CacheNode|null}
+     */
+    private _windowVictim;
+    /**
+     * Splice an unlinked node in at the MRU end of main space — immediately
+     * before the window's oldest entry.
+     *
+     * This is the *one* splice that may place a node on the main-space side of
+     * the boundary, and every path that leaves the window goes through it.
+     * Appending to the tail instead is the error three separate implementations
+     * made: it puts a main-space node back inside the window region, the region
+     * and the counter stop describing the same set of nodes, and the visible
+     * symptom is a counter bug some distance from its cause.
+     *
+     * Falls back to the tail when the window is empty (main space then runs to
+     * the end of the list) and to a head fix when there is no main space at all.
+     *
+     * @private
+     * @param {CacheNode} node - An unlinked node. Its links are overwritten.
+     * @returns {void}
+     */
+    private _insertAtMainSpaceMrU;
+    /**
+     * Move a node out of the window and into main space, in front of the window.
+     *
+     * @private
+     * @param {CacheNode} node - A linked window node.
+     * @returns {void}
+     */
+    private _promoteFromWindow;
+    /**
+     * Evict one node, reporting it and returning it to the node pool.
+     *
+     * Single-node sibling of `_evictIfNeeded`, for the paths that displace a
+     * specific victim rather than sweeping. Sharing the unlink/report/free
+     * sequence is what keeps `onEvict` firing on every path — a window eviction
+     * that skipped the callback would be invisible to every user cleanup and to
+     * the pool's own node accounting.
+     *
+     * @private
+     * @param {CacheNode} node
+     * @returns {void}
+     */
+    private _evictNode;
+    /**
+     * Admit a new key into the window, then arbitrate the window's oldest entry.
+     *
+     * Called after a new key has been appended at the tail. Once the window is
+     * full, its oldest entry is the challenger: it either takes a place in main
+     * space or is dropped, and which one is the only place the sketch arbitrates.
+     *
+     * Two rules here are not in the W-TinyLFU *description* and both were found
+     * by attempting it (see `design/0001-tinylfu-admission-window.md`):
+     *
+     * - **The challenger wins ties.** A tie means "no evidence either is better",
+     *   and discarding the challenger discards the only evidence the filter has.
+     *   Refusing ties is what made a fill-then-read caller lose every key written
+     *   after the first few, because they all tie at estimate 1.
+     * - **Only arbitrate at capacity.** While main space has room the filter has
+     *   nothing to protect and a comparison has no signal — every fresh key sits
+     *   at estimate 1, so every comparison is a tie and the churn evicts the
+     *   entry the previous `set` just promoted. Measured: a 40-key warm ended with
+     *   5 entries instead of 40. Caffeine's `admit` makes the same check.
+     *
+     * `previousSize` is the count **before** the arrival, and it has to be. A
+     * cache filled to exactly `maxEntries` has been full the whole time the last
+     * key was arriving; testing the count *after* the insert makes the final key
+     * of every fill contend with a main-space victim it should have been promoted
+     * past, which drops it. That is a 40-key warm ending at 39 — one key short,
+     * no error, and invisible unless the test checks the count.
+     *
+     * @private
+     * @param {number} previousSize - `this._map.size` before this arrival.
+     * @returns {void}
+     */
+    private _arbitrateWindow;
     /**
      * Evict nodes from the head (least-recently used) until the cache
      * satisfies both `maxEntries` and `maxWeight` constraints. For each

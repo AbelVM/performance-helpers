@@ -131,6 +131,7 @@ export class PowerCache {
     /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
     policy = 'lru',
     admission = 'none',
+    windowSize = 0,
     /**
      * Injected clock in milliseconds, matching the limiters (PERF-007) and
      * `PowerTTLMap`. Expiry is the one behaviour in this class that cannot be
@@ -281,6 +282,52 @@ export class PowerCache {
           })
         : null;
     /**
+     * Size of the W-TinyLFU admission window, or `0` for no window.
+     *
+     * The window is the last `windowSize` entries of the recency list: new keys
+     * land there unconditionally, and only the window's oldest entry is
+     * arbitrated against the main-space victim. That is what lets a one-shot
+     * scan be absorbed in a region it cannot displace the working set from.
+     *
+     * It defaults to **`0` — the window is off** — and that is the shipped
+     * behaviour of `admission: 'tinylfu'`. See the note below and
+     * `design/0001-tinylfu-admission-window.md`.
+     *
+     * Arming is last because it depends on `_sketch` and `_maxEntries`. An
+     * earlier version computed it just below the sketch and was then zeroed
+     * again by the declaration further down, so the option silently did nothing
+     * and every test that turned it on failed for the same uninteresting reason.
+     *
+     * @type {number}
+     * @private
+     */
+    this._windowSize =
+      this._sketch && this._policy === 'lru'
+        ? windowSize === null
+          ? Math.min(
+              Math.max(4, Math.ceil(this.maxEntries * 0.01)),
+              Math.floor(this.maxEntries / 4)
+            )
+          : Math.max(0, Math.floor(Number(windowSize) || 0))
+        : 0;
+    if (this._windowSize >= this.maxEntries && this.maxEntries >= 4) {
+      // A window that is the whole cache is not a window: every newcomer would be
+      // admitted and the filter would never run. Clamp so main space always has
+      // room for the comparison to mean something.
+      this._windowSize = Math.floor(this.maxEntries / 4);
+    }
+    /**
+     * MRU end of the admission window, or `null` when the list is shorter than
+     * the window. Derived rather than tracked: `_windowOldest()` walks back
+     * from the tail, because every attempt that maintained this pointer
+     * incrementally got it wrong. The window is *positional*, and a node
+     * carrying a correct `inWindow` flag can still be on the wrong side of the
+     * boundary.
+     * @type {CacheNode|null}
+     * @private
+     */
+    this._windowStart = null;
+    /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
      *
@@ -324,6 +371,11 @@ export class PowerCache {
       expiresAt: 0,
       prev: null,
       next: null,
+      // Whether this node sits in the admission window. A pooled node carries
+      // its last role's flag, so this is reset on every allocation rather than
+      // at insert — the window path sets it, the plain path never reads it, and
+      // a stale `true` from a pooled node would misplace a fresh entry.
+      inWindow: false,
     };
     node.key = key;
     node.value = value;
@@ -331,6 +383,7 @@ export class PowerCache {
     node.expiresAt = expiresAt || 0;
     node.prev = null;
     node.next = null;
+    node.inWindow = false;
     return node;
   }
 
@@ -666,9 +719,218 @@ export class PowerCache {
       if (wasProbationEnd) this._probationEnd = prevProbation;
       return;
     }
+    if (this._windowSize > 0) {
+      // A hit in main space must refresh its recency *within main space*. Moving
+      // it to the tail of the whole list would put it inside the window region
+      // without being counted or flagged there, and the region and the counter
+      // would stop describing the same set of nodes — the exact defect the
+      // derived `_windowOldest()` exists to make impossible.
+      if (!node.inWindow) {
+        this._remove(node);
+        this._insertAtMainSpaceMrU(node);
+        return;
+      }
+      if (this._tail === node) return;
+      this._remove(node);
+      this._append(node);
+      return;
+    }
     if (this._tail === node) return;
     this._remove(node);
     this._append(node);
+  }
+
+  /**
+   * The oldest node in the admission window, or `null` when the window is empty.
+   *
+   * Derived from the tail run of flagged nodes rather than maintained as a
+   * pointer, and derived by *following the flag* rather than by walking back a
+   * fixed number of steps. Both halves matter:
+   *
+   * - A pointer has to be updated by every mutation of the list. Every attempt
+   *   that maintained one missed a mutation, and produced a counter reading
+   *   negative some distance from the splice that caused it.
+   * - A fixed walk of `windowSize` steps is only right while the window is
+   *   **full**. A challenger that loses arbitration is dropped and the window is
+   *   briefly one short, at which point the walk reaches past the boundary into
+   *   main space: `main space, k-47, k-6, window` with the window's two
+   *   survivors after it, which put a recency bump for `k-6` *behind* a key
+   *   inserted fifty sets later and quietly destroyed the recency order of main
+   *   space. The window is "the flagged run at the tail" at every fill level,
+   *   and that is what this returns.
+   *
+   * The flag is the source of truth for _membership_ because it is set in
+   * exactly one place (admission) and cleared in exactly one (promotion or
+   * drop). List consistency against it is checked by `test/powerCache.window.test.js`,
+   * which is the half this cannot verify on its own.
+   *
+   * @private
+   * @returns {CacheNode|null}
+   */
+  _windowOldest() {
+    let node = this._tail;
+    if (!node || !node.inWindow) return null;
+    while (node.prev && node.prev.inWindow) node = node.prev;
+    return node;
+  }
+
+  /**
+   * The eviction candidate in main space: the entry just below the window.
+   *
+   * `null` when the window holds the whole list, which is the cold-cache case
+   * the note calls out: with no main space there is nothing to compare against,
+   * and evicting a node against *itself* would remove it from `_map` and lose
+   * it permanently.
+   *
+   * @private
+   * @returns {CacheNode|null}
+   */
+  _windowVictim() {
+    const oldest = this._windowOldest();
+    if (!oldest || oldest === this._head) return null;
+    return oldest.prev;
+  }
+
+  /**
+   * Splice an unlinked node in at the MRU end of main space — immediately
+   * before the window's oldest entry.
+   *
+   * This is the *one* splice that may place a node on the main-space side of
+   * the boundary, and every path that leaves the window goes through it.
+   * Appending to the tail instead is the error three separate implementations
+   * made: it puts a main-space node back inside the window region, the region
+   * and the counter stop describing the same set of nodes, and the visible
+   * symptom is a counter bug some distance from its cause.
+   *
+   * Falls back to the tail when the window is empty (main space then runs to
+   * the end of the list) and to a head fix when there is no main space at all.
+   *
+   * @private
+   * @param {CacheNode} node - An unlinked node. Its links are overwritten.
+   * @returns {void}
+   */
+  _insertAtMainSpaceMrU(node) {
+    const windowStart = this._windowOldest();
+    if (!windowStart) {
+      node.prev = this._tail;
+      node.next = null;
+      if (this._tail) this._tail.next = node;
+      else {
+        this._head = node;
+        this._evictionCandidate = node;
+      }
+      this._tail = node;
+      return;
+    }
+    const prev = windowStart.prev;
+    node.prev = prev;
+    node.next = windowStart;
+    if (prev) prev.next = node;
+    else {
+      this._head = node;
+      // The head moved, so the eviction cursor has to move with it or the sweep
+      // will start unlinking from a node that is no longer in the list.
+      this._evictionCandidate = node;
+    }
+    windowStart.prev = node;
+  }
+
+  /**
+   * Move a node out of the window and into main space, in front of the window.
+   *
+   * @private
+   * @param {CacheNode} node - A linked window node.
+   * @returns {void}
+   */
+  _promoteFromWindow(node) {
+    this._remove(node);
+    this._insertAtMainSpaceMrU(node);
+    node.inWindow = false;
+    this._windowStart = null;
+  }
+
+  /**
+   * Evict one node, reporting it and returning it to the node pool.
+   *
+   * Single-node sibling of `_evictIfNeeded`, for the paths that displace a
+   * specific victim rather than sweeping. Sharing the unlink/report/free
+   * sequence is what keeps `onEvict` firing on every path — a window eviction
+   * that skipped the callback would be invisible to every user cleanup and to
+   * the pool's own node accounting.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @returns {void}
+   */
+  _evictNode(node) {
+    if (!node) return;
+    const k = node.key;
+    const v = node.value;
+    this._unlinkNode(node, { advanceEvictionCandidate: true });
+    this._evictions++;
+    try {
+      if (this.onEvict) this.onEvict(k, v, 'evicted');
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onEvict callback threw');
+    }
+    this._freeNode(node);
+  }
+
+  /**
+   * Admit a new key into the window, then arbitrate the window's oldest entry.
+   *
+   * Called after a new key has been appended at the tail. Once the window is
+   * full, its oldest entry is the challenger: it either takes a place in main
+   * space or is dropped, and which one is the only place the sketch arbitrates.
+   *
+   * Two rules here are not in the W-TinyLFU *description* and both were found
+   * by attempting it (see `design/0001-tinylfu-admission-window.md`):
+   *
+   * - **The challenger wins ties.** A tie means "no evidence either is better",
+   *   and discarding the challenger discards the only evidence the filter has.
+   *   Refusing ties is what made a fill-then-read caller lose every key written
+   *   after the first few, because they all tie at estimate 1.
+   * - **Only arbitrate at capacity.** While main space has room the filter has
+   *   nothing to protect and a comparison has no signal — every fresh key sits
+   *   at estimate 1, so every comparison is a tie and the churn evicts the
+   *   entry the previous `set` just promoted. Measured: a 40-key warm ended with
+   *   5 entries instead of 40. Caffeine's `admit` makes the same check.
+   *
+   * `previousSize` is the count **before** the arrival, and it has to be. A
+   * cache filled to exactly `maxEntries` has been full the whole time the last
+   * key was arriving; testing the count *after* the insert makes the final key
+   * of every fill contend with a main-space victim it should have been promoted
+   * past, which drops it. That is a 40-key warm ending at 39 — one key short,
+   * no error, and invisible unless the test checks the count.
+   *
+   * @private
+   * @param {number} previousSize - `this._map.size` before this arrival.
+   * @returns {void}
+   */
+  _arbitrateWindow(previousSize) {
+    if (this._map.size <= this._windowSize) return;
+    const challenger = this._windowOldest();
+    if (!challenger) return;
+    const victim = this._windowVictim();
+    // Rule 2b: "full" counts the window, because the window is admission slack
+    // and not capacity on top of `maxEntries`. Excluding it makes a main-only
+    // test read as never-full, admit every scan key, and churn through the
+    // working set one key at a time.
+    const atCapacity = victim != null && previousSize >= this.maxEntries;
+    if (!atCapacity) {
+      // Below capacity nothing is displaced — only the promotion happens. Doing
+      // the eviction here too is what made a warm lose 35 of 40 keys: promoted,
+      // then immediately evicted by the next arrival, forever.
+      this._promoteFromWindow(challenger);
+      return;
+    }
+    if (this._sketch.estimate(challenger.key) > this._sketch.estimate(victim.key)) {
+      this._evictNode(victim);
+      this._promoteFromWindow(challenger);
+    } else {
+      this._rejectedAdmission += 1;
+      this._evictNode(challenger);
+    }
   }
 
   /**
@@ -755,6 +1017,31 @@ export class PowerCache {
       // insert after the first and the cache can never fill. Measured: 200
       // insertions rejected, `size` 1. Admission is about what to *displace*,
       // so it needs something to displace.
+      if (this._sketch && this._windowSize > 0) {
+        // **The window path.** A new key is admitted to the window
+        // unconditionally — that is what makes the cold start stop collapsing,
+        // because a one-shot key displaces the previous one-shot key inside the
+        // window rather than a working-set entry in main space. The filter then
+        // arbitrates only the window's oldest entry, which is a comparison
+        // between two established keys rather than between a newcomer and a cold
+        // sketch.
+        //
+        // This has to be tested *before* the capacity check below, not after
+        // it. As an `else if` it was unreachable exactly when it mattered: once
+        // the cache was full, the old refuse-on-tie rule ran instead and every
+        // arrival was judged against a single main-space victim, so the window
+        // never arbitrated and nothing was ever evicted through it.
+        const previousSize = this._map.size;
+        const node = this._allocNode(key, value, w, expiresAt);
+        this._map.set(key, node);
+        node.inWindow = true;
+        this._append(node);
+        this._currentWeight += node.weight || 0;
+        this._sketch.increment(key);
+        this._arbitrateWindow(previousSize);
+        this._evictIfNeeded();
+        return this;
+      }
       if (this._sketch && this._map.size >= this.maxEntries) {
         const incumbent = this._evictionCandidate || this._head;
         // A brand-new key is **refused whenever the incumbent's estimate is

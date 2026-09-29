@@ -35,6 +35,7 @@
  *   node bench/claims.js zipf      # admission-policy comparison (default)
  *   node bench/claims.js latency   # histogram quantile accuracy across scales
  *   node bench/claims.js carrier   # message-carrier fidelity and encode cost
+ *   node bench/claims.js coldstart # cold start after a one-shot scan
  *
  * Every parameter is overridable from the environment so a result can be
  * reproduced exactly, and so the interesting axes (Zipf exponent, capacity,
@@ -129,7 +130,7 @@ function zipfDraw(cum, n, rng) {
  * the comparison paired: any difference between two policies is then
  * attributable to the policy, because both saw byte-identical requests.
  *
- * @param {{policy: string, admission: string, label: string}} variant
+ * @param {{policy: string, admission: string, label: string, windowSize?: number}} variant
  * @param {number[]} stream - Pre-generated key ids, already including scans.
  * @param {number} workingSetSize - How many leading ids are the hot set.
  * @param {number} maxEntries
@@ -140,6 +141,7 @@ function runAdmissionVariant(variant, stream, workingSetSize, maxEntries) {
     maxEntries,
     policy: variant.policy,
     admission: variant.admission,
+    windowSize: variant.windowSize,
     defaultTTL: 60_000,
   });
 
@@ -250,6 +252,19 @@ function runZipfWorkload() {
   const variants = [
     { label: 'lru', policy: 'lru', admission: 'none' },
     { label: 'lru + tynilfu', policy: 'lru', admission: 'tinylfu' },
+    // The window-floor sweep (BENCH-002c): the same request stream, replayed
+    // against every candidate window size. `design/0001-tinylfu-admission-window.md`
+    // ends by asking one question of the window -- raise the floor and see
+    // whether retention follows -- so the sweep lives next to the workload that
+    // answers it rather than in a private script that can drift from it.
+    ...(process.env.CLAIM_WINDOW_SWEEP === '0'
+      ? []
+      : [1, 2, 4, 8, 16, 25, 32].map((w) => ({
+          label: `lru + tynilfu window=${w}`,
+          policy: 'lru',
+          admission: 'tinylfu',
+          windowSize: w,
+        }))),
     { label: 'slru', policy: 'slru', admission: 'none' },
     { label: 'slru + tynilfu', policy: 'slru', admission: 'tinylfu' },
   ];
@@ -339,6 +354,74 @@ function runZipfWorkload() {
     rows,
     config: { keySpace, workingSet, maxEntries, scanKeys, scanEvery, zipf, repeats, seed: SEED },
   };
+}
+
+// ─── Workload 1b: cold start, the case the window was built for ─────────────
+//
+// `admission: 'tynilfu'` has a known cold-start collapse: a cold cache filled by
+// a one-shot scan refuses the working set afterwards, because every estimate in
+// a cold sketch is equal and a brand-new key has none. This is the case the
+// admission window was supposed to fix, and it is measured here separately from
+// the sustained mix because the two answer differently.
+
+function runColdStart(variant, workingSet = 40, scanBurst = 460, passes = 5) {
+  const cache = new PowerCache({
+    maxEntries: workingSet,
+    policy: variant.policy,
+    admission: variant.admission,
+    windowSize: variant.windowSize,
+    defaultTTL: 60_000,
+  });
+  // A one-shot scan, written cold, before the working set is ever seen.
+  for (let i = 0; i < scanBurst; i += 1) cache.set(`scan-${i}`, i);
+
+  let hits = 0;
+  let requests = 0;
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (let i = 0; i < workingSet; i += 1) {
+      requests += 1;
+      if (cache.get(`hot-${i}`) !== undefined) hits += 1;
+      else cache.set(`hot-${i}`, pass);
+    }
+  }
+  let survivors = 0;
+  for (let i = 0; i < workingSet; i += 1) if (cache.has(`hot-${i}`)) survivors += 1;
+  return { label: variant.label, hitRate: hits / requests, survivors, workingSet };
+}
+
+function runColdStartWorkload() {
+  console.log('BENCH-002b — cold start: a one-shot scan, then a working set\n');
+  console.log('  A cold 40-entry cache is filled with 460 one-shot keys, and the');
+  console.log('  40-key working set is then worked 5 times. No warm-up: this is the');
+  console.log('  case a frequency filter is weakest on, and the case the admission');
+  console.log('  window was designed to fix.\n');
+  console.log(`  ${'variant'.padEnd(30)}${'hit rate'.padStart(10)}${'survivors'.padStart(12)}`);
+  console.log(`  ${'-'.repeat(52)}`);
+  const variants = [
+    { label: 'lru', policy: 'lru', admission: 'none' },
+    { label: 'lru + tynilfu (shipped)', policy: 'lru', admission: 'tinylfu' },
+    ...[1, 2, 4, 8, 16].map((w) => ({
+      label: `lru + tynilfu window=${w}`,
+      policy: 'lru',
+      admission: 'tinylfu',
+      windowSize: w,
+    })),
+  ];
+  const results = variants.map((v) => runColdStart(v));
+  for (const r of results) {
+    console.log(
+      `  ${r.label.padEnd(30)}${(r.hitRate * 100).toFixed(1).padStart(9)}%` +
+        `${`${r.survivors}/${r.workingSet}`.padStart(12)}`
+    );
+  }
+  const best = results.reduce((a, b) => (b.hitRate > a.hitRate ? b : a));
+  console.log(
+    `\n  Best: ${best.label} at ${(best.hitRate * 100).toFixed(1)}%. The window does not\n` +
+      '  rescue the cold-start case at any size: a working-set key arriving into a\n' +
+      '  cold sketch ties with the scan keys already resident, and a tie is not a\n' +
+      '  win. TinyLFU needs frequency history, and this workload denies it one.'
+  );
+  return { results };
 }
 
 // ─── Workload 2: histogram quantile accuracy across scales ──────────────────
@@ -682,7 +765,9 @@ if (mode === 'zipf') {
   runScaledLatencyWorkload();
 } else if (mode === 'carrier') {
   runCarrierWorkload();
+} else if (mode === 'coldstart') {
+  runColdStartWorkload();
 } else {
-  console.error(`Unknown mode: ${mode}. Use "zipf", "latency" or "carrier".`);
+  console.error(`Unknown mode: ${mode}. Use "zipf", "coldstart", "latency" or "carrier".`);
   process.exit(1);
 }
