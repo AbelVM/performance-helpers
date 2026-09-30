@@ -963,6 +963,52 @@ Worth knowing if you hit an oversize rejection and cannot work out why: the
 weight 1 and is not rejected however small you make `maxWeight`. The rejection
 only fires under a size-based `weightFn` or an explicit `weight`.
 
+#### Event bus: a rejecting `async` listener killed the process
+
+`PowerEventBus.emit()` wrapped each listener call in `try`/`catch`, and its docs
+said errors were swallowed. That was true of a synchronous throw and false of a
+promise — and the difference is fatal rather than noisy. An unobserved rejection
+reaches the process, and **Node's default `--unhandled-rejections=throw` since
+v15 terminates it**, so an `async` listener that threw killed its host from
+inside a fire-and-forget notification:
+
+```js
+const bus = new PowerEventBus();
+bus.on('ready', async () => {
+  throw new Error('boom');
+});
+bus.emit('ready'); // the process used to die here, on Node's defaults
+```
+
+`emit` now observes a thenable return and attaches a no-op rejection handler. The
+check is one property access and allocates nothing on the sync path, which is the
+common case; a handler is attached only when a listener actually returned
+something awaitable. It is a `typeof result.then === 'function'` rather than
+`instanceof Promise`, so a hand-rolled deferred or a cross-realm `PromiseLike` is
+covered too.
+
+**Reaching `once` needed a second fix.** `PowerSubscriberSet`'s once-wrapper was
+`try { fn(...) } finally { this.delete(fn) }` and it _discarded the return
+value_ — so the promise died inside the wrapper, before `emit` had anything to
+observe. The wrapper now returns it. `once`-ness is unaffected, and the sync
+return value is now passed through rather than dropped.
+
+A rejecting listener is **not** unsubscribed: a listener that throws is not the
+same as one that removed itself, and dropping it would turn one bad event into a
+permanently missing one. `emit` still reports `true`, because the listener was
+notified. If you want a failing listener surfaced rather than swallowed, that is
+what `emitAsync` is for.
+
+**The tests are subprocesses, and that is load-bearing.** "The rejection did not
+reach the process" is not observable from inside the process that would have died,
+so a `waitFor`, a fake timer or a try/catch all pass against the broken code —
+the failure is a _later_ exit, not a thrown error. Three cases spawn a real
+`node --input-type=module` child on default settings and assert it exits cleanly.
+Mutation-checked both ways: reverting the `thenable` check fails two, and
+reverting the wrapper's return value fails two.
+
+Closes OBS-003.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

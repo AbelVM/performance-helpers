@@ -109,10 +109,17 @@ export class PowerSubscriberSet {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
     // The wrapper is tagged with the original listener under a module-private
     // symbol so a caller holding the wrapper can recover what it wraps.
-    const wrapped = /** @type {((...args:any[])=>void) & {[ORIGINAL]?: SubscriberListener}} */ (
+    const wrapped = /** @type {((...args:any[])=>any) & {[ORIGINAL]?: SubscriberListener}} */ (
       (...args) => {
         try {
-          fn(...args);
+          // Returned, and that is load-bearing rather than tidy. Dropping it made
+          // an `async` once-listener unobservable: the promise was discarded
+          // inside this wrapper, so whatever called it had nothing to attach a
+          // rejection handler to, and a listener that rejected reached the
+          // process. `PowerEventBus.emit` is the caller that cares, and it
+          // swallows rejections on purpose — but it can only do that if the
+          // promise survives this frame.
+          return fn(...args);
         } finally {
           this.delete(fn);
         }

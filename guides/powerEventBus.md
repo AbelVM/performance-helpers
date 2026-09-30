@@ -4,20 +4,20 @@ Typed micro event bus for intra-process pub/sub. Useful for wiring multiple help
 
 ## Constructor
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `maxListeners` | `number` | `0` | Maximum listeners per event; `0` means unlimited. |
-| `weak` | `boolean` | `false` | When `true` listeners are stored as `WeakRef` (when supported) and automatically cleaned by GC. |
+| Option         |      Type | Default | Description                                                                                     |
+| -------------- | --------: | ------: | ----------------------------------------------------------------------------------------------- |
+| `maxListeners` |  `number` |     `0` | Maximum listeners per event; `0` means unlimited.                                               |
+| `weak`         | `boolean` | `false` | When `true` listeners are stored as `WeakRef` (when supported) and automatically cleaned by GC. |
 
 ## API
 
-- `on(evt, fn)` — Subscribe to events named `evt`. `fn(payload)` will be called for each emit. Returns an unsubscribe function. Listener errors are swallowed.
+- `on(evt, fn)` — Subscribe to events named `evt`. `fn(payload)` will be called for each emit. Returns an unsubscribe function. Listener errors are swallowed — including a rejection from a listener that returned a promise (see [async listeners](#async-listeners-are-observed-too)).
 
 - `once(evt, fn)` — Subscribe for a single invocation; the listener is removed automatically after the first emit.
 
 - `off(evt, fn)` — Remove a previously-registered listener for `evt`.
 
-- `emit(evt, payload)` — Emit an event with an optional `payload`; returns `true` if at least one listener was invoked. Errors thrown by listeners are swallowed to avoid propagation.
+- `emit(evt, payload)` — Emit an event with an optional `payload`; returns `true` if at least one listener was invoked. Both a synchronous throw and an asynchronous rejection from a listener are swallowed, so a failing subscriber cannot break the emitter or reach the process.
 
 - `emitAsync(evt, payload, { concurrency = Infinity })` — Emit an event and await async listeners. The optional `concurrency` parameter limits how many listeners run in parallel, making listener pipelines easier to manage.
 
@@ -26,6 +26,7 @@ Typed micro event bus for intra-process pub/sub. Useful for wiring multiple help
 - `clear(evt?)` — Remove listeners for a specific `evt`, or all listeners when `evt` is omitted.
 
 ## Example
+
 ```javascript
 import { PowerEventBus } from '../src/helpers/powerEventBus.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
@@ -36,26 +37,26 @@ const pool = new PowerPool('./worker.js', { size: 2 });
 
 // Publish a lightweight event whenever a worker finishes a job
 pool.addEventListener('message', (e) => {
-	const d = e && e.data;
-	if (d && d.type === 'job:done') bus.emit('job:done', d.payload);
+  const d = e && e.data;
+  if (d && d.type === 'job:done') bus.emit('job:done', d.payload);
 });
 
 // Subscribe from elsewhere in the app without coupling to `pool`
 const unsub = bus.on('job:done', ({ id, result }) => {
-	metrics.increment('jobs.completed');
-	cache.set(id, result);
+  metrics.increment('jobs.completed');
+  cache.set(id, result);
 });
 
 // Graceful shutdown: listen once for pool drain then stop services
 bus.once('idle', async () => {
-	console.log('pool is idle — shutting down');
-	await closeDatabaseConnections();
+  console.log('pool is idle — shutting down');
+  await closeDatabaseConnections();
 });
 
 // Emit 'idle' when appropriate (could be wired from `pool.drain()`)
 (async () => {
-	await pool.drain();
-	bus.emit('idle');
+  await pool.drain();
+  bus.emit('idle');
 })();
 
 // later
@@ -64,7 +65,37 @@ bus.once('idle', async () => {
 
 ## Notes
 
-- Errors thrown by listeners are swallowed to avoid breaking the emitter.
+- Both a synchronous throw and a rejection from a listener that returned a
+  promise are swallowed, so a failing subscriber cannot break the emitter.
+
+### Async listeners are observed too
+
+`emit` is synchronous and fire-and-forget, and it **observes the promise a
+listener returns** rather than ignoring it. This is not belt-and-braces: an
+unobserved promise rejection reaches the process, and **Node's default
+`--unhandled-rejections=throw` since v15 terminates it.** Before this, an `async`
+listener that threw killed the host from inside a notification nobody was
+awaiting:
+
+```js
+const bus = new PowerEventBus();
+bus.on('ready', async () => {
+  throw new Error('boom');
+});
+bus.emit('ready'); // the process used to die here
+```
+
+A listener that rejects is **not** unsubscribed — a listener that throws is not
+the same as a listener that removed itself, and dropping it would turn one bad
+event into a permanently missing one. If you want a failing listener to be
+reported rather than swallowed, use `emitAsync`, which surfaces it to its caller.
+
+This also covers `once`, and reaching it needed a second fix:
+`PowerSubscriberSet`'s once-wrapper discarded the listener's return value, so the
+promise died inside the wrapper before `emit` could see it. A hand-rolled
+thenable — anything with a callable `.then` — is handled the same way, since
+`instanceof Promise` would miss a deferred or a cross-realm `PromiseLike`.
+
 - `listeners(evt)` returns a shallow copy of the listener list and may be used for debugging or metrics.
 
 ## Real-world: async listeners with bounded concurrency
@@ -76,10 +107,10 @@ const bus = new PowerEventBus();
 
 // register several async listeners that perform IO
 bus.on('user:signup', async (user) => {
-	await sendWelcomeEmail(user.email);
+  await sendWelcomeEmail(user.email);
 });
 bus.on('user:signup', async (user) => {
-	await indexUserInSearch(user);
+  await indexUserInSearch(user);
 });
 
 // When emitting, await listeners but limit concurrency to avoid resource spikes

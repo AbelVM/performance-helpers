@@ -1,24 +1,3 @@
-/**
- * PowerEventBus
- *
- * Typed micro event bus providing lightweight pub/sub for intra-process
- * coordination. Subscriber errors are swallowed to avoid breaking emitters.
- *
- * @class PowerEventBus
- */
-/**
- * A bucket of listeners as the bus stores them. Always a `PowerSubscriberSet`
- * in practice - the plain-`Set` arm is the shape a bucket has to be before
- * `_getBucket` has migrated it, and `emit()`/`emitAsync()` still recognise it
- * so a bus that was poked from outside degrades instead of throwing.
- *
- * @typedef {PowerSubscriberSet|Set<SubscriberListener|WeakRef<SubscriberListener>>} EventBusBucket
- */
-/**
- * @typedef {import('./jsdoc-types.js').PowerEventBusOptions} PowerEventBusOptions
- * @typedef {import('./jsdoc-types.js').SubscriberListener} SubscriberListener
- * @typedef {import('./jsdoc-types.js').EventBusWeakToken} EventBusWeakToken
- */
 export class PowerEventBus {
     /**
      * @param {PowerEventBusOptions} [options] - `maxListeners` caps listeners per
@@ -114,7 +93,12 @@ export class PowerEventBus {
     off(event: string, fn: (payload: any) => void): void;
     /**
      * Emit an event to all subscribers. Returns true if any listeners were notified.
-     * Errors thrown by listeners are swallowed.
+     *
+     * Errors thrown by listeners are swallowed, and so are rejections from
+     * listeners that returned a promise — an `async` listener that throws will not
+     * reach the process. See {@link notifyListener}, which is where both are
+     * observed.
+     *
      * @param {string} event
      * @param {any} [payload]
      * @returns {boolean}

@@ -5,7 +5,10 @@ import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
  * PowerEventBus
  *
  * Typed micro event bus providing lightweight pub/sub for intra-process
- * coordination. Subscriber errors are swallowed to avoid breaking emitters.
+ * coordination. Subscriber errors are swallowed to avoid breaking emitters —
+ * both a synchronous throw and a rejection from a listener that returned a
+ * promise, because an unobserved rejection reaches the process and Node's
+ * default is to terminate it. See {@link notifyListener}.
  *
  * @class PowerEventBus
  */
@@ -23,6 +26,47 @@ import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
  * @typedef {import('./jsdoc-types.js').SubscriberListener} SubscriberListener
  * @typedef {import('./jsdoc-types.js').EventBusWeakToken} EventBusWeakToken
  */
+/**
+ * Call a listener, swallowing both a synchronous throw and an asynchronous
+ * rejection.
+ *
+ * A `try`/`catch` observes a synchronous throw and nothing else. An `async`
+ * listener returns a promise, and a promise that rejects with nobody observing
+ * it reaches the process: **Node's default `--unhandled-rejections=throw` since
+ * v15 terminates the process.** So an `async` listener that threw killed its
+ * host from inside what is documented as a fire-and-forget notification, and
+ * both the class JSDoc and `emit`'s own doc claimed errors were swallowed. The
+ * claim was true of the sync case and false of the async one, which is worse
+ * than either being consistently true.
+ *
+ * The thenable check is one property access and allocates nothing on the sync
+ * path — `result` is `undefined` for a listener that returns nothing, and that is
+ * by far the common case. A handler is attached only when a listener actually
+ * returned something awaitable.
+ *
+ * @param {SubscriberListener} fn
+ * @param {any} payload
+ * @returns {any} Whatever the listener returned, so a caller that *wants* to
+ *   await it still can.
+ */
+function notifyListener(fn, payload) {
+  let result;
+  try {
+    result = fn(payload);
+  } catch {
+    // Swallowed, and the listener is deliberately left subscribed: a listener
+    // that throws is not the same as a listener that unsubscribed, and dropping
+    // it would turn one bad event into a permanently missing one.
+    return undefined;
+  }
+  if (result != null && typeof result.then === 'function') {
+    // `then(undefined, handler)` rather than `catch(handler)`, which is not
+    // available on every thenable.
+    result.then(undefined, () => {});
+  }
+  return result;
+}
+
 export class PowerEventBus {
   /**
    * @param {PowerEventBusOptions} [options] - `maxListeners` caps listeners per
@@ -306,7 +350,12 @@ export class PowerEventBus {
 
   /**
    * Emit an event to all subscribers. Returns true if any listeners were notified.
-   * Errors thrown by listeners are swallowed.
+   *
+   * Errors thrown by listeners are swallowed, and so are rejections from
+   * listeners that returned a promise — an `async` listener that throws will not
+   * reach the process. See {@link notifyListener}, which is where both are
+   * observed.
+   *
    * @param {string} event
    * @param {any} [payload]
    * @returns {boolean}
@@ -319,11 +368,7 @@ export class PowerEventBus {
       let notified = false;
       bucket.forEach((fn) => {
         notified = true;
-        try {
-          fn(payload);
-        } catch (e) {
-          // swallow subscriber errors
-        }
+        notifyListener(fn, payload);
       });
       if (bucket.size === 0) {
         this._clearWeakListenerEvent(event);
@@ -339,11 +384,7 @@ export class PowerEventBus {
         bucket.delete(entry);
         continue;
       }
-      try {
-        fn(payload);
-      } catch (e) {
-        // swallow subscriber errors
-      }
+      notifyListener(fn, payload);
     }
     if (bucket.size === 0) {
       this._clearWeakListenerEvent(event);
