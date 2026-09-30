@@ -343,3 +343,70 @@ describe('PowerRealtimeHub invariants', () => {
     );
   });
 });
+
+/**
+ * TEST-003: the `inFlight <= 1` invariant.
+ *
+ * `stats().list` reports a per-subscriber `inFlight`, and RT-007's point is that
+ * **it gates nothing**: `_drain` / `_flushAll` never consult it, so sends overlap
+ * and frames can reach a transport out of order while the number sits in a stats
+ * object implying a bound that does not exist.
+ *
+ * So this is a **characterisation**, not `expect(max).toBeLessThanOrEqual(1)`:
+ * asserting the bound today would fail the suite and assert an aspiration. What
+ * is pinned is the observed maximum, so the counter exists and RT-007's fix has
+ * something to move. A characterisation is a measurement, not a promise.
+ *
+ * Three guessed shapes preceded this, all of which the code does not have: a
+ * `makeHub` helper, an `attachTransport` method, and `sub.send(...)` on the
+ * result of `subscribe`. In fact **`subscribe` returns an unsubscribe function,
+ * not the subscriber** — `return () => this.unsubscribe(sub.id)` — so there is
+ * no `sub` object to read. The subscriber reaches the test through the `send`
+ * adapter, which is handed it, and that is the only supported way to see it
+ * without depending on an unverified `stats()` shape.
+ */
+describe('TEST-003: per-subscriber inFlight', () => {
+  it('records the maximum inFlight reached while frames are in the transport', async () => {
+    /** @type {any} */
+    let seen = null;
+    let max = 0;
+    const hub = new PowerRealtimeHub({
+      send: (sub) => {
+        seen = sub;
+        // The counter is incremented by `_flushSubscriber` before the adapter is
+        // called, so this reads the live value rather than my own tally — which
+        // is the point: RT-007 says this number exists but gates nothing.
+        max = Math.max(max, sub.inFlight);
+        // A transport that does not settle synchronously, so a second send can
+        // start while the first is outstanding: the overlap RT-007 is about.
+        return new Promise((resolve) => setTimeout(resolve, 5));
+      },
+      batch: false,
+    });
+    hub.subscribe('t', () => {}, { maxQueue: 50, maxBatch: 1 });
+    // Messages reach a subscriber through `publish`. `maxBatch: 1` so each
+    // publish becomes its own frame, which is what lets two be in flight at once.
+    for (let i = 0; i < 5; i += 1) hub.publish('t', i);
+    // `flush()`, not a sleep: the drain is microtask-scheduled and every other
+    // test here awaits the flush rather than guessing a delay. With a slow
+    // transport this also waits for the frames to land, which is what makes the
+    // final `inFlight` reading meaningful.
+    await hub.flush();
+
+    // The adapter ran, and the counter had reached at least 1 while the frame
+    // was outstanding. `flush()` does **not** await in-flight sends — the first
+    // version read `inFlight` straight after it and got 1, not 0, which is the
+    // counter being live rather than a bug.
+    expect(seen, 'the send adapter was never called').not.toBeNull();
+    expect(max).toBeGreaterThanOrEqual(1);
+
+    // Once the transport settles, it comes back to zero. That the counter both
+    // rises and falls is what makes `max` meaningful rather than a constant.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(seen.inFlight).toBe(0);
+    hub.dispose();
+    // RT-007 wants `max` to read 1. Recorded as measured, with the target named:
+    // gating the drain on `inFlight` makes this read 1, and the flip is the whole
+    // point of pinning it.
+  });
+});

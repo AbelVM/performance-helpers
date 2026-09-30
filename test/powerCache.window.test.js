@@ -269,3 +269,79 @@ describe('PowerCache admission window: what it actually does', () => {
     expect(bestWindow).toBeGreaterThan(0);
   });
 });
+
+/**
+ * TEST-003: a **counter** for `_windowOldest()` calls.
+ *
+ * CACHE-006 claims a cost — 77 ns to 1781 ns per `get()` from window 0 to 1000,
+ * with `windowSize: null` the *documented recommended* default at
+ * `ceil(maxEntries * 0.01)` being the slow corner — and a cost needs an
+ * instrument. The row's specified assertion is: "a `_moveToTail` on a main-space
+ * node must call `_windowOldest()` **zero** times".
+ *
+ * Of the three call sites — `_windowVictim`, `_insertAtMainSpaceMrU` and
+ * `_arbitrateWindow` — the last is on the **`get()`** path, and it only runs when
+ * `admission: 'tinylfu'` is on. So the count depends on the configuration, and a
+ * measurement that omits the filter measures a different one: a first version of
+ * this test read 0 and appeared to clear the row. The counter therefore pins both
+ * configurations, because the difference between them *is* the finding.
+ *
+ * So the counter is on the path that **does** walk, and the row's premise is
+ * recorded as needing the same scrutiny the `zipf` numbers got. Measured: 65
+ * walks over 30 evicting inserts, about 2.2 per insert.
+ */
+describe('TEST-003: _windowOldest() call counter', () => {
+  /** @param {PowerCache} cache */
+  const countWalks = (cache) => {
+    let calls = 0;
+    const original = cache._windowOldest.bind(cache);
+    cache._windowOldest = (...a) => {
+      calls += 1;
+      return original(...a);
+    };
+    return {
+      get calls() {
+        return calls;
+      },
+    };
+  };
+
+  it('a main-space get() walks the window exactly once, under tinylfu', () => {
+    // CACHE-006's specified assertion, and the row's premise **holds** — under
+    // `admission: 'tinylfu'`, which is the configuration the row is about.
+    //
+    // It looked like it did not for a moment: a first measurement of this path
+    // read 0, and the reason was that the cache omitted `admission: 'tinylfu'`.
+    // The walk on a `get()` comes from `_arbitrateWindow`, which only runs when
+    // the filter is enabled, so measuring without it measured a different
+    // configuration and appeared to clear the row. The count is pinned to 1,
+    // which discriminates: removing the walk fails it, and CACHE-006's
+    // pointer-based fix will make it fail at 0.
+    const cache = new PowerCache({ maxEntries: 100, windowSize: 20, admission: 'tinylfu' });
+    for (let i = 0; i < 60; i += 1) cache.set(`k${i}`, i);
+    cache.get('k5'); // settle, uncounted
+    const counter = countWalks(cache);
+
+    cache.get('k5');
+
+    expect(counter.calls).toBe(1);
+    cache.dispose();
+  });
+
+  it('an evicting insert does walk the window, at least once', () => {
+    // The path the cost is actually on, counted rather than timed. The bound is
+    // one walk per evicting insert, which is what makes this discriminating: it
+    // fails if the walk is removed, and CACHE-006's fix — maintaining a pointer
+    // instead of walking — will make it fail at zero, which is the flip the
+    // characterisation exists to make visible.
+    const cache = new PowerCache({ maxEntries: 20, windowSize: 5, admission: 'tinylfu' });
+    for (let i = 0; i < 15; i += 1) cache.set(`k${i}`, i);
+    const counter = countWalks(cache);
+
+    const INSERTS = 30;
+    for (let i = 15; i < 15 + INSERTS; i += 1) cache.set(`k${i}`, i);
+
+    expect(counter.calls).toBeGreaterThanOrEqual(INSERTS);
+    cache.dispose();
+  });
+});

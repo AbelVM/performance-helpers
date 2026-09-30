@@ -3136,3 +3136,68 @@ flake TEST-008 exists to remove. That is now recorded as done in the plan.
 
 Documentation only beyond the new option; no behaviour changes for existing
 callers.
+
+#### The four regression tests the plan named, and two of them were decoration
+
+TEST-003 listed nine missing tests. One already existed, two were written
+earlier in this release, and the remaining four are added here — each in the file
+that owns the unit, and each a counter or a shape rather than a duration.
+
+**The round-trip item named the wrong function.** `prepareBuffers` deliberately
+returns an **unframed** body with `deferred: true`; framing is
+`_dispatchToWorker`'s job, per POOL-001. So
+`decodeMessage(prepareBuffers(…).message)` cannot work by design — the first
+version did exactly that, and the codec correctly rejected a plain object with
+"expected a Uint8Array, ArrayBuffer or DataView".
+
+The round trip is therefore measured on what reaches the **worker**, and it
+asserts the decoded **value**, which is the property the existing framing test
+did not have:
+
+```js
+const decoded = decodeMessage(bytesOf(entry), { codec: 'framed' });
+expect(decoded.value).toEqual(values[i]); // not just "it decoded"
+```
+
+The existing test only checked that the frame _decodes_, so a framing change
+could ship a perfectly valid envelope carrying the wrong payload and every
+assertion would pass. Primitives are not framed at all, so the values are objects
+and arrays, plus an 8 KB payload that crosses the length-prefix path.
+
+**Three of the four are characterisations of still-open rows** — PERF-003,
+CACHE-006, RT-007 — and that distinction matters, because they are not passing
+tests for those optimisations. They are the instruments those rows need, and each
+pins the number as measured so that the fix landing is a visible flip:
+
+| counter                                                 | measured | the row's target |
+| ------------------------------------------------------- | -------: | ---------------- |
+| `getOrSet` `nowMs()` reads per call                     |        2 | 1 (PERF-003)     |
+| `_windowOldest()` on a main-space `get()` under tinylfu |        1 | 0 (CACHE-006)    |
+| `_windowOldest()` per evicting insert                   |     ~2.2 | 0 (CACHE-006)    |
+| per-subscriber `inFlight` maximum                       | observed | 1 (RT-007)       |
+
+**Two of them were decoration, and mutation said so.** The `_windowOldest` counter
+asserted `toBeGreaterThanOrEqual(0)` and the `getOrSet` counter
+`toBeGreaterThanOrEqual(1)`; both accept every value, which is decoration by this
+repository's own rule rather than a measurement. Pinning them to the measured
+numbers is what makes them tests — `getOrSet` reads the clock twice per call,
+exactly as PERF-003 states.
+
+The window counter also measured the wrong thing twice over. It first pinned 0 on
+a main-space `get()` and appeared to clear CACHE-006's premise — but the
+measurement omitted `admission: 'tinylfu'`, and the walk on that path comes from
+`_arbitrateWindow`, which only runs when the filter is enabled. Under tinylfu the
+count is 1, so the row's premise holds. Both configurations are now pinned,
+because the difference between them is the finding.
+
+One mutation remains uncaught and is stated rather than hidden: replacing the
+insert-path walk with `this._tail` leaves enough other walks to satisfy the "at
+least one walk per evicting insert" bound, so that bound is deliberately loose.
+
+The `inFlight` test cost three guessed shapes before it was right. `subscribe`
+returns an **unsubscribe function, not the subscriber**, so the counter is only
+reachable from inside the `send` adapter, which is handed it. It also learned that
+`flush()` does **not** await in-flight sends, so reading `inFlight` immediately
+after it gives 1 and not 0 — the counter being live, not a bug.
+
+Closes TEST-003.

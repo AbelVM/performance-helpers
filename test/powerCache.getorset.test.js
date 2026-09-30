@@ -115,3 +115,48 @@ describe('PowerCache getOrSet APIs', () => {
     expect(c.get('x')).toBe('fresh');
   });
 });
+
+/**
+ * TEST-003: a **counter** for the clock `getOrSet` reads.
+ *
+ * `getOrSet` calls `nowMs()` more than once per call, and `now.js:58-60` puts
+ * that at 141 ns on "the hot path of essentially every helper". A test that only
+ * asserts the value is correct cannot see that, because the extra read changes
+ * no observable result — which is why the row asks for a counter rather than a
+ * duration, and why the number has to be pinned as a *characterisation*:
+ * PERF-003 has not landed, so asserting the post-fix count would fail the suite
+ * and assert an aspiration.
+ *
+ * Counting is done by wrapping the module's `nowMs` through `vi.mock`, because
+ * `powerCache.js` imports it directly and a spy on the module namespace would
+ * not be seen by the already-bound import.
+ */
+describe('TEST-003: getOrSet clock reads', () => {
+  it('counts nowMs() calls per getOrSet, as a characterisation of PERF-003', async () => {
+    let reads = 0;
+    vi.resetModules();
+    vi.doMock('../src/utils/now.js', async () => {
+      const actual = await vi.importActual('../src/utils/now.js');
+      return { ...actual, nowMs: () => ((reads += 1), 1_000) };
+    });
+    try {
+      const { PowerCache: Counted } = await import('../src/helpers/powerCache.js');
+      const cache = new Counted({ maxEntries: 10 });
+      reads = 0;
+      cache.getOrSet('k', () => 'v');
+      // **Pinned to 2, which is the number PERF-003 names** — "`getOrSet` and
+      // `touch` read the clock twice per call" — so the counter is measuring the
+      // documented defect rather than something adjacent to it.
+      //
+      // The first version asserted `toBeGreaterThanOrEqual(1)`, which accepts
+      // every value and is therefore decoration by this repository's own rule.
+      // Measured through the same mock: 2 on the miss path, 2 on a second miss.
+      // PERF-003 wants 1; when it lands this fails, which is the flip the
+      // characterisation exists to make visible.
+      expect(reads).toBe(2);
+    } finally {
+      vi.doUnmock('../src/utils/now.js');
+      vi.resetModules();
+    }
+  });
+});

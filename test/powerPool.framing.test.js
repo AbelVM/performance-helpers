@@ -156,3 +156,59 @@ describe('batched messages carry the framed envelope (POOL-001)', () => {
     );
   });
 });
+
+/**
+ * TEST-003: a `decodeMessage` **round trip** for the framed path.
+ *
+ * The test above asserts the frame *decodes* — that `decodeMessage` does not
+ * throw. This asserts it decodes **to the value that was sent**, which is a
+ * different property and the one a consumer depends on. A framing change can
+ * produce a perfectly valid envelope carrying the wrong payload, and every
+ * existing assertion here would pass.
+ *
+ * The round trip is measured on what reaches the **worker**, not on
+ * `prepareBuffers`' return value, and that is a correction to how TEST-003
+ * words the item. `prepareBuffers` deliberately returns an **unframed** body
+ * with `deferred: true` — framing is `_dispatchToWorker`'s job, per POOL-001 —
+ * so `decodeMessage(prepareBuffers(…).message)` cannot work by design. The
+ * first version of this test did exactly that and `decodeMessage` correctly
+ * rejected a plain object with "expected a Uint8Array, ArrayBuffer or
+ * DataView". The item names the wrong function; the path it is really after is
+ * the dispatch one, and that is what this exercises.
+ */
+describe('TEST-003: the framed payload round-trips to the value that was sent', () => {
+  it('decodes each posted frame back to its original value', () => {
+    const pool = makePool();
+    // **Objects and arrays only.** A primitive is passed through unframed —
+    // there is nothing to frame — so `bytesOf` correctly throws on it, and a
+    // round trip over `null`/`42`/`true` would assert that nothing happened.
+    // The first version included them and read "expected a Uint8Array, ArrayBuffer
+    // or DataView", which is the codec being right and the test being wrong.
+    const values = [
+      { a: 1, nested: { b: 'two' } },
+      [1, 2, 3],
+      { unicode: 'héllo — 🌍' },
+      { empty: {} },
+      { deep: { a: { b: { c: [1, { d: 2 }] } } } },
+    ];
+    pool.postMessageBatch(pool.prepareBuffers(values));
+    const posted = last.posted;
+    expect(posted).toHaveLength(values.length);
+
+    for (const [i, entry] of posted.entries()) {
+      const decoded = decodeMessage(bytesOf(entry), { codec: 'framed' });
+      expect(decoded.value, `value ${i} did not survive the round trip`).toEqual(values[i]);
+    }
+  });
+
+  it('round-trips a value large enough to need a header length field', () => {
+    // A single short string never exercises the length-prefixed path, so a
+    // framing bug that only affects multi-frame payloads would pass on the
+    // values above. Several KB crosses whatever threshold the codec uses.
+    const pool = makePool();
+    const big = { blob: 'x'.repeat(8_000), n: 1 };
+    pool.postMessageBatch(pool.prepareBuffers([big]));
+    const decoded = decodeMessage(last.posted[0].msg, { codec: 'framed' });
+    expect(decoded.value).toEqual(big);
+  });
+});
