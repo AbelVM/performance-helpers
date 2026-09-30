@@ -1889,6 +1889,65 @@ not keep.
 
 Closes OBS-006.
 
+#### A noisy partition could starve a critical one, which is the one thing the bulkhead exists to prevent
+
+**Breaking**
+
+`PowerBulkhead` partitions its permits and its gates, and did **not** partition
+the queue budget. One `_pendingCount` for the whole bulkhead was compared
+against every partition's admission decision, so the partition that spent the
+budget decided for the others.
+
+Measured with 2 partitions, `maxConcurrency: 1`, `queueCapacity: 2`, submitting
+five tasks back to back and reading the state after each:
+
+```
+A1   pending 0   A(avail,queued) 0,0   C(avail,queued) 1,0
+A2   pending 1   A(avail,queued) 0,1   C(avail,queued) 1,0
+A3   pending 2   A(avail,queued) 0,2   C(avail,queued) 1,0
+C1   pending 2   A(avail,queued) 0,2   C(avail,queued) 0,0   <- took C's permit
+C2   rejected: "PowerBulkhead queue is full"                  <- C had queued 0
+```
+
+C's own queue held **nothing**, C's own permit was in use by C1, and C's own
+gate reported `queueCapacity: Infinity` — and C was still turned away, by
+partition A. Each partition's gate now carries the budget as a backstop (it was
+hard-coded to `Infinity`, so the gate could never be the thing that refused),
+and the bulkhead checks first so the refusal is still its own error.
+
+**`queueCapacity` is now a per-partition budget.** The total that can wait is
+`queueCapacity * partitions`, so this configuration admits more work than it
+did:
+
+```js
+new PowerBulkhead({ partitions: 4, queueCapacity: 100 });
+// before: 100 waiting tasks in the bulkhead
+// after:  100 per partition, 400 total
+```
+
+That is the intended trade. A shared budget is not isolation, and the number
+that made it shared was never visible in the option's name.
+
+**`isFull` and `stats().saturated` changed meaning**, because "is the bulkhead
+full" is no longer one comparison. Both are now `true` when **every** partition
+is at its budget — when no task that would have to queue can be admitted
+anywhere. The alternative, `true` as soon as _any_ partition is busy, would
+report the normal state of a working isolated bulkhead as full and make the
+flag useless for backing off.
+
+Also: `drain()` no longer waits on `active` and `pending` together. Deleting
+the bulkhead's duplicate `_pendingCount` in favour of each gate's own count
+exposed a window — a released permit hands the permit to the next queued task
+and drops the queue count in the same synchronous turn that the predecessor
+settles its own bookkeeping, so both counters read zero while a task is
+promoted and not yet begun. `drain()` now waits on a single count of admitted
+work. Caught by the pre-existing drain test the moment the gate took over the
+count.
+
+`test/powerBulkhead.partition.test.js`, 9 tests, four mutations checked.
+
+Closes RES-008.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

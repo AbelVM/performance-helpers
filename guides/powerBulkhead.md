@@ -6,12 +6,12 @@ Use `PowerBulkhead` when you need to protect critical work from a noisy producer
 
 ## Constructor
 
-| option           |       type | default | description                                                                                                            |
-| ---------------- | ---------: | ------: | ---------------------------------------------------------------------------------------------------------------------- |
-| `partitions`     |   `number` |     `4` | Number of isolated execution partitions. Work in different partitions does not compete for the same concurrency slots. |
-| `maxConcurrency` |   `number` |     `1` | Maximum concurrent tasks allowed per partition.                                                                        |
-| `queueCapacity`  |   `number` |   `100` | Maximum number of tasks that may wait in the queue across all partitions.                                              |
-| `partitioner`    | `Function` |  `null` | Optional function `(key) => partitionIndex` used to route a task based on a custom key.                                |
+| option           |       type | default | description                                                                                                              |
+| ---------------- | ---------: | ------: | ------------------------------------------------------------------------------------------------------------------------ |
+| `partitions`     |   `number` |     `4` | Number of isolated execution partitions. Work in different partitions does not compete for the same concurrency slots.   |
+| `maxConcurrency` |   `number` |     `1` | Maximum concurrent tasks allowed per partition.                                                                          |
+| `queueCapacity`  |   `number` |   `100` | Maximum number of tasks that may wait **in one partition**. The bulkhead can hold `queueCapacity * partitions` in total. |
+| `partitioner`    | `Function` |  `null` | Optional function `(key) => partitionIndex` used to route a task based on a custom key.                                  |
 
 ## API
 
@@ -20,10 +20,10 @@ Use `PowerBulkhead` when you need to protect critical work from a noisy producer
 - `drain()` — Wait until all active and queued tasks complete.
 - `partitions` — Number of configured partitions.
 - `maxConcurrency` — Maximum concurrent tasks per partition.
-- `queueCapacity` — Maximum queue size across all partitions.
+- `queueCapacity` — Maximum queue size **per partition**. It is the budget for one lane, not for the bulkhead: a noisy partition spends only its own, and a critical partition is not turned away by it. The total that can wait is `queueCapacity * partitions`.
 - `active` — Number of tasks currently running.
-- `pending` — Number of tasks currently queued.
-- `isFull` — `true` when the helper has reached its global queue capacity.
+- `pending` — Number of tasks currently queued, summed across all partitions.
+- `isFull` — `true` when **every** partition is at its budget, so no task that would have to queue can be admitted anywhere. One busy partition is the normal state of an isolated bulkhead and does not make the bulkhead full.
 - `reset(options?)` — Clear the partition tables and counters. The bulkhead stays usable, and — deliberately — keeps its [metrics](metrics.md) registration, because a reset is reversible and unregistering would make the series flap.
 - `dispose(options?)` — `reset()` plus releasing the metrics registration. Terminal. `using bulkhead = new PowerBulkhead(...)` calls this on scope exit, so a `using` block does not leave a bulkhead being sampled forever.
 
@@ -62,7 +62,7 @@ console.log('all work finished');
 
 - `PowerBulkhead` uses an internal `PowerQueue` for each partition to keep queued tasks O(1) on enqueue/dequeue.
 - Tasks with the same `partitionKey` are routed to the same partition by default, so noisy or bursty keys can be isolated from healthier lanes.
-- If `queueCapacity` is reached, `run()` rejects immediately with `PowerBulkhead queue is full`.
+- If that partition's `queueCapacity` is reached, `run()` rejects immediately with `PowerBulkhead queue is full`. The partition's own budget, not the bulkhead's total — a shared budget is not isolation.
 - Because partitions do not steal capacity from each other, a hot partition cannot block progress in other partitions.
 
 ## Validation

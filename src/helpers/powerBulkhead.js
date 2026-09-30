@@ -82,10 +82,36 @@ export class PowerBulkhead {
     });
     this._partitioner = typeof partitioner === 'function' ? partitioner : null;
     this._nextPartition = 0;
-    this._pendingCount = 0;
     this._activeCount = 0;
+    // Every admitted task, from submission to its outermost `finally`. `drain()`
+    // waits on this rather than on `active`/`pending`, because those two have an
+    // ordering hazard between them: when a permit is released the gate hands it to
+    // the next queued task and decrements its `pending` **synchronously**, while the
+    // predecessor's `.finally` decrements `active` in the same turn. There is a
+    // moment where a task has been promoted from the queue to the active lane and has
+    // not yet begun, and `active`/`pending` both read zero across it. Reading that
+    // window resolves `drain()` while a task is still owed. One counter of admitted
+    // work has no such gap.
+    this._outstanding = 0;
+    // Each partition owns its own queue budget. It used to be one global
+    // budget enforced against a single `_pendingCount`, so partition A filling
+    // its share refused partition C's work — measured, 2 partitions,
+    // `maxConcurrency: 1`, `queueCapacity: 2`: after A queued two tasks, a task
+    // in C was rejected with "PowerBulkhead queue is full" while **C had queued
+    // nothing and its own permit was free**. That is the starvation this class
+    // exists to prevent, caused by the one part of it that was not partitioned.
+    //
+    // `queueCapacity` is therefore read per partition, and the total that can
+    // wait is `queueCapacity * partitions` rather than `queueCapacity`. That is
+    // an observable admission change and is the point: a shared budget is not
+    // isolation. The gate carries the same value as a backstop, but the
+    // bulkhead checks first so the refusal is this class's error and not
+    // `PowerPermitGate`'s.
     this._buckets = Array.from({ length: this._partitions }, () => ({
-      gate: new PowerPermitGate({ capacity: this._maxConcurrency, queueCapacity: Infinity }),
+      gate: new PowerPermitGate({
+        capacity: this._maxConcurrency,
+        queueCapacity: this._queueCapacity,
+      }),
     }));
     this._drainWaiters = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
     // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
@@ -102,9 +128,18 @@ export class PowerBulkhead {
     return this._maxConcurrency;
   }
 
-  /** Total number of currently queued tasks. */
+  /**
+   * Total number of currently queued tasks, across all partitions.
+   *
+   * The sum of the partitions' own queues. This used to be a separate
+   * `_pendingCount` incremented and decremented by hand alongside the gates'
+   * own `pending`; two counters for one quantity, which is how a refusal
+   * decision came to be made against the wrong one.
+   */
   get pending() {
-    return this._pendingCount;
+    let total = 0;
+    for (const bucket of this._buckets) total += bucket.gate.pending;
+    return total;
   }
 
   /** Total number of running tasks across all partitions. */
@@ -112,14 +147,33 @@ export class PowerBulkhead {
     return this._activeCount;
   }
 
-  /** Maximum number of tasks that may wait in the queue. */
+  /**
+   * Maximum number of tasks that may wait, **per partition**.
+   *
+   * The total that can wait is `queueCapacity * partitions`. `0` is honoured
+   * and means "refuse immediately rather than queue", matching
+   * `PowerPermitGate`.
+   */
   get queueCapacity() {
     return this._queueCapacity;
   }
 
-  /** True when the bulkhead queue is saturated. */
+  /**
+   * True when **every** partition is at its queue budget, so no task that would
+   * have to queue can be admitted anywhere.
+   *
+   * Under a per-partition budget "is the bulkhead full" cannot be a single
+   * comparison against a global pending count, because a full partition says
+   * nothing about the others. `every` is the reading that matches the name: the
+   * bulkhead can accept no more work. `some` would report `isFull` as soon as
+   * one partition was busy, which is the *normal* state of an isolated
+   * bulkhead and would make the flag useless for backing off.
+   */
   get isFull() {
-    return this.pending >= this._queueCapacity;
+    for (const bucket of this._buckets) {
+      if (bucket.gate.pending < this._queueCapacity) return false;
+    }
+    return true;
   }
 
   /**
@@ -141,19 +195,25 @@ export class PowerBulkhead {
     const partition = this._choosePartition(options.partitionKey);
     const bucket = this._buckets[partition];
     const willQueue = bucket.gate.available === 0;
-    if (this.pending >= this._queueCapacity && willQueue) {
+    // Against **this partition's** queue, not the bulkhead's total. The total
+    // is a sum over partitions that are independently bounded, so comparing a
+    // global pending count against one partition's budget is what let a noisy
+    // partition refuse a critical one.
+    if (willQueue && bucket.gate.pending >= this._queueCapacity) {
       return Promise.reject(new Error('PowerBulkhead queue is full'));
     }
 
-    if (willQueue) this._pendingCount += 1;
-    else this._activeCount += 1;
+    this._outstanding += 1;
+    if (!willQueue) this._activeCount += 1;
 
     const permit = bucket.gate.acquire({ signal: options.signal });
     const result = permit.then(
       (release) => {
         if (willQueue) {
-          // A queued task promotes from the pending counter to the active one.
-          this._pendingCount = Math.max(0, this._pendingCount - 1);
+          // A queued task promotes from the partition's pending counter to the
+          // active one. The pending side is the gate's, which `acquire()`
+          // decrements itself as it hands the permit over; only the active
+          // count is this class's to move.
           this._activeCount += 1;
         }
 
@@ -170,14 +230,14 @@ export class PowerBulkhead {
           });
       },
       (err) => {
-        // The permit was refused. The queued branch already decremented
-        // `_pendingCount`; the non-queued branch had counted the task in
-        // `_activeCount` when it was submitted, so that has to be unwound
-        // here. Previously it was not, which permanently inflated
-        // `_activeCount` and left `drain()` hanging forever.
-        if (willQueue) {
-          this._pendingCount = Math.max(0, this._pendingCount - 1);
-        } else {
+        // The permit was refused, which is how a queued task is evicted or a
+        // reset rejects it. The gate unwinds its own pending count; the
+        // non-queued branch had counted the task in `_activeCount` when it was
+        // submitted, so that has to be unwound here. Previously that was not
+        // done for the queued branch, and the non-queued one was not unwound
+        // at all, which permanently inflated `_activeCount` and left `drain()`
+        // hanging forever.
+        if (!willQueue) {
           this._activeCount = Math.max(0, this._activeCount - 1);
         }
         this._resolveDrainWaitersIfIdle();
@@ -186,6 +246,7 @@ export class PowerBulkhead {
     );
 
     return result.finally(() => {
+      this._outstanding = Math.max(0, this._outstanding - 1);
       this._resolveDrainWaitersIfIdle();
     });
   }
@@ -205,11 +266,13 @@ export class PowerBulkhead {
     const bucket = this._buckets[partition];
     const release = bucket.gate.tryAcquire();
     if (!release) return null;
+    this._outstanding += 1;
     this._activeCount += 1;
     const result = Promise.resolve().then(() => task());
     return result.finally(() => {
       release();
       this._activeCount = Math.max(0, this._activeCount - 1);
+      this._outstanding = Math.max(0, this._outstanding - 1);
       this._resolveDrainWaitersIfIdle();
     });
   }
@@ -219,7 +282,7 @@ export class PowerBulkhead {
    * @returns {Promise<void>}
    */
   drain() {
-    if (this.active === 0 && this.pending === 0) {
+    if (this._outstanding === 0) {
       return Promise.resolve();
     }
     return new Promise((resolve) => {
@@ -234,11 +297,14 @@ export class PowerBulkhead {
   stats() {
     return {
       active: this._activeCount,
-      pending: this._pendingCount,
+      pending: this.pending,
       queueCapacity: this._queueCapacity,
       partitions: this._partitions,
       maxConcurrency: this._maxConcurrency,
-      saturated: this._pendingCount >= this._queueCapacity,
+      // Same reading as `isFull`: saturated means *nothing* can be admitted,
+      // not that one partition is busy. See the getter for why `every` and
+      // not `some` — a single busy partition is the normal state here.
+      saturated: this.isFull,
     };
   }
 
@@ -275,7 +341,6 @@ export class PowerBulkhead {
     for (const bucket of this._buckets) {
       bucket.gate.reset({ available, reason: coded });
     }
-    this._pendingCount = 0;
     this._resolveDrainWaitersIfIdle();
   }
 
@@ -339,7 +404,7 @@ export class PowerBulkhead {
   }
 
   _resolveDrainWaitersIfIdle() {
-    if (this._activeCount !== 0 || this._pendingCount !== 0) return;
+    if (this._outstanding !== 0) return;
 
     while (this._drainWaiters.length > 0) {
       const resolve = this._drainWaiters.shift();

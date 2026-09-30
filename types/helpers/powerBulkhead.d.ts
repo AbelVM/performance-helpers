@@ -23,8 +23,8 @@ export class PowerBulkhead {
     _queueCapacity: number;
     _partitioner: ((key: any) => number) | null;
     _nextPartition: number;
-    _pendingCount: number;
     _activeCount: number;
+    _outstanding: number;
     _buckets: {
         gate: PowerPermitGate;
     }[];
@@ -37,13 +37,36 @@ export class PowerBulkhead {
     get partitions(): number;
     /** Maximum concurrent tasks allowed per partition. */
     get maxConcurrency(): number;
-    /** Total number of currently queued tasks. */
+    /**
+     * Total number of currently queued tasks, across all partitions.
+     *
+     * The sum of the partitions' own queues. This used to be a separate
+     * `_pendingCount` incremented and decremented by hand alongside the gates'
+     * own `pending`; two counters for one quantity, which is how a refusal
+     * decision came to be made against the wrong one.
+     */
     get pending(): number;
     /** Total number of running tasks across all partitions. */
     get active(): number;
-    /** Maximum number of tasks that may wait in the queue. */
+    /**
+     * Maximum number of tasks that may wait, **per partition**.
+     *
+     * The total that can wait is `queueCapacity * partitions`. `0` is honoured
+     * and means "refuse immediately rather than queue", matching
+     * `PowerPermitGate`.
+     */
     get queueCapacity(): number;
-    /** True when the bulkhead queue is saturated. */
+    /**
+     * True when **every** partition is at its queue budget, so no task that would
+     * have to queue can be admitted anywhere.
+     *
+     * Under a per-partition budget "is the bulkhead full" cannot be a single
+     * comparison against a global pending count, because a full partition says
+     * nothing about the others. `every` is the reading that matches the name: the
+     * bulkhead can accept no more work. `some` would report `isFull` as soon as
+     * one partition was busy, which is the *normal* state of an isolated
+     * bulkhead and would make the flag useless for backing off.
+     */
     get isFull(): boolean;
     /**
      * Enqueue a task for execution under partition isolation.
