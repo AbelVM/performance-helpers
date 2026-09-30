@@ -126,6 +126,7 @@ export class PowerWebSocketClient {
         decodeErrors: number;
         reconnects: number;
         heartbeatTimeouts: number;
+        heartbeats: number;
     };
     _metrics: {
         unregister: () => boolean;
@@ -274,6 +275,24 @@ export class PowerWebSocketClient {
      * @private
      */
     private _handleError;
+    /**
+     * The reply to a heartbeat ping.
+     *
+     * Two things depend on it and neither happened before this existed:
+     * `_heartbeatDeadline` was never cleared, so on a `ws` socket — where `ping()`
+     * exists and the reply comes back as a `pong` event — **every healthy
+     * connection was closed with 4000 and reconnected, forever**; and in a browser,
+     * where there is no `ping()` at all, the heartbeat was inert and
+     * `stats().rtt` was permanently empty.
+     *
+     * The `canPing` read is the honest answer for a browser: the transport cannot
+     * ping, so RTT is unobservable rather than zero, and a dashboard that shows
+     * `0 ms` for a connection it never measured is making a claim it did not earn.
+     *
+     * @private
+     * @returns {void}
+     */
+    private _handlePong;
     /**
      * Poll `bufferedAmount`, pausing and resuming the producer across the marks.
      * The interval backs off while paused so a stuck socket does not spin.

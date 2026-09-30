@@ -302,6 +302,11 @@ export class PowerWebSocketClient {
       decodeErrors: 0,
       reconnects: 0,
       heartbeatTimeouts: 0,
+      // Heartbeats that came back. Always 0 before `RT-003`: the client had no
+      // `pong` handler, so `_pingSentAt` was written and never read, and a `ws`
+      // socket had every healthy connection closed with 4000 and reconnected
+      // because the reply was never accounted for.
+      heartbeats: 0,
     };
     // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
     this._metrics = attach(this, 'ws', options);
@@ -552,6 +557,11 @@ export class PowerWebSocketClient {
         p50: this.rtt.count ? this.rtt.percentile(50) : undefined,
         p95: this.rtt.count ? this.rtt.percentile(95) : undefined,
         p99: this.rtt.count ? this.rtt.percentile(99) : undefined,
+        // Whether the transport can measure RTT at all. A browser socket has no
+        // `ping()`, so the heartbeat is inert and `rtt.count` stays 0 — which
+        // reads as "0 ms latency" and is a claim the client never earned. `false`
+        // is the honest answer: unmeasured is not zero.
+        canPing: typeof this._socket?.ping === 'function',
       },
     };
   }
@@ -602,19 +612,72 @@ export class PowerWebSocketClient {
             });
         } else {
           this._socket = new this._WS(this.url, this.protocols);
+          // **A browser delivers every inbound frame as a `Blob` unless this is
+          // set**, and this library only ever sends binary — so without it every
+          // binary frame the client receives fails to decode, while the
+          // equivalent `ws` socket in Node works fine. The asymmetry is what makes
+          // it survive: a test on Node cannot see it. Highest
+          // severity-per-line item in the review.
+          //
+          // Set through a try/catch rather than guarded on the property existing,
+          // because a socket that *accepts* the assignment need not pre-declare
+          // it — and a fake or a non-browser implementation that does not is
+          // exactly the case where setting it is harmless and skipping it is not.
+          // What the try/catch is for is the opposite: an implementation that
+          // exposes `binaryType` as a getter-only accessor throws on assignment,
+          // and a client that cannot connect is worse than one that connects with
+          // the platform default.
+          //
+          // Swallowed rather than reported. `_debugLog` is a `PowerPool` field
+          // and this class has no such member, so calling it here would have been
+          // a no-op that *looked* like a diagnostic — and the type-debt ratchet
+          // caught exactly that, which is the gate working as intended. The
+          // condition is not worth an `error` event either: the connection is
+          // fine, and an implementation that cannot hold an `ArrayBuffer`
+          // preference is that implementation's business.
+          try {
+            this._socket.binaryType = 'arraybuffer';
+          } catch {
+            /* platform does not accept a binaryType override; the default applies */
+          }
           // Register through exactly ONE mechanism. Doing both would deliver
           // every event twice on a socket that supports both, silently
           // duplicating each message. `addEventListener` is preferred because
           // it does not clobber handlers the user set on the socket.
+          //
+          // `error` and `close` take `done` as well as reporting: a connect
+          // attempt that fails has to *settle*. Without it `connect()` stayed
+          // PENDING after both events and only rejected at the connect timeout —
+          // 10 s by default, and **forever** with `connectTimeoutMs: 0`, where
+          // `connect()` is documented to "reject on a failed connect".
           if (typeof this._socket.addEventListener === 'function') {
             this._socket.addEventListener('open', () => this._handleOpen(done));
-            this._socket.addEventListener('error', (e) => this._handleError(e));
-            this._socket.addEventListener('close', (e) => this._handleClose(e));
+            this._socket.addEventListener('error', (e) => {
+              this._handleError(e);
+              done(e);
+            });
+            this._socket.addEventListener('close', (e) => {
+              this._handleClose(e);
+              done(e);
+            });
             this._socket.addEventListener('message', (e) => this._handleMessage(e));
+            // The heartbeat's reply. A browser socket has no `ping()`, so
+            // `_pingSentAt` is never set and the deadline below can only ever
+            // expire — on a browser the heartbeat is inert, and `stats().rtt` is
+            // permanently empty.
+            if (typeof this._socket.addEventListener === 'function') {
+              this._socket.addEventListener('pong', () => this._handlePong());
+            }
           } else {
             this._socket.onopen = () => this._handleOpen(done);
-            this._socket.onerror = (e) => this._handleError(e);
-            this._socket.onclose = (e) => this._handleClose(e);
+            this._socket.onerror = (e) => {
+              this._handleError(e);
+              done(e);
+            };
+            this._socket.onclose = (e) => {
+              this._handleClose(e);
+              done(e);
+            };
             this._socket.onmessage = (e) => this._handleMessage(e);
           }
         }
@@ -633,13 +696,18 @@ export class PowerWebSocketClient {
               `PowerWebSocketClient: connect timed out after ${this._connectTimeoutMs}ms`
             );
             err.code = 'ERR_WS_CONNECT_TIMEOUT';
+            // **Settle before closing.** Closing emits a `close` event, and since
+            // `close` now settles a pending connect (it must — that is
+            // `RT-001`), closing first let the close's event object win the race
+            // and reject with an empty message instead of this one. The caller
+            // got `''` where the code and the reason had both been available.
+            done(err);
+            this._state = READY_STATE.CLOSED;
             try {
               this._socket?.close();
             } catch {
               /* ignore */
             }
-            this._state = READY_STATE.CLOSED;
-            done(err);
           }
         }, this._connectTimeoutMs);
       }
@@ -701,6 +769,44 @@ export class PowerWebSocketClient {
    */
   _handleError(err) {
     this._emit('error', err, this);
+  }
+
+  /**
+   * The reply to a heartbeat ping.
+   *
+   * Two things depend on it and neither happened before this existed:
+   * `_heartbeatDeadline` was never cleared, so on a `ws` socket — where `ping()`
+   * exists and the reply comes back as a `pong` event — **every healthy
+   * connection was closed with 4000 and reconnected, forever**; and in a browser,
+   * where there is no `ping()` at all, the heartbeat was inert and
+   * `stats().rtt` was permanently empty.
+   *
+   * The `canPing` read is the honest answer for a browser: the transport cannot
+   * ping, so RTT is unobservable rather than zero, and a dashboard that shows
+   * `0 ms` for a connection it never measured is making a claim it did not earn.
+   *
+   * @private
+   * @returns {void}
+   */
+  _handlePong() {
+    // **Only the deadline is cleared, not the whole heartbeat.** `_clearHeartbeat()`
+    // also cancels `_heartbeatTimer`, which is the heartbeat's own interval — so
+    // calling it here stopped the heartbeat after a single round trip, and
+    // `stats().heartbeats` froze at 1 forever. Measured with an async `pong`:
+    // 1 ping for the life of the socket, against 28 in 150 ms when the clear was
+    // missing. The reply settles one outstanding probe; it does not end the
+    // probing.
+    if (this._heartbeatDeadline) {
+      clearTimeout(this._heartbeatDeadline);
+      this._heartbeatDeadline = null;
+    }
+    const sentAt = this._pingSentAt;
+    this._pingSentAt = 0;
+    if (!sentAt) return;
+    const rtt = nowMs() - sentAt;
+    if (!(rtt >= 0)) return; // a clock that went backwards is not a measurement
+    this._counters.heartbeats += 1;
+    this.rtt.record(rtt);
   }
 
   /**

@@ -1455,6 +1455,65 @@ both were wrong in the tree:
 
 Closes GATE-003, GATE-008 and ALGO-009.
 
+#### WebSocket client: a failed connect never settled, and a browser got `Blob`s
+
+Two P0s in `PowerWebSocketClient`, one of which a Node test cannot see at all.
+
+**`connect()` never settled when the attempt failed.** Measured: still `PENDING`
+60 ms after both an `error` and a `close`, and with `connectTimeoutMs: 0` — the
+documented way to say "wait as long as it takes" — it never settled _at all_. The
+socket tier reported the event but never settled the promise, so the only paths
+left were `open` and the connect timer. A caller awaiting a connection to a dead
+endpoint waited 10 s by default, or forever, against a guide that promises
+"rejects on a failed connect".
+
+Two things the fix got wrong first, both caught by **existing** tests rather than
+by mine:
+
+- The connect **timeout** path closed the socket _before_ rejecting. Since `close`
+  now settles a pending connect — that is the fix — the close's event object won
+  the race and the caller got an empty message instead of
+  `connect timed out after Nms`, losing both the code and the reason on the one
+  error a caller is most likely to handle. Reordered to settle first, then close.
+  `test/powerWebSocketClient.test.js` had been pinning the correct error all along
+  and is a better test than the one I would have written.
+- I wrote a `catch (e) { this._debugLog?.(e, …) }` around the `binaryType`
+  assignment. **`_debugLog` is a `PowerPool` field; this class has no such
+  member**, so the call would have been a silent no-op that looked like a
+  diagnostic. The type-debt ratchet caught it — the gate working as intended on a
+  change made two commits after it was hardened.
+
+**A browser delivered every inbound frame as a `Blob`, and the client never said
+otherwise.** `binaryType` was never assigned anywhere in the file. A browser hands
+you a `Blob` unless it is set, and this library only ever _sends_ binary — so on a
+browser every received binary frame failed to decode, while the identical code
+against a Node `ws` socket worked. **A test on Node cannot observe it**, which is
+why it survived and why it is worth naming separately from the connect fix.
+
+It is now set at **construction**, not on first message: the browser reads the
+property when it delivers each frame, so a frame arriving before the assignment is
+already a `Blob`. The first attempt used `if ('binaryType' in socket)`, which
+does not work — it skips a socket that _accepts_ the assignment but does not
+pre-declare it, which is exactly the case where setting it is harmless and
+skipping it is not. The try/catch alone is the right shape: it tolerates a
+getter-only accessor that throws, since a client that cannot connect is worse than
+one that connects with the platform default.
+
+`test/powerWebSocketClient.connect.test.js`, 8 tests, mutation-checked both ways.
+
+**`RT-003` is deliberately left open.** Its named symptom is fixed — a healthy `ws`
+socket is no longer closed with 4000 and reconnected forever, because the `pong`
+reply is now handled, the probe deadline is cleared, RTT is recorded, and
+`stats().rtt.canPing` says _unmeasured_ rather than showing 0 ms. But the fix
+surfaced a **new, opposite** failure, recorded as its own row: the heartbeat's
+detection timer is armed with an unref'd `setSafeTimeout`, so on a socket that
+accepts a ping and never answers, the deadline **never fires at all** —
+`heartbeatTimeouts` stays 0 and the socket is never closed. The heartbeat cannot
+detect a dead socket, which is the only thing it is for. The `pong` mutation
+survives because of it, and that is stated on the row rather than papered over.
+
+Closes RT-001 and RT-002.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
