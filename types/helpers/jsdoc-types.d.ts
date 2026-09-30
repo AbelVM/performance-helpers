@@ -497,9 +497,18 @@ export type PowerBatchOptions = {
      */
     maxSize?: number | undefined;
     /**
-     * How the batch is scheduled.
+     * How the batch is
+     * scheduled, passed straight to `PowerScheduler`. The set matches the
+     * scheduler's own, including `'yield'` — the native continuation, which the
+     * scheduler prioritises. An unrecognised value throws.
      */
-    scheduling?: "microtask" | "macrotask" | undefined;
+    scheduling?: "microtask" | "macrotask" | "yield" | undefined;
+    /**
+     * Called when the handler rejects with no
+     * pending promise to reject, which is a scheduler-driven flush rather than an
+     * `add()`-triggered one. Without it that error had nowhere to go.
+     */
+    onError?: ((err: any) => void) | undefined;
 };
 /**
  * The promise `PowerBatch` hands back to every `add()`/`flush()` caller in a

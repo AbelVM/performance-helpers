@@ -43,6 +43,7 @@ export class PowerBatch {
   constructor(handler, options = {}) {
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
     const { maxSize = Number.POSITIVE_INFINITY, scheduling = 'microtask' } = options;
+    const onError = typeof options.onError === 'function' ? options.onError : undefined;
     this._handler = handler;
     // `Number(maxSize) || Infinity` turned `maxSize: 0` into `Infinity` - a
     // batch that then never flushes, silently. Validate instead.
@@ -56,8 +57,24 @@ export class PowerBatch {
     this._queue = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
     /** @type {?BatchPending} */
     this._pending = null;
+    // **Passed through, not coerced.** This was
+    // `scheduling === 'macrotask' ? 'macrotask' : 'microtask'`, which silently
+    // turned `'typo'` into `'microtask'` — defeating the explicit throw
+    // `PowerScheduler` performs for exactly that case, whose own comment says "a
+    // typo would otherwise silently pick the *fastest* strategy for a scheduler
+    // that was asked for something else". It also lost the `'yield'` strategy
+    // entirely, even though `PowerScheduler` supports it and prioritises it.
+    //
+    // The default above is what supplies `'microtask'`, so an omitted option
+    // behaves exactly as before and a caller who asked for something specific
+    // now gets it — or a `TypeError` naming what is valid.
     this._scheduler = new PowerScheduler(() => this._runBatch(), {
-      scheduling: scheduling === 'macrotask' ? 'macrotask' : 'microtask',
+      scheduling,
+      // Without this, `_runBatch`'s `else throw err` — reached when the handler
+      // rejects and there is no pending promise to reject, i.e. during a
+      // scheduler-driven flush rather than an `add()`-triggered one — became a
+      // silent unhandled rejection that nothing in this class could observe.
+      onError,
     });
   }
 

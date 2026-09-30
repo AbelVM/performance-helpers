@@ -362,7 +362,13 @@ export {};
  * Batch options for `PowerBatch`.
  * @typedef {Object} PowerBatchOptions
  * @property {number} [maxSize] Flush as soon as this many items are queued.
- * @property {'microtask'|'macrotask'} [scheduling] How the batch is scheduled.
+ * @property {'microtask'|'macrotask'|'yield'} [scheduling] How the batch is
+ *   scheduled, passed straight to `PowerScheduler`. The set matches the
+ *   scheduler's own, including `'yield'` — the native continuation, which the
+ *   scheduler prioritises. An unrecognised value throws.
+ * @property {(err:any)=>void} [onError] Called when the handler rejects with no
+ *   pending promise to reject, which is a scheduler-driven flush rather than an
+ *   `add()`-triggered one. Without it that error had nowhere to go.
  */
 
 /**

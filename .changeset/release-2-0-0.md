@@ -3364,3 +3364,44 @@ still `'open'` and `_consecutiveOpens` is untouched after the logical half-open 
 read.
 
 Closes RES-025.
+
+#### `PowerBatch` silently rewrote the scheduling strategy it was asked for
+
+The constructor read:
+
+```js
+scheduling: scheduling === 'macrotask' ? 'macrotask' : 'microtask';
+```
+
+Two failures, both quiet. **A typo became the fastest strategy** — `'typo'`,
+`'macro'`, `'MACROTASK'` all landed on `'microtask'`, defeating the explicit throw
+`PowerScheduler` performs for exactly that case, whose own comment reads "a typo
+would otherwise silently pick the _fastest_ strategy for a scheduler that was asked
+for something else". And **`'yield'` was lost entirely**, in runtime _and_ in
+types: the JSDoc typedef listed only `'microtask'|'macrotask'`, so the strategy
+`PowerScheduler` supports and prioritises was unreachable through this class.
+
+`scheduling` is now passed straight through. The default is applied in
+`PowerBatch`'s own destructuring, so the no-option path is unchanged, and a caller
+who asked for something specific now gets it — or a `TypeError` naming what is
+valid. The typedef, the guide's option table and the tests all carry all three
+strategies.
+
+`onError` is forwarded too, as a pass-through rather than something handled here:
+`PowerScheduler._run` already normalises the flush result to a promise and funnels
+both a synchronous throw and an async rejection into `_notifyError`.
+
+`test/powerBatch.scheduling.test.js`, 7 tests, three mutations caught — including
+a _partial_ coercion that keeps `'yield'` but still drops typos, which only the
+typo assertion catches. The tests observe the argument a real `PowerScheduler`
+subclass receives, so nothing about scheduling's behaviour is faked.
+
+**The `onError` half is a safety net rather than a fix for an observed failure,
+and that was measured.** `_runBatch`'s `else throw err` needs `_pending` to be
+null while the queue is non-empty, and every `add()` creates a pending, so that
+branch looks unreachable through the public API. My first end-to-end test asserted
+`onError` was called, failed with 0 calls and an unhandled rejection, and was wrong
+about the premise rather than about the fix. What is reachable — and now asserted —
+is that a handler rejection always reaches a caller and is never lost.
+
+Closes RES-033.

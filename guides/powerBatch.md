@@ -10,14 +10,15 @@ Useful for coalescing DB writes, network calls, or other I/O that benefits from 
 
 ## Options
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `maxSize` | `number` | `Infinity` | When the queue reaches `maxSize`, the batch flushes immediately. |
-| `scheduling` | `'microtask'\|'macrotask'` | `'microtask'` | Choose whether the batch dispatch is scheduled on the microtask queue (`queueMicrotask`) or macrotask queue (`setTimeout(…,0)`). Default is `'microtask'` to match low-latency coalescing semantics.
+| Option       |                                   Type |       Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------ | -------------------------------------: | ------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxSize`    |                               `number` |    `Infinity` | When the queue reaches `maxSize`, the batch flushes immediately.                                                                                                                                                                                                                                                                                                                                                                |
+| `scheduling` | `'microtask'`\|'macrotask'`\|`'yield'` | `'microtask'` | Which queue the batch dispatch is scheduled on, **passed straight to `PowerScheduler`**. `'microtask'` coalesces via `queueMicrotask`, `'macrotask'` via a `MessageChannel` post, and `'yield'` uses the native `scheduler.yield()` continuation, which the scheduler prioritises. An unrecognised value **throws** rather than being coerced to a default. Default is `'microtask'` to match low-latency coalescing semantics. |
+| `onError`    |                        `function(err)` |             — | Called when the handler rejects with no pending promise to reject — a scheduler-driven flush rather than an `add()`-triggered one. Without it that error had nowhere to go.                                                                                                                                                                                                                                                     |
 
 ### Cancelling the wait
 
-`flush({ signal })` stops *waiting*. It does not cancel the flush: the items
+`flush({ signal })` stops _waiting_. It does not cancel the flush: the items
 already queued still belong to the callers who passed them to `add()`, and
 those promises still resolve when the batch goes out. Rejecting the shared
 pending promise instead would break every queued caller with a cancellation
@@ -52,15 +53,18 @@ An already-aborted signal rejects without flushing at all.
 import { PowerBatch } from '../src/helpers/powerBatch.js';
 import { getDbClient } from './db'; // user helper returning a pooled client
 
-const writer = new PowerBatch(async (items) => {
-  const db = await getDbClient();
-  try {
-    // perform a single bulk upsert for many small events
-    await db.bulkUpsert('events', items);
-  } finally {
-    db.release();
-  }
-}, { maxSize: 500 });
+const writer = new PowerBatch(
+  async (items) => {
+    const db = await getDbClient();
+    try {
+      // perform a single bulk upsert for many small events
+      await db.bulkUpsert('events', items);
+    } finally {
+      db.release();
+    }
+  },
+  { maxSize: 500 }
+);
 
 // coalesce many synchronous events into fewer DB calls
 for (const ev of incomingEvents()) {

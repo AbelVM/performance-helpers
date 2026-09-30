@@ -81,13 +81,37 @@ describe('PowerBatch branches extra', () => {
     expect(() => new PowerBatch(() => {}, { maxSize: Number.NaN })).toThrow(/maxSize/);
   });
 
-  it('still falls back to microtask for an unknown scheduling mode', async () => {
+  it('rejects an unknown scheduling mode rather than normalising it', async () => {
+    // **This used to assert the opposite** — "still falls back to microtask for
+    // an unknown scheduling mode" — so the fallback was a deliberate decision,
+    // not an oversight. It was wrong for two reasons, and RES-033 is the record
+    // of the change.
+    //
+    // The inconsistency is local: the `maxSize` test three assertions above says
+    // "A nonsensical limit is a configuration error", and throws for `0`, `-5` and
+    // `NaN`. This option normalised the same class of nonsense. One file, two
+    // answers to the same question.
+    //
+    // And the fallback picked `microtask`, the *fastest* strategy, for a
+    // scheduler that was asked for something else — which is what
+    // `PowerScheduler` throws to prevent, in a comment that says so explicitly.
+    // It also made `'yield'` unreachable, since every non-`'macrotask'` value
+    // collapsed onto `'microtask'`.
+    expect(() => new PowerBatch(() => {}, { scheduling: 'invalid' })).toThrow(
+      /scheduling.*must be one of/i
+    );
+  });
+
+  it('still coalesces a flush on a valid scheduling mode', async () => {
+    // Kept so the batching this test used to cover incidentally is still covered:
+    // the previous body asserted the items arrived together, which is worth
+    // keeping whatever happens to the fallback.
     const calls = [];
     const b = new PowerBatch(
       async (items) => {
         calls.push(items.slice());
       },
-      { scheduling: 'invalid' }
+      { scheduling: 'microtask' }
     );
 
     b.add(1);
