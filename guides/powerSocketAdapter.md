@@ -63,24 +63,38 @@ async function shutdown() {
 
 `socket` is a Node `ws` socket, a browser `WebSocket`, or a `WebSocketStream`. The transport is detected from the socket's **capabilities**, not its constructor name — the same class is reachable as `ws` in Node, `undici`'s `WebSocket` in newer Node, and the global in a browser, and the last two are different objects sharing a name. An unrecognised object **throws** rather than defaulting, because a silent default would attach no listeners and look healthy while receiving nothing.
 
-Detection order is `stream` → `websocket` → `ws`, and the order matters: a `WebSocketStream` exposes `readable`/`writable` but neither `on` nor `addEventListener`, so tested in the other order it would be classified as unidentifiable.
+Detection order is `stream` → `websocket` → `ws`, and each test asks for the **capability that model actually needs** rather than for a truthy property:
+
+| kind        | detected by                                    |
+| ----------- | ---------------------------------------------- |
+| `stream`    | `writable.getWriter` (or `readable.getReader`) |
+| `websocket` | `addEventListener`                             |
+| `ws`        | `on` **and** `send`                            |
+
+Two of those tests are load-bearing in both directions.
+
+The stream test is on the **methods**, not on `readable`/`writable` being truthy, because on a Node `Duplex` — `net.Socket` above all — those two are **booleans**. A truthiness test therefore classified every TCP socket in existence as a `WebSocketStream`: `send()` returned `false` on every call, `isOpen` reported `true`, and not one inbound message was ever delivered while the socket itself was echoing them. A healthy-looking adapter, permanently deaf.
+
+`writable` is checked before `readable` because a `WebSocketStream` reports `readable: null` until its connection opens, and that object is still a stream.
+
+The `ws` test requires `send` as well as `on`, because `on` alone matches every `EventEmitter` in Node. Without it a raw `net.Socket` was accepted as a `ws` socket: it emits `data`, never `message`, so the adapter stayed deaf, and its TCP `close` was reported as a WebSocket close. So a `net.Socket` **throws** — pass `kind` explicitly if you really are adapting one.
 
 ## Options
 
-| Option                |                              Type |     Default | Description                                                                                                       |
-| --------------------- | --------------------------------: | ----------: | ----------------------------------------------------------------------------------------------------------------- |
-| `kind`                | `'ws' \| 'websocket' \| 'stream'` |    detected | Override detection.                                                                                               |
-| `onMessage`           |                        `Function` | `undefined` | Called per accepted inbound message as `{ data, isBinary, adapter }`. A returned promise is awaited by `drain()`. |
-| `onOpen`              |                        `Function` | `undefined` | Socket opened.                                                                                                    |
-| `onClose`             |                        `Function` | `undefined` | Socket closed — including a heartbeat or idle timeout. Receives `{ code, reason, adapter }`.                      |
-| `onError`             |                        `Function` | `undefined` | Transport, handler, or send error. Receives `(err, adapter)`. A throwing `onError` is swallowed.                  |
-| `onRateLimited`       |                        `Function` | `undefined` | An inbound message was refused by the rate limit. Receives the running refusal count.                             |
-| `heartbeatIntervalMs` |                          `number` |     `30000` | Send a ping at this interval. `0` disables.                                                                       |
-| `heartbeatTimeoutMs`  |                          `number` |     `10000` | Declare the socket dead if no pong or message arrives in this long. `0` disables.                                 |
-| `idleTimeoutMs`       |                          `number` |         `0` | Declare the socket dead if nothing at all arrives for this long. `0` disables.                                    |
-| `rateLimit`           |             `{ limit, windowMs }` | `undefined` | Per-socket inbound rate limit. Omitted means no limit.                                                            |
-| `rateLimitAction`     |               `'drop' \| 'close'` |    `'drop'` | What to do with a rate-limited message. `close` uses code 1008.                                                   |
-| `drainTimeoutMs`      |                          `number` |      `5000` | How long `drain()` waits for in-flight handlers before closing anyway. `0` waits indefinitely.                    |
+| Option                |                              Type |     Default | Description                                                                                                                                                        |
+| --------------------- | --------------------------------: | ----------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `kind`                | `'ws' \| 'websocket' \| 'stream'` |    detected | Override detection. An unrecognised value **throws** rather than being stored, because a stored kind that matches no branch would attach nothing and look healthy. |
+| `onMessage`           |                        `Function` | `undefined` | Called per accepted inbound message as `{ data, isBinary, adapter }`. A returned promise is awaited by `drain()`.                                                  |
+| `onOpen`              |                        `Function` | `undefined` | Socket opened.                                                                                                                                                     |
+| `onClose`             |                        `Function` | `undefined` | Socket closed — including a heartbeat or idle timeout. Receives `{ code, reason, adapter }`.                                                                       |
+| `onError`             |                        `Function` | `undefined` | Transport, handler, or send error. Receives `(err, adapter)`. A throwing `onError` is swallowed.                                                                   |
+| `onRateLimited`       |                        `Function` | `undefined` | An inbound message was refused by the rate limit. Receives the running refusal count.                                                                              |
+| `heartbeatIntervalMs` |                          `number` |     `30000` | Send a ping at this interval. `0` disables.                                                                                                                        |
+| `heartbeatTimeoutMs`  |                          `number` |     `10000` | Declare the socket dead if no pong or message arrives in this long. `0` disables.                                                                                  |
+| `idleTimeoutMs`       |                          `number` |         `0` | Declare the socket dead if nothing at all arrives for this long. `0` disables.                                                                                     |
+| `rateLimit`           |             `{ limit, windowMs }` | `undefined` | Per-socket inbound rate limit. Omitted means no limit.                                                                                                             |
+| `rateLimitAction`     |               `'drop' \| 'close'` |    `'drop'` | What to do with a rate-limited message. `close` uses code 1008.                                                                                                    |
+| `drainTimeoutMs`      |                          `number` |      `5000` | How long `drain()` waits for in-flight handlers before closing anyway. `0` waits indefinitely.                                                                     |
 
 ## API
 
@@ -151,7 +165,7 @@ Step 3 is bounded by `drainTimeoutMs`, because a handler that never settles woul
 
 A stream has no `readyState` or `bufferedAmount`, so the adapter reports `OPEN` for its life and `CLOSED` after `close()`, and `bufferedAmount` is always `0`. Reporting `0` rather than `NaN` or `Infinity` is deliberate: a watermark loop reading either would treat the socket as "never backed up" and never pause.
 
-The writable writer is acquired **once** and held until `dispose()`. `getWriter()` locks a stream, and the lock is only released by `releaseLock()` — so taking a fresh writer per `send()` would make the second send throw, and the stream would stay locked for the life of the object even for whoever else holds a reference. `send()` stays synchronous and returns a boolean, so it is a drop-in for the `ws` path; the underlying write promise is tracked so `drain()` waits for it, because an un-awaited `write()` that later rejects is an unhandled rejection.
+The writable writer is acquired **once** and held until the socket closes or the adapter is disposed — `close()` releases it, as does a close the adapter observes from the peer, because the lock was otherwise held for the life of the stream object even for whoever else holds a reference. `getWriter()` locks a stream, and the lock is only released by `releaseLock()` — so taking a fresh writer per `send()` would make the second send throw. `send()` stays synchronous and returns a boolean, so it is a drop-in for the `ws` path; the underlying write promise is tracked so `drain()` waits for it, because an un-awaited `write()` that later rejects is an unhandled rejection.
 
 ## Disposal
 

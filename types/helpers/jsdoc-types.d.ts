@@ -629,6 +629,10 @@ export type PowerSocketAdapterRateLimited = (count: number) => void;
 export type PowerSocketAdapterOptions = {
     /**
      * - Transport family. Detected
+     * from the socket's capabilities when omitted; pass it to override detection,
+     * or when adapting a socket the detector cannot recognise. An unrecognised
+     * value throws rather than being stored — a stored kind that matched no
+     * branch would attach nothing and report itself open.
      */
     kind?: "ws" | "websocket" | "stream" | undefined;
     /**

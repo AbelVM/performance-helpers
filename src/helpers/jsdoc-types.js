@@ -471,6 +471,10 @@ export {};
  *
  * @typedef {Object} PowerSocketAdapterOptions
  * @property {'ws'|'websocket'|'stream'} [kind] - Transport family. Detected
+ *   from the socket's capabilities when omitted; pass it to override detection,
+ *   or when adapting a socket the detector cannot recognise. An unrecognised
+ *   value throws rather than being stored — a stored kind that matched no
+ *   branch would attach nothing and report itself open.
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
  *   metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Off by default, so the common case allocates nothing.

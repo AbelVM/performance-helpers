@@ -1753,6 +1753,76 @@ throwaway `setTimeout` would be measuring the thing under test.
 
 Closes RES-014, RES-027, PERF-001 and GATE-009.
 
+#### A TCP socket was classified as a `WebSocketStream`, and the override that should have saved you did not work
+
+**Breaking**
+
+`PowerSocketAdapter` detected a `WebSocketStream` by testing `socket.readable &&
+socket.writable`. On a Node `Duplex` — `net.Socket` above all — those two
+properties are **booleans**, so the test matched every TCP socket in existence.
+Measured against a real `net.Socket` on a real loopback connection whose peer
+echoed every byte it received:
+
+```js
+detectSocketKind(socket); // 'stream'
+adapter.kind; // 'stream'
+adapter.send('ping'); // false, every call
+adapter.isOpen; // true    <- reports a healthy connection
+adapter.readyState; // 1
+// 0 of 1 messages delivered, while the socket was echoing them
+```
+
+The adapter read `socket.readable === true`, found no `getReader`, and returned
+without attaching anything. Not one inbound message was ever delivered, and
+nothing failed visibly. `send()` returned `false` on every call, which a caller
+could mistake for a closed socket.
+
+Detection now asks for the capability each model actually needs, and a
+`net.Socket` **throws** — which is what `guides/powerSocketAdapter.md` has always
+said an unrecognised object should do.
+
+```js
+detectSocketKind(socket); // 'stream'  <- writable.getWriter / readable.getReader
+// 'websocket' <- addEventListener
+// 'ws'      <- on AND send
+```
+
+Two of those tests are load-bearing in both directions. `writable` is checked
+before `readable` because a `WebSocketStream` reports `readable: null` until its
+connection opens and is still a stream. And the `ws` test requires `send` as
+well as `on`, because `on` alone matches every `EventEmitter` in Node — without
+it, tightening only the stream test would have moved `net.Socket` from `'stream'`
+to `'ws'`, still deaf, and now reporting its TCP `close` as a WebSocket close.
+
+**The `kind` option did not work, and its own error message said to use it.**
+That message ends _"Pass `kind` explicitly to override detection"_, and the line
+after the assignment called `detectSocketKind` a second time regardless — so on
+precisely the sockets detection rejects, following the message reproduced the
+error it told you to bypass. `kind` now short-circuits detection, and an
+unrecognised value **throws** rather than being stored; a stored kind matching no
+branch would attach nothing and report itself open, which is the failure this
+class exists to avoid.
+
+**A closed stream stayed locked.** The writable writer is acquired once and the
+lock is only released by `releaseLock()`, so a socket that closed — including
+through the adapter's own `close()` — left `writable` locked for good, and a
+caller holding the socket could not write to it again. The lock is now released
+on a close, not only on `dispose()`.
+
+The related row **RT-004 stays open**: the message pump still reads
+`socket.readable` once and never retries, so a `WebSocketStream` that is not yet
+open receives nothing. That needs a wait mechanism and is not fixed here.
+
+`test/powerSocketAdapter.detect.test.js` covers all of it against real
+`net.Socket` connections and real `ReadableStream`/`WritableStream` pairs, with
+four mutations checked. Two of the tests were wrong before the code was — the
+override test asserted a not-yet-open stream was undetectable, which the
+tightened predicate now detects, and one loop asserted all three `kind` values
+against a single object although `_attach` dispatches on `kind`. Both were found
+by running the suite, and both are explained where they were fixed.
+
+Closes RT-005.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

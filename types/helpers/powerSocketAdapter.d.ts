@@ -264,6 +264,15 @@ export class PowerSocketAdapter {
      */
     private _handleClose;
     /**
+     * Hand back the writer lock taken in `_writeStream`, if one is held.
+     *
+     * Called from both `_handleClose` and `_detach`, and idempotent: the second
+     * call finds `_streamWriter` already null.
+     *
+     * @private
+     */
+    private _releaseStreamWriter;
+    /**
      * @private
      */
     private _handlePong;

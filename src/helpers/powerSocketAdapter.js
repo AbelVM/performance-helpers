@@ -39,6 +39,16 @@ import { PowerSlidingWindow } from './powerSlidingWindow.js';
 import { MS_PER_SEC, READY_STATE } from './constants.js';
 
 /**
+ * The three socket models the adapter knows how to drive. Kept as a list rather
+ * than three comparisons so the constructor can reject an unknown `kind` in the
+ * same place it accepts a known one — an unrecognised kind used to be stored
+ * as-is and then match no branch in `_attach`, which is the silent-deafness
+ * failure this class exists to avoid.
+ * @type {readonly ['stream', 'websocket', 'ws']}
+ */
+const KINDS = /** @type {const} */ (['stream', 'websocket', 'ws']);
+
+/**
  * The four states of a socket's lifecycle, as constants.
  *
  * Re-exported from `constants.js` rather than declared here, so it is the *same*
@@ -88,14 +98,31 @@ export function detectSocketKind(socket) {
   if (!socket || typeof socket !== 'object') {
     throw new TypeError('PowerSocketAdapter: socket must be an object.');
   }
-  if (socket.readable && socket.writable) return 'stream';
+  // A `WebSocketStream` is identified by its **stream methods**, not by having
+  // truthy `readable`/`writable`. On a Node `Duplex` — `net.Socket` above all —
+  // those two are **booleans**, so `readable && writable` matched every TCP
+  // socket in existence. The adapter then read `socket.readable === true`, found
+  // no `getReader`, and returned without attaching: `kind` `'stream'`, `send()`
+  // `false` on every call, `isOpen` `true`, and not one inbound message
+  // delivered while the socket itself was echoing them. Silent total failure,
+  // reported as a healthy connection.
+  //
+  // `writable` is checked first because a `WebSocketStream` reports `readable:
+  // null` until its connection opens, and that object is still a stream.
+  if (typeof socket.writable?.getWriter === 'function') return 'stream';
+  if (typeof socket.readable?.getReader === 'function') return 'stream';
   if (typeof socket.addEventListener === 'function') return 'websocket';
-  if (typeof socket.on === 'function') return 'ws';
+  // `on` alone matches every `EventEmitter` in Node — a `net.Socket`, an
+  // `http.IncomingMessage` — so `send` is required as well. Without it a raw
+  // TCP socket was accepted as a `ws` socket: it emits `data`, never `message`,
+  // so the adapter stayed deaf, and its TCP `close` was reported as a
+  // WebSocket close. An unrecognised socket is supposed to throw.
+  if (typeof socket.on === 'function' && typeof socket.send === 'function') return 'ws';
   throw new TypeError(
     'PowerSocketAdapter: cannot detect the socket model. Expected a Node `ws` ' +
-      'socket (EventEmitter), a browser `WebSocket` (EventTarget), or a ' +
-      '`WebSocketStream` (readable/writable). Pass `kind` explicitly to ' +
-      'override detection.'
+      'socket (EventEmitter with `send`), a browser `WebSocket` (EventTarget), or a ' +
+      '`WebSocketStream` (with `getWriter`/`getReader`). A Node `Duplex` such as a ' +
+      '`net.Socket` is not one of these. Pass `kind` explicitly to override detection.'
   );
 }
 
@@ -136,9 +163,23 @@ export class PowerSocketAdapter {
     } = options || {};
 
     /** @type {SocketKind} */
+    // `kind` short-circuits detection, and it has to. The error above tells the
+    // caller to pass `kind` to override detection, and this used to call
+    // `detectSocketKind` a *second* time on the following line regardless — so
+    // on precisely the sockets detection rejects, the documented escape hatch
+    // threw the very error it existed to bypass. A not-yet-open
+    // `WebSocketStream` is the case that matters: its `readable` is `null`, it
+    // has neither `on` nor `addEventListener`, and without the override there
+    // was no way to construct an adapter for it at all.
+    //
+    // The guard that guard was replaced with could never be true: with no `kind`
+    // the comparison is `x !== x`, and with a `kind` the `&& !kind` is false.
     this.kind = kind || detectSocketKind(socket);
-    if (this.kind !== detectSocketKind(socket) && !kind) {
-      throw new TypeError('PowerSocketAdapter: socket must be an object.');
+    if (!KINDS.includes(this.kind)) {
+      throw new TypeError(
+        `PowerSocketAdapter: unknown kind ${JSON.stringify(this.kind)}. ` +
+          `Expected one of ${KINDS.map((k) => `'${k}'`).join(', ')}.`
+      );
     }
     /** @type {any} The underlying socket, for escape hatches the adapter omits. */
     this.socket = socket;
@@ -395,6 +436,11 @@ export class PowerSocketAdapter {
     }
     this._state = READY_STATE.CLOSED;
     this._finishDrain();
+    // `close()` sets the state itself rather than routing through
+    // `_handleClose`, so it needs the same lock release — otherwise the local
+    // close path leaked the writer exactly as the remote one did, and this is
+    // the path a caller reaches first.
+    this._releaseStreamWriter();
   }
 
   /**
@@ -655,7 +701,35 @@ export class PowerSocketAdapter {
     this._state = READY_STATE.CLOSED;
     this._clearTimers();
     this._finishDrain();
+    // The adapter's own comment on `_writeStream` calls a permanently locked
+    // stream permanent damage, but the lock was only ever released by
+    // `_detach`, which runs on `dispose()`. A socket that closes — and
+    // `close()` is one of the adapter's own methods — left `writable` locked
+    // for good, so a caller holding the socket could not write to it again even
+    // after reconnecting a new stream over it.
+    this._releaseStreamWriter();
     this._invoke(this._onClose, { code, reason, adapter: this });
+  }
+
+  /**
+   * Hand back the writer lock taken in `_writeStream`, if one is held.
+   *
+   * Called from both `_handleClose` and `_detach`, and idempotent: the second
+   * call finds `_streamWriter` already null.
+   *
+   * @private
+   */
+  _releaseStreamWriter() {
+    if (!this._streamWriter) return;
+    // Without this the stream stays locked for the life of the stream object,
+    // so nothing else could ever write to it - including a caller that got the
+    // socket back.
+    try {
+      this._streamWriter.releaseLock?.();
+    } catch (e) {
+      /* a writer with an in-flight write cannot be released; the stream is closing */
+    }
+    this._streamWriter = null;
   }
 
   /**
@@ -809,15 +883,7 @@ export class PowerSocketAdapter {
       this._streamReader = null;
     }
     if (this._streamWriter) {
-      // The other half of the lock taken in `_writeStream`. Without this the
-      // stream stays locked for the life of the stream object, so nothing else
-      // could ever write to it - including a caller that got the socket back.
-      try {
-        this._streamWriter.releaseLock?.();
-      } catch (e) {
-        /* a writer with an in-flight write cannot be released; the stream is closing */
-      }
-      this._streamWriter = null;
+      this._releaseStreamWriter();
     }
   }
 
