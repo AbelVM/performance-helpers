@@ -49,9 +49,60 @@ function getMacrotaskChannel() {
     _macrotaskChannel.port1.onmessage = () => {
       /* messages are consumed by the per-subscription handler below */
     };
+    // Assigning `onmessage` **starts** the port, and a started `MessagePort`
+    // keeps the Node event loop alive. This one is module-level, so a single
+    // `yield()` anywhere in a process — a CLI, a serverless handler, a test —
+    // pinned that process open for good, including after `dispose()`. Verified
+    // in a subprocess: the script reached its last line and then sat there until
+    // the timeout killed it. Three lines are the whole of it:
+    //
+    //     const c = new MessageChannel(); c.port1.onmessage = () => {};
+    //
+    // `unref()` is the same treatment `utils/timers.js` and `PowerCron` already
+    // get, and the trade is identical: a flush still pending when the process
+    // would otherwise exit is dropped rather than holding the process open. A
+    // scheduler's job is to yield promptly inside a running program, not to keep
+    // one alive. Guarded because a browser `MessagePort` has no `unref`, and
+    // browsers have no event loop to hold open.
+    // Guarded because a browser `MessagePort` has no `unref`, and browsers have
+    // no event loop to hold open. The cast is the same one `utils/timers.js`
+    // makes and for the same reason: the DOM's `MessagePort` type has no
+    // `unref`, while Node's has it as an own instance property, so the
+    // capability has to be probed on the value rather than asserted through a
+    // type that only holds in one of them. `typecheck:ratchet` caught both
+    // accesses at 292 against a 290 ceiling.
+    const port = /** @type {any} */ (_macrotaskChannel.port1);
+    if (typeof port.unref === 'function') port.unref();
     return _macrotaskChannel;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Release the module-level macrotask channel.
+ *
+ * Called from `dispose()`. `unref()` alone already lets the process exit, but
+ * the ports are still open and still referenced, so a disposed scheduler would
+ * leave a started channel behind for the next one in the same process. Clearing
+ * the module reference lets the next `getMacrotaskChannel()` build a fresh pair.
+ *
+ * @returns {void}
+ */
+function closeMacrotaskChannel() {
+  const channel = _macrotaskChannel;
+  if (!channel) return;
+  _macrotaskChannel = null;
+  try {
+    channel.port1.onmessage = null;
+    channel.port1.close();
+  } catch {
+    /* already closed */
+  }
+  try {
+    channel.port2.close();
+  } catch {
+    /* already closed */
   }
 }
 
@@ -299,6 +350,10 @@ export class PowerScheduler {
    */
   dispose() {
     this.cancel();
+    // The channel is module-level, so one disposed scheduler is enough to
+    // release it for the process. Doing this in `dispose()` rather than relying
+    // on `unref()` alone is what makes the common path actually clean.
+    closeMacrotaskChannel();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
     this.cancel = () => {};

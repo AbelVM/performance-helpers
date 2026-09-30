@@ -2227,6 +2227,53 @@ the cache keys directly rather than trusting the return value.
 
 Closes CACHE-010.
 
+#### One `yield()` anywhere kept your Node process from exiting
+
+`PowerScheduler`'s macrotask strategy builds a **module-level** `MessageChannel`
+and assigns `port1.onmessage`, which _starts_ the port — and a started
+`MessagePort` keeps the Node event loop alive. So a single scheduler with
+`scheduling: 'macrotask'` anywhere in a program kept that program from exiting,
+**including after `dispose()`**, which only neutralised `cancel`.
+
+A CLI, a serverless handler, or a test that touched the scheduler once hung at
+the end, doing no work, waiting on a port nothing would post to again. The whole
+of it needs no library at all:
+
+```js
+const c = new MessageChannel();
+c.port1.onmessage = () => {};
+// …this process now never exits
+```
+
+The port is now `unref`'d when it is started, and `dispose()` closes both ports
+and clears the module reference. `unref()` rather than only closing, because
+`dispose()` cannot help a scheduler that is simply never disposed — the same rule
+`utils/timers.js` and `PowerCron` already follow, with the same trade: a flush
+pending when the process would otherwise exit is dropped rather than holding the
+process open. Guarded, because a browser `MessagePort` has no `unref` and
+browsers have no loop to hold open.
+
+**This is not the `setImmediate` swap.** That change was already measured in this
+project at 608× per turn and then found to be **within noise end to end** —
+`PowerChunker` posts chunks as a batch, so per-turn cost is not batch cost. The
+performance half of the review row was a withdrawn claim; the hang is the real
+defect, and it is a correctness one.
+
+`test/powerScheduler.macrotask.test.js`, 10 tests, in a **subprocess** because a
+hang is not observable in-process — vitest owns the event loop, so a pinning
+scheduler looks identical to a non-pinning one. The `microtask` path is the
+control in the same file, because "the process exits" is only evidence if
+something in it does not.
+
+Worth recording: the first version of that test file was **decoration, and
+mutation said so**. Deleting the port teardown from `dispose()`, and not clearing
+the module reference, both reported every test green — `unref()` alone is enough
+to let a process exit, so "the process finished" cannot tell the two mechanisms
+apart. The port teardown had no test at all until tests that observe the real
+ports were added.
+
+Closes RES-005.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
