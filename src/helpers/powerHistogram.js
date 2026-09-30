@@ -99,9 +99,20 @@ export class PowerHistogram {
     return this._sum;
   }
 
-  /** Average of recorded values, or `0` when empty. */
+  /**
+   * Average of the recorded values, or `0` when empty.
+   *
+   * Averaged over the records that carry a value, not over `count`. A `+Infinity`
+   * record is counted and reported in `infCount` but deliberately contributes
+   * nothing to `sum`, so dividing `sum` by `count` under-reported every
+   * histogram that saw one: `[10, Infinity]` gave `mean` of 5 for a single
+   * finite sample. There is no finite mean over a set containing `Infinity`, so
+   * the finite samples are averaged and the infinities are left to `infCount`.
+   */
   get mean() {
-    return this._count === 0 ? 0 : this._sum / this._count;
+    const valued = this._count - this._infCount;
+    if (valued <= 0) return this._infCount > 0 ? Infinity : 0;
+    return this._sum / valued;
   }
 
   /** Minimum recorded value, or `undefined` when empty. */
@@ -180,6 +191,12 @@ export class PowerHistogram {
       this._zeroCount += 1;
       this._sum += 0;
       if (0 < this._min) this._min = 0;
+      // `_max` is initialised to -Infinity and values are non-negative, so a
+      // histogram whose every record is 0 used to keep reporting `max` of
+      // `-Infinity` — a maximum below every one of its own samples, which then
+      // flowed into `toJSON().max` and into the metrics series. `min` was
+      // updated on this branch and `max` was not.
+      if (0 > this._max) this._max = 0;
       return this;
     }
     if (n === Number.POSITIVE_INFINITY) {
@@ -204,7 +221,12 @@ export class PowerHistogram {
    * The estimate is guaranteed to be within `relativeAccuracy` of the true
    * quantile, for any value range.
    *
-   * @param {number} quantile Percentile between `0` and `100`, or fraction between `0` and `1`.
+   * @param {number} quantile Percentile between `0` and `100`, or fraction
+   *   between `0` and `1`. **The two ranges overlap at `1`, and the fraction
+   *   reading wins** — `percentile(1)` is the 100th percentile, not the 1st.
+   *   Use `0.5` or `50` for p50 and `100` for the maximum. This is documented
+   *   rather than accidental: see `guides/powerHistogram.md`, which calls `1`
+   *   "the one to watch".
    * @returns {number|undefined} Estimated percentile value, or `undefined` when empty.
    */
   percentile(quantile) {

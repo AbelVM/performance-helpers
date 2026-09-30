@@ -39,7 +39,7 @@ That buys three things:
 - `merge(other)` — Absorb another `PowerHistogram`. Throws if the two use different `relativeAccuracy` (bucket indices are not comparable), or if `other` is not a `PowerHistogram`.
 - `reset()` — Clear all recorded values and statistics.
 - `toJSON()` — Serializable `{ relativeAccuracy, count, sum, min, max, zeroCount, infCount, outOfRangeCount, belowRangeCount, buckets }` for shipping to a metrics backend or merging elsewhere.
-- `count`, `sum`, `mean` — Exact.
+- `count`, `sum`, `mean` — Exact. `count` is every record recorded; `mean` averages the records that carry a value, so a `+Infinity` is counted in `count` and in `infCount` but left out of the average. A histogram of nothing but `+Infinity` reports `mean` of `Infinity`.
 - `min`, `max` — Exact, or `undefined` when empty.
 - `relativeAccuracy` — The configured bound.
 - `bucketCount` — Number of **occupied** buckets (not a fixed array size).

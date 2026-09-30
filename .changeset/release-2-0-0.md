@@ -1823,6 +1823,72 @@ by running the suite, and both are explained where they were fixed.
 
 Closes RT-005.
 
+#### A histogram of zeroes reported `max` of `-Infinity`, and one `Infinity` halved the mean
+
+**Breaking**
+
+Two edges where the accumulator and the sketch disagreed, and the documentation
+was right about both.
+
+`guides/powerHistogram.md` says `count`, `sum`, `mean`, `min` and `max` are
+**exact** — only the quantiles are estimated. Two of them were not.
+
+**A histogram whose every record was `0` reported `max` of `-Infinity`.** `_max`
+is initialised to `-Infinity` and values are non-negative, and the `record(0)`
+branch updated `_min` and returned. `min` was correct, which is what made this
+easy to miss: the histogram contradicted itself in `max` alone, below every one
+of its own samples. It reached `toJSON().max` and the metrics series, and
+`-Infinity` is not even JSON-representable.
+
+```js
+const h = new PowerHistogram({ maxValue: 10, buckets: 5 });
+h.record(0);
+h.record(0);
+h.min; // 0
+h.max; // -Infinity  ->  now 0
+```
+
+This reached `merge()` transitively and further than the obvious case: `merge`
+compares `other._max > this._max`, and `-Infinity > -Infinity` is false, so
+**no merge of any number of all-zero histograms could ever produce a finite
+max**.
+
+**One `Infinity` halved the mean.** `record(+Infinity)` increments `count` and
+then returns _before_ adding to `sum`, because an infinity is deliberately kept
+out of the sum and counted in `infCount` instead. Dividing `sum` by `count`
+therefore under-reported every histogram that ever saw one:
+
+```js
+h.record(10);
+h.record(Infinity);
+h.count; // 2
+h.sum; // 10
+h.mean; // 5   ->  now 10
+```
+
+`mean` now averages the records that carry a value. `count` still reports every
+record — stopping the count would make the mean right and `count` wrong, and
+`infCount` is reported beside it precisely so a caller can see how many samples
+carried none. A histogram of nothing but `+Infinity` reports `mean` of
+`Infinity`; the old `0/0` answered `NaN`, which claims the sketch is broken,
+and `0` would claim the samples were zero-sized.
+
+`test/powerHistogram.extremes.test.js` covers both against 16 tests, with four
+mutations checked. The fourth is the one worth having: counting infinities out
+of `count` instead of fixing the getter is the tempting wrong fix, and it fails
+5 of 16.
+
+**`percentile(1)` is unchanged, and that is deliberate.** It returns the 100th
+percentile, because the `0..100` and `0..1` ranges overlap at `1` and the
+fraction reading wins. `guides/powerHistogram.md` has documented this on purpose
+and calls `1` "the one to watch", so it is characterised by a test rather than
+changed — which means altering it is now a deliberate act with a guide rewrite
+attached, not a silent fix. The JSDoc states the collision and points at the
+guide, rather than restating a contract in a way that reads as a promise it does
+not keep.
+
+Closes OBS-006.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

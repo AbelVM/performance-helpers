@@ -27,7 +27,16 @@ export class PowerHistogram {
     get count(): number;
     /** Sum of all recorded values. */
     get sum(): number;
-    /** Average of recorded values, or `0` when empty. */
+    /**
+     * Average of the recorded values, or `0` when empty.
+     *
+     * Averaged over the records that carry a value, not over `count`. A `+Infinity`
+     * record is counted and reported in `infCount` but deliberately contributes
+     * nothing to `sum`, so dividing `sum` by `count` under-reported every
+     * histogram that saw one: `[10, Infinity]` gave `mean` of 5 for a single
+     * finite sample. There is no finite mean over a set containing `Infinity`, so
+     * the finite samples are averaged and the infinities are left to `infCount`.
+     */
     get mean(): number;
     /** Minimum recorded value, or `undefined` when empty. */
     get min(): number | undefined;
@@ -72,7 +81,12 @@ export class PowerHistogram {
      * The estimate is guaranteed to be within `relativeAccuracy` of the true
      * quantile, for any value range.
      *
-     * @param {number} quantile Percentile between `0` and `100`, or fraction between `0` and `1`.
+     * @param {number} quantile Percentile between `0` and `100`, or fraction
+     *   between `0` and `1`. **The two ranges overlap at `1`, and the fraction
+     *   reading wins** — `percentile(1)` is the 100th percentile, not the 1st.
+     *   Use `0.5` or `50` for p50 and `100` for the maximum. This is documented
+     *   rather than accidental: see `guides/powerHistogram.md`, which calls `1`
+     *   "the one to watch".
      * @returns {number|undefined} Estimated percentile value, or `undefined` when empty.
      */
     percentile(quantile: number): number | undefined;
