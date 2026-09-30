@@ -895,6 +895,68 @@ export class PowerMemoizer {
      */
     delete(...args: any[]): boolean;
     /**
+     * Key an attached helper should use, given the helper's own receiver.
+     *
+     * The helpers are the only way to reach a **method**-memoized entry, and they
+     * used to be arrow functions, which discarded their receiver entirely. So
+     * `memo.call(obj, 10)` stored under `r1:10` while `memo.get(10)` looked up
+     * `10`: the entry existed, was invisible, and could not be invalidated by any
+     * of `get`/`has`/`delete`. They are ordinary functions now, and this is where
+     * the receiver is turned back into a key.
+     *
+     * Calling a helper plainly — `memo.get(10)` — leaves the memoized function as
+     * the receiver, and that must resolve the **unscoped** key, because a plain
+     * `memo(10)` call is what stored it. So the guide's documented
+     * `get(...args)` keeps working unchanged, and
+     * `memo.get.call(obj, 10)` reaches the entry `memo.call(obj, 10)` stored.
+     *
+     * A `null`/absent receiver is the detached-helper case (`const g = memo.get`),
+     * which resolved the unscoped key before this change and still does.
+     *
+     * @param {Function} memoizedFn - The wrapper the helper is attached to.
+     * @param {any} receiver - The helper's `this`.
+     * @param {any[]} args
+     * @returns {string}
+     * @private
+     */
+    private _scopedKey;
+    /**
+     * @param {string} key
+     * @returns {*|undefined}
+     * @private
+     */
+    private _lookup;
+    /**
+     * @param {string} key
+     * @returns {boolean}
+     * @private
+     */
+    private _evict;
+    /**
+     * @param {Function} memoizedFn
+     * @param {any} receiver
+     * @param {any[]} args
+     * @returns {*|undefined}
+     * @private
+     */
+    private _getFor;
+    /**
+     * @param {Function} memoizedFn
+     * @param {any} receiver
+     * @param {any[]} args
+     * @returns {boolean}
+     * @private
+     */
+    private _hasFor;
+    /**
+     * @param {Function} memoizedFn
+     * @param {any} receiver
+     * @param {any[]} args
+     * @returns {boolean}
+     * @private
+     */
+    private _deleteFor;
+    /**
      * Clear all cached entries and any inflight markers.
      * @returns {void}
      */

@@ -116,6 +116,14 @@ const NOT_CALLS = new Set([
  * underneath it.
  */
 const CROSS_CLASS = new Set([
+  // PowerMemoizer, referenced from powerCache. `memoize` is a method of it, and
+  // `memo` is the *value that method returns* — the memoized wrapper a guide
+  // example then calls. A local binding rather than a member, so no source
+  // file declares it. Added when the receiver-aware helper docs introduced
+  // `memo.call(obj, 10)` and `memo.get(10)`: the guide became uncheckable
+  // because its own example used a name the per-guide rule cannot resolve.
+  'memoize',
+  'memo',
   // powerMessageCodec, referenced from powerPool and powerChunking.
   'encodeMessage',
   'decodeMessage',

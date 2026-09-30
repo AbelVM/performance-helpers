@@ -2181,6 +2181,52 @@ commit above.
 
 Closes RT-004.
 
+#### `using` a cache leaked its metrics series, and a memoized method's entry could never be invalidated
+
+**`using cache = new PowerCache({ observability: true })` left the series
+registered.** `dispose()` called `detach(this._metrics)` and then
+`[Symbol.dispose]()`; the symbol did only `stopCleanup()` and `clear()`. The
+detach now lives in the symbol, because a `using` block is a scope exit and that
+is the teardown path the guarantee is about. Nothing failed this way — the
+collector kept sampling an object nobody could reach and answering every time.
+
+This is the same bug `PowerBulkhead` and `PowerRetryBudget` were already fixed
+for, in a class that fix did not reach. `test/metrics.lifetime.test.js` pins both
+of those, which is why the gap was findable.
+
+**A method-memoized entry was cached and unreachable at the same time.** The
+helpers attached to a memoized function were arrow functions, which discard their
+receiver, so `memo.call(obj, 10)` stored `r1:10` while `memo.get(10)` looked up
+`10`:
+
+```js
+obj.double(10); // 20, stored under obj's scoped key
+memo.get(10); // undefined
+memo.has(10); // false
+memo.delete(10); // false — and the scoped key stayed in the cache
+```
+
+No helper could remove it. They are ordinary functions now, and the receiver is
+turned back into a key. **The documented signature is unchanged** — the guide
+says `get(...args)`, and calling a helper plainly leaves the memoized function
+as the receiver, which resolves the unscoped key a plain `memo(10)` call stored:
+
+```js
+memo.get.call(obj, 10); // 20
+memo.delete.call(obj, 10); // true, and the scoped key is gone
+```
+
+A detached helper (`const g = memo.get`) still resolves the unscoped key, which
+the arrow form gave for free and a `function` in a module does not — pinned
+explicitly, since that is the one behaviour the change could have silently
+broken.
+
+`test/powerCache.memoizedKeys.test.js`, 12 tests, four mutations checked. The
+`delete` mutation returns `true` without evicting, which is why the test reads
+the cache keys directly rather than trusting the return value.
+
+Closes CACHE-010.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

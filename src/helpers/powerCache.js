@@ -1863,12 +1863,19 @@ export class PowerCache {
    * @returns {void}
    */
   dispose() {
-    detach(this._metrics);
-    this._metrics = null;
     this[Symbol.dispose]();
   }
 
   [Symbol.dispose]() {
+    // The detach lives **here**, not in `dispose()`. `using cache = …` and
+    // `await using` call the symbol and nothing else, so a detach that only
+    // `dispose()` performed left the series registered for the life of the
+    // collector — sampling an object nobody can reach, which answers every time
+    // and so fails nothing. `PowerBulkhead` and `PowerRetryBudget` had already
+    // been fixed for exactly this, and `using` is the teardown path the
+    // guarantee is about: a scope exit.
+    detach(this._metrics);
+    this._metrics = null;
     try {
       this.stopCleanup();
     } catch (e) {
@@ -2504,9 +2511,19 @@ export class PowerMemoizer {
         ? options
         : this._defaultMemoizeOptions;
     const memoizedFn = this._memoize(fn, useOptions);
-    memoizedFn.get = (...args) => this.get(...args);
-    memoizedFn.has = (...args) => this.has(...args);
-    memoizedFn.delete = (...args) => this.delete(...args);
+    // Ordinary functions, not arrows, so the receiver survives. See
+    // `_scopedKey` for what that receiver means and why the plain call
+    // `memo.get(10)` still resolves the unscoped key.
+    const self = this;
+    memoizedFn.get = function (...args) {
+      return self._getFor(memoizedFn, this, args);
+    };
+    memoizedFn.has = function (...args) {
+      return self._hasFor(memoizedFn, this, args);
+    };
+    memoizedFn.delete = function (...args) {
+      return self._deleteFor(memoizedFn, this, args);
+    };
     memoizedFn.clear = () => this.clear();
     memoizedFn.stats = () => this.stats();
     memoizedFn.cache = this.cache;
@@ -2524,7 +2541,7 @@ export class PowerMemoizer {
    * @returns {*|undefined}
    */
   get(...args) {
-    return this.cache.get(this.keyResolver(...args));
+    return this._lookup(this.keyResolver(...args));
   }
 
   /**
@@ -2543,9 +2560,89 @@ export class PowerMemoizer {
    * @returns {boolean}
    */
   delete(...args) {
-    const key = this.keyResolver(...args);
+    return this._evict(this.keyResolver(...args));
+  }
+
+  /**
+   * Key an attached helper should use, given the helper's own receiver.
+   *
+   * The helpers are the only way to reach a **method**-memoized entry, and they
+   * used to be arrow functions, which discarded their receiver entirely. So
+   * `memo.call(obj, 10)` stored under `r1:10` while `memo.get(10)` looked up
+   * `10`: the entry existed, was invisible, and could not be invalidated by any
+   * of `get`/`has`/`delete`. They are ordinary functions now, and this is where
+   * the receiver is turned back into a key.
+   *
+   * Calling a helper plainly — `memo.get(10)` — leaves the memoized function as
+   * the receiver, and that must resolve the **unscoped** key, because a plain
+   * `memo(10)` call is what stored it. So the guide's documented
+   * `get(...args)` keeps working unchanged, and
+   * `memo.get.call(obj, 10)` reaches the entry `memo.call(obj, 10)` stored.
+   *
+   * A `null`/absent receiver is the detached-helper case (`const g = memo.get`),
+   * which resolved the unscoped key before this change and still does.
+   *
+   * @param {Function} memoizedFn - The wrapper the helper is attached to.
+   * @param {any} receiver - The helper's `this`.
+   * @param {any[]} args
+   * @returns {string}
+   * @private
+   */
+  _scopedKey(memoizedFn, receiver, args) {
+    if (receiver === memoizedFn || receiver == null) return this.keyResolver(...args);
+    return this._receiverKey(receiver, args);
+  }
+
+  /**
+   * @param {string} key
+   * @returns {*|undefined}
+   * @private
+   */
+  _lookup(key) {
+    return this.cache.get(key);
+  }
+
+  /**
+   * @param {string} key
+   * @returns {boolean}
+   * @private
+   */
+  _evict(key) {
     if (this._inflight.has(key)) this._inflight.delete(key);
     return this.cache.delete(key);
+  }
+
+  /**
+   * @param {Function} memoizedFn
+   * @param {any} receiver
+   * @param {any[]} args
+   * @returns {*|undefined}
+   * @private
+   */
+  _getFor(memoizedFn, receiver, args) {
+    return this._lookup(this._scopedKey(memoizedFn, receiver, args));
+  }
+
+  /**
+   * @param {Function} memoizedFn
+   * @param {any} receiver
+   * @param {any[]} args
+   * @returns {boolean}
+   * @private
+   */
+  _hasFor(memoizedFn, receiver, args) {
+    return this.cache.has(this._scopedKey(memoizedFn, receiver, args));
+  }
+
+  /**
+   * @param {Function} memoizedFn
+   * @param {any} receiver
+   * @param {any[]} args
+   * @returns {boolean}
+   * @private
+   */
+  _deleteFor(memoizedFn, receiver, args) {
+    return this._evict(this._scopedKey(memoizedFn, receiver, args));
   }
 
   /**

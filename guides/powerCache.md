@@ -265,10 +265,23 @@ const memoB = pm.memoize(fnB, { ttl: 5000 });
 ### Memoizer API
 
 - `get(...args)` — Retrieve the cached value for the resolved key, or `undefined` when missing.
+- `has(...args)` / `delete(...args)` — the same, for presence and removal.
 
-- `has(...args)` — Check presence in the memoizer's underlying cache.
+The three helpers are **receiver-aware**, which matters for memoized _methods_. A call with a receiver is cached under a key scoped to that receiver (`memo.call(obj, 10)` stores `r1:10`), so the plain `memo.get(10)` deliberately does not see it — that key belongs to `obj`, not to the function. To reach it, call the helper _with the receiver_:
 
-- `delete(...args)` — Remove a cached entry and any tracked inflight Promise; returns `true` when removed.
+```javascript
+const obj = {
+  double(x) {
+    return memo.call(this, x);
+  },
+};
+obj.double(10); // caches under obj's scoped key
+memo.get(10); // undefined — correct: no plain call was made
+memo.get.call(obj, 10); // 20 — the entry obj.double(10) stored
+memo.delete.call(obj, 10); // true, and the scoped key is gone
+```
+
+Calling a helper plainly — `memo.get(10)` — resolves the **unscoped** key, which is what a plain `memo(10)` call stores, so the documented signature is unchanged. Two receivers holding the same arguments stay independent.
 
 - `clear()` — Clear the memoizer's cache and any inflight markers.
 
