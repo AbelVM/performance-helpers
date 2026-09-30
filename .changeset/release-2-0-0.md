@@ -862,6 +862,71 @@ transfer was being counted as both a grant and a return (4 holders releasing int
 _increase_, so a permit the capacity clamp discarded left a phantom holder
 outstanding forever.
 
+#### Cache: a one-character typo silently disabled TTL, and a "verified" claim withdrawn
+
+Fixes a live defect in `PowerCache` that made a mistyped TTL produce an
+**immortal entry** — and withdraws a claimed cache bug that a measurement could
+not reproduce.
+
+**`ttl: 'abc'` made an entry never expire.** `now + ttl` on a non-number is string
+concatenation, not a failure, so the stored `expiresAt` became the string
+`"3000abc"`. Every expiry test then compared a number against a string, produced
+`NaN`, and `NaN > anything` is `false`. The entry could not expire, and nothing
+reported a problem — a TTL from an environment variable is a string, so a
+one-character typo in a config value silently turned expiry off, which is the
+worst direction a cache has to fail in: it looks accepted, and memory grows until
+something unrelated breaks.
+
+```js
+// Before: expiresAt === "3000abc", and the entry is immortal.
+cache.set('k', v, { ttl: 'abc' });
+// After:
+cache.set('k', v, { ttl: 'abc' });
+// TypeError: PowerCache: `ttl` must be a finite number of milliseconds or
+// Infinity (received "abc"). A value that is not a number concatenates rather
+// than adds, and every expiry comparison against it is false — so the entry
+// would never expire.
+```
+
+A **numeric** string is still accepted, because `process.env.TTL` is a string and
+rejecting that would be pedantry. Note that the plan's own example was
+`ttl: '1e3'`, which is _not_ a bad value — `Number('1e3') === 1000`. The string was
+never the problem; the concatenation was. `'1e3'` is now accepted and expires
+correctly.
+
+A second hole turned up while probing the validation surface rather than by
+reading the code: `Number([]) === 0` and `Number(true) === 1`, so a value check
+alone would have accepted `{ ttl: [] }` as "expire now" and `{ ttl: true }` as "one
+millisecond". A `typeof` guard rejects those. The arithmetic was written out three
+times — in `set`, `setMany` and `touch` — and there is now one
+`_expiresAt(ttl, now)` all three call, since fixing two of three copies would have
+left the defect in the third.
+
+**The "most serious defect found in this review" is withdrawn.** `CACHE-001` is
+recorded in the plan as `**[verified]** A dangling cursor destroys the whole linked
+list: size 5, head null, tail null, entries() undefined`. It does not reproduce. A
+fuzzer over ~2.4 million operations — 40 000 seeds × 60 operations, across
+`admission: 'tinylfu'` with a window, without one, and under `policy: 'slru'`, using
+thirteen operation types — **never produced a stale cursor**. Every path that
+removes the node the cursor points at either passes an explicit "advance it" flag
+or is removing the head, which `_remove` already repairs.
+
+Two candidate fixes were written and **both reverted**: a differential trace over
+every public method found them observationally identical to the original, and a
+change that cannot be distinguished from no change is not a fix. What ships instead
+is the invariant test `CACHE-002` asked for — which also revealed that **no test
+mentioned `cache.resize` at all** before this, only `PowerPool.resize`, and that
+absence of coverage is a large part of why the premise went unexamined. The
+`_unlinkNode` comment now states the invariant and tells a future fifth caller to
+advance the cursor, which is the one place the reasoning is worth keeping.
+
+Two corrections are recorded so the next reader does not repeat the work: the
+plan's `[verified]` label was not, and `resize()`'s
+`this._evictionCandidate = this.head` **is not a typo** — `head` is one of ten
+`Object.defineProperty` aliases, and `cache.head === cache._head`. That was
+asserted the other way round on the strength of one misread probe before the alias
+was checked.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

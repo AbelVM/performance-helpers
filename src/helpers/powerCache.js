@@ -88,6 +88,26 @@ const ALIASED_FIELDS = Object.freeze([
 ]);
 
 /**
+ * The message for a `ttl` that is not a duration.
+ *
+ * Extracted because `PowerCache._expiresAt` raises it from two branches — a
+ * wrong *type* and a non-finite *value* — and two copies of a paragraph
+ * explaining that string concatenation is not addition is how the original
+ * defect stayed invisible in three places at once.
+ *
+ * @param {*} ttl - The rejected value.
+ * @returns {string}
+ */
+function ttlTypeMessage(ttl) {
+  return (
+    'PowerCache: `ttl` must be a finite number of milliseconds or Infinity ' +
+    `(received ${JSON.stringify(ttl) ?? String(ttl)}). A value that is not a number ` +
+    'concatenates rather than adds, and every expiry comparison against it is ' +
+    'false — so the entry would never expire.'
+  );
+}
+
+/**
  * PowerCache
  *
  * In-memory cache with weight-aware eviction, TTLs and optional cleanup.
@@ -668,6 +688,16 @@ export class PowerCache {
    * that eviction sweeps must also advance `_evictionCandidate`, hence the
    * flag.
    *
+   * A cursor may only ever name a live node: `_remove` nulls both links, so a
+   * cursor left pointing at a removed node would be handed by `_evictIfNeeded`
+   * to `_unlinkNode`, whose `!p` and `!n` branches would set `head` and `tail`
+   * to `null` and destroy the list. That is unreachable today — the eviction
+   * sweeps pass the flag, and every other caller happens to remove the head,
+   * which `_remove` repairs — and `review.md`'s CACHE-001 records it as
+   * `**[verified]**` when it is not. **If you add a fifth call site, advance the
+   * cursor when it is on the node you are removing**, or assert the invariant
+   * that currently guards it. See `test/powerCache.cursor.ttl.test.js`.
+   *
    * @private
    * @param {CacheNode} node - Node to unlink. Must currently be in the list.
    * @param {Object} [options]
@@ -989,6 +1019,54 @@ export class PowerCache {
   }
 
   /**
+   * Normalise a caller-supplied TTL into the `expiresAt` this entry stores.
+   *
+   * The arithmetic used to be written out at each of `set`, `setMany` and
+   * `touch`, and `now + ttl` on a non-number does **string concatenation** rather
+   * than failing. With `now === 3000`, `{ ttl: 'abc' }` therefore stored
+   * `expiresAt === '3000abc'`; every expiry test then compared a number against a
+   * string, produced `NaN`, and `NaN > anything` is `false` — so the entry never
+   * expired. A one-character typo in a config value silently disabled expiry,
+   * which is the worst direction a cache has to fail in: it looks like the value
+   * it was given, and memory grows until something else breaks.
+   *
+   * A numeric *string* is still accepted, because `'1000'` from an environment
+   * variable is a reasonable thing to pass and rejecting it would be pedantry.
+   * What is rejected is anything that does not name a duration — including
+   * `{ ttl: [] }` and `{ ttl: true }`, which `Number()` would happily coerce to 0
+   * and 1.
+   *
+   * @private
+   * @param {number|string|null|undefined} ttl - Caller-supplied TTL in ms.
+   * @param {number} now - The clock reading this expiry is relative to.
+   * @returns {number} `0` for "no expiry", otherwise an absolute expiry.
+   * @throws {TypeError} If `ttl` is neither nullish, `Infinity`, nor a finite
+   *   number.
+   */
+  _expiresAt(ttl, now) {
+    // `0` is the stored sentinel for "this entry has no expiry", and it is
+    // deliberately *not* how a zero TTL is spelled: `{ ttl: 0 }` means expire now
+    // and callers of that behaviour existed before this helper did. Nullish
+    // short-circuits here so the two are told apart while the caller's intent is
+    // still visible, rather than being conflated in a sentinel and reconstructed
+    // at each call site.
+    if (ttl == null || ttl === Infinity) return 0;
+    // The type check, not just the value check, and the reason is
+    // `Number([]) === 0` and `Number(true) === 1`. Coercing first would accept
+    // `{ ttl: [] }` as "expire now" and `{ ttl: true }` as "one millisecond",
+    // which is the same silent-misconfiguration failure as the string case below
+    // — a value that looks accepted and means something the caller did not write.
+    if (typeof ttl !== 'number' && typeof ttl !== 'string') {
+      throw new TypeError(ttlTypeMessage(ttl));
+    }
+    const ms = Number(ttl);
+    if (!Number.isFinite(ms)) {
+      throw new TypeError(ttlTypeMessage(ttl));
+    }
+    return now + ms;
+  }
+
+  /**
    * Set a value in the cache (add or update).
    * Marks the entry as most-recently used.
    * If `rejectOversized` is enabled and the computed/explicit weight exceeds `maxWeight`,
@@ -1002,7 +1080,7 @@ export class PowerCache {
    */
   set(key, value, { ttl = this.defaultTTL, weight = null } = {}) {
     const now = this._now();
-    const expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
+    const expiresAt = this._expiresAt(ttl, now);
     // Compute weight once and validate it before mutating bookkeeping.
     const w = this._computeWeight(value, weight);
     // If item is heavier than maxWeight, optionally reject insertion
@@ -1250,7 +1328,7 @@ export class PowerCache {
    */
   setMany(entries, { ttl = undefined, weight = undefined } = {}) {
     const now = this._now();
-    const expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
+    const expiresAt = this._expiresAt(ttl, now);
     for (const pair of entries) {
       if (!pair) continue;
       const [key, value] = pair;
@@ -1307,7 +1385,7 @@ export class PowerCache {
     if (!node) return false;
     const now = this._now();
     if (ttl !== undefined) {
-      node.expiresAt = ttl == null || ttl === Infinity ? 0 : now + ttl;
+      node.expiresAt = this._expiresAt(ttl, now);
     }
     this._moveToTail(node);
     return true;
@@ -1755,7 +1833,16 @@ export class PowerCache {
     this._evictIfNeeded();
     this._cleanupCursor = null;
     this._cleanupCursorValid = false;
-    // Eviction candidate should align with the (possibly new) head.
+    // Eviction candidate should align with the (possibly new) head. `head` is an
+    // alias onto `_head` (see `ALIASED_FIELDS`), so this is the head node.
+    //
+    // An earlier version of this comment claimed `this.head` was a typo and that
+    // the assignment stored `undefined`. It was not: `head` is one of ten
+    // `Object.defineProperty` accessors, and `cache.head === cache._head`. The
+    // claim was wrong, and the reordering that came with it changed no
+    // observable behaviour — see the note on `_unlinkNode` and `review.md`'s
+    // CACHE-001, which records this whole area as unreproducible. The reset runs
+    // after `_evictIfNeeded()` because that is where the head can change.
     this._evictionCandidate = this.head;
   }
 

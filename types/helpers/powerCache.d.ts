@@ -280,6 +280,16 @@ export class PowerCache {
      * that eviction sweeps must also advance `_evictionCandidate`, hence the
      * flag.
      *
+     * A cursor may only ever name a live node: `_remove` nulls both links, so a
+     * cursor left pointing at a removed node would be handed by `_evictIfNeeded`
+     * to `_unlinkNode`, whose `!p` and `!n` branches would set `head` and `tail`
+     * to `null` and destroy the list. That is unreachable today — the eviction
+     * sweeps pass the flag, and every other caller happens to remove the head,
+     * which `_remove` repairs — and `review.md`'s CACHE-001 records it as
+     * `**[verified]**` when it is not. **If you add a fifth call site, advance the
+     * cursor when it is on the node you are removing**, or assert the invariant
+     * that currently guards it. See `test/powerCache.cursor.ttl.test.js`.
+     *
      * @private
      * @param {CacheNode} node - Node to unlink. Must currently be in the list.
      * @param {Object} [options]
@@ -432,6 +442,32 @@ export class PowerCache {
      * @returns {void}
      */
     private _evictIfNeeded;
+    /**
+     * Normalise a caller-supplied TTL into the `expiresAt` this entry stores.
+     *
+     * The arithmetic used to be written out at each of `set`, `setMany` and
+     * `touch`, and `now + ttl` on a non-number does **string concatenation** rather
+     * than failing. With `now === 3000`, `{ ttl: 'abc' }` therefore stored
+     * `expiresAt === '3000abc'`; every expiry test then compared a number against a
+     * string, produced `NaN`, and `NaN > anything` is `false` — so the entry never
+     * expired. A one-character typo in a config value silently disabled expiry,
+     * which is the worst direction a cache has to fail in: it looks like the value
+     * it was given, and memory grows until something else breaks.
+     *
+     * A numeric *string* is still accepted, because `'1000'` from an environment
+     * variable is a reasonable thing to pass and rejecting it would be pedantry.
+     * What is rejected is anything that does not name a duration — including
+     * `{ ttl: [] }` and `{ ttl: true }`, which `Number()` would happily coerce to 0
+     * and 1.
+     *
+     * @private
+     * @param {number|string|null|undefined} ttl - Caller-supplied TTL in ms.
+     * @param {number} now - The clock reading this expiry is relative to.
+     * @returns {number} `0` for "no expiry", otherwise an absolute expiry.
+     * @throws {TypeError} If `ttl` is neither nullish, `Infinity`, nor a finite
+     *   number.
+     */
+    private _expiresAt;
     /**
      * Set a value in the cache (add or update).
      * Marks the entry as most-recently used.

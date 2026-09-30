@@ -103,6 +103,44 @@ console.log(cache.peek('a')); // undefined; the expired entry is removed
 console.log(cache.has('a', { ignoreExpiry: true })); // false (entry was removed)
 ```
 
+### TTL values are checked, and the boundary is `expiresAt <= now`
+
+`ttl` must be a number of milliseconds, or `null` / `Infinity` for "never
+expires". A **numeric string is accepted** — `process.env.TTL` is a string, and
+rejecting that would be pedantry — but a value that does not name a duration is a
+`TypeError`:
+
+```js
+cache.set('k', v, { ttl: 'abc' });
+// TypeError: PowerCache: `ttl` must be a finite number of milliseconds or
+// Infinity (received "abc").
+
+cache.set('k', v, { ttl: '1000' }); // fine — 1000 ms from now
+```
+
+This is not defensive validation for its own sake. `now + ttl` on a non-number is
+_string concatenation_, not a failure, so before this check a mistyped TTL stored
+`expiresAt === "3000abc"`, every expiry comparison produced `NaN`, and `NaN > x` is
+`false` — the entry simply never expired. A typo in a config value disabled expiry
+silently, which is the worst direction a cache can fail in.
+
+The same applies to a non-number that `Number()` would happily coerce:
+`Number([]) === 0` and `Number(true) === 1`, so `{ ttl: [] }` and `{ ttl: true }`
+are rejected rather than read as "expire now" and "one millisecond".
+
+Two boundaries worth knowing, because they are the opposite of what you might
+assume:
+
+- An entry is alive **strictly before** its expiry and lapses **at** it. The
+  read is `expiresAt <= now`, so `{ ttl: 100 }` is gone at exactly 100 ms.
+- `{ ttl: 0 }` means **expire immediately**, not "no expiry". "No expiry" is
+  `null`, `Infinity`, or omitting `ttl` — and those store `0` internally, which is
+  why the two are easy to conflate and worth a test each.
+
+Note that `PowerTTLMap` uses the _opposite_ boundary: it stores `now + ttl + 1`
+and reads back `now > expiresAt`, so it survives exactly at its TTL. Both are
+deliberate and pinned independently; do not assume they agree.
+
 Note: The library currently defaults to non-mutating read behavior (expired entries remain until cleanup). Changing the default to `eagerCleanupOnRead: true` would be a breaking change and should be done as part of a major-version bump.
 
 If you need LRU order, use `Array.from(c.entries('LRU'))` or the `entries('LRU')` iterator directly.
