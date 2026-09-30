@@ -454,7 +454,7 @@ reliable way to mislead yourself.
 - `PowerObserver`: Reactive container for one changing value.
 - `PowerLogger`: Structured runtime logging.
 - `PowerHistogram`: In-process latency and percentile-style telemetry.
-- `PowerEventLoopMonitor`: Event-loop delay histogram and `eventLoopUtilization()`.
+- `PowerEventLoopMonitor`: Event-loop delay histogram and `utilization()`.
 
 ### Coordination and async building blocks
 

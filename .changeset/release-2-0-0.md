@@ -2059,6 +2059,47 @@ when a step is added.
 
 Closes GATE-010.
 
+#### The quick chooser told a newcomer to call a method that does not exist
+
+`guides/metaGuide.md` attributed `eventLoopUtilization()` to
+`PowerEventLoopMonitor`:
+
+```
+- `PowerEventLoopMonitor`: Event-loop delay histogram and `eventLoopUtilization()`.
+```
+
+The accessor is `utilization()`. A reader following the router that
+`AGENTS.md` points people at would write `monitor.eventLoopUtilization()` and get
+a `TypeError`. Node does export an `eventLoopUtilization()` — from
+`perf_hooks` — which is what made the sentence plausible enough to survive
+review, and which is why it was fixed in the guide rather than excused in a
+stop-list.
+
+It was found by a check, not by reading. The existing GATE-002 gate compares a
+guide's backticked calls against the source of the **helper the guide is named
+after**, and skips any guide with no same-named helper. Measured across all 40
+guides, that is **6** — `autoscale.md`, `errors.md`, `metaGuide.md`, `now.md`,
+`traceContext.md`, `troubleshooting.md` — carrying 22 distinct call names
+between them that no check in the repository looked at, including `drain(`,
+`getStats(`, `nowMs(`, `decodeMessage(`, `tryConsume(` and
+`eventLoopUtilization(`.
+
+The extension is a **union across all of `src/`** rather than a per-guide check:
+any class member or any exported name satisfies it, so a name belonging to a
+class the guide is not about is satisfied once instead of needing an entry in
+every file. Six of 40 guides are now covered that were not, and the two
+highest-traffic ones — the quick chooser and the error guide — are among them.
+
+It went into the existing `docsCodeAgreement.test.js` rather than into
+`apiSurface.test.js`, as the row proposed. That file already pins export names;
+the defect is a property of guides, not of the package's export list, and a
+second file holding a second list of method names is precisely the
+two-lists-drift shape that made this project's CI run neither `test:types` nor
+`check:bundle` for as long as both existed. Four mutations, all caught, including
+reintroducing the bad sentence in the guide.
+
+Closes GATE-004 and GATE-005.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

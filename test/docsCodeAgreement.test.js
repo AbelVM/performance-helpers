@@ -178,10 +178,13 @@ const helperNames = new Set(readdirSync(path.join(ROOT, 'src/helpers')));
 /** @type {Array<{guide: string, name: string}>} */
 const mismatches = [];
 let checked = 0;
+/** Guides the per-guide loop below actually checks, for the GATE-005 block. */
+const scannedGuides = new Set();
 
 for (const guide of guideNames) {
   const base = guide.replace(/\.md$/, '');
   const helper = `${base}.js`;
+  scannedGuides.add(guide);
   const helperPath = path.join(ROOT, 'src/helpers', helper);
   if (!helperNames.has(helper)) {
     // A guide with no same-named helper cannot be checked this way. Asserted
@@ -308,5 +311,158 @@ describe('a name the docs show without an import is actually exported (GATE-009)
       .join('\n');
     const orphaned = DOCS_SHOW_NAMES_WITHOUT_IMPORT.filter((n) => !guides.includes(n));
     expect(orphaned, 'no guide names these any more; remove them from the list').toEqual([]);
+  });
+});
+
+/**
+ * The cross-cutting guides, which GATE-002 cannot check.
+ *
+ * The check above compares a guide's backticked calls against **the helper the
+ * guide is named after**, and skips a guide with no same-named helper. That is
+ * the right rule for a per-helper guide and the wrong one for a guide that
+ * spans many: `metaGuide.md` is the router the project tells a newcomer to
+ * start from, and it names `drain(`, `getStats(`, `decodeMessage(`, `tryConsume(`,
+ * `eventLoopUtilization(` and a dozen others belonging to a dozen classes.
+ *
+ * Measured: **6 of 40 guides were skipped entirely** — `autoscale.md`,
+ * `errors.md`, `metaGuide.md`, `now.md`, `traceContext.md` and
+ * `troubleshooting.md` — carrying 22 distinct backticked call names between
+ * them, none of which any check looked at. The two highest-traffic guides in the
+ * repository are among them, which is the point: a typo in the quick chooser is
+ * read more often than a typo in a reference page.
+ *
+ * The check is a **union across the whole codebase** rather than a per-guide
+ * one, so a cross-class name is satisfied by the class that actually has it and
+ * needs no stop-list entry per guide. That matters: the per-guide check above
+ * needs a growing `CROSS_CLASS` list precisely because it insists a name belong
+ * to *this* guide's helper, and a list that is only ever added to is the
+ * failure mode this file already guards against in three places.
+ *
+ * Deliberately **not** an extension of `apiSurface.test.js`. That file pins
+ * *export* names, and the F-14 class this covers — a guide naming a method that
+ * does not exist — is a property of guides, not of the package's export list.
+ * A second file holding a second list of method names is the same
+ * two-lists-drift shape that made CI run neither `test:types` nor
+ * `check:bundle` in this project for as long as both existed.
+ */
+
+/** Guides with no same-named helper, which the per-guide loop above skips. */
+// `helperNames` holds filenames *with* the extension, which is why the
+// per-guide loop above appends `.js` before consulting it. The first draft of
+// this line stripped `.md` instead and matched nothing, so all 32 power guides
+// were treated as cross-cutting and 4 of their names were reported as invented
+// when they are declared.
+// From **all** guides, not from `guideNames`, which is filtered to
+// `guides/power*.md`. The six that the per-guide loop cannot reach are not
+// power-prefixed at all, so deriving this from `guideNames` found nothing —
+// which is the second version of this line being wrong in the same way.
+const ALL_GUIDES = readdirSync(path.join(ROOT, 'guides')).filter((f) => f.endsWith('.md'));
+const CROSS_CUTTING = ALL_GUIDES.filter((g) => !helperNames.has(g.replace(/\.md$/, '.js')));
+
+/** Every class member and every exported name anywhere under `src/`. */
+const everythingDeclared = (() => {
+  const names = new Set();
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith('.js')) continue;
+      const source = readFileSync(full, 'utf8');
+      for (const n of declaredNames(source)) names.add(n);
+      // Standalone exports matter as much as methods: `u82o(` and `o2u8(` in
+      // `guides/errors.md` and `guides/powerBuffer.md` are `powerBuffer.js`
+      // functions, and the first draft of this check rejected them as invented
+      // methods. Found by running it, which is the only way that shows up.
+      for (const m of source.matchAll(
+        /export\s+(?:async\s+)?(?:function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/g
+      )) {
+        names.add(m[1]);
+      }
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  return names;
+})();
+
+/**
+ * Not method calls at all. Small, and each entry justified at its definition.
+ * The per-guide `NOT_CALLS` group is reused: it is a list of words that look
+ * like calls in prose and are not, and a second such list would rot.
+ */
+const CROSS_CUTTING_NOT_CALLS = new Set([
+  'fn', // a parameter name: `measureSync(fn)` in guides/now.md
+]);
+
+const crossCuttingMismatches = (() => {
+  /** @type {Array<{guide: string, name: string}>} */
+  const out = [];
+  let checked = 0;
+  for (const guide of CROSS_CUTTING) {
+    const text = readFileSync(path.join(ROOT, 'guides', guide), 'utf8');
+    const seen = new Set();
+    for (const m of text.matchAll(/`([A-Za-z_$][\w$]*)\s*\(/g)) {
+      const name = m[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      checked += 1;
+      if (everythingDeclared.has(name)) continue;
+      if (NOT_CALLS.has(name) || CROSS_CUTTING_NOT_CALLS.has(name)) continue;
+      if (BUILTIN_GLOBALS.has(name)) continue;
+      out.push({ guide, name });
+    }
+  }
+  return { out, checked };
+})();
+
+describe('a cross-cutting guide only names calls that exist somewhere (GATE-005)', () => {
+  it('actually covers the guides the per-guide check skips', () => {
+    // The measured shape, pinned so this cannot quietly become a gate that
+    // scans one file. Before this existed these 6 guides and their 22 distinct
+    // call names were invisible to every check in the repository.
+    expect(CROSS_CUTTING.length).toBe(6);
+    expect(crossCuttingMismatches.checked).toBeGreaterThan(15);
+    // And it is a strict complement: nothing is checked by both rules, which is
+    // what makes this additive rather than a second copy.
+    expect(CROSS_CUTTING.every((g) => !scannedGuides.has(g))).toBe(true);
+    // And it reaches the two highest-traffic guides in the repository, which is
+    // why this was worth closing: the quick chooser and the error guide are
+    // both in the six.
+    expect(CROSS_CUTTING).toContain('metaGuide.md');
+    expect(CROSS_CUTTING).toContain('errors.md');
+  });
+
+  it('has no backticked call in a cross-cutting guide that nothing declares', () => {
+    expect(
+      crossCuttingMismatches.out.map((m) => `${m.guide}: \`${m.name}(\``),
+      'a guide naming a call that exists nowhere under `src/` is a TypeError for\n' +
+        'the reader, and `metaGuide.md` is the router a newcomer is told to start\n' +
+        'from. If the name is a builtin or a shared util, add it to the right\n' +
+        'group in this file — not to a general escape hatch.'
+    ).toEqual([]);
+  });
+
+  it('accepts a method of a class other than the guide is about', () => {
+    // The property that makes the union shape right. `drain(` belongs to
+    // several helpers and to none of these guides, so the per-guide check would
+    // need a CROSS_CLASS entry for it in every one of the six files; here it is
+    // satisfied once.
+    expect([...everythingDeclared]).toContain('drain');
+    expect([...everythingDeclared]).toContain('getStats');
+    expect([...everythingDeclared]).toContain('decodeMessage');
+  });
+
+  it('keeps no dead entries in the cross-cutting stop-list', () => {
+    // A stop-list that is only added to stops saying what it is for. `fn` is
+    // the only entry and it is load-bearing, so if a guide stops showing a bare
+    // `fn(` this fails rather than leaving a name that means nothing.
+    const used = new Set();
+    for (const guide of CROSS_CUTTING) {
+      const text = readFileSync(path.join(ROOT, 'guides', guide), 'utf8');
+      for (const m of text.matchAll(/`([A-Za-z_$][\w$]*)\s*\(/g)) used.add(m[1]);
+    }
+    expect([...CROSS_CUTTING_NOT_CALLS].filter((n) => !used.has(n)).sort()).toEqual([]);
   });
 });
