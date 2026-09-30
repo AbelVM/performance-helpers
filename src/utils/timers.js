@@ -20,19 +20,6 @@
  */
 
 /**
- * Detect whether the current runtime exposes ref-able Node.js timer handles.
- * @returns {boolean} `true` when `setTimeout` returns an object with `unref`.
- * @private
- */
-function _canUnref() {
-  // `setTimeout` resolves to a DOM `number` in a browser type environment and
-  // to a Node.js `Timeout` in Node, so the capability is probed at runtime
-  // rather than asserted through a type that only holds in one of them.
-  const probe = /** @type {any} */ (setTimeout(() => {}, 0));
-  return typeof probe === 'object' && typeof probe?.unref === 'function';
-}
-
-/**
  * Schedule a one-shot timer that does not keep the Node.js process alive.
  *
  * @param {Function} fn - Callback invoked after the delay.
@@ -43,7 +30,25 @@ function _canUnref() {
  */
 export function setSafeTimeout(fn, ms, options = {}) {
   const t = /** @type {any} */ (setTimeout(fn, ms));
-  if (!options.keepProcessAlive && _canUnref()) t.unref();
+  // Probe the handle, not the runtime. This used to call a `_canUnref()`
+  // helper that allocated a throwaway `setTimeout` on *every* invocation just
+  // to ask whether `unref` existed, and never cleared it - so 200 000 calls
+  // produced 400 000 live `Timeout` objects, on the paths that call this in a
+  // loop (the event-loop monitor alone made 100 wasted timers a second at a
+  // 5 ms sample, in the code whose job is to measure the loop). Asking the
+  // handle we were just handed answers the same question with no allocation.
+  //
+  // It also removes a load-order dependency rather than moving it: a
+  // module-level `const` would answer the question once, using whichever
+  // `setTimeout` was installed at import time, and apply that answer to every
+  // handle afterwards. That is a structural improvement, not a fix for an
+  // observed failure - the fake timers this repo's suite installs do return
+  // Node-shaped handles, so a cached capability would have worked here too.
+  //
+  // `setTimeout` resolves to a DOM `number` in a browser type environment and
+  // to a Node.js `Timeout` in Node, so the check is on the value rather than
+  // asserted through a type that only holds in one of them.
+  if (!options.keepProcessAlive && typeof t?.unref === 'function') t.unref();
   return t;
 }
 
@@ -57,7 +62,7 @@ export function setSafeTimeout(fn, ms, options = {}) {
  */
 export function setSafeInterval(fn, ms, options = {}) {
   const t = /** @type {any} */ (setInterval(fn, ms));
-  if (!options.keepProcessAlive && _canUnref()) t.unref();
+  if (!options.keepProcessAlive && typeof t?.unref === 'function') t.unref();
   return t;
 }
 

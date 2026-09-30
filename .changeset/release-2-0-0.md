@@ -1660,6 +1660,99 @@ the test were removed rather than loosened.
 
 Closes WRK-001.
 
+#### A teardown that hung its own waiters, and a capability probe per timer
+
+Three defects, each found by reproducing before changing anything, and two of
+them are behaviour changes rather than internal cleanups.
+
+**`PowerLatch.dispose()` is now terminal, and pending `wait()`s reject.** It was
+implemented as `this.reset()` — whose default argument is `1` — so disposing a
+latch left every pending `wait()` **pending for the life of the process**, and
+left `remaining` at 1 and `done` false, reporting a torn-down object as still
+armed. Worse, `reset()` clears the aborted state by design, so `dispose()` on an
+aborted latch made it **live again**:
+
+```js
+const latch = new PowerLatch(1);
+const waiter = latch.wait(); // was: never settled
+latch.dispose(); // was: count re-armed to 1
+await waiter; // now: rejects, code 'EDISPOSED'
+latch.remaining; // 0
+```
+
+This is not a family defect, which was worth checking: `PowerPermitGate.reset()`
+already rejects its waiters and `PowerSemaphore.dispose()` inherits that, so
+`PowerLatch` was the only `dispose() → reset()` in the library whose `reset()`
+did not settle waiters. `EDISPOSED` joins `EABORT`, `ETIMEOUT` and
+`ECIRCUITOPEN` as a rejection code, so `catch (err) { switch (err.code) }` can
+tell a teardown from an abort.
+
+`abort()` is now idempotent, and keeps the **first** reason. A second call used
+to re-fire `onAbort`, which is reachable from ordinary code — every finally
+block that aborts defensively fires it twice for one logical abort — and it used
+to overwrite the reason an error-path caller was about to surface.
+
+**Two fixes for a documentation bug where the guide was the only copy.** This
+project has now paid for the documented-but-wrong option twice, and both halves
+of this release are that class again:
+
+- `defaultMetrics` is exported from the package root. `guides/metrics.md` and
+  the `attach()` JSDoc both show `defaultMetrics.snapshot().series` **with no
+  import**, and neither mentions the `/metrics` subpath that did have it — so
+  following the guide produced a `ReferenceError` at module load.
+- `setSafeTimeout` / `setSafeInterval` allocated **two** timers per call, not
+  one. Each asked a `_canUnref()` helper whether the runtime's handle supported
+  `unref`, and the helper implemented that question by calling `setTimeout`
+  itself — a throwaway 0 ms timer, never cleared, per invocation. 4000 calls
+  made 8000 timers. The 17 call sites are on the paths that schedule in a loop:
+  cache eviction sweeps, the pool idle reaper, the backpressure refill, socket
+  and websocket heartbeats, and `PowerEventLoopMonitor` — which made 100 wasted
+  timers a second at a 5 ms sample, in the code whose job is to measure the
+  loop.
+
+```js
+// before: 4000 calls -> 8000 timers
+// after:  4000 calls -> 4000 timers
+```
+
+The capability is now read off the handle that was actually returned
+(`typeof t?.unref === 'function'`) and the helper is gone, which removes the
+allocation rather than amortising it — the fix is not the "cache the probe at
+module scope" the plan proposed, because the probe was asking a question about
+a value the caller already had.
+
+**Three of the regression tests were wrong before the code was, and mutation is
+what found it.** Every one of the 19 new tests is checked by reverting the fix:
+restoring the old `dispose()` fails 9 of 11, deleting the abort guard fails 2 of
+11, deleting the `wait()` guard fails 3 of 11; reinstating the timer probe fails
+3 of 8, an unconditional `t.unref()` fails 1, ignoring `keepProcessAlive` fails
+1; dropping the `defaultMetrics` export fails 2.
+
+The failures that mattered were all in the instruments:
+
+- A test asserting "a pending `wait()` now rejects" **passed with the fix
+  reverted**, because it watched a waiter registered before the abort — already
+  rejected, so re-running the reject is a no-op. It only discriminates when it
+  issues a `wait()` _after_ the aborts.
+- The `setSafeInterval` allocation test counted only `setInterval` and passed
+  with the probe reinstated, because the probe billed its throwaway timer to
+  `setTimeout`. The probe's cost was real; the accounting was not.
+- Detecting the hang by racing a promise against `Promise.resolve()` **loses**:
+  chaining off a settled promise costs an extra microtask hop than attaching to
+  an already-fulfilled one, so it reported `PENDING` for a promise that really
+  had rejected. Raced against a `setTimeout(0)` sentinel — ordered strictly
+  after every promise reaction, so a settled promise always wins and only a
+  genuinely pending one loses — the same test both discriminates and cuts a
+  regression from 45 s of vitest timeouts to 1-6 ms. That is a happens-before
+  guarantee rather than a threshold, so it cannot go flaky on a busy machine.
+
+The allocation tests assert a **count**, not a duration, for the same reason the
+rest of this repository's tests do: at the ~28% median spread the harness
+measures, a duration cannot reliably separate one timer from two, and timing a
+throwaway `setTimeout` would be measuring the thing under test.
+
+Closes RES-014, RES-027, PERF-001 and GATE-009.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

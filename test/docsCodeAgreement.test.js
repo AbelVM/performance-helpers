@@ -255,3 +255,58 @@ describe('a guide only names methods its helper has (GATE-002)', () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * GATE-009, and the blind spot the row exposed in GATE-002.
+ *
+ * The gate above checks that a guide's backticked `name(` is a method of the
+ * helper the same guide is about. It cannot see `defaultMetrics`, because that
+ * is a *package export* shown in `guides/metrics.md` — a guide with no
+ * same-named helper, in a non-`power*` file — and `attach()`'s JSDoc showed the
+ * same bare identifier. Following either one produced a ReferenceError, so the
+ * guide and the code disagreed about a name that exists, just not where the
+ * guide implied.
+ *
+ * This is deliberately narrow: a fixed list of the identifiers the docs show
+ * *without* an import, each asserted to be exported from the entry point. Not a
+ * general scan — an unimported-name scan across every guide produces the same
+ * false-positive rate as GATE-002's method scan, and a gate that cannot be kept
+ * green is not a gate. The list grows one verified entry at a time.
+ */
+const DOCS_SHOW_NAMES_WITHOUT_IMPORT = [
+  // `guides/metrics.md:98` and the `attach()` JSDoc both show
+  // `defaultMetrics.snapshot().series` with no import line.
+  'defaultMetrics',
+];
+
+describe('a name the docs show without an import is actually exported (GATE-009)', () => {
+  it('exports every such name from the package entry point', async () => {
+    const entry = await import('../src/index.js');
+    const missing = DOCS_SHOW_NAMES_WITHOUT_IMPORT.filter((n) => !(n in entry));
+    expect(
+      missing,
+      'these names appear in the docs with no import, so a reader following the\n' +
+        'guide hits a ReferenceError. Re-export from `src/index.js`, or show the\n' +
+        'import in the doc. `defaultMetrics` was reachable only via the\n' +
+        '`/metrics` subpath, which neither `guides/metrics.md` nor the JSDoc\n' +
+        'mentions — so the guide was wrong about where a name lives.'
+    ).toEqual([]);
+  });
+
+  it('the list is not empty, so the test cannot pass by finding nothing', () => {
+    // The failure mode this project has now hit three times: a gate that
+    // scans nothing and reports nothing.
+    expect(DOCS_SHOW_NAMES_WITHOUT_IMPORT.length).toBeGreaterThan(0);
+  });
+
+  it('each listed name is still named in a guide, so entries cannot rot', () => {
+    // A list that is only ever added to is a list that stops meaning anything.
+    // If a guide is edited to show the import, drop the entry here.
+    const guides = readdirSync(path.join(ROOT, 'guides'))
+      .filter((f) => f.endsWith('.md'))
+      .map((f) => readFileSync(path.join(ROOT, 'guides', f), 'utf8'))
+      .join('\n');
+    const orphaned = DOCS_SHOW_NAMES_WITHOUT_IMPORT.filter((n) => !guides.includes(n));
+    expect(orphaned, 'no guide names these any more; remove them from the list').toEqual([]);
+  });
+});

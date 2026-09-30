@@ -22,6 +22,7 @@ export class PowerLatch {
     _aborted: boolean;
     /** @type {any} */
     _abortReason: any;
+    _disposed: boolean;
     /** @type {?((reason:any)=>void)} */
     _onAbort: ((reason: any) => void) | null;
     set onAbort(fn: ((reason: any) => void) | null);
@@ -49,7 +50,8 @@ export class PowerLatch {
     /**
      * Wait until the latch reaches zero.
      * Options: `wait(timeoutMs)` or `wait({ timeout, signal })`.
-     * If aborted via `abort()` pending waiters are rejected.
+     * If aborted via `abort()` pending waiters are rejected. A disposed latch
+     * rejects too, with `code: 'EDISPOSED'` — see {@link PowerLatch#dispose}.
      * @param {number|PowerLatchWaitOptions} [opts]
      * @returns {Promise<void>}
      */
@@ -97,11 +99,24 @@ export class PowerLatch {
     _rejectAll(err: any): void;
     /**
      * Abort pending waiters. If `reason` provided it will be used to reject waiters.
+     *
+     * Idempotent. A second call is a no-op rather than a second abort: callers
+     * abort on both an error path and a cleanup path, and one logical abort must
+     * fire `onAbort` once.
+     *
      * @param {any} [reason]
      */
     abort(reason?: any): void;
     /**
-     * Release every resource this instance holds.
+     * Release every resource this instance holds. Terminal: pending waiters are
+     * rejected with `code: 'EDISPOSED'`, the count is zeroed, later `wait()`
+     * calls reject rather than registering, and `reset()` becomes a no-op.
+     *
+     * This is a teardown, not a re-arm. It used to call `reset()` with its
+     * default count of 1, which left every pending `wait()` unsettled forever and
+     * left `remaining` at 1 — and because `reset()` clears the aborted state, it
+     * also made an aborted latch live again. Compare
+     * `PowerPermitGate.reset()`, which rejects its waiters.
      *
      * Idempotent, and safe to call while the instance is idle. Exists so the
      * instance works with `using` / `await using` and gives callers an explicit

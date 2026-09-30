@@ -15,7 +15,13 @@ export { PowerSubscriberSet } from './helpers/powerSubscriberSet.js';
 export { PowerSemaphore } from './helpers/powerSemaphore.js';
 export { PowerDefer } from './helpers/powerDefer.js';
 export { PowerTTLMap } from './helpers/powerTTLMap.js';
-export { MetricsCollector, toSeries, METRICS_VERSION } from './helpers/metrics.js';
+// `defaultMetrics` is re-exported because it is the only way to *read* what
+// `observability: true` collects, and `guides/metrics.md` plus the `attach()`
+// JSDoc both show `defaultMetrics.snapshot().series` with no import. Following
+// either one produced a ReferenceError. It is allocated at module load, so
+// exporting it costs a collector and a closure in every consumer - which is why
+// `observability` stays off by default everywhere.
+export { MetricsCollector, defaultMetrics, toSeries, METRICS_VERSION } from './helpers/metrics.js';
 export { normalizeError, formatErrorObj } from './utils/errors.js';
 export { nowMs, measureSync, measureAsync } from './utils/now.js';
 export { PowerCircuit } from './helpers/powerCircuit.js';

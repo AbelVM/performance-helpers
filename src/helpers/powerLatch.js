@@ -45,6 +45,11 @@ export class PowerLatch {
     this._aborted = false;
     /** @type {any} */
     this._abortReason = null;
+    // Terminal, unlike `_aborted`: `dispose()` is documented as releasing
+    // every resource, and a teardown that can be undone by `reset()` is not
+    // one. `reset()` re-arms by design, so a disposed latch needs a flag
+    // `reset()` does not clear.
+    this._disposed = false;
     /** @type {?((reason:any)=>void)} */
     this._onAbort = typeof options.onAbort === 'function' ? options.onAbort : null;
   }
@@ -91,11 +96,14 @@ export class PowerLatch {
   /**
    * Wait until the latch reaches zero.
    * Options: `wait(timeoutMs)` or `wait({ timeout, signal })`.
-   * If aborted via `abort()` pending waiters are rejected.
+   * If aborted via `abort()` pending waiters are rejected. A disposed latch
+   * rejects too, with `code: 'EDISPOSED'` — see {@link PowerLatch#dispose}.
    * @param {number|PowerLatchWaitOptions} [opts]
    * @returns {Promise<void>}
    */
   wait(opts) {
+    if (this._disposed)
+      return Promise.reject(Object.assign(new Error('Disposed'), { code: 'EDISPOSED' }));
     if (this._aborted)
       return Promise.reject(
         this._abortReason || Object.assign(new Error('Aborted'), { code: 'EABORT' })
@@ -255,9 +263,15 @@ export class PowerLatch {
 
   /**
    * Abort pending waiters. If `reason` provided it will be used to reject waiters.
+   *
+   * Idempotent. A second call is a no-op rather than a second abort: callers
+   * abort on both an error path and a cleanup path, and one logical abort must
+   * fire `onAbort` once.
+   *
    * @param {any} [reason]
    */
   abort(reason) {
+    if (this._aborted) return;
     this._aborted = true;
     this._abortReason = reason || Object.assign(new Error('Aborted'), { code: 'EABORT' });
     // invoke optional onAbort callback
@@ -278,7 +292,15 @@ export class PowerLatch {
   }
 
   /**
-   * Release every resource this instance holds.
+   * Release every resource this instance holds. Terminal: pending waiters are
+   * rejected with `code: 'EDISPOSED'`, the count is zeroed, later `wait()`
+   * calls reject rather than registering, and `reset()` becomes a no-op.
+   *
+   * This is a teardown, not a re-arm. It used to call `reset()` with its
+   * default count of 1, which left every pending `wait()` unsettled forever and
+   * left `remaining` at 1 — and because `reset()` clears the aborted state, it
+   * also made an aborted latch live again. Compare
+   * `PowerPermitGate.reset()`, which rejects its waiters.
    *
    * Idempotent, and safe to call while the instance is idle. Exists so the
    * instance works with `using` / `await using` and gives callers an explicit
@@ -287,7 +309,10 @@ export class PowerLatch {
    * @returns {void}
    */
   dispose() {
-    this.reset();
+    if (this._disposed) return;
+    this._disposed = true;
+    this._count = 0;
+    this._rejectAll(Object.assign(new Error('Disposed'), { code: 'EDISPOSED' }));
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
     this.reset = () => {};

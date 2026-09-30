@@ -82,6 +82,11 @@ describe('API surface', () => {
         'PowerSubscriberSet',
         'PowerTTLMap',
         'MetricsCollector',
+        // Re-exported so the one-liner both `guides/metrics.md` and the
+        // `attach()` JSDoc show can be followed literally. Without it,
+        // `defaultMetrics` is reachable only via the `/metrics` subpath, which
+        // neither of those two places mentions (GATE-009).
+        'defaultMetrics',
         'toSeries',
         'METRICS_VERSION',
         'PowerThrottle',

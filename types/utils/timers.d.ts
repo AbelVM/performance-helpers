@@ -1,4 +1,9 @@
 /**
+ * @typedef {object} TimerOptions
+ * @property {boolean} [keepProcessAlive=false] - When `true`, skip the
+ *   `unref()` call so the timer keeps the Node.js event loop alive.
+ */
+/**
  * Schedule a one-shot timer that does not keep the Node.js process alive.
  *
  * @param {Function} fn - Callback invoked after the delay.
