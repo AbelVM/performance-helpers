@@ -2941,7 +2941,25 @@ export class PowerPool {
       // the message is refused and the caller is told so, instead of `stopThePress`
       // reporting a success that discarded the message it was handed.
       try {
-        return this._enqueueOrReject({ message, transfer }, false, undefined, undefined);
+        // Prepare it first, exactly as `postMessage` does. This used to enqueue
+        // `{ message, transfer }` straight from the caller's arguments, which
+        // skipped `_prepareForTransfer` entirely — and that is the whole method:
+        // under `messageCodec: 'negotiated'` the carrier is a *per-worker*
+        // decision, so an item the drain finds without `deferred` gets encoded
+        // for a worker that may not want it. Measured, with the pool full and
+        // one task in flight:
+        //
+        //     codec=negotiated   postMessage  -> message, transfer, deferred
+        //     codec=negotiated   stopThePress -> message, transfer          <-- no marker
+        //
+        // One line, and the two routes stop disagreeing about what an item in the
+        // queue is.
+        return this._enqueueOrReject(
+          this._prepareForTransfer(message, transfer, options),
+          false,
+          undefined,
+          undefined
+        );
       } catch (e) {
         this._logger.error(e, 'stopThePress: enqueue after reset failed');
         return false;

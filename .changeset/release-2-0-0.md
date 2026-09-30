@@ -1322,6 +1322,51 @@ reintroduce it.
 
 Closes POOL-002.
 
+#### Pool: `stopThePress` enqueued a message nothing had prepared
+
+`stopThePress` handed the caller's `message`/`transfer` straight to
+`_enqueueOrReject`, skipping `_prepareForTransfer` — the one call every other
+enqueue route makes. One line to fix, and the row is right about the cause.
+
+**But half the row's claim does not reproduce, and the row says it does.** It
+asserts the message goes on the wire unframed. It does not: the drain calls
+`_encodeForWorker` on whatever it dequeues, and that frames it — measured, the
+drained message reaches the worker with first byte 1 and decodes cleanly. So the
+on-the-wire symptom is the luck of a downstream rescue rather than design, and the
+row's `[verified]` framing is right about the cause and wrong about the visible
+effect. Worth knowing, because it is the difference between "this message is
+broken" and "this message is unlabelled".
+
+The **`deferred` half is real**, and it is a genuine bypass. Measured, pool full
+with one task in flight:
+
+```
+codec=negotiated   postMessage   -> message, transfer, deferred   (true)
+codec=negotiated   stopThePress  -> message, transfer             (undefined)
+```
+
+Under `messageCodec: 'negotiated'` the carrier is a _per-worker_ decision, so an
+item the drain finds without the marker gets encoded for a worker that may not
+have asked for that codec.
+
+`test/powerPool.stopThePress.test.js`, 4 tests, mutation-checked — reverting the
+line fails 3 of 4. The main assertion compares the two enqueue routes against
+**each other** rather than against a hard-coded expectation, because "an item in
+the queue is a `PreparedItem`" is the property, and two paths disagreeing about it
+is what regressed.
+
+Two of my own test expectations were wrong and are recorded in the row: a refusal
+cannot be asserted here because draining the queue is the method's documented
+purpose, so there is always room by the time it enqueues; and
+`recreateWorkers: true` _rebuilds_ the worker, so the instance captured at
+construction is stale.
+
+`POOL-004` is the structural answer and is not done. This is the **third** site
+that drifted — the direct path, the inline drain, `stopThePress` and
+`_dispatchQueuedTasks` each had their own idea of what a prepared item is.
+
+Closes POOL-003.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
