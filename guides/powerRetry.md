@@ -232,15 +232,17 @@ any request is sent**:
 
 ## PowerRetryBudget API
 
-| Member                                      | Description                                                   |
-| ------------------------------------------- | ------------------------------------------------------------- |
-| `new PowerRetryBudget({ ratio, capacity })` | `ratio` defaults to `0.2`, `capacity` to `10`.                |
-| `recordRequest()`                           | Fund the bucket by one request. Returns the new token count.  |
-| `tryConsumeRetry()`                         | Spend one retry token. Returns `false` when empty.            |
-| `available()`                               | Current tokens.                                               |
-| `stats()`                                   | `{ ratio, capacity, available, requests, retries, refused }`. |
-| `reset()`                                   | Refill to capacity and zero the counters.                     |
-| `ratio` / `capacity`                        | The configured values.                                        |
+| Member                                      | Description                                                     |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| `new PowerRetryBudget({ ratio, capacity })` | `ratio` defaults to `0.2`, `capacity` to `10`.                  |
+| `recordRequest()`                           | Fund the bucket by one request. Returns the new token count.    |
+| `tryConsumeRetry()`                         | Spend one retry token. Returns `false` when empty.              |
+| `available()`                               | Current tokens.                                                 |
+| `stats()`                                   | `{ ratio, capacity, available, requests, retries, refused }`.   |
+| `reset()`                                   | Refill to capacity and zero the counters.                       |
+| `dispose()`                                 | Release the metrics registration. Terminal. `reset()` does not, |
+|                                             | because a budget can be reset and reused.                       |
+| `ratio` / `capacity`                        | The configured values.                                          |
 
 ## Composes with
 

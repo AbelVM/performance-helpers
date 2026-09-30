@@ -73,12 +73,25 @@ export class PowerRetryBudget {
      */
     reset(): void;
     /**
+     * Release the metrics registration. Safe to call more than once.
+     *
+     * `reset()` deliberately does not do this — a budget can be reset and reused,
+     * and unregistering on every reset would make the series flap. `dispose()` is
+     * the terminal teardown, and it is new here for the reason
+     * `guides/metrics.md` gives: a disposed budget that stays registered is sampled
+     * forever, and its `stats()` still answers, so nothing fails visibly.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
      * A snapshot of the budget, for logging and for deciding whether a refusal
      * was routine or a sign the dependency is genuinely sick.
      *
      * @returns {PowerRetryBudgetStats}
      */
     stats(): PowerRetryBudgetStats;
+    [Symbol.dispose](): void;
 }
 /**
  * PowerRetry

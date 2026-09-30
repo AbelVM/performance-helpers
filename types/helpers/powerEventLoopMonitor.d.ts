@@ -74,6 +74,17 @@ export class PowerEventLoopMonitor {
     /**
      * Stop sampling. In-flight samples already recorded are kept, so a stop/start
      * cycle does not lose history. Idempotent.
+     *
+     * **This does not unregister the metrics receipt**, and that is the whole
+     * point. It used to, which meant a stop/start cycle — the exact cycle this
+     * method's own JSDoc invites, and one an app performs on a debug toggle or a
+     * pause — left the monitor sampling and reporting nothing, permanently and
+     * silently. `start()` does not re-attach, so there was no way back short of
+     * constructing a new monitor and losing the collected history as well.
+     * Eight other helpers detach in teardown only; this was the only one that
+     * detached in a method documented as reversible. Use {@link
+     * PowerEventLoopMonitor#dispose} to unregister.
+     *
      * @returns {this}
      */
     stop(): this;
@@ -154,6 +165,11 @@ export class PowerEventLoopMonitor {
     };
     /**
      * Stop sampling and release the timer. Safe to call more than once.
+     *
+     * This is the only thing that unregisters the metrics receipt, and it is
+     * terminal: after it, `getStats()` still answers but the monitor reports
+     * nothing, because the collector no longer calls it.
+     *
      * @returns {void}
      */
     dispose(): void;

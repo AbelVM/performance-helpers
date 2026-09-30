@@ -1009,6 +1009,46 @@ reverting the wrapper's return value fails two.
 
 Closes OBS-003.
 
+#### Metrics: registrations outliving the object, or dying too early
+
+Two P0 rows in the same area, and both directions of the mistake are silent. A
+registration that outlives its object is sampled forever by a collector holding a
+closure over something nobody can reach — and because `getStats()` still answers,
+the series looks live, so nothing fails. A registration destroyed too early is
+the mirror image: the helper is working, reporting nothing, and there is no error
+to find.
+
+**`PowerEventLoopMonitor.stop()` was destroying the receipt.** Its own JSDoc
+advertises "in-flight samples already recorded are kept, so a stop/start cycle
+does not lose history" — and `start()` does not re-attach. So the cycle the
+method explicitly invited, an app performing on a debug toggle, left the monitor
+sampling and reporting nothing for the rest of its life. The only way back was a
+new monitor, which discards the collected history too. `stop()` no longer
+detaches; `dispose()` remains the only thing that does. Eight other helpers
+detached in teardown only — this was the only one detaching in a method
+documented as reversible.
+
+**`PowerBulkhead.dispose` and a new `PowerRetryBudget.dispose` now detach.**
+`guides/metrics.md` states the guarantee and then _lists both of these two
+helpers_ as ones that must honour it; neither did. `PowerBulkhead.dispose` was a
+bare alias for `reset`, and `Symbol.dispose` called `reset()` too — so a
+`using` block, which is a scope exit and exactly the teardown the guarantee is
+about, left the bulkhead registered. `PowerRetryBudget` had no `dispose()` at all,
+so it could not be released even in principle.
+
+The split between `reset` and `dispose` is deliberate and is the thing worth
+keeping: **`reset()` and `stop()` keep the registration, `dispose()` and
+`terminate()` release it.** Both `reset` operations are reversible — a budget or
+a bulkhead is still usable afterwards — and unregistering there would make the
+series flap on every reset.
+
+Tests are in `test/metrics.lifetime.test.js`, and they assert the _sampling_, not
+just the registration name, so a receipt whose reader was swapped out cannot pass.
+Mutation-checked three ways: putting the detach back into `stop()` fails 1 of 9,
+and making either `dispose` a no-op fails 2 of 9 each.
+
+Closes OBS-001 and OBS-002.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

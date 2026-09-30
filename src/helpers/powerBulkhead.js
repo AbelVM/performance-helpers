@@ -8,7 +8,7 @@ import { assertLimitRequired } from '../utils/options.js';
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
 import { DEFAULT_QUEUE_CAPACITY, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
-import { attach } from './metrics.js';
+import { attach, detach } from './metrics.js';
 
 /**
  * PowerBulkhead
@@ -280,16 +280,26 @@ export class PowerBulkhead {
   }
 
   /**
-   * Alias for {@link PowerBulkhead#reset}.
+   * Alias for {@link PowerBulkhead#reset}, plus releasing the metrics
+   * registration.
+   *
+   * A disposed bulkhead that stays registered is sampled forever: its
+   * `stats()` keeps answering, so nothing fails visibly, and the collector
+   * accumulates a series for an object nobody can reach. `guides/metrics.md`
+   * lists this as one of the helpers that must detach in teardown, and it did
+   * not.
+   *
    * @param {PowerBulkheadResetOptions} [options] - Reset options.
    * @returns {void}
    */
   dispose(options) {
+    detach(this._metrics);
+    this._metrics = null;
     this.reset(options);
   }
 
   [Symbol.dispose]() {
-    this.reset();
+    this.dispose();
   }
 
   /**

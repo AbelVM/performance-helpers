@@ -24,6 +24,8 @@ Use `PowerBulkhead` when you need to protect critical work from a noisy producer
 - `active` — Number of tasks currently running.
 - `pending` — Number of tasks currently queued.
 - `isFull` — `true` when the helper has reached its global queue capacity.
+- `reset(options?)` — Clear the partition tables and counters. The bulkhead stays usable, and — deliberately — keeps its [metrics](metrics.md) registration, because a reset is reversible and unregistering would make the series flap.
+- `dispose(options?)` — `reset()` plus releasing the metrics registration. Terminal. `using bulkhead = new PowerBulkhead(...)` calls this on scope exit, so a `using` block does not leave a bulkhead being sampled forever.
 
 ## Example
 

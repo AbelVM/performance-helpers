@@ -115,10 +115,25 @@ it holds is the thing with numbers — and an always-zero series would read as
 "this helper is idle", which is a different and wrong claim. Use
 `new PowerRetryBudget({ observability: true })`.
 
-A helper that is disposed, stopped or terminated **detaches itself**, so a
-collector never goes on sampling a dead object. That matters: `terminate()` on a
-pool still answers `getStats()`, so a leaked registration keeps reporting a dead
-pool forever and nothing fails visibly while the series quietly stops moving.
+A helper that is disposed or terminated **detaches itself**, so a collector never
+goes on sampling a dead object. That matters: `terminate()` on a pool still answers
+`getStats()`, so a leaked registration keeps reporting a dead pool forever and
+nothing fails visibly while the series quietly stops moving.
+
+**Detaching is for teardown, not for pausing.** `reset()` and
+`PowerEventLoopMonitor.stop()` deliberately _keep_ the registration: both are
+reversible operations, and a helper that unregisters on `stop()` and does not
+re-register on `start()` silently stops reporting for the rest of its life — the
+failure has no error, only a series that stops moving. The methods that end a
+helper's life are `dispose()`, `terminate()` and, for the loop monitor,
+`dispose()`.
+
+So the pairing is:
+
+| Operation                  | Registration                     |
+| -------------------------- | -------------------------------- |
+| `reset()`, `stop()`        | kept — the helper is still alive |
+| `dispose()`, `terminate()` | released — the helper is done    |
 
 ### Which helpers take it
 

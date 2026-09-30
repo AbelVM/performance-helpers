@@ -29,7 +29,7 @@
  * @typedef {import('./jsdoc-types.js').PowerRetryBudgetStats} PowerRetryBudgetStats
  */
 import { assertLimitRequired } from '../utils/options.js';
-import { attach } from './metrics.js';
+import { attach, detach } from './metrics.js';
 import {
   DECORRELATED_JITTER_FACTOR,
   DEFAULT_RETRY_BASE_DELAY_MS,
@@ -166,6 +166,26 @@ export class PowerRetryBudget {
     this._retries = 0;
     this._refused = 0;
     this._funded = 0;
+  }
+
+  /**
+   * Release the metrics registration. Safe to call more than once.
+   *
+   * `reset()` deliberately does not do this — a budget can be reset and reused,
+   * and unregistering on every reset would make the series flap. `dispose()` is
+   * the terminal teardown, and it is new here for the reason
+   * `guides/metrics.md` gives: a disposed budget that stays registered is sampled
+   * forever, and its `stats()` still answers, so nothing fails visibly.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    detach(this._metrics);
+    this._metrics = null;
+  }
+
+  [Symbol.dispose]() {
+    this.dispose();
   }
 
   /**
