@@ -239,12 +239,6 @@ could not be enforced and should be surfaced by the caller.
 
 ---
 
-### eagerCleanupOnRead
-
-> **eagerCleanupOnRead**: `boolean`
-
----
-
 ### maxCleanupPerTick
 
 > **maxCleanupPerTick**: `number`

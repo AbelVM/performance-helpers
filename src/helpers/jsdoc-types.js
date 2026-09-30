@@ -726,7 +726,6 @@ export {};
  * @property {?(function(*, *):void)} [onExpire]
  * @property {number} [initialPoolSize]
  * @property {number} [maxCleanupPerTick]
- * @property {boolean} [eagerCleanupOnRead]
  * @property {number} [defaultAsyncTimeout] - Default timeout (ms) applied to
  * @property {() => number} [now] Injected clock in milliseconds, matching the limiters
  *   (PERF-007) and `PowerTTLMap`. Expiry is the one behaviour here that cannot be

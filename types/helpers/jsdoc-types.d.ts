@@ -1007,7 +1007,6 @@ export type PowerCacheOptions = {
     onExpire?: ((arg0: any, arg1: any) => void) | null | undefined;
     initialPoolSize?: number | undefined;
     maxCleanupPerTick?: number | undefined;
-    eagerCleanupOnRead?: boolean | undefined;
     /**
      * - Default timeout (ms) applied to
      */

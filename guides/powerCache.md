@@ -4,22 +4,21 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 ## PowerCache
 
-| option               |                         type |    default | description                                                                                                                                                                                                                                                                                    |
-| -------------------- | ---------------------------: | ---------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxEntries`         |                     `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                                                                                                                                                                                                                  |
-| `maxWeight`          |                     `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                                                                                                                                                                                                        |
-| `weightFn`           |     `function(value):number` |  `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                                                                                                                                                                                                                   |
-| `defaultTTL`         |                     `number` |    `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                                                                                                                                                                                                            |
-| `maxPoolSize`        |                     `number` |     `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                                                                                                                                                                                                                      |
-| `rejectOversized`    |                    `boolean` |    `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                                                                                                                                                                                                                  |
-| `onEvict`            | `function(key,value,reason)` |     `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                                                                                                                                                                                                                  | 'deleted' | 'rejected-oversized'`. |
-| `onExpire`           |        `function(key,value)` |     `null` | Callback invoked when an entry expires due to TTL.                                                                                                                                                                                                                                             |
-| `now`                |               `() => number` |  `nowMs()` | Injected clock in milliseconds, matching the limiters and `PowerTTLMap`. Expiry is the one behaviour here that cannot be observed synchronously, so this turns "assert it expired after 100 ms" from a sleep into an exact assertion — see [Testing expiry](#testing-expiry-without-sleeping). |
-| `initialPoolSize`    |                     `number` |        `0` | Prefill the internal node pool to reduce early allocations.                                                                                                                                                                                                                                    |
-| `maxCleanupPerTick`  |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                                                                                                                                                                                                       |
-| `eagerCleanupOnRead` |                    `boolean` |    `false` | If `true`, `peek()` and `has()` will remove expired nodes when observed (opt-in behavior).                                                                                                                                                                                                     |
-| `policy`             |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`.                                                                                                                                                                                        |
-| `admission`          |                     `'none'` |   `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan).                                                                                                       |
+| option              |                         type |    default | description                                                                                                                                                                                                                                                                                    |
+| ------------------- | ---------------------------: | ---------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxEntries`        |                     `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                                                                                                                                                                                                                  |
+| `maxWeight`         |                     `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                                                                                                                                                                                                        |
+| `weightFn`          |     `function(value):number` |  `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                                                                                                                                                                                                                   |
+| `defaultTTL`        |                     `number` |    `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                                                                                                                                                                                                            |
+| `maxPoolSize`       |                     `number` |     `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                                                                                                                                                                                                                      |
+| `rejectOversized`   |                    `boolean` |    `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                                                                                                                                                                                                                  |
+| `onEvict`           | `function(key,value,reason)` |     `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                                                                                                                                                                                                                  | 'deleted' | 'rejected-oversized'`. |
+| `onExpire`          |        `function(key,value)` |     `null` | Callback invoked when an entry expires due to TTL.                                                                                                                                                                                                                                             |
+| `now`               |               `() => number` |  `nowMs()` | Injected clock in milliseconds, matching the limiters and `PowerTTLMap`. Expiry is the one behaviour here that cannot be observed synchronously, so this turns "assert it expired after 100 ms" from a sleep into an exact assertion — see [Testing expiry](#testing-expiry-without-sleeping). |
+| `initialPoolSize`   |                     `number` |        `0` | Prefill the internal node pool to reduce early allocations.                                                                                                                                                                                                                                    |
+| `maxCleanupPerTick` |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                                                                                                                                                                                                       |
+| `policy`            |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`.                                                                                                                                                                                        |
+| `admission`         |                     `'none'` |   `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan).                                                                                                       |
 
 ### API
 
@@ -27,9 +26,9 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `get(key)` — Retrieve the stored value and mark the entry as recently used. Returns the value or `undefined` when missing or expired.
 
-- `peek(key)` — Read the value without affecting recency; returns `value | undefined`. When the cache is constructed with `eagerCleanupOnRead: true`, `peek()` will remove expired entries it encounters.
+- `peek(key)` — Read the value without affecting recency; returns `value | undefined`. Expired entries it encounters are removed as it goes — see 'Expiry is eager' below.
 
-- `has(key, { ignoreExpiry = false })` — Check whether a key exists and is not expired. When `ignoreExpiry` is true expired entries are considered present. When `eagerCleanupOnRead: true` the call will remove expired entries seen during the check.
+- `has(key, { ignoreExpiry = false })` — Check whether a key exists and is not expired. When `ignoreExpiry` is true expired entries are considered present. Expired entries the call observes are removed as it goes — see 'Expiry is eager' below.
 
 - `hasEqual(key, value, { ignoreExpiry = false })` — Deep-equality compare the stored value against `value` using optimized fast paths for primitives, typed arrays, Maps/Sets, and cyclic-safe comparison. Respects the `ignoreExpiry` option. **`hasEqualWithSeen` and the `seen` option were removed in 2.0** — the comparison's cycle guard is per-walk state, so a `seen` map reused across two calls made the second return `true` for a pair a previous, unrelated call had recorded, without comparing anything. Pass no `seen`; the primitive and typed-array fast paths never allocate one.
 
@@ -90,12 +89,23 @@ console.log('hit rate', c.hitRate);
 
 ### Opt-in: eager cleanup on read
 
-If you prefer reads to automatically remove expired entries when they are observed, construct the cache with `eagerCleanupOnRead: true`. This makes `peek()` and `has()` remove expired nodes seen during the check instead of leaving them until the periodic cleanup.
+**Expiry is eager, and always has been.** Any read that observes an expired
+entry removes it: `get()`, `peek()` and `has()` all go through the same node
+lookup, which unlinks the node, fires `onExpire`, and counts the expiration. There
+is no option for this, because there is nothing to turn on.
+
+An `eagerCleanupOnRead` option was documented here for two releases, promised
+exactly this, and did nothing — the behaviour it described was already
+unconditional, so setting it changed no observable result. It has been removed
+along with its entry in the options table. The statement that the library
+"currently defaults to non-mutating read behavior" was the actual error, and it
+was here rather than in the code: a reader who believed it would be surprised to
+find `onExpire` firing from a `has()`.
 
 ```javascript
 import { PowerCache } from '../src/helpers/powerCache.js';
 
-const cache = new PowerCache({ defaultTTL: 1, eagerCleanupOnRead: true });
+const cache = new PowerCache({ defaultTTL: 1 });
 cache.set('a', 1, { ttl: 1 });
 // wait for expiry
 await new Promise((r) => setTimeout(r, 5));
@@ -141,7 +151,8 @@ Note that `PowerTTLMap` uses the _opposite_ boundary: it stores `now + ttl + 1`
 and reads back `now > expiresAt`, so it survives exactly at its TTL. Both are
 deliberate and pinned independently; do not assume they agree.
 
-Note: The library currently defaults to non-mutating read behavior (expired entries remain until cleanup). Changing the default to `eagerCleanupOnRead: true` would be a breaking change and should be done as part of a major-version bump.
+Note: expiry is eager on every read path, so the periodic cleanup loop is a
+backstop for entries nothing reads again, not the thing that reclaims them.
 
 If you need LRU order, use `Array.from(c.entries('LRU'))` or the `entries('LRU')` iterator directly.
 

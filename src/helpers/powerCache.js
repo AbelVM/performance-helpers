@@ -194,7 +194,6 @@ export class PowerCache {
     onExpire = null,
     initialPoolSize = 0,
     maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
-    eagerCleanupOnRead = false,
     // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
     defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
     // invoked as onError(err, message) whenever an internal failure is
@@ -261,9 +260,14 @@ export class PowerCache {
       ? Math.max(1, +maxCleanupPerTick)
       : DEFAULT_MAX_CLEANUP_PER_TICK;
 
-    this.eagerCleanupOnRead = Boolean(eagerCleanupOnRead);
-
     this._map = new Map();
+    // NOTE: there is deliberately no `eagerCleanupOnRead` option. It was
+    // documented for two releases, promised that `peek()`/`has()` would remove
+    // expired entries when observed, and did nothing — because
+    // `_fetchValidNode` already removes them, unconditionally, on every read path.
+    // Measured with both values set: identical `size`, `_expirations` and
+    // `onExpire` counts. The *guide* was the actual defect, claiming a
+    // non-mutating default the code never had. See CACHE-008.
     this._head = null;
     this._tail = null;
     /**

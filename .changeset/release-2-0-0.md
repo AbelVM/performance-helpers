@@ -3405,3 +3405,47 @@ about the premise rather than about the fix. What is reachable — and now asser
 is that a handler rejection always reaches a caller and is never lost.
 
 Closes RES-033.
+
+#### `eagerCleanupOnRead` documented a behaviour the code always had
+
+**Removed.** The option promised that `peek()` and `has()` would "remove expired
+nodes when observed", and did nothing — because `_fetchValidNode` already
+removes them, unconditionally, on every read path. It unlinks, frees, counts
+`_expirations` and fires `onExpire`, with no flag consulted.
+
+Measured with an injected clock and both option values:
+
+```
+eagerCleanupOnRead=false | has: false | size 1->0 | expirations 0->1 | onExpire fired
+eagerCleanupOnRead=true  | has: false | size 1->0 | expirations 0->1 | onExpire fired
+```
+
+Identical. So the option was removed rather than left inert, and **the guide was
+the actual defect**: it claimed "the library currently defaults to non-mutating
+read behavior (expired entries remain until cleanup)", which was false. A reader
+who believed it would be surprised to find `onExpire` firing from a `has()`.
+
+The alternative was implementing the option by _inverting_ the current behaviour
+to match the docs — reads becoming non-mutating by default, on a hot path, and
+`onExpire` no longer firing from reads. That is a real behaviour change, and the
+code's behaviour is the one with a helper written to produce it, so the code is
+right and the prose was not.
+
+The guide is corrected in five places: the options table, two method
+descriptions, a worked example, and the note about the default. The historical
+paragraph naming the removed option is kept on purpose — this project records
+withdrawn claims.
+
+**Breaking:** a caller already passing `eagerCleanupOnRead: true` now has the
+option ignored, which is a no-op because the behaviour was unconditional. The
+property is gone from the published `types/`.
+
+`test/powerCache.eagerExpiry.test.js`, 6 tests on an injected clock, so nothing
+sleeps: each read path removes the node and fires `onExpire`, the option is absent
+from the instance, a live entry is still not removed, and `ignoreExpiry` still
+reports an expired entry as present. Three mutations caught — and the first is
+worth noting: making `_fetchValidNode` stop removing on expiry, **which is what
+the guide described**, fails 2 of 6. The wrong documentation was itself pinned by
+these tests before this commit.
+
+Closes CACHE-008.
