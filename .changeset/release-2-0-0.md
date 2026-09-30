@@ -3277,3 +3277,46 @@ clean batch reports and counts nothing, and that a throwing logger does not
 swallow the report.
 
 Closes POOL-005.
+
+#### A batched dispatch read the clock once per item
+
+`_dispatchToWorker` takes `startTime` as a **default parameter**:
+
+```js
+const { correlationId, startTime = nowMs() } = options;
+```
+
+Every call that omits it pays a clock read — and `postMessageBatch`'s loops call
+it per item, so a batch of N cost **N** syscalls to stamp N tasks that all
+dispatch at the same moment.
+
+`postMessage` and `broadcast` already hoisted their reads, and both say why in a
+comment ("capture a single timestamp for this dispatch to avoid multiple
+syscalls"). The batch was the one path not given the same treatment, so this is a
+consistency fix rather than a new idea: one read at the top of the method, passed
+to all four dispatch sites. `startTime` feeds `_startTimes` and `lastActive`,
+which is what `getStats().performance.timePerTask` reads, and a batch dispatches
+its items at the same moment — so one read is accurate to within the batch's own
+duration rather than wrong.
+
+**Asserted with a count, not a clock** — the instrument TEST-001 established.
+Timing a `nowMs()` call would be measuring the thing being removed, and at the
+harness's ~28% median spread a duration could not separate one read from N:
+
+```js
+pool.postMessageBatch(Array.from({ length: 50 }, (_, i) => ({ message: { i } })));
+expect(reads()).toBe(1); // was 50
+expect(worker.posted).toHaveLength(50); // and nothing was skipped
+```
+
+**The runtime test only reached the single-worker fast path.** Dropping
+`startTime` from the _fallback_ site left every test green, because that branch is
+never taken under `size: 1` with `maxTasksPerWorker: Infinity` — so three of the
+four sites I changed were unverified. Reaching the multi-worker branches needs a
+saturated pool, a grow and a fallback, which is a lot of arrangement to assert
+one argument. So the file has a second instrument: a **static** check over the
+method body that every dispatch passes the hoisted stamp and that the hoist
+precedes the first loop. That is the same trap as a test that cannot fail,
+reached a different way.
+
+Closes POOL-006.

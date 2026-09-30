@@ -3070,6 +3070,14 @@ export class PowerPool {
    */
   postMessageBatch(items, options) {
     this._assertNotTerminated();
+    // One timestamp for the whole batch, as `postMessage` and `broadcast`
+    // already do. `_dispatchToWorker` defaults `startTime` to `nowMs()`, so
+    // without this every item in the batch paid a syscall — and the loops below
+    // call it per item, so a batch of N cost N clock reads. `startTime` is the
+    // task's start for `lastActive` and `_startTimes`, and a batch dispatches
+    // its items at the same moment, so one read is accurate to within the
+    // batch's own duration rather than wrong.
+    const now = nowMs();
     if (!Array.isArray(items))
       throw new Error('postMessageBatch expects an array of {message, transfer?}');
 
@@ -3149,7 +3157,7 @@ export class PowerPool {
           // `_dispatchToWorker` resolves a deferred encode, so this branch no
           // longer speaks a different protocol from `postMessage` — which is how
           // it used to fail every batched request.
-          this._dispatchToWorker(obj, prepared);
+          this._dispatchToWorker(obj, prepared, { startTime: now });
           idleStateDirty = true;
           results[i] = true;
         } catch (err) {
@@ -3184,7 +3192,7 @@ export class PowerPool {
 
       if (least?.tasks < this._maxTasksPerWorker) {
         try {
-          this._dispatchToWorker(least, prepared);
+          this._dispatchToWorker(least, prepared, { startTime: now });
           idleStateDirty = true;
           results[i] = true;
           dispatched = true;
@@ -3205,7 +3213,7 @@ export class PowerPool {
               results[i] = false;
               dispatched = true;
             } else {
-              this._dispatchToWorker(obj, prepared);
+              this._dispatchToWorker(obj, prepared, { startTime: now });
               idleStateDirty = true;
               results[i] = true;
               dispatched = true;
@@ -3256,7 +3264,7 @@ export class PowerPool {
             this._nextIndex = (this._nextIndex + 1) % this.workers.length;
             const fallback = this.workers[idx];
             try {
-              this._dispatchToWorker(fallback, prepared);
+              this._dispatchToWorker(fallback, prepared, { startTime: now });
               idleStateDirty = true;
               results[i] = true;
             } catch (err) {
