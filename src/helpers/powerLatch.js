@@ -35,6 +35,7 @@ export class PowerLatch {
     this._count = assertLimitRequired(count, {
       name: 'count',
       className: 'PowerLatch',
+      integer: true,
       min: 0,
       fallback: 0,
     });

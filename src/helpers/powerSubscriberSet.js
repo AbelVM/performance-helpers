@@ -52,6 +52,7 @@ export class PowerSubscriberSet {
     this._maxListeners = assertLimitRequired(maxListeners, {
       name: 'maxListeners',
       className: 'PowerSubscriberSet',
+      integer: true,
       min: 0,
       fallback: 0,
     });

@@ -53,6 +53,15 @@ export function intAtLeast(value, min = 0, fallback = min) {
  * @param {string} spec.name - Option name, used in the error message.
  * @param {string} spec.className - Constructing class name.
  * @param {number} [spec.min=0] - Smallest acceptable value.
+ * @param {boolean} [spec.integer=false] - Require a whole number. A limit that
+ *   counts things (permits, entries, waiters) must be one: `capacity: 2.5`
+ *   granted **three** concurrent holders, because each `_grant()` decremented
+ *   the fractional counter and three decrements of 1 still leave it above 0.
+ *   The gate then reported `available: -0.5` and admitted a fourth caller
+ *   against a limit of one. Off by default rather than applied everywhere,
+ *   because some options are genuinely fractional - `PowerRetryBudget.ratio`
+ *   among them - and a blanket `Math.floor` in this helper would quietly
+ *   corrupt those.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
  * @param {number|null|undefined} [spec.fallback] - Value used when
  *   `undefined`/`null` is passed. When omitted the value passes through
@@ -62,6 +71,8 @@ export function intAtLeast(value, min = 0, fallback = min) {
  *   contract, so migrating them onto this helper does not silently restyle a
  *   message users may be grepping for.
  * @param {string} [spec.minMessage] - Overrides the below-minimum message, for
+ *   the same reason.
+ * @param {string} [spec.integerMessage] - Overrides the non-integer message, for
  *   the same reason.
  * @returns {number|null|undefined} The validated number, `spec.fallback`, or the
  *   original value. Wide on purpose: the passthrough branch really can return
@@ -93,10 +104,12 @@ export function assertLimit(value, spec) {
     name,
     className,
     min = 0,
+    integer = false,
     allowInfinity = false,
     fallback,
     invalidMessage,
     minMessage,
+    integerMessage,
   } = spec;
   if (value === undefined || value === null) {
     if (fallback !== undefined) return fallback;
@@ -109,6 +122,14 @@ export function assertLimit(value, spec) {
       invalidMessage ??
         `${className}: \`${name}\` must be a finite number (received ${String(value)}). ` +
           'A non-finite limit would silently disable the check it guards.'
+    );
+  }
+  if (integer && !Number.isInteger(n)) {
+    throw new TypeError(
+      integerMessage ??
+        `${className}: \`${name}\` must be a whole number (received ${String(value)}). ` +
+          'A fractional limit is silently rounded up by the first consumer, so it ' +
+          'admits more than the number that was configured.'
     );
   }
   if (n < min) {
@@ -138,6 +159,8 @@ export function assertLimit(value, spec) {
  * @param {string} spec.name - Option name, used in the error message.
  * @param {string} spec.className - Constructing class name.
  * @param {number} [spec.min=0] - Smallest acceptable value.
+ * @param {boolean} [spec.integer=false] - Require a whole number. See
+ *   {@link assertLimit} for why this is a flag and not a blanket floor.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
  * @param {number} [spec.fallback] - Value used when `undefined`/`null` is passed.
  * @param {string} [spec.invalidMessage] - Overrides the non-finite message.

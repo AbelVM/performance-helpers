@@ -113,8 +113,6 @@ export class PowerBackpressure extends PowerPermitGate {
     // --- AIMD state -------------------------------------------------------
     this._baseRefillAmount = normalizedRefillAmount;
     this._adaptive = normalizeAdaptive(adaptive, normalizedRefillAmount);
-    /** Permits currently held by consumers: granted and not yet returned. */
-    this._inFlight = 0;
     this._adaptiveHeartbeat = false;
   }
 
@@ -167,19 +165,15 @@ export class PowerBackpressure extends PowerPermitGate {
    * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
    */
   acquire(options = {}) {
-    // Before the fast path, for the same reason as the gate: an already-aborted
-    // signal is a refusal, not a suggestion.
-    if (/** @type {{signal?: AbortSignal}} */ (options)?.signal?.aborted) {
-      return Promise.reject(new Error('PowerBackpressure acquire aborted'));
-    }
-    if (this.available > 0) {
-      return Promise.resolve(this._grant());
-    }
-    if (this.isFull) {
-      return Promise.reject(new Error('PowerBackpressure queue is full'));
-    }
+    // The admission decision is the parent's: an override that re-implements
+    // its parent's `acquire` is two implementations of the same question, and
+    // this one had already drifted - it rejected an already-aborted signal with
+    // a bare `Error` where the gate gives an `AbortError`, so the
+    // `err.name === 'AbortError'` check the gate's own docs tell callers to make
+    // failed for exactly the class that documents it. The only thing added here
+    // is the refill safety net, which is this class's whole reason to exist.
     const promise = super.acquire(options);
-    if (this.pending > 0 && !this._refillTimer) {
+    if (this._hasWaiters() && !this._refillTimer) {
       this._scheduleRefill();
     }
     return promise;
@@ -196,14 +190,25 @@ export class PowerBackpressure extends PowerPermitGate {
   /**
    * Release one or more permits back to the controller.
    * @param {number} [count=1]
+   * @returns {number} Permits returned to the gate rather than transferred.
    */
   release(count = 1) {
-    super.release(count);
-    const returned = Math.min(Math.max(0, Math.floor(Number(count) || 0)), this._inFlight);
-    this._inFlight -= returned;
-    if ((this.available < this._lowWaterMark || this._adaptiveHeartbeat) && this.pending > 0) {
+    // Only the permits that actually came *back* stop being in flight. A
+    // release that serves a queued producer is a transfer - the permit is
+    // handed straight over and the producer is a holder from that instant - and
+    // the base gate's `_grantTo` has already counted it. Subtracting the
+    // requested count instead used to walk the counter down by one for every
+    // transfer, so after the first transfer cycle the AIMD signal read 0 while
+    // permits were still outstanding, and the controller stayed pinned in
+    // additive increase forever after.
+    const returned = super.release(count);
+    if ((this.available < this._lowWaterMark || this._adaptiveHeartbeat) && this._hasWaiters()) {
       this._scheduleRefill();
     }
+    // Passed through rather than dropped: the count is the same fact this class
+    // reads to decide whether a refill is needed, so swallowing it here would
+    // make the override's return type differ from its base's for no reason.
+    return returned;
   }
 
   /**
@@ -213,8 +218,9 @@ export class PowerBackpressure extends PowerPermitGate {
     super.reset({ available: this._capacity, reason: new Error('PowerBackpressure reset') });
     // A reset means "forget what you learned about the consumer". Carrying the
     // tuned window across would keep applying a conclusion drawn about a
-    // workload that no longer exists.
-    this._inFlight = 0;
+    // workload that no longer exists. The in-flight count is *not* cleared: the
+    // consumers it counts are still running, and the base gate's `reset()`
+    // refuses to hand their permits to anyone else until they return.
     this._adaptiveHeartbeat = false;
     this._refillAmount = this._baseRefillAmount;
     if (this._refillTimer) {
@@ -223,18 +229,25 @@ export class PowerBackpressure extends PowerPermitGate {
     }
   }
 
-  _grant() {
-    // The single point at which a permit reaches a consumer. Every grant path -
-    // the fast path, the refill loop, and the base gate serving a waiter as a
-    // permit is released - funnels through here, so this is the only place that
-    // has to count. Counting in more than one place double-counted and reported
-    // 12 permits in flight against a capacity of 4.
-    this._inFlight += 1;
-    return super._grant();
+  /**
+   * Whether the wait queue physically holds anything.
+   *
+   * Deliberately the raw length rather than {@link PowerPermitGate#pending}:
+   * the refill machinery is a safety net for a queue nothing else will drain,
+   * so gating it on a *derived* count means one cancelled-but-not-yet-compacted
+   * entry can turn the net off while a live waiter is still queued. `pending`
+   * stays the user-facing answer ("how many producers are actually waiting");
+   * this is the mechanism's own question.
+   *
+   * @returns {boolean}
+   * @private
+   */
+  _hasWaiters() {
+    return this._waiters.length > 0;
   }
 
   _scheduleRefill() {
-    if (this._refillTimer || this.pending === 0) return;
+    if (this._refillTimer || !this._hasWaiters()) return;
     // A heartbeat exists so AIMD can observe *good* behaviour. Without it the
     // window only ever moves on a refill, and a refill only happens below the
     // low-water mark - so a consumer that recovered would never be rewarded
@@ -247,17 +260,34 @@ export class PowerBackpressure extends PowerPermitGate {
   }
 
   _performRefill() {
-    if (this.pending === 0) {
+    if (!this._hasWaiters()) {
       this._adaptiveHeartbeat = false;
       return;
     }
+    // `capacity - available`: the *pool*, not the concurrency in flight. The
+    // refill is a pressure-triggered token source - it mints back up to the pool
+    // size only while a queue is waiting - and under congestion it will hand out
+    // more than `capacity` is worth, because a consumer that is not returning
+    // its permits is exactly the case where more producers have to be let in.
+    // That is the AIMD idea; a gate that could not exceed its own ceiling would
+    // have no reason to tune a window.
+    //
+    // It is also why `active` is `_held` and not `capacity - available`: under
+    // this model more holders can be outstanding than `capacity`, and
+    // `capacity - available` cannot represent that - it saturates at
+    // `capacity` and reports a healthy gate while the work is piling up. See
+    // ADR 0004 for the model and the two readings of `capacity` it separates.
     const missing = this._capacity - this._available;
     if (missing <= 0) {
-      // Nothing to grant, but the queue is still there and the consumer is
-      // still behaving: that is exactly the signal AIMD needs, so observe it
-      // and come back. Without this the window could only ever shrink.
+      // The pool is already full and a waiter is queued, which cannot normally
+      // happen - a caller only queues when the pool is empty. Transiently it can,
+      // during a grant, so the branch exists: there is nothing to mint and
+      // nothing to learn, so it observes the signal and, with a window to tune,
+      // comes back. Without `adaptive` there is no window, and rescheduling
+      // would be a timer that can neither grant nor learn - a live handle held
+      // open forever behind a queue it cannot relieve.
       this._aimdStep();
-      this._scheduleRefill();
+      if (this._adaptive.enabled) this._scheduleRefill();
       return;
     }
 
@@ -270,17 +300,32 @@ export class PowerBackpressure extends PowerPermitGate {
     const refill = Math.min(adaptiveAmount, missing);
     this._available += refill;
 
-    while (this._available > 0 && this.pending > 0) {
-      const next = this._waiters.shift();
-      if (typeof next?.resolve === 'function') {
-        this._available -= 1;
-        next.resolve(this._makeRelease());
-      }
-    }
+    // `_serveWaiters`, not a local shift loop: this path used to hand permits
+    // to aborted waiters - their `resolve` is a no-op, so the permit was taken
+    // and nothing came of it - and never decremented `_cancelledWaiters`, which
+    // is what deadlocked the queue behind a corpse. `fromAvailable = true`
+    // because the refill above already counted these permits into `_available`;
+    // this is the one route that draws them back out again.
+    this._serveWaiters(Math.min(refill, this._available), true);
 
-    if ((this._available < this._lowWaterMark || this._adaptiveHeartbeat) && this.pending > 0) {
+    if ((this.available < this._lowWaterMark || this._adaptiveHeartbeat) && this._hasWaiters()) {
       this._scheduleRefill();
     }
+  }
+
+  /**
+   * Permits currently held by consumers: granted and not yet returned.
+   *
+   * A named view of the base gate's `_held`, not a second counter. The
+   * controller used to keep its own, incremented from the fast-path grant only,
+   * and the two of them disagreed whenever a permit reached a *queued* producer
+   * - which is most of them, and all of the ones a refill tick hands out.
+   *
+   * @returns {number}
+   * @private
+   */
+  get _inFlight() {
+    return this._held;
   }
 
   /**
@@ -298,6 +343,13 @@ export class PowerBackpressure extends PowerPermitGate {
    * round-trip time, and here the honest analogue of "did my probe come back"
    * is "did a permit come back", which needs no clock and cannot be fooled by a
    * fast consumer that keeps everything forever.
+   *
+   * It is also deliberately *loss-based*, which is the only one of Netflix's
+   * three controllers whose signal transfers. `vegas` and `gradient2` are both
+   * RTT-shaped, and a permit gate is a producer/consumer queue rather than an
+   * RPC: there is no request/response round trip here for them to measure. A
+   * delay-shaped controller for this class would need a queue-drain *rate*, not
+   * a latency - see `ALGO-010` in `review.md`.
    *
    * @returns {void}
    * @private

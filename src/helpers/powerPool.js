@@ -428,6 +428,7 @@ export class PowerPool {
     this.minSize = assertLimitRequired(minSize, {
       name: 'minSize',
       className: 'PowerPool',
+      integer: true,
       min: 0,
       fallback: DEFAULT_POOL_SIZE,
     });
@@ -436,6 +437,7 @@ export class PowerPool {
       assertLimitRequired(maxSize, {
         name: 'maxSize',
         className: 'PowerPool',
+        integer: true,
         min: 0,
         fallback: this.minSize,
       })
@@ -456,6 +458,7 @@ export class PowerPool {
     this._maxQueueLength = assertLimitRequired(options.maxQueueLength, {
       name: 'maxQueueLength',
       className: 'PowerPool',
+      integer: true,
       min: 0,
       allowInfinity: true,
       fallback: Infinity,
@@ -463,6 +466,7 @@ export class PowerPool {
     this._maxDrainWaiters = assertLimitRequired(options.maxDrainWaiters, {
       name: 'maxDrainWaiters',
       className: 'PowerPool',
+      integer: true,
       min: 1,
       fallback: DEFAULT_MAX_DRAIN_WAITERS,
     });

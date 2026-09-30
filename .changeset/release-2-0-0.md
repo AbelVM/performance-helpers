@@ -714,10 +714,153 @@ of these with `as any`, you can delete the workaround:
 - `o2u8`'s second parameter is now documented and optional.
 - `PowerWebSocketClient.readyState` is typed `0 | 1 | 2 | 3` rather than
   depending on the `lib.dom` alias `WebSocketReadyState`.
+- **`PowerPermitGate.release()` now returns a number.** It is the number of
+  permits that actually came _back_ to the gate rather than being transferred
+  straight to a queued waiter. A caller tracking outstanding work needs that
+  difference: a release that serves a waiter is not a free permit, and
+  subtracting the requested count is what pinned the backpressure controller in
+  additive increase. `PowerBackpressure.release()` overrides it and passes the
+  value through rather than dropping it, so the override's type matches its
+  base's.
+- The `typecheck:ratchet` ceiling of 300 is now met at **291** — the permit-gate
+  work reduced measured type debt by 9, since the new members are documented
+  well enough for `tsc` to type them.
 
 **Added in the review cycle**
 
-The items below landed while the plan table in `review.md` was being worked through. Three of them are worth reading even if you skip the rest: two proposals were **closed on a measurement rather than built**, one feature shipped under a justification the row did not predict, and a guard that had been passing for the wrong reason was found by deliberately breaking it.
+The items below landed while the plan table in `review.md` was being worked through. Five of them are worth reading even if you skip the rest: two proposals were **closed on a measurement rather than built**, one feature shipped under a justification the row did not predict, and **a guard that had been passing for the wrong reason was found by deliberately breaking it** — twice, in the same file.
+
+#### Concurrency: the permit gate's accounting was wrong on two of three paths
+
+Fixes a family of defects in `PowerPermitGate` and everything built on it —
+`PowerSemaphore`, `PowerBackpressure`, `PowerBulkhead` — and records the design
+decision the fix forced. **The short version: the gate's one count of outstanding
+work was incremented on one of its three grant paths, so most of the time it
+described a quarter of the truth.** The AIMD controller reads that number, and
+the tests that cover it were passing _because_ of the bug.
+
+`active` is now counted from a single grant point rather than computed as
+`capacity - available`, and four defects follow from making it honest:
+
+- **A reset no longer mints a permit that is still held** (`RES-023`).
+  `reset()` set `available` unconditionally, so resetting a gate of 1 with one
+  holder running produced a **second** concurrent holder against a limit of 1,
+  permanently — the first holder's release was then absorbed by the capacity
+  clamp. `using sem = new PowerSemaphore(1)` reaches it: a `run()` in flight at
+  scope exit is not hypothetical. Outstanding holders cannot be _settled_ by a
+  reset (the promise that produced a release callback has already resolved, so
+  there is nothing to reject), but a teardown can stop pretending their permits
+  are free. `available` is now capped at `capacity - active`, and a holder's
+  release returns its permit normally afterwards.
+
+- **A queued producer is no longer starved behind a cancelled one** (`RES-001`).
+  The refill loop shifted queue entries itself, so it neither skipped aborted
+  entries nor decremented the cancelled-waiter counter. One cancellation was
+  enough to leave that counter permanently one too high: `pending` then reported
+  **0 with a live waiter still queued**, every refill tick short-circuited on
+  `pending === 0`, and the queue could not make progress at all. The only way out
+  was `reset()`.
+
+- **The in-flight count is not decremented for a transfer** (`RES-024`). A
+  release that hands a permit straight to a queued producer is a transfer, not a
+  return: the permit is never in the pool in between. Subtracting on that path
+  walked the counter below zero after one cycle, and the AIMD controller — which
+  asks "is everything I handed out still out there?" — was **pinned in additive
+  increase forever after**. A window that only ever grows is not congestion
+  control. `release()` now returns what actually came _back_.
+
+- **A fractional `capacity` is rejected** (`RES-010`). `capacity: 2.5` admitted
+  **three** concurrent holders — each grant decremented the fractional counter,
+  and three decrements of 1 still leave it above 0 — and then reported
+  `available: -0.5`. This is a `TypeError` now, at thirteen count-like option
+  sites. The flag is opt-in rather than a blanket `Math.floor` in `assertLimit`,
+  because some options are genuinely fractional: `PowerRetryBudget.ratio` among
+  them.
+
+Also: `PowerBackpressure.acquire()` delegates its admission decision to the
+parent instead of re-implementing it (`RES-028`), and the override had already
+drifted — it rejected an already-aborted signal with a bare `Error` where the gate
+gives an `AbortError`, so the `err.name === 'AbortError'` check this class's own
+docs tell you to make **failed for exactly the class that documents it**.
+
+**Two user-visible changes:**
+
+```js
+// Before: three holders, available: -0.5
+new PowerBackpressure({ capacity: 2.5 });
+// After:
+new PowerBackpressure({ capacity: 2.5 });
+// TypeError: PowerBackpressure: `capacity` must be a whole number (received 2.5).
+```
+
+```js
+// Before, on a full queue:
+await bp.acquire(); // Error: PowerBackpressure queue is full
+// After — one admission decision, one set of words:
+await bp.acquire(); // Error: PowerPermitGate queue is full
+```
+
+If you match on the second string, match on `'queue is full'` or on `instanceof`.
+
+#### The decision that fix forced: what a permit _is_
+
+`capacity` is a **hard ceiling** on concurrent holders for `PowerPermitGate`,
+`PowerSemaphore` and `PowerBulkhead`. It is the **pool size** the refill draws
+from for `PowerBackpressure`. The two are not the same question, and the code had
+to pick one without saying so.
+
+The ceiling reading cannot be used everywhere. A producer only queues when the
+pool is empty; an empty pool means every permit is out; so "missing" is always
+zero and the refill could never grant anything. `refillAmount`, `refillInterval`
+and the whole AIMD window would be dead code, and `PowerBackpressure` would
+become `PowerSemaphore` with three inert options. The guide's own words were
+already the pool reading — "base number of permits **restored** during each
+adaptive refill".
+
+So the pool model is what ships, and two things changed with it:
+
+- **`active` counts holders rather than reporting `capacity - available`.** The
+  two are identical for the ceiling classes, so this is invisible there. Under
+  the pool model they diverge, and the old form cannot represent the divergence:
+  `capacity - available` cannot exceed `capacity`, so on a `PowerBackpressure`
+  whose consumers are not returning their permits it sits **pinned at the ceiling
+  and reports a healthy gate while the work is piling up**. `active` can now read
+  above `capacity` on that class, and `examples/backpressure.mjs` prints the case
+  rather than hiding it.
+- **`guides/powerBackpressure.md`'s claim that "`_inFlight` is bounded by
+  `capacity`" was wrong** and is now corrected. It was written as an aspiration
+  and believed because the counter that would have falsify it was incremented on
+  one of three grant paths.
+
+A refill also cannot relieve a queue whose every permit is out and never coming
+back. That is the pressure the class exists to express, not something a timer
+can schedule around — and the controller now stops re-arming when it has nothing
+to mint, rather than holding a live handle open behind a queue it cannot relieve.
+
+[ADR 0004](../adr/0004-permit-capacity-ceiling-or-pool.md) records the model, both
+rejected alternatives, and the rows that depend on it (`ALGO-005`, `ALGO-010`,
+`RES-008`).
+
+#### The tests that were passing for the wrong reason
+
+`test/powerBackpressure.aimd.test.js` had two tests asserting that the AIMD
+window _grows_ while consumers return permits. Both passed against a controller
+whose congestion signal was structurally dead — a permanently-false signal is a
+permanently-growing window — and both were red the moment the count was honest.
+
+The replacement asserts the count through the refill path rather than through
+`acquire()`, because that is the route that bypassed it, and drives the AIMD
+branches from a state that is actually reachable. That state is narrower than it
+looks: a queued waiter implies the pool is empty, and an empty pool with a waiter
+only arises when the gate starts drained (`initialTokens: 0`) and is handed work
+faster than the first tick. **The additive branch is not reachable from a
+saturated gate at all**, which is `ALGO-010`'s question and not a test problem.
+
+Two more bugs in the fix were caught the same way rather than by reading: a
+transfer was being counted as both a grant and a return (4 holders releasing into
+3 waiters read **7** in flight), and `release()` was decrementing by the pool's
+_increase_, so a permit the capacity clamp discarded left a phantom holder
+outstanding forever.
 
 #### Message protocol
 

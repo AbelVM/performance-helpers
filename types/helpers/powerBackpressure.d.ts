@@ -16,8 +16,6 @@ export class PowerBackpressure extends PowerPermitGate {
         min: number;
         max: number;
     };
-    /** Permits currently held by consumers: granted and not yet returned. */
-    _inFlight: number;
     _adaptiveHeartbeat: boolean;
     /**
      * The refill amount the controller is currently probing with.
@@ -44,8 +42,34 @@ export class PowerBackpressure extends PowerPermitGate {
      * Reset the controller to its initial capacity and clear waiting producers.
      */
     reset(): void;
+    /**
+     * Whether the wait queue physically holds anything.
+     *
+     * Deliberately the raw length rather than {@link PowerPermitGate#pending}:
+     * the refill machinery is a safety net for a queue nothing else will drain,
+     * so gating it on a *derived* count means one cancelled-but-not-yet-compacted
+     * entry can turn the net off while a live waiter is still queued. `pending`
+     * stays the user-facing answer ("how many producers are actually waiting");
+     * this is the mechanism's own question.
+     *
+     * @returns {boolean}
+     * @private
+     */
+    private _hasWaiters;
     _scheduleRefill(): void;
     _performRefill(): void;
+    /**
+     * Permits currently held by consumers: granted and not yet returned.
+     *
+     * A named view of the base gate's `_held`, not a second counter. The
+     * controller used to keep its own, incremented from the fast-path grant only,
+     * and the two of them disagreed whenever a permit reached a *queued* producer
+     * - which is most of them, and all of the ones a refill tick hands out.
+     *
+     * @returns {number}
+     * @private
+     */
+    private get _inFlight();
     /**
      * One AIMD round.
      *
@@ -61,6 +85,13 @@ export class PowerBackpressure extends PowerPermitGate {
      * round-trip time, and here the honest analogue of "did my probe come back"
      * is "did a permit come back", which needs no clock and cannot be fooled by a
      * fast consumer that keeps everything forever.
+     *
+     * It is also deliberately *loss-based*, which is the only one of Netflix's
+     * three controllers whose signal transfers. `vegas` and `gradient2` are both
+     * RTT-shaped, and a permit gate is a producer/consumer queue rather than an
+     * RPC: there is no request/response round trip here for them to measure. A
+     * delay-shaped controller for this class would need a queue-drain *rate*, not
+     * a latency - see `ALGO-010` in `review.md`.
      *
      * @returns {void}
      * @private

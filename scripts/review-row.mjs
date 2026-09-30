@@ -173,34 +173,46 @@ export function checkTable(text) {
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
-const argv = process.argv.slice(2);
-const rowIndex = argv.indexOf('--row');
+/**
+ * Only when run directly. This module is imported as a library by
+ * `close-review-row.mjs`, and an unguarded CLI block ran on import too — printing
+ * the usage banner into that script's output on every invocation, which reads as
+ * a warning and is not one.
+ */
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
-if (rowIndex !== -1) {
-  const payload = argv[rowIndex + 1];
-  if (!payload) {
-    console.error('review-row: --row needs a JSON payload');
-    process.exit(2);
-  }
-  try {
-    process.stdout.write(`${buildRow(JSON.parse(payload))}\n`);
-  } catch (err) {
-    console.error(`review-row: ${err && err.message}`);
-    process.exit(1);
-  }
-} else if (argv.includes('--check')) {
-  if (!existsSync(REVIEW)) {
-    console.error(`review-row: ${REVIEW} not found`);
-    process.exit(2);
-  }
-  const { rows, problems } = checkTable(readFileSync(REVIEW, 'utf8'));
-  if (problems.length) {
-    for (const p of problems) console.error(p);
-    console.error(`\nreview-row: ${problems.length} problem(s) across ${rows} rows.`);
-    process.exit(1);
-  }
-  console.log(`review-row: ${rows} plan rows, all ${COLUMNS.length} columns.`);
+if (!isMain) {
+  // Imported for `buildRow` / `splitRow` / `checkTable`; nothing to do.
 } else {
-  console.log('usage: node scripts/review-row.mjs --check | --row \'{"id":...}\'');
-  console.log(`columns: ${COLUMNS.join(', ')}`);
+  const argv = process.argv.slice(2);
+  const rowIndex = argv.indexOf('--row');
+
+  if (rowIndex !== -1) {
+    const payload = argv[rowIndex + 1];
+    if (!payload) {
+      console.error('review-row: --row needs a JSON payload');
+      process.exit(2);
+    }
+    try {
+      process.stdout.write(`${buildRow(JSON.parse(payload))}\n`);
+    } catch (err) {
+      console.error(`review-row: ${err && err.message}`);
+      process.exit(1);
+    }
+  } else if (argv.includes('--check')) {
+    if (!existsSync(REVIEW)) {
+      console.error(`review-row: ${REVIEW} not found`);
+      process.exit(2);
+    }
+    const { rows, problems } = checkTable(readFileSync(REVIEW, 'utf8'));
+    if (problems.length) {
+      for (const p of problems) console.error(p);
+      console.error(`\nreview-row: ${problems.length} problem(s) across ${rows} rows.`);
+      process.exit(1);
+    }
+    console.log(`review-row: ${rows} plan rows, all ${COLUMNS.length} columns.`);
+  } else {
+    console.log('usage: node scripts/review-row.mjs --check | --row \'{"id":...}\'');
+    console.log(`columns: ${COLUMNS.join(', ')}`);
+  }
 }

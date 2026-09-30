@@ -6,10 +6,10 @@ Low-level permit queue helper for building semaphore-like concurrency primitives
 
 ## Constructor
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `capacity` | `number` | `1` | Maximum number of permits available concurrently. |
-| `queueCapacity` | `number` | `Infinity` | Maximum number of waiting callers allowed in the queue. |
+| option          |     type |    default | description                                                 |
+| --------------- | -------: | ---------: | ----------------------------------------------------------- |
+| `capacity`      | `number` |        `1` | Maximum number of permits available concurrently.           |
+| `queueCapacity` | `number` | `Infinity` | Maximum number of waiting callers allowed in the queue.     |
 | `initialTokens` | `number` | `capacity` | Number of permits available immediately after construction. |
 
 ### Cancelling a wait
@@ -32,7 +32,7 @@ Three details that are easy to get wrong and are worth stating plainly:
   convenient right now" is how a cancelled request ends up doing work nobody
   will collect.
 - **An aborted waiter never consumes a permit.** When the queue drains, a
-  cancelled entry is compacted out *without* taking a permit. Letting it take
+  cancelled entry is compacted out _without_ taking a permit. Letting it take
   one is a quiet capacity leak: the gate looks one permit emptier after every
   abort, and nothing reports it.
 - **`pending` and `isFull` count live waiters only.** A cancel storm cannot
@@ -47,7 +47,7 @@ retain every settled closure.
 `capacity` and `queueCapacity` are validated. Before 2.0, `capacity` was read as
 `Math.max(1, Number(x) || 1)`, so **`capacity: 0` produced a gate holding one
 permit rather than none** — and a gate configured to allow nothing is how you
-switch a dependency off, so silently becoming *open* is the worst direction to
+switch a dependency off, so silently becoming _open_ is the worst direction to
 fail in. Both now throw a `TypeError` naming the option.
 
 Two zero values are deliberately still accepted, because they are requests
@@ -61,11 +61,12 @@ rather than mistakes:
 
 - `acquire()` — Returns a `Promise` that resolves to a release callback when a permit becomes available. If a permit is immediately available, the promise resolves synchronously.
 - `tryAcquire()` — Returns a release callback if a permit is available immediately, or `null` if no permit is available.
-- `release(count?)` — Releases one or more permits back into the gate and dispatches queued waiters in FIFO order.
-- `reset(options?)` — Clears queued waiters and optionally restores available permits. Waiters are rejected with a provided reason.
-- `capacity` — Total permit count.
+- `release(count?)` — Releases one or more permits back into the gate and dispatches queued waiters in FIFO order. Returns the number of permits that actually came _back_ rather than being transferred to a waiter, so a caller tracking outstanding work is not told a transferred permit is free.
+- `reset(options?)` — Clears queued waiters and optionally restores available permits. Waiters are rejected with a provided reason. Permits held by callers that have not released are **not** restored: `available` is capped at `capacity - active`, so a reset cannot admit a second holder alongside one that is still running. A holder's release returns its permit normally afterwards.
+- `capacity` — Total permit count, and a hard ceiling on concurrent holders.
 - `available` — Current available permit count.
-- `pending` — Number of queued waiters.
+- `active` — Permits granted and not yet returned. Equals `capacity - available` for this class, because `capacity` is a ceiling. It is counted rather than derived, so that the subclass whose refill can exceed the ceiling still reports honestly — see [ADR 0004](../adr/0004-permit-capacity-ceiling-or-pool.md).
+- `pending` — Number of queued waiters, excluding any that have been aborted.
 - `queueCapacity` — Maximum allowed queue size.
 - `isFull` — `true` when the wait queue is saturated.
 

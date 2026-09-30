@@ -49,6 +49,7 @@ export class PowerBatch {
     this._maxSize = assertLimitRequired(maxSize, {
       name: 'maxSize',
       className: 'PowerBatch',
+      integer: true,
       min: 1,
       allowInfinity: true,
     });

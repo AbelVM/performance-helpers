@@ -89,75 +89,147 @@ describe('PowerBackpressure adaptive refill (AIMD)', () => {
     bp.dispose();
   });
 
-  it('increases the refill window additively while consumers return permits', async () => {
+  it('counts a permit handed to a queued producer by a refill tick', async () => {
+    // RES-003, second half. The refill loop used to hand permits to waiters
+    // itself, without touching the in-flight count, so a gate whose every
+    // permit had gone out through a refill read 0 in flight. The controller
+    // then saw no congestion at all and grew its window into exactly the stall
+    // it exists to prevent - which is also why the additive-increase assertion
+    // in this file used to pass: a permanently-false congestion signal is a
+    // permanently-growing window. Asserted through the refill path, not through
+    // `acquire`, because that is the route that bypassed the count.
     const bp = make();
-    // Keep one producer cycling and releasing promptly, and keep a backlog so
-    // refills keep being scheduled.
-    let running = true;
-    const cycle = (async () => {
-      while (running) {
-        try {
-          const r = await bp.acquire();
-          r();
-        } catch {
-          /* queue full */
-        }
-        await sleep(2);
-      }
-    })();
+    const held = await bp.acquire();
+    // A waiter that nothing will release, purely to give the refill something
+    // to hand a permit to.
+    bp.acquire().catch(() => {});
 
-    for (let i = 0; i < 12; i += 1) bp.acquire().catch(() => {});
-    const start = bp.refillAmount;
-    await waitFor(() => bp.refillAmount > start);
-    running = false;
-    await cycle;
-
-    expect(bp.refillAmount).toBeGreaterThan(start);
+    await waitFor(() => bp._inFlight === 2);
+    expect(bp._inFlight).toBe(2);
+    expect(bp.active).toBe(2);
+    expect(bp.available).toBe(2);
+    held();
     bp.dispose();
   });
 
-  it('recovers after the consumer starts returning permits again', async () => {
+  it('does not let a transferred permit count as a returned one', async () => {
+    // RES-024. A release that serves a queued producer is a *transfer*: the
+    // permit is handed straight over and is never in the pool in between, so
+    // the in-flight count is unchanged. `release()` used to subtract the
+    // requested count regardless, which walked the counter below zero after one
+    // transfer cycle and pinned the controller in additive increase forever
+    // after - a window that only ever grows is not congestion control.
+    //
+    // The count is a *concurrency* count, so the shape to assert is the
+    // inequality, not an exact figure: 4 holders releasing into 3 queued
+    // waiters must still read 4 held of a capacity of 4. The old code read 1.
     const bp = make();
     const held = [];
     for (let i = 0; i < 4; i += 1) held.push(await bp.acquire());
-    for (let i = 0; i < 8; i += 1) bp.acquire().catch(() => {});
-    await waitFor(() => bp.refillAmount < 4);
-    const backedOff = bp.refillAmount;
-    expect(backedOff).toBeLessThan(4);
+    const transfers = [];
+    for (let i = 0; i < 3; i += 1)
+      transfers.push(
+        bp.acquire().then(
+          (r) => r,
+          () => null
+        )
+      );
+    await waitFor(() => bp._inFlight === 4);
 
-    // The consumer starts behaving, *under sustained pressure*: producers must
-    // keep outrunning it, or the queue empties, there is nothing left to
-    // observe, and a window that cannot recover is not a defect - the system
-    // is simply not under load.
-    let running = true;
-    const consumer = (async () => {
-      while (running) {
-        try {
-          const r = await bp.acquire();
-          setTimeout(r, 3);
-        } catch {
-          /* queue full */
-        }
-        await sleep(2);
-      }
-    })();
-    for (let i = 0; i < 8; i += 1) void bp.acquire().catch(() => {});
-    await waitFor(() => bp.refillAmount > backedOff);
-    running = false;
-    await consumer;
+    // Three releases, three waiters: every one is a transfer.
+    held.slice(0, 3).forEach((r) => r());
+    const served = await Promise.all(transfers);
 
-    console.log(
-      'DEBUG refill=',
-      bp.refillAmount,
-      'backedOff=',
-      backedOff,
-      'inFlight=',
-      bp._inFlight,
-      'pending=',
-      bp.pending
-    );
-    expect(bp.refillAmount).toBeGreaterThan(backedOff);
-    held.forEach((r) => r());
+    expect(served.filter((r) => typeof r === 'function')).toHaveLength(3);
+    expect(bp._inFlight).toBe(4);
+    expect(bp.active).toBe(4);
+    expect(bp._inFlight).toBeLessThanOrEqual(bp.capacity);
+
+    // The fourth release has nobody left to transfer to, so that one *is* a
+    // return - which is the difference the return value of `release()` exists
+    // to express, and the reason the counter moves at all.
+    held[3]();
+    expect(bp._inFlight).toBe(3);
+    bp.dispose();
+  });
+
+  it('grows the window when a permit comes back and cuts it when none do', async () => {
+    // Both branches in one test, because the interesting claim is that the
+    // *same* signal decides between them - a counter that cannot distinguish the
+    // two cases cannot drive either one.
+    //
+    // The additive branch needs a state that is easy to assume reachable and is
+    // not. `_performRefill` reaches `_aimdStep` only when a waiter is queued; a
+    // caller only queues when no permit is free; and a gate with a free permit is
+    // by definition not saturated. So the branch wants
+    // `in-flight < capacity`, `available === 0`, and a queue - which a gate at
+    // its default `initialTokens` cannot reach, because the first `acquire`
+    // takes the fast path and the gate is saturated before a queue ever forms.
+    //
+    // The one configuration that produces it is a gate that starts drained and
+    // is handed work faster than the first tick, which is exactly the
+    // token-bucket-starting-empty case the refill machinery exists for. An
+    // earlier draft of this file asserted the branch with 12 producers on a
+    // saturated gate and passed only while the count was broken; `ALGO-010` is
+    // the row that has to decide whether the non-congested signal should be
+    // reachable more generally (Netflix's `vegas` and `gradient2` are RTT-shaped
+    // and a permit gate is a producer/consumer queue with no round trip to
+    // measure, so a queue-drain *rate* is the only candidate).
+    //
+    // The long interval is not decoration: with a 5ms tick, the real timer fires
+    // between the two halves of the setup and this test measures the race rather
+    // than the branch.
+    const bp = make({ initialTokens: 0, refillInterval: 60_000 });
+    const waits = [];
+    for (let i = 0; i < 5; i += 1)
+      waits.push(
+        bp.acquire().then(
+          (r) => r,
+          () => null
+        )
+      );
+
+    // Queueing is not granting. That distinction is the whole content of the
+    // count, and RES-003 was that the refill loop handed permits out without
+    // moving it - so a gate running entirely on refills read 0 in flight.
+    expect(bp._inFlight).toBe(0);
+    expect(bp.pending).toBe(5);
+
+    bp._performRefill();
+    // additiveIncrease defaults to 1, so one step is exactly one permit.
+    expect(bp.refillAmount).toBe(5);
+    // ...and that same tick granted 4 of the 5 waiting, which is the same
+    // counting the previous test pins.
+    expect(bp._inFlight).toBe(4);
+    expect(bp.available).toBe(0);
+
+    // Saturated with a waiter still queued: the backoff condition, and the
+    // branch the sibling test drives through a real workload. Same signal, same
+    // method, the other decision.
+    //
+    // The second tick mints a *second* permit per queued waiter, because
+    // `capacity` bounds the pool rather than the concurrency in flight - a
+    // consumer that has not returned anything is exactly why more producers get
+    // let in. So the count crosses `capacity` here, and that is the design
+    // rather than the over-minting it looks like: the window is what shrinks to
+    // correct it. See ADR 0004.
+    const grown = bp.refillAmount;
+    bp._performRefill();
+    expect(bp.refillAmount).toBeLessThan(grown);
+    expect(bp.refillAmount).toBeGreaterThanOrEqual(1);
+    expect(bp._inFlight).toBeGreaterThan(bp.capacity);
+    // ...and `active` keeps counting rather than saturating at `capacity`,
+    // which is the whole reason it is read from `_held`.
+    expect(bp.active).toBe(bp._inFlight);
+
+    // Reject the one waiter that never got a permit, then give the rest back.
+    const outstanding = bp._inFlight;
+    bp.reset();
+    expect(bp._inFlight).toBe(outstanding);
+    const served = (await Promise.all(waits)).filter((r) => typeof r === 'function');
+    expect(served).toHaveLength(5);
+    served.forEach((r) => r());
+    expect(bp._inFlight).toBe(0);
     bp.dispose();
   });
 
@@ -187,21 +259,40 @@ describe('PowerBackpressure adaptive refill (AIMD)', () => {
     slow.dispose();
   });
 
-  it('reset() returns the window to its base and clears in-flight accounting', async () => {
+  it('reset() returns the window to its base and leaves the honest holder count alone', async () => {
     const bp = make();
     const held = [];
     for (let i = 0; i < 4; i += 1) held.push(await bp.acquire());
     for (let i = 0; i < 8; i += 1) bp.acquire().catch(() => {});
     await waitFor(() => bp.refillAmount < 4);
     expect(bp.refillAmount).toBeLessThan(4);
+    // The refill has been minting past the pool size for as long as the
+    // backlog lasted, so the outstanding count is above `capacity` by the time
+    // the window has come down. That is the model (ADR 0004), and it is why the
+    // count is the thing to record rather than `capacity`.
+    const outstanding = bp._inFlight;
+    expect(outstanding).toBeGreaterThanOrEqual(4);
 
     // Forgetting what was learned about a consumer that no longer exists is the
     // point of reset(); carrying a tuned window across would apply a conclusion
     // drawn about a different workload.
     bp.reset();
     expect(bp.refillAmount).toBe(4);
-    expect(bp._inFlight).toBe(0);
+
+    // The in-flight count is *not* cleared, and that is the fix rather than an
+    // oversight: those consumers are still running, so their permits are still
+    // held. Zeroing the counter used to make the AIMD signal read "no
+    // congestion" immediately after a reset - a conclusion about a workload
+    // that had not been re-measured - and it disagreed with `available`.
+    expect(bp._inFlight).toBe(outstanding);
+    expect(bp.active).toBe(outstanding);
+    // The pool is not refilled past what is outstanding (RES-023): a teardown
+    // must not hand a second consumer a permit the first one is still using.
+    expect(bp.available).toBe(0);
+    expect(bp.tryAcquire()).toBeNull();
+
     held.forEach((r) => r());
+    expect(bp._inFlight).toBeLessThan(outstanding);
     bp.dispose();
   });
 

@@ -43,6 +43,7 @@ export class PowerThrottle {
     this.capacity = assertLimitRequired(capacity, {
       name: 'capacity',
       className: 'PowerThrottle',
+      integer: true,
       min: 1,
       fallback: 1,
     });

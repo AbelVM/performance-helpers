@@ -125,6 +125,17 @@ for (const g of granted) console.log(`    ${g.got} was granted at +${g.at}ms`);
 console.log('  ^ w1 took the released permit immediately; w2 waited for the refill');
 console.log('    tick. The refill kicked in because there was a queue to relieve —');
 console.log('    a gate that refilled eagerly would be a rate limiter.');
+console.log('');
+console.log(`    Note the difference from the PowerPermitGate above: ${bp.active} are held`);
+console.log(`    against a capacity of ${bp.capacity}. There, \`capacity\` is a hard ceiling on`);
+console.log('    concurrent holders. Here it sizes the *pool* the refill draws from, so a');
+console.log('    consumer that is not returning its permits — exactly the case where more');
+console.log('    producers have to be let in — takes the count above capacity. The AIMD');
+console.log('    window is what corrects it: with `adaptive: true` a tick that finds');
+console.log('    every permit still out cuts `refillAmount`, so the rate falls again.');
+console.log('    That is why `active` counts the holders rather than reporting');
+console.log('    `capacity - available`, which would sit pinned at the ceiling and read as');
+console.log('    healthy precisely when the work is piling up. ADR 0004 has the model.');
 clearInterval(heartbeat);
 
 if (bp.available < 0) {

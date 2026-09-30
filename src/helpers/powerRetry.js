@@ -88,6 +88,7 @@ export class PowerRetryBudget {
     this._capacity = assertLimitRequired(capacity, {
       name: 'capacity',
       className: 'PowerRetryBudget',
+      integer: true,
       min: 1,
       fallback: DEFAULT_RETRY_BUDGET_CAPACITY,
     });
@@ -275,6 +276,7 @@ function resolveRunOptions(options) {
     name: 'maxAttempts',
     className: 'PowerRetry',
     min: 1,
+    integer: true,
     fallback: 3,
     // The shared helper's messages name the class and the bound, but the
     // pre-2.0 wording is part of the public contract (two tests, and users

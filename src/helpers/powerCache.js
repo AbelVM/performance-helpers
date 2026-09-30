@@ -153,6 +153,7 @@ export class PowerCache {
     this.maxEntries = assertLimitRequired(maxEntries, {
       name: 'maxEntries',
       className: 'PowerCache',
+      integer: true,
       min: 0,
       allowInfinity: true,
     });
@@ -165,6 +166,7 @@ export class PowerCache {
     this.maxPoolSize = assertLimitRequired(maxPoolSize, {
       name: 'maxPoolSize',
       className: 'PowerCache',
+      integer: true,
       min: 0,
       allowInfinity: true,
     });

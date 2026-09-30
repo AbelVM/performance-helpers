@@ -33,11 +33,12 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 
 ## Index
 
-| #                                             | Decision                                                             | Status   |
-| --------------------------------------------- | -------------------------------------------------------------------- | -------- |
-| [0001](./0001-versioned-envelope-protocol.md) | The pool frames every message in a versioned binary envelope         | Accepted |
-| [0002](./0002-ring-buffer-queue.md)           | `PowerQueue` is a hand-rolled ring buffer, not an array              | Accepted |
-| [0003](./0003-tinylfu-admission-window.md)    | A frequency admission filter does not earn its keep on this workload | Rejected |
+| #                                                 | Decision                                                             | Status   |
+| ------------------------------------------------- | -------------------------------------------------------------------- | -------- |
+| [0001](./0001-versioned-envelope-protocol.md)     | The pool frames every message in a versioned binary envelope         | Accepted |
+| [0002](./0002-ring-buffer-queue.md)               | `PowerQueue` is a hand-rolled ring buffer, not an array              | Accepted |
+| [0003](./0003-tinylfu-admission-window.md)        | A frequency admission filter does not earn its keep on this workload | Rejected |
+| [0004](./0004-permit-capacity-ceiling-or-pool.md) | `capacity` is a ceiling on some gates and a pool size on others      | Accepted |
 
 ## Status values
 

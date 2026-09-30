@@ -88,7 +88,14 @@ describe('PowerSemaphore', () => {
     expect(sem.isLocked).toBe(false);
   });
 
-  it('reset rejects queued waiters and restores availability', async () => {
+  it('reset rejects queued waiters without admitting a second holder', async () => {
+    // RES-023. The reset is a teardown, not a licence to over-issue: a `run()`
+    // in flight at scope exit is the case that reached it, because
+    // `using sem = new PowerSemaphore(1)` disposes while the first `run()` is
+    // still awaiting. The old `reset()` set `available` to the limit regardless,
+    // so the next `tryAcquire()` succeeded and two tasks ran against a limit of
+    // one - permanently, since the first holder's release was absorbed by the
+    // capacity clamp.
     const sem = new PowerSemaphore(1);
     const release = await sem.acquire();
     const pending = sem.acquire();
@@ -98,11 +105,16 @@ describe('PowerSemaphore', () => {
 
     await expect(pending).rejects.toThrow();
     expect(sem.pending).toBe(0);
-    expect(sem.available).toBe(sem.limit);
+    expect(sem.active).toBe(1);
+    expect(sem.available).toBe(0);
+    expect(sem.tryAcquire()).toBeNull();
 
+    // The permit returns when the holder that owns it releases.
+    release();
+    expect(sem.active).toBe(0);
+    expect(sem.available).toBe(1);
     const nextRelease = sem.tryAcquire();
     expect(typeof nextRelease).toBe('function');
     nextRelease();
-    release();
   });
 });

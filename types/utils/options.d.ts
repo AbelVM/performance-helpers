@@ -32,6 +32,15 @@ export function intAtLeast(value: any, min?: number, fallback?: number): number;
  * @param {string} spec.name - Option name, used in the error message.
  * @param {string} spec.className - Constructing class name.
  * @param {number} [spec.min=0] - Smallest acceptable value.
+ * @param {boolean} [spec.integer=false] - Require a whole number. A limit that
+ *   counts things (permits, entries, waiters) must be one: `capacity: 2.5`
+ *   granted **three** concurrent holders, because each `_grant()` decremented
+ *   the fractional counter and three decrements of 1 still leave it above 0.
+ *   The gate then reported `available: -0.5` and admitted a fourth caller
+ *   against a limit of one. Off by default rather than applied everywhere,
+ *   because some options are genuinely fractional - `PowerRetryBudget.ratio`
+ *   among them - and a blanket `Math.floor` in this helper would quietly
+ *   corrupt those.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
  * @param {number|null|undefined} [spec.fallback] - Value used when
  *   `undefined`/`null` is passed. When omitted the value passes through
@@ -41,6 +50,8 @@ export function intAtLeast(value: any, min?: number, fallback?: number): number;
  *   contract, so migrating them onto this helper does not silently restyle a
  *   message users may be grepping for.
  * @param {string} [spec.minMessage] - Overrides the below-minimum message, for
+ *   the same reason.
+ * @param {string} [spec.integerMessage] - Overrides the non-integer message, for
  *   the same reason.
  * @returns {number|null|undefined} The validated number, `spec.fallback`, or the
  *   original value. Wide on purpose: the passthrough branch really can return
@@ -71,10 +82,12 @@ export function assertLimit(value: any, spec: {
     name: string;
     className: string;
     min?: number | undefined;
+    integer?: boolean | undefined;
     allowInfinity?: boolean | undefined;
     fallback?: number | null | undefined;
     invalidMessage?: string | undefined;
     minMessage?: string | undefined;
+    integerMessage?: string | undefined;
 }): number | null | undefined;
 /**
  * Validate a numeric limit that must resolve to a `number`.
@@ -95,6 +108,8 @@ export function assertLimit(value: any, spec: {
  * @param {string} spec.name - Option name, used in the error message.
  * @param {string} spec.className - Constructing class name.
  * @param {number} [spec.min=0] - Smallest acceptable value.
+ * @param {boolean} [spec.integer=false] - Require a whole number. See
+ *   {@link assertLimit} for why this is a flag and not a blanket floor.
  * @param {boolean} [spec.allowInfinity=false] - Accept `Infinity` as "no limit".
  * @param {number} [spec.fallback] - Value used when `undefined`/`null` is passed.
  * @param {string} [spec.invalidMessage] - Overrides the non-finite message.
@@ -106,6 +121,7 @@ export function assertLimitRequired(value: any, spec: {
     name: string;
     className: string;
     min?: number | undefined;
+    integer?: boolean | undefined;
     allowInfinity?: boolean | undefined;
     fallback?: number | undefined;
     invalidMessage?: string | undefined;

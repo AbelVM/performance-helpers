@@ -47,6 +47,7 @@ export class PowerDeadline {
       name: 'maxAttempts',
       className: 'PowerDeadline',
       min: 1,
+      integer: true,
       fallback: 1,
     });
     const perAttemptTimeout =
