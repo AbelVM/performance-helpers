@@ -1501,18 +1501,43 @@ one that connects with the platform default.
 
 `test/powerWebSocketClient.connect.test.js`, 8 tests, mutation-checked both ways.
 
-**`RT-003` is deliberately left open.** Its named symptom is fixed — a healthy `ws`
-socket is no longer closed with 4000 and reconnected forever, because the `pong`
-reply is now handled, the probe deadline is cleared, RTT is recorded, and
-`stats().rtt.canPing` says _unmeasured_ rather than showing 0 ms. But the fix
-surfaced a **new, opposite** failure, recorded as its own row: the heartbeat's
-detection timer is armed with an unref'd `setSafeTimeout`, so on a socket that
-accepts a ping and never answers, the deadline **never fires at all** —
-`heartbeatTimeouts` stays 0 and the socket is never closed. The heartbeat cannot
-detect a dead socket, which is the only thing it is for. The `pong` mutation
-survives because of it, and that is stated on the row rather than papered over.
+**`RT-003` is closed, and the row that seemed to be blocking it was my own
+measurement error.** A healthy `ws` socket is no longer closed with 4000 and
+reconnected forever: the `pong` reply is handled, the probe deadline is cleared,
+RTT is recorded, and `stats().rtt.canPing` says _unmeasured_ rather than showing
+0 ms — 27 pings in 150 ms, 0 closes, against 0 pings and a dead RTT series
+before.
 
-Closes RT-001 and RT-002.
+While fixing it I found what looked like a serious new P0: the heartbeat's
+detection timer is armed with an unref'd `setSafeTimeout`, so on a socket that
+accepts a ping and never answers the deadline **never fires at all**, and the
+heartbeat cannot detect a dead socket. It reads convincingly, it is traced, and it
+is **entirely wrong**:
+
+- An unref'd timer _does_ fire while the event loop is alive — verified side by
+  side with a ref'd one in the same 60 ms window. The unref is irrelevant, and is
+  the right default for a library that promises never to hold a process open.
+- The real fault was in my probe: the option is `heartbeatTimeoutMs`, and I passed
+  `pongTimeoutMs`, which the class does not recognise. It silently used its **10 s
+  default** — so the whole investigation was 100 ms measured against a 10 s
+  timeout. With the correct name the same socket produces 5 timeouts and a
+  `close(4000)` in 100 ms.
+
+**An option a class does not have is not a no-op; it is the default, and the
+resulting number is shaped like a measurement without being one.** The same wrong
+name was in the new test file, so every heartbeat assertion in it was measuring a
+10 s timeout inside an 80 ms window — which is why the `pong` mutation survived
+twice, and why a whole P0 row got filed on the strength of it. All four fixes are
+now mutation-checked, and the file carries the correction at the top.
+
+A second, smaller lesson from the same episode: filing that finding used
+`RT-022`, **which was already in use** by an unrelated open row about
+`SharedArrayBuffer` transfer lists. `scripts/review-row.mjs --check` reported
+_clean_, because a duplicate ID is neither a column-count nor a header problem.
+That is the third time in this series a guard has reported clean about a file it
+had not read correctly, and it is recorded on the row.
+
+Closes RT-001, RT-002 and RT-003.
 
 #### Message protocol
 

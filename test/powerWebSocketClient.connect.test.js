@@ -29,6 +29,14 @@ import { PowerWebSocketClient } from '../src/helpers/powerWebSocketClient.js';
 /**
  * A `_WS`-shaped socket the test drives by hand.
  *
+ * **The heartbeat option is `heartbeatTimeoutMs`.** An earlier version of this
+ * file passed `pongTimeoutMs`, which the client does not recognise, so it silently
+ * used its 10 s default — and every heartbeat assertion here was measuring a 10 s
+ * timeout inside an 80 ms window. That is what produced a convincing "the
+ * detection timer never fires" measurement, and an entire new P0 row built on
+ * it. An option the class does not have is not a no-op; it is the default, and
+ * the resulting number looks like a measurement.
+ *
  * `ping()` emits a `pong` immediately, which is what a healthy `ws` socket does
  * — and is the only way to reach the RTT path at all, since a socket without
  * `ping()` never arms the deadline and never has anything to clear.
@@ -200,7 +208,7 @@ describe('the heartbeat is answered (RT-003)', () => {
     // reconnected, forever.
     const { client, opened } = makeClient({
       heartbeatIntervalMs: 5,
-      pongTimeoutMs: 60,
+      heartbeatTimeoutMs: 60,
     });
     client.connect();
     const sock = opened();
@@ -222,7 +230,7 @@ describe('the heartbeat is answered (RT-003)', () => {
     // which is the bug described as if it were the expectation.
     const { client, opened } = makeClient({
       heartbeatIntervalMs: 5,
-      pongTimeoutMs: 60,
+      heartbeatTimeoutMs: 60,
     });
     client.connect();
     opened().emit('open', {});
@@ -234,6 +242,35 @@ describe('the heartbeat is answered (RT-003)', () => {
     expect(stats.rtt.count).toBeGreaterThanOrEqual(3);
     expect(stats.heartbeats).toBe(stats.rtt.count);
     expect(typeof stats.rtt.p50).toBe('number');
+    client.dispose();
+  });
+
+  it('closes a socket that accepts a ping and never answers', async () => {
+    // The other half of the heartbeat, and the one that proved a measurement was
+    // wrong rather than right. With `heartbeatTimeoutMs` set properly (see the
+    // note at the top of this file) a socket that never replies produces a timeout
+    // per probe and a close — 5 pings, 5 timeouts in 100 ms. Against the 10 s
+    // *default*, which is what an unrecognised option name produces, the same
+    // probe looks like "detection never fires", which is how this file came to
+    // carry a row claiming the detection timer was inert.
+    const { client, opened } = makeClient({
+      heartbeatIntervalMs: 5,
+      heartbeatTimeoutMs: 30,
+      reconnectOnHeartbeatTimeout: true,
+    });
+    client.connect();
+    const sock = opened();
+    // A socket that accepts a ping and never replies. The base class replies on a
+    // macrotask, so this has to replace it rather than suppress the event.
+    sock.ping = function () {
+      this.pings += 1;
+    };
+    sock.emit('open', {});
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(sock.closes.length, 'a socket that never answered was not closed').toBeGreaterThan(0);
+    expect(sock.closes[0][0]).toBe(4000);
+    expect(client.stats().heartbeatTimeouts).toBeGreaterThan(0);
     client.dispose();
   });
 
