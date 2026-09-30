@@ -116,6 +116,11 @@ export class PowerCircuit {
     /** @type {?number} */
     this._openedAt = null;
     this._trialInFlight = false;
+    // Whether the *logical* `open -> half-open` transition has already been
+    // announced. `_state` stays `'open'` until a call is attempted, so the
+    // `state` getter can observe the drawn window elapsing any number of times
+    // before `_setState` runs. This is what makes the announcement fire once.
+    this._halfOpenAnnounced = false;
 
     // optional callback invoked on state transitions: (state, reason)
     /** @type {?((state: CircuitState, reason?: string) => void)} */
@@ -169,6 +174,8 @@ export class PowerCircuit {
       // sized `timeout` as "the first window".
       this._openWindowMs = this._drawOpenWindow();
       this._consecutiveOpens++;
+      // A new outage gets a new logical half-open to announce.
+      this._halfOpenAnnounced = false;
     } else {
       this._openedAt = null;
       // Reaching `closed` means the dependency answered a trial, so the next
@@ -187,15 +194,42 @@ export class PowerCircuit {
     // only keep trial flag true when in half-open; otherwise clear it
     if (newState !== 'half-open') this._trialInFlight = false;
 
-    // invoke callback if provided
+    this._notifyState(newState, reason);
+  }
+
+  /**
+   * Announce a state to `onStateChange` and the bus, **without** mutating state.
+   *
+   * Split out of `_setState` so the lazy `open -> half-open` transition can be
+   * announced from the `state` getter. That transition is computed, not applied:
+   * `_state` stays `'open'` until a call is attempted, so a dashboard polling
+   * `state` saw `half-open` while the only thing that emitted was `_setState` —
+   * which means **half-open was never observable**, and a breaker whose trial then
+   * succeeded went `open -> closed` for every observer with nothing in between.
+   * The lazy design is the right one (an eager transition needs a timer, which is
+   * a wakeup and a handle to leak); announcing it is what was missing.
+   *
+   * The bus emit is guarded where `_setState` did not guard it, because this now
+   * runs **inside a getter**: a throwing event bus would otherwise make reading
+   * `state` throw, which is a far worse failure than a missed notification.
+   *
+   * @param {CircuitState} newState
+   * @param {string} [reason]
+   * @returns {void}
+   * @private
+   */
+  _notifyState(newState, reason) {
     try {
       if (typeof this.onStateChange === 'function') this.onStateChange(newState, reason);
     } catch (e) {
       /* swallow user callback errors */
     }
-    // emit on bus if provided
-    if (typeof this._bus?.emit === 'function') {
-      this._bus.emit('stateChange', { state: newState, reason });
+    try {
+      if (typeof this._bus?.emit === 'function') {
+        this._bus.emit('stateChange', { state: newState, reason });
+      }
+    } catch (e) {
+      /* an event bus that throws must not break a state read */
     }
   }
 
@@ -203,7 +237,17 @@ export class PowerCircuit {
   get state() {
     // If open and the *drawn* window has elapsed, expose as 'half-open' logically
     if (this._state === 'open' && this._openedAt != null) {
-      if (nowMs() - this._openedAt >= this._openWindowMs) return 'half-open';
+      if (nowMs() - this._openedAt >= this._openWindowMs) {
+        // Announce it, once per outage. Reading `state` is what a dashboard does
+        // to notice, so the observer that polls is the one that gets told — and a
+        // reader that only ever looks at `_state` (as the request path does)
+        // never pays for it.
+        if (!this._halfOpenAnnounced) {
+          this._halfOpenAnnounced = true;
+          this._notifyState('half-open', 'timeoutElapsed');
+        }
+        return 'half-open';
+      }
     }
     return this._state;
   }

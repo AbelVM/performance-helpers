@@ -40,6 +40,7 @@ export class PowerCircuit {
     /** @type {?number} */
     _openedAt: number | null;
     _trialInFlight: boolean;
+    _halfOpenAnnounced: boolean;
     /** @type {?((state: CircuitState, reason?: string) => void)} */
     onStateChange: ((state: CircuitState, reason?: string) => void) | null;
     _bus: PowerEventBus | null;
@@ -69,6 +70,28 @@ export class PowerCircuit {
      * @returns {void}
      */
     _setState(newState: CircuitState, reason?: string): void;
+    /**
+     * Announce a state to `onStateChange` and the bus, **without** mutating state.
+     *
+     * Split out of `_setState` so the lazy `open -> half-open` transition can be
+     * announced from the `state` getter. That transition is computed, not applied:
+     * `_state` stays `'open'` until a call is attempted, so a dashboard polling
+     * `state` saw `half-open` while the only thing that emitted was `_setState` —
+     * which means **half-open was never observable**, and a breaker whose trial then
+     * succeeded went `open -> closed` for every observer with nothing in between.
+     * The lazy design is the right one (an eager transition needs a timer, which is
+     * a wakeup and a handle to leak); announcing it is what was missing.
+     *
+     * The bus emit is guarded where `_setState` did not guard it, because this now
+     * runs **inside a getter**: a throwing event bus would otherwise make reading
+     * `state` throw, which is a far worse failure than a missed notification.
+     *
+     * @param {CircuitState} newState
+     * @param {string} [reason]
+     * @returns {void}
+     * @private
+     */
+    private _notifyState;
     /** @returns {CircuitState} */
     get state(): CircuitState;
     get failures(): number;

@@ -57,6 +57,12 @@ Reset to 0 whenever the circuit proves the dependency is healthy again.
 
 ---
 
+### \_halfOpenAnnounced
+
+> **\_halfOpenAnnounced**: `boolean`
+
+---
+
 ### \_maxTimeout
 
 > **\_maxTimeout**: `number`

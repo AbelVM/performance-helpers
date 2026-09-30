@@ -3320,3 +3320,47 @@ precedes the first loop. That is the same trap as a test that cannot fail,
 reached a different way.
 
 Closes POOL-006.
+
+#### A circuit breaker went `open → closed` for every observer, with nothing in between
+
+`PowerCircuit`'s `state` getter computes `'half-open'` **logically**: when
+`_state` is `'open'` and the drawn window has elapsed, the getter returns
+`'half-open'` without mutating anything. That lazy design is right — an eager
+transition needs a timer, which is a wakeup and a handle to leak.
+
+But `_setState` was the _only_ thing that notified `onStateChange` or emitted
+`stateChange`, and the getter does not go through it. So the transition was
+reported to anyone who read `state` while telling nobody, and a breaker whose
+trial then succeeded went `open → closed` for every observer with nothing in
+between. Any dashboard built on the bus was wrong.
+
+The announcement is now made from the getter, once per outage:
+
+```js
+if (nowMs() - this._openedAt >= this._openWindowMs) {
+  if (!this._halfOpenAnnounced) {
+    this._halfOpenAnnounced = true;
+    this._notifyState('half-open', 'timeoutElapsed');
+  }
+  return 'half-open';
+}
+```
+
+Reading `state` is what a dashboard does to notice, so the observer that polls is
+the one that gets told, and a reader that only ever looks at `_state` — as the
+request path does — never pays for it. The once-flag matters: without it, a
+dashboard polling every second would report a state change every second.
+
+**The bus emit is now guarded where `_setState` did not guard it.** This runs
+inside a getter, so a throwing event bus would make reading `state` throw — a far
+worse failure than a missed notification. The old code only got away with it
+because nothing ran during a read.
+
+`test/powerCircuit.halfOpen.test.js`, 7 tests, four mutations caught. The
+instructive one: replacing the announcement with `_setState('half-open', …)` —
+i.e. making the fix eager — passes every announcement assertion and would have
+quietly changed the trial path's timing. It is pinned by asserting `_state` is
+still `'open'` and `_consecutiveOpens` is untouched after the logical half-open is
+read.
+
+Closes RES-025.
