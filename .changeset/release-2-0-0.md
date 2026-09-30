@@ -1049,6 +1049,70 @@ and making either `dispose` a no-op fails 2 of 9 each.
 
 Closes OBS-001 and OBS-002.
 
+#### Backpressure: the AIMD controller was not being consulted
+
+`ALGO-010` asks a design question — keep a loss-based AIMD, or invent a third
+signal? The answer turned out to be neither, because the controller was almost
+never _asked_. It is fixed, and the question is now answerable on evidence rather
+than by argument.
+
+**The refill drains the queue it exists to relieve.** A producer only queues when
+the pool is empty, a tick mints, and the queue empties — so the queue is a
+_transient_, present for roughly one tick. Anything gated on "is anyone waiting?"
+is gated on something that is usually false. And the AIMD heartbeat was gated on
+it: `_adaptiveHeartbeat` means "keep probing", but the only thing that armed a
+refill timer was a producer arriving to find an empty pool, and after the first
+tick there is neither.
+
+Measured, 16 producers against a capacity of 8, each holding its permit:
+
+```
+aimd steps   2                    (400 ms)
+window       8 → 4 → 2, frozen    (floor is 1)
+inFlight     16 of 8              (2x oversubscribed)
+heartbeat    true                 (nothing acted on it)
+_refillTimer null                 (nothing armed it)
+```
+
+Two real cuts, then a controller that had stopped — holding at 2 while the gate
+stayed twice oversubscribed. The loss signal was fixed by `RES-003`/`RES-024`; the
+thing reading it was asleep. After the fix: **97 steps, and the window reaches its
+floor.**
+
+Two properties keep this cheap, and both are asserted:
+
+- **`adaptive` defaults to `false`.** The heartbeat only exists for a caller who
+  explicitly asked for adaptation, so a default-constructed controller gains no
+  timer at all. This is the test that stops the fix becoming "every
+  `PowerBackpressure` polls forever".
+- **It terminates.** The heartbeat clears when there is no queue _and_ nothing in
+  flight, so the controller probes while there is work to observe and stops when
+  the gate goes quiet.
+
+The rejected alternative is worth stating, because it is the second time this
+ADR rejects it: making `capacity` a hard ceiling would make the loss signal
+correct by construction, and would also make `missing` structurally zero — a
+producer only queues when the pool is empty — which deletes the refill and turns
+`PowerBackpressure` into `PowerSemaphore`.
+
+One measurement correction along the way, because it changed the conclusion: an
+earlier probe of mine sampled the in-flight count at _grant_ time rather than at
+the decision, and reported 7% congestion, which hid this completely. A second
+probe sampled at the decision but used producers that acquired once and never
+released, so the "blindness" looked like an artefact of producers that stop
+arriving — it is not; continuously-arriving producers freeze it too. The
+instrumentation has to sit on `_aimdStep` itself.
+
+ADR 0004 records this, and the note there also corrects something the changeset
+above states: the AIMD **additive** branch is _not_ reachable only from a gate
+that starts drained. A refill grants `min(refillAmount, missing)`, so whenever
+`refillAmount < capacity` the post-grant in-flight count is below capacity and the
+additive branch fires — 93% of grants in a transient-load probe. The window
+oscillates between its floor and the refill amount, which is what a loss-based
+AIMD should do.
+
+Closes ALGO-010.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

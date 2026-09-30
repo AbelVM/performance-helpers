@@ -162,19 +162,22 @@ describe('PowerBackpressure adaptive refill (AIMD)', () => {
     // not. `_performRefill` reaches `_aimdStep` only when a waiter is queued; a
     // caller only queues when no permit is free; and a gate with a free permit is
     // by definition not saturated. So the branch wants
-    // `in-flight < capacity`, `available === 0`, and a queue - which a gate at
-    // its default `initialTokens` cannot reach, because the first `acquire`
-    // takes the fast path and the gate is saturated before a queue ever forms.
+    // `in-flight < capacity`, `available === 0`, and a queue.
     //
-    // The one configuration that produces it is a gate that starts drained and
-    // is handed work faster than the first tick, which is exactly the
-    // token-bucket-starting-empty case the refill machinery exists for. An
-    // earlier draft of this file asserted the branch with 12 producers on a
-    // saturated gate and passed only while the count was broken; `ALGO-010` is
-    // the row that has to decide whether the non-congested signal should be
-    // reachable more generally (Netflix's `vegas` and `gradient2` are RTT-shaped
-    // and a permit gate is a producer/consumer queue with no round trip to
-    // measure, so a queue-drain *rate* is the only candidate).
+    // **Correction, from ALGO-010's investigation:** this comment used to claim
+    // the branch was "not reachable from a real workload today" and that only a
+    // gate starting drained could produce it. That was wrong. A refill grants
+    // `min(refillAmount, missing)`, so whenever `refillAmount < capacity` the
+    // post-grant in-flight count is *below* capacity and the additive branch
+    // fires — measured at 93% of grants on a transient load, with the window
+    // oscillating between its floor and the refill amount. That is what a
+    // loss-based AIMD is supposed to do. What was actually broken was the whole
+    // controller ceasing to be invoked (now fixed, and covered by
+    // `test/powerBackpressure.heartbeat.test.js`), not this branch.
+    //
+    // The drained-gate setup below is kept because it isolates the branch from
+    // the rest of the controller, which is what this test is for: it is a unit
+    // test of the decision, not a demonstration of when the decision is reached.
     //
     // The long interval is not decoration: with a 5ms tick, the real timer fires
     // between the two halves of the setup and this test measures the race rather

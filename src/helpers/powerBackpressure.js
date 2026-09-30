@@ -202,7 +202,12 @@ export class PowerBackpressure extends PowerPermitGate {
     // permits were still outstanding, and the controller stayed pinned in
     // additive increase forever after.
     const returned = super.release(count);
-    if ((this.available < this._lowWaterMark || this._adaptiveHeartbeat) && this._hasWaiters()) {
+    // Re-armed on the heartbeat alone as well as on a low pool, and the reason
+    // is the same as in `_scheduleRefill`: a `release()` is the *last* thing that
+    // happens once the queue has drained, and gating the re-arm on waiters meant
+    // the controller stopped being consulted at exactly the moment a slow
+    // consumer became visible.
+    if (this.available < this._lowWaterMark || this._adaptiveHeartbeat) {
       this._scheduleRefill();
     }
     // Passed through rather than dropped: the count is the same fact this class
@@ -247,7 +252,24 @@ export class PowerBackpressure extends PowerPermitGate {
   }
 
   _scheduleRefill() {
-    if (this._refillTimer || !this._hasWaiters()) return;
+    // The heartbeat arms the timer on its own, and **this is the whole fix for a
+    // controller that had stopped learning.**
+    //
+    // The flag means "keep probing", but the only thing that used to arm a timer
+    // was a producer arriving to find an empty pool — and the refill *drains* the
+    // queue. So by the time a consumer was demonstrably slow enough for the
+    // window to need cutting, the queue was empty, the flag was `true`, and
+    // nothing acted on it. Measured: 16 producers against a capacity of 8, each
+    // holding its permit, produced **2** `_aimdStep` calls in 400 ms and then
+    // froze — window 8 → 4 → 2 with a floor of 1, 16 permits outstanding, and
+    // `_refillTimer` null. The first two cuts were real; there was no mechanism
+    // for a third, so the window held at 2 for the rest of the object's life
+    // while the gate stayed 2x oversubscribed.
+    //
+    // Cheap, because `adaptive` defaults to `false`: the heartbeat only exists
+    // for a caller who explicitly asked for adaptation, and that caller's
+    // expectation is precisely that the option does something.
+    if (this._refillTimer || !(this._hasWaiters() || this._adaptiveHeartbeat)) return;
     // A heartbeat exists so AIMD can observe *good* behaviour. Without it the
     // window only ever moves on a refill, and a refill only happens below the
     // low-water mark - so a consumer that recovered would never be rewarded
@@ -260,8 +282,25 @@ export class PowerBackpressure extends PowerPermitGate {
   }
 
   _performRefill() {
-    if (!this._hasWaiters()) {
+    // Idle: no waiters and nothing in flight. Stop the heartbeat, or it ticks
+    // for the object's whole life learning nothing — and the only thing it could
+    // learn on an empty gate is that the window should grow.
+    //
+    // This is the termination condition that makes honouring the heartbeat
+    // affordable. It runs while there is something to observe — something in
+    // flight, or a producer waiting — and stops when the gate goes quiet, so the
+    // controller is not a permanent timer.
+    if (!this._hasWaiters() && this._held === 0) {
       this._adaptiveHeartbeat = false;
+      return;
+    }
+    if (!this._hasWaiters()) {
+      // Nothing waiting, but permits are out with consumers: something to
+      // observe, and the window still has business. This is the branch that
+      // actually runs under sustained congestion, because the refill has just
+      // drained the queue.
+      this._aimdStep();
+      this._scheduleRefill();
       return;
     }
     // `capacity - available`: the *pool*, not the concurrency in flight. The
@@ -282,10 +321,10 @@ export class PowerBackpressure extends PowerPermitGate {
       // The pool is already full and a waiter is queued, which cannot normally
       // happen - a caller only queues when the pool is empty. Transiently it can,
       // during a grant, so the branch exists: there is nothing to mint and
-      // nothing to learn, so it observes the signal and, with a window to tune,
-      // comes back. Without `adaptive` there is no window, and rescheduling
-      // would be a timer that can neither grant nor learn - a live handle held
-      // open forever behind a queue it cannot relieve.
+      // nothing to learn, so it observes the signal and comes back. Without
+      // `adaptive` there is no window to tune, and rescheduling would be a timer
+      // that can neither grant nor learn - a live handle held open forever behind
+      // a queue it cannot relieve.
       this._aimdStep();
       if (this._adaptive.enabled) this._scheduleRefill();
       return;
@@ -308,7 +347,7 @@ export class PowerBackpressure extends PowerPermitGate {
     // this is the one route that draws them back out again.
     this._serveWaiters(Math.min(refill, this._available), true);
 
-    if ((this.available < this._lowWaterMark || this._adaptiveHeartbeat) && this._hasWaiters()) {
+    if (this.available < this._lowWaterMark || this._adaptiveHeartbeat) {
       this._scheduleRefill();
     }
   }

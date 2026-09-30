@@ -64,6 +64,38 @@ clamp. `using sem = new PowerSemaphore(1)` is enough to reach it.
 Under-admitting on a teardown is the safe direction for both models, which is why
 one clamp serves both.
 
+### The heartbeat is load-bearing, and was not
+
+A consequence of the pool reading that was not obvious while writing it: **the
+refill drains the queue it exists to relieve.** A producer only queues when the
+pool is empty; a tick mints; the queue empties. So the queue is a _transient_ —
+present for roughly one tick — and anything gated on "is anyone waiting?" is
+gated on something that is usually false.
+
+That turned out to include the AIMD controller's own heartbeat.
+`_adaptiveHeartbeat` means "keep probing", but the only thing that armed a refill
+timer was a producer arriving to find an empty pool, and after the first tick
+there is no pool and no arrival. Measured with 16 producers against a capacity of
+8, each holding its permit: **two** `_aimdStep` calls in 400 ms, the window cut
+`8 → 4 → 2` with a floor of 1, and then frozen at 2 for the rest of the object's
+life with 16 permits outstanding and `_refillTimer` null. The signal was honest
+after `RES-003`/`RES-024` and the controller was still asleep.
+
+So the heartbeat now arms the timer itself, which restores the loss signal's
+meaning. Two things keep that affordable:
+
+- **`adaptive` defaults to `false`.** The heartbeat only exists for a caller who
+  asked for adaptation, and that caller's expectation is that the option works.
+- **It terminates.** `_performRefill` clears the flag when there is no queue
+  _and_ nothing in flight, so the controller probes while there is work to
+  observe and stops when the gate goes quiet. Without this the fix buys a timer
+  that runs for the object's lifetime, learning only that the window should grow.
+
+The alternative — making `capacity` a hard ceiling so the signal is correct by
+construction — was rejected for the reason given above: a ceiling makes `missing`
+structurally zero, which deletes the refill. That was already the rejected
+alternative here, and this finding is the second argument for it.
+
 ## Consequences
 
 - `PowerSemaphore` and `PowerBulkhead` behaviour is unchanged except that a reset
