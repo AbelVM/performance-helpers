@@ -3201,3 +3201,42 @@ reachable from inside the `send` adapter, which is handed it. It also learned th
 after it gives 1 and not 0 — the counter being live, not a bug.
 
 Closes TEST-003.
+
+#### A timing assertion that could not fail, replaced with one that measures work
+
+`test/powerCache.hasEqual.budget.test.js` asserted `expect(ms).toBeLessThan(200)`
+on a 50 000-wide deep comparison. It was decoration: the file's own comment
+records the unbudgeted cost as "tens of milliseconds", well inside 200, so the
+bound held whether or not the width budget existed. **Mutation confirmed it** —
+reinstating the clock bound alongside the fix leaves every test green.
+
+Deleted rather than widened, and replaced with a **node count**, which is what
+the budget actually is. `hasEqual` accepts a `compareFn` that is consulted per
+node compared, so counting its calls measures the work directly:
+
+```js
+const r = cache.hasEqual(key, value, {
+  compareFn: () => {
+    compared += 1;
+  },
+});
+expect(compared).toBeLessThan(2 * WIDE); // unbudgeted this is 2 × WIDE
+```
+
+The number is exact on any machine — no spread, no threshold, nothing to flake —
+and it fails when the budget is removed. A second test pins the knob: `maxNodes`
+_is_ the budget, so a larger one compares strictly more and neither exceeds its
+own ceiling.
+
+Three mutations caught: the node budget removed, the `maxNodes` option ignored,
+and `compareFn` never consulted.
+
+Getting there took three attempts, each of which passed while measuring nothing.
+The first used the test's original **scalar** array and counted **1** — a flat
+array of scalars takes a fast path that never reaches `compareFn` (measured: 1
+call for a 2 000-wide scalar array, against 2 001 for the same width of objects).
+The second used `wide.slice()`, which reuses the same object references, so every
+element hit reference equality and both budgets counted 1. A counter that counts
+nothing is worse than no counter, because it looks like coverage.
+
+Closes TEST-001.

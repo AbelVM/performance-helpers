@@ -57,15 +57,83 @@ describe('hasEqual: width budget', () => {
     const wide = Array.from({ length: 50_000 }, (_, i) => i);
     cache.set('k', wide);
 
-    const t0 = Date.now();
-    const r = cache.hasEqual(
-      'k',
-      Array.from({ length: 50_000 }, (_, i) => i)
+    // **A node count, not a clock.** The assertion this replaces was
+    // `expect(ms).toBeLessThan(200)`, and it would have passed with the budget
+    // removed — the file's own comment records the unbudgeted cost as "tens of
+    // milliseconds", well inside 200. Mutation confirmed it: reinstating the
+    // clock bound alongside the fix leaves every test green. It was decoration
+    // by this repository's own definition, and the fix is to delete it rather
+    // than widen it.
+    //
+    // What replaces it bounds the **work** rather than the wall clock, which is
+    // what the budget actually is. `compareFn` is consulted per node compared, so
+    // counting its calls measures the work directly and the number is exact on
+    // any machine — no spread, no threshold, nothing to flake.
+    //
+    // **Objects, not scalars.** A flat array of scalars takes a fast path that
+    // never reaches `compareFn` — measured, 1 call for a 2 000-wide scalar array
+    // against 2 001 for the same width of objects — so a scalar shape counts
+    // nothing and the bound below would be vacuous.
+    const WIDE = 50_000;
+    cache.set(
+      'k2',
+      Array.from({ length: WIDE }, (_, i) => ({ i }))
     );
-    const ms = Date.now() - t0;
+    let compared = 0;
+    const r = cache.hasEqual(
+      'k2',
+      Array.from({ length: WIDE }, (_, i) => ({ i })),
+      {
+        compareFn: () => {
+          compared += 1;
+          return undefined; // "no opinion", so the default comparison proceeds
+        },
+      }
+    );
 
     expect(r).toBe(false); // truncated, and the safe direction for a cache
-    expect(ms).toBeLessThan(200);
+    // The point of the budget: the comparison stopped long before the width it
+    // was handed. Unbudgeted this would be 2 x WIDE.
+    expect(compared).toBeGreaterThan(0);
+    expect(compared).toBeLessThan(2 * WIDE);
+  });
+
+  it('honours a caller-supplied node budget', () => {
+    // The knob, and the reason the count above is exact rather than incidental:
+    // `maxNodes` *is* the budget, so a caller can ask for less work and get less.
+    const cache = new PowerCache({ maxEntries: 10 });
+    // Objects, for the reason above: the scalar fast path never consults
+    // `compareFn`, so both budgets would count 1 and compare nothing.
+    const wide = Array.from({ length: 5_000 }, (_, i) => ({ i }));
+    cache.set('k', wide);
+
+    // A **fresh, equal** array each time. `wide.slice()` reuses the same object
+    // references, so every element hit reference equality and the comparison
+    // returned `true` without consulting `compareFn` — both budgets counted 1.
+    const equalTo = (n) => Array.from({ length: n }, (_, i) => ({ i }));
+    const countFor = (maxNodes) => {
+      let compared = 0;
+      const r = cache.hasEqual('k', equalTo(wide.length), {
+        maxNodes,
+        compareFn: () => {
+          compared += 1;
+          return undefined;
+        },
+      });
+      return { compared, r };
+    };
+
+    const small = countFor(50);
+    const large = countFor(2_000);
+
+    // Truncation is always in the safe direction: false, never true.
+    expect(small.r).toBe(false);
+    expect(large.r).toBe(false);
+    // A larger budget compares more, and neither exceeds its own ceiling. This is
+    // what makes the budget a knob rather than a constant that happens to fire.
+    expect(large.compared).toBeGreaterThan(small.compared);
+    expect(small.compared).toBeLessThanOrEqual(50);
+    expect(large.compared).toBeLessThanOrEqual(2_000);
   });
 
   it('truncation reports false, never true', () => {
