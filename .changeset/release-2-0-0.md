@@ -1948,6 +1948,71 @@ count.
 
 Closes RES-008.
 
+#### The admission filter was not sized to the cache it was protecting
+
+`PowerCache` built its TinyLFU sketch with only `sampleSize` set, so `width` and
+`depth` kept the sketch's own defaults: a fixed 64×4 = 256 counters, 128 bytes,
+whatever the cache's capacity. Counters per cache entry, measured:
+
+| `maxEntries` |      before | after |
+| ------------ | ----------: | ----: |
+| 16           |       16.00 | 16.00 |
+| 64           |        4.00 | 16.00 |
+| 1 000        |   **0.256** | 16.38 |
+| 1 000 000    | **0.00026** | 16.78 |
+
+The accuracy of an admission filter depending on nothing about the cache is not
+a tuning question — at 1 000 entries it stops working. Measured, with a working
+set at capacity, on the old 256-counter table:
+
+```
+maxEntries 1000:  hot keys all read 15
+                  a key NEVER inserted also read 15
+                  -> 1 distinct estimate across 6 keys
+```
+
+One estimate for everything means the filter cannot refuse a scan key, which is
+the only reason a filter is in the admission path. The table is now sized from
+the cache's capacity on Caffeine's recipe — a 4-bit CountMinSketch "growing at
+8 bytes per cache entry", which is 16 counters per entry, with the width a
+power of two because the sketch indexes with a mask.
+
+**The cache now spends memory on the filter proportional to its size.** That is
+the cost of accuracy, and it is worth stating plainly: `maxEntries: 1000` takes
+8 KB instead of 128 bytes, and the table is capped at the `1e6` entry the
+`sampleSize` clamp already used, so a 1 000 000-entry cache spends ~8 MB.
+`maxEntries` defaults to `Infinity`, which is why the cap exists at all — and a
+cache that large never consults the filter anyway, because `_admit` only
+arbitrates once `size >= maxEntries`. Plain `admission: 'lru'` and
+`policy: 'slru'` still build no sketch at all.
+
+**The half-life counted operations instead of changes.** `increment()` advanced
+`sample` whether or not any counter moved, so once the sketch saturated every
+further increment was a no-op on the data — the minimum across rows is already
+15, so no estimate can move — and a full countdown on the clock. Caffeine
+advances only on an effective increment. The half-life now describes what it
+claims to.
+
+**Both benches were re-run, and no conclusion moves.** `lru` and `slru` came back
+byte-identical, which confirms the harness is deterministic, and the TinyLFU
+figures moved by at most 0.8 points of working-set hit rate. Plain LRU still
+beats TinyLFU on the sustained mix, the window still does not rescue cold start
+at any size, and SLRU is still the measured answer.
+
+One stale number turned up on the way: the guide listed `policy: 'slru'` with
+`admission: 'tinylfu'` at 70.9 % / 15.2, which described a build where the
+sketch was still constructed for SLRU. It is `null` under any policy but LRU, so
+the row is the same configuration as plain `slru` and now reads 89.4 % / 33.0.
+
+`test/powerCache.sketchSize.test.js`, 10 tests, four mutations checked. The
+sizing assertions are ratios and thresholds, never a pinned width — a pinned
+number would be a claim about one machine's arithmetic that breaks when the
+target ratio or the depth changes, and the review that asked for this recorded
+that a previous attempt's exact figures could not be reproduced by the person
+who filed it.
+
+Closes CACHE-005 and ALGO-011.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
@@ -2094,10 +2159,15 @@ Corrected, retention follows the floor and then runs away from it:
 | variant                | ws hit rate | survivors |
 | ---------------------- | ----------: | --------: |
 | `lru`                  |      75.0 % | 17.2 / 40 |
-| `admission: 'tinylfu'` |      70.8 % | 15.2 / 40 |
-| `+ windowSize: 1`      |  **76.5 %** | 15.4 / 40 |
-| `+ windowSize: 16`     |      70.3 % | 18.8 / 40 |
+| `admission: 'tinylfu'` |      70.8 % | 15.0 / 40 |
+| `+ windowSize: 1`      |  **77.3 %** | 15.4 / 40 |
+| `+ windowSize: 16`     |      70.7 % | 19.2 / 40 |
 | `policy: 'slru'`       |  **89.4 %** | 33.0 / 40 |
+
+_Re-measured after the sketch was sized from the cache capacity; see "The
+admission filter was not sized to the cache it was protecting" below. No
+conclusion moves: TinyLFU without a window still loses to plain LRU, and SLRU
+is still the answer._
 
 Small windows maximise the hit rate; large windows maximise the survivor count
 and lose it, because a bigger window admits more scan keys into main space and

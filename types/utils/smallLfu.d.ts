@@ -59,6 +59,16 @@ export class SmallLfuSketch {
     private _set;
     /**
      * Record one occurrence of `key` and, periodically, age the whole sketch.
+     *
+     * The sample counter advances only when an increment was **effective** — when
+     * at least one row's counter actually moved. Caffeine does the same
+     * (`incrementAt` returns false once a counter is saturated, and only an
+     * effective increment advances `size`). Advancing it unconditionally meant
+     * that a fully saturated sketch reset on schedule anyway, so the half-life
+     * was measured in *operations* rather than in *changes to the estimates*:
+     * every increment after saturation was a no-op on the data and a full
+     * countdown on the clock, and the sketch halved far more often than
+     * `sampleSize` describes.
      * @param {*} key
      * @returns {void}
      */

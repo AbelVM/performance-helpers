@@ -314,12 +314,19 @@ key stream (`node bench/claims.js zipf`):
 | Configuration                            | Working-set hit rate |     Survivors |
 | ---------------------------------------- | -------------------: | ------------: |
 | `policy: 'lru'`                          |               75.0 % |     17.2 / 40 |
-| `policy: 'lru'`, `admission: 'tinylfu'`  |               71.0 % |     15.2 / 40 |
+| `policy: 'lru'`, `admission: 'tinylfu'`  |               70.8 % |     15.0 / 40 |
 | **`policy: 'slru'`**                     |           **89.4 %** | **33.0 / 40** |
-| `policy: 'slru'`, `admission: 'tinylfu'` |               70.9 % |     15.2 / 40 |
+| `policy: 'slru'`, `admission: 'tinylfu'` |           **89.4 %** | **33.0 / 40** |
 
-`slru` wins outright, and adding the filter on top of it _hurts_. That is the
-result to act on: on this workload the scan-resistant behaviour people want
+`slru` wins outright. The last row is the same measurement as the one above it
+for a reason worth knowing: **`admission` is ignored under `policy: 'slru'`**,
+because the SLRU probation segment already does the job the filter is for, so
+the sketch is never built (`policy !== 'lru'` leaves it `null`) and the two rows
+are the same configuration. It previously read 70.9 % / 15.2 here, which was
+stale — a measured number that described a build where the sketch was still
+constructed for SLRU. Restated from a re-run rather than edited.
+
+That is the result to act on: on this workload the scan-resistant behaviour people want
 comes from `slru`, which shipped earlier and is not experimental.
 
 **Off by default**, and the numbers above are the reason to leave it there. The
@@ -370,8 +377,8 @@ not recommended, because it fixes the sustained case and not the cold one:
 | ---------------------- | --------------------: | ------------------: |
 | `lru`                  |                75.0 % |          **80.0 %** |
 | `admission: 'tinylfu'` |                70.8 % |               0.0 % |
-| + `windowSize: 1`      |            **76.5 %** |               1.0 % |
-| + `windowSize: 16`     |                70.3 % |               1.5 % |
+| + `windowSize: 1`      |            **77.3 %** |               1.5 % |
+| + `windowSize: 16`     |                70.7 % |               1.5 % |
 | `policy: 'slru'`       |            **89.4 %** |                   — |
 
 Both columns are `node bench/claims.js zipf` and `node bench/claims.js coldstart`.

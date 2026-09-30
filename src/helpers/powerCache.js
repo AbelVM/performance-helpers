@@ -7,6 +7,58 @@ import { SmallLfuSketch } from '../utils/smallLfu.js';
  * measurement - see the scan-resistance table in guides/powerCache.md.
  */
 const ADMISSION_SAMPLE_MULTIPLE = 200;
+
+/**
+ * Counters per cache entry in the TinyLFU admission sketch, per Caffeine.
+ *
+ * 4-bit counters, two to a byte, so this is 8 bytes per entry — the figure
+ * Caffeine quotes for its own frequency sketch. Held as a count of counters
+ * rather than bytes so the relationship to `depth` below is visible.
+ */
+const SKETCH_COUNTERS_PER_ENTRY = 16;
+
+/**
+ * Rows in the sketch. Unchanged at the sketch's own default of 4: taking the
+ * minimum across rows is what makes this a Count-Min, so a key can read
+ * slightly hotter than it is but never colder — the safe direction for an
+ * admission filter. This class is Count-Min, not Caffeine's single-table
+ * variant, and lowering it would give that guarantee up for memory.
+ */
+const SKETCH_DEPTH = 4;
+
+/**
+ * Largest cache the sketch table is sized for, matching the clamp already
+ * applied to `sampleSize` above.
+ *
+ * `maxEntries` defaults to `Infinity`, so this is not a formality: an unbounded
+ * cache cannot be sized from and must not be asked to allocate `Infinity`
+ * counters. A cache that large also never consults the sketch, because
+ * `_admit` only arbitrates once `size >= maxEntries` — the filter exists to
+ * choose what to evict, and an unbounded cache never evicts. The cost at the
+ * ceiling is 16 counters per entry, or 8 bytes per entry: a 1 000 000-entry
+ * cache spends ~8 MB on the filter, and only when `admission: 'tinylfu'` was
+ * asked for.
+ */
+const SKETCH_SIZE_CEILING = 1e6;
+
+/**
+ * Table width, in counters, for a cache holding `maxEntries`.
+ *
+ * Power of two, because the sketch indexes with a mask (`this.mask = width - 1`).
+ * Rounding **up** matters: rounding down would land below the target budget and
+ * re-create the undersized-table problem at exactly the capacities where the
+ * ratio is closest.
+ *
+ * @param {number} maxEntries
+ * @returns {number}
+ */
+function sketchWidthFor(maxEntries) {
+  const entries = Math.min(Math.max(1, Number(maxEntries) || 1), SKETCH_SIZE_CEILING);
+  const wanted = Math.ceil((SKETCH_COUNTERS_PER_ENTRY * entries) / SKETCH_DEPTH);
+  // `Math.max(2, …)` matches the sketch's own floor, so this cannot ask for a
+  // table the constructor would silently widen.
+  return Math.max(2, 1 << Math.ceil(Math.log2(wanted)));
+}
 /**
  * @typedef {import('./jsdoc-types.js').CacheNode} CacheNode
  */
@@ -316,6 +368,23 @@ export class PowerCache {
     this._sketch =
       admission === 'tinylfu' && this._policy === 'lru'
         ? new SmallLfuSketch({
+            // Sized from the cache's capacity, not left at the sketch's own
+            // default. The default is a fixed 64x4 = 256 counters, so the
+            // filter's accuracy depended on nothing about the cache it was
+            // protecting: 16 counters per entry at `maxEntries: 16`, 4.0 at 64,
+            // **0.256 at 1 000**, 0.00026 at 1e6. At 1 000 the sketch cannot
+            // discriminate at all — measured, a working set at capacity drove
+            // every hot key to 15 and a key **never inserted** also read 15, so
+            // a one-shot scan key was indistinguishable from the working set and
+            // the admission filter carried zero information. That is the
+            // failure the filter exists to prevent, and it arrived through the
+            // one part of the policy that was not sized to the workload.
+            //
+            // Caffeine's recipe, which this now follows: a 4-bit CountMinSketch
+            // "growing at 8 bytes per cache entry" = 16 counters per entry, with
+            // the table a power of two so the index is a mask. Depth is held at
+            // 4, so the width carries a quarter of the budget.
+            width: sketchWidthFor(this.maxEntries),
             // The half-life has to be sized against the working set, not left
             // at the sketch's own default of 10 operations. At 10 a reset
             // fired every ten set/get and halved everything, so by the time a
