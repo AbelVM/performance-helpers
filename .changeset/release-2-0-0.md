@@ -1113,6 +1113,59 @@ AIMD should do.
 
 Closes ALGO-010.
 
+#### The type-debt ratchet could measure nothing and report it as progress
+
+A ratchet that measures nothing while printing a number is worse than no
+ratchet, because it is believed. Every number the type-debt gate prints is
+downstream of `tsc`, and three of the ways it could measure nothing were open.
+All three are now closed, and each was verified by breaking it.
+
+**A zero count is a failure, not a windfall.** The script never looked at
+`run.status`, so a deleted `tsconfig` or an `include` glob matching no files —
+non-zero exit, nothing countable — reported `0`, took the "debt fell" branch, and
+printed _passed_ while measuring nothing. It now fails, and the message says which
+of the two modes it is by quoting the exit status: exit 0 with no diagnostics
+means the glob matches nothing; a non-zero exit with nothing countable means tsc
+never got as far as checking. The plan notes that reproducing this needs editing
+`PROJECTS` in the script; both modes are reachable without that, which is the part
+worth having.
+
+**An unparsed source file no longer lowers the ceiling.** The defence was a list of
+21 TypeScript grammar error codes. It could not be maintained — 18 further codes
+escaped, including `TS1110` — and, measured, it matched **0 of the 29 codes this
+project actually emits**, so it had never once fired on a real diagnostic. A code
+range is not the replacement either: `TS1016` (module resolution) and `TS18048` (a
+real semantic null-check) sit either side of the `1xxx` boundary.
+
+What replaced it is a property of the _shape_ of the output rather than of the
+codes: **a file that stops parsing stops reporting diagnostics, so it leaves the
+set of files with diagnostics.** A real syntax error takes tsc from 12 reporting
+files to 1, because tsc aborts the program. That set now has a floor in the
+committed config, and it cannot rot — a new file starts outside it, and a file
+only leaves when it reaches zero diagnostics, which is the same event as lowering
+the ceiling.
+
+The "half the debt vanished in one run" heuristic is also promoted from a warning
+that exited 0 to a hard failure. A ratchet that accepts a headline drop silently
+is the exact shape of the lie this script exists to prevent.
+
+**The ceiling is a reviewable artefact.** It moved out of a `const BASELINE = 300`
+— which read as a typo to anyone who had not read the forty lines of history above
+it — into `scripts/typecheck-ratchet.json` with `{ ceiling, minFilesWithDiagnostics,
+recordedAt, reason }`. Moving it requires `--raise` or `--lower` **and** a
+`--reason`, so the change is a diff with a justification. Both directions refuse the
+wrong flag, so a flag name cannot substitute for reading the number. The plan
+records the gate as "tolerating 11 new type errors and answering with advice and
+exit 0"; that is no longer its shape.
+
+Two of the row's proposals were checked before being written and did not survive:
+"every `src/**/*.js` file appears in tsc's output" is not implementable, because 32
+of 44 source files are clean and correctly appear nowhere; and a `code < 2000` rule
+false-positives on a live diagnostic. Both are recorded in the rows so the next
+person does not try them again.
+
+Closes GATE-006, GATE-007 and GATE-011.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

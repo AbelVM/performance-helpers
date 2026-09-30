@@ -1,0 +1,6 @@
+{
+  "ceiling": 293,
+  "minFilesWithDiagnostics": 12,
+  "recordedAt": "2026-09-30",
+  "reason": "293 internal checkJs diagnostics across 12 files, down from 300 at the start of the review cycle. The consumer project is not here: it reached zero and became the hard gate `test:types` instead. `minFilesWithDiagnostics` is the parse-regression floor \u2014 a file that stops parsing reports no semantic errors, so it leaves the set of files with diagnostics and the total falls while the code is more broken. It replaces a list of 21 TypeScript grammar codes that matched 0 of the 29 codes this project actually emits. Both numbers move together, on purpose: a file only leaves the set when it reaches zero diagnostics, which is the same event as lowering the ceiling."
+}

@@ -25,109 +25,186 @@
  * not rise. That is checkable today, and it turns the debt into a measurable
  * series instead of an anecdote.
  *
- *   node scripts/typecheck-ratchet.cjs            # the gate
- *   node scripts/typecheck-ratchet.cjs --verbose  # ... with full tsc output
- *   node scripts/typecheck-ratchet.cjs --update   # print the new BASELINE line
+ *   node scripts/typecheck-ratchet.cjs                    # the gate
+ *   node scripts/typecheck-ratchet.cjs --verbose          # ... with full tsc output
+ *   node scripts/typecheck-ratchet.cjs --update           # print the values to record
+ *   node scripts/typecheck-ratchet.cjs --raise --reason "..."   # record a higher ceiling
+ *   node scripts/typecheck-ratchet.cjs --lower --reason "..."   # ... or a lower one
  *
- * When the internal count reaches zero, delete this script and add
- * `npm run typecheck` to `verify` directly. It is scaffolding for a check that
- * is not yet honest, not a permanent fixture.
+ * The ceiling and the two safety floors live in
+ * `scripts/typecheck-ratchet.json`, so moving one is a reviewable diff with a
+ * justification rather than an edit to a constant that reads as a typo.
+ *
+ * ## What this is allowed to be wrong about
+ *
+ * A ratchet that measures nothing while reporting a number is worse than no
+ * ratchet, because it is believed. Every number printed here is downstream of
+ * `tsc`, so all three ways of measuring nothing are closed explicitly:
+ *
+ * - **tsc failed, and printed nothing countable.** A deleted config, or an
+ *   `include` glob matching no files, exits non-zero with zero diagnostics. The
+ *   old script never looked at `run.status`, so this reported `0`, took the
+ *   "debt fell" branch, and printed *passed* while measuring nothing.
+ * - **tsc loaded a subset of the source.** `--listFilesOnly` reports the program
+ *   it actually built, and it is compared against every JavaScript file the
+ *   repository has under `src`.
+ * - **A file stopped parsing.** This is the one that bites, and it is the
+ *   historical incident this script exists because of: an inserted JSDoc block
+ *   swallowed the next one's opener, `jsdoc-types.js` stopped parsing, and the
+ *   reported total fell from 515 to 62. That looked like a 453-error win and
+ *   was entirely fake. A file that does not parse reports no semantic errors
+ *   either, so the count *falls* while the code is more broken, and the only
+ *   symptom is that the debt looks like progress.
+ *
+ * The defence used to be a list of 21 TypeScript grammar error codes. It could
+ * not be maintained: 18 further codes escaped it, including `TS1110`, and as of
+ * this writing it matched **0 of the 29 codes the project actually emits** — it
+ * had never once fired on a real diagnostic, so it was guarding against a
+ * failure mode it could not actually detect. A code range is not the answer
+ * either: `TS1016` (a module-resolution error) and `TS18048` (a real semantic
+ * null-check) sit either side of the `1xxx` boundary the range test would draw.
+ *
+ * What replaces it is a property of the *shape* of the output rather than of the
+ * codes: a file that stops parsing stops reporting diagnostics, so it leaves the
+ * set of files with diagnostics. The floor on that set's size catches it, and
+ * cannot rot — a new file simply starts at zero and is not counted.
  *
  * @see .github/workflows/ci.yml, package.json "verify"
  */
 
-const { spawnSync } = require('node:child_process');
+const { spawnSync, execFileSync } = require('node:child_process');
 const path = require('node:path');
+const fs = require('node:fs');
 
-/**
- * The ceiling this repository is allowed to reach. Lower it whenever you fix
- * some. `scripts/typecheck-ratchet.cjs --update` prints the replacement line.
- *
- * 305 = `tsconfig.check.json`, internal `checkJs` debt, all pre-existing.
- *
- * The history of this number is worth keeping, because the wrong move was
- * available three times and taken none of them.
- *
- * It started at 593 (563 internal + 30 consumer). Raising the JSDoc return type
- * of `assertLimit` off `number|any` - which TypeScript collapses to `any`, and
- * `any` satisfies everything - took it to 615, because it stopped hiding 25 real
- * null-safety diagnostics (QUAL-009). The tempting response was to put the `any`
- * back and keep the number small; that trades the published types for a prettier
- * metric, so instead the ceiling was raised to match reality and the finding was
- * filed.
- *
- * QUAL-009 was then fixed, the declarations stopped leaking `@types/node`, the
- * duplicated `PowerCacheOptions` list was deleted, and the consumer project went
- * 30 -> 0 - at which point it stopped being debt and became a gate. 542 is
- * below the 593 this started at, and the consumer column is no longer here at
- * all.
- *
- * 305 -> 303 -> 301 as the constructors moved onto named option types (QUAL-001).
- * Each one stopped declaring `@param {Object}`, which had been a hole the
- * checker could not report: an `Object` parameter is compatible with every
- * argument, so it never produced a diagnostic and never fixed one. Two errors
- * fell because `PowerMemoizer`'s hand-duplicated copy of the `PowerCacheOptions`
- * key list went away, and because `PowerRateLimit`'s `RateLimiterLike` gained
- * the `reset` member two call sites were already using.
- *
- * 301 -> 300 with TEST-003's `WorkerAgnostic` fix. The async-factory guard sat
- * inside a `typeof result === 'string'` branch that a Promise can never
- * satisfy, so it was dead code; the checker had flagged the `typeof` test as
- * narrowing to a string, and moving the guard out to a thenable test at the top
- * of the function is what removed the error. Worth noting as a pattern: the
- * diagnostic was real, but it described a *consequence* of the dead branch
- * rather than the deadness itself, and reading it as "this comparison is
- * unnecessary" rather than "nothing after this line runs" is the mistake the
- * ratchet invites.
- */
-const BASELINE = 300;
+const repoRoot = path.resolve(__dirname, '..');
+const configPath = path.join(__dirname, 'typecheck-ratchet.json');
+const tsc = require.resolve('typescript/bin/tsc');
+
+const verbose = process.argv.includes('--verbose');
+const update = process.argv.includes('--update');
+const raise = process.argv.includes('--raise');
+const lower = process.argv.includes('--lower');
+const reasonIndex = process.argv.indexOf('--reason');
+const reason = reasonIndex === -1 ? undefined : process.argv[reasonIndex + 1];
 
 const PROJECTS = [{ label: 'checkJs (tsconfig.check.json)', project: 'tsconfig.check.json' }];
 
 // tsc reports `path(line,col): error TS1234: message`. Continuation lines of a
 // multi-line diagnostic do not match, so counting matches counts diagnostics.
-const DIAGNOSTIC = /^\S.*\(\d+,\d+\): error TS\d+:/;
+const DIAGNOSTIC = /^\S.*\(\d+,\d+\): error TS(\d+):/;
 
-// Grammar-level diagnostics. If any of these appear, tsc could not *parse* the
-// file, and a file that does not parse produces no semantic errors either - so
-// the count falls without anything having been fixed. This is not theoretical:
-// while landing the WorkerLike typedef, an inserted JSDoc block swallowed the
-// `/**` opener of the next one, `jsdoc-types.js` stopped parsing, and the
-// reported total dropped from 515 to 62. That looked like a 453-error win and
-// was entirely fake. A count that can go *down* for the wrong reason is the
-// only way this gate can lie, so it refuses to.
-const SYNTAX =
-  /error TS(1002|1003|1005|1006|1010|1011|1109|1128|1131|1135|1136|1160|1161|1206|1243|1244|1245|1258|1358|1434|1435):/;
-
-// A large drop without a matching reduction elsewhere is also suspicious, but it
-// cannot be detected from a single run - `previousCount` below is only a
-// threshold on the same run, not history. Kept deliberately conservative.
 const implausibleDropFraction = 0.5;
 const implausibleDropFloor = 50;
 
-const repoRoot = path.resolve(__dirname, '..');
-const tsc = require.resolve('typescript/bin/tsc');
-const verbose = process.argv.includes('--verbose');
-const update = process.argv.includes('--update');
-
-function countDiagnostics(output) {
-  let n = 0;
-  for (const line of output.split('\n')) if (DIAGNOSTIC.test(line)) n += 1;
-  return n;
-}
-
-function findSyntaxErrors(output) {
-  const found = [];
-  for (const line of output.split('\n')) {
-    if (DIAGNOSTIC.test(line) && SYNTAX.test(line)) {
-      found.push(line.trim());
+/**
+ * @returns {{ceiling: number, minFilesWithDiagnostics: number, recordedAt: string, reason: string}}
+ */
+function readConfig() {
+  let raw;
+  try {
+    raw = fs.readFileSync(configPath, 'utf8');
+  } catch (err) {
+    process.stderr.write(
+      `ratchet: cannot read ${path.relative(repoRoot, configPath)}: ${err.message}\n`
+    );
+    process.exit(2);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    process.stderr.write(
+      `ratchet: ${path.relative(repoRoot, configPath)} is not valid JSON: ${err.message}\n`
+    );
+    process.exit(2);
+  }
+  for (const key of ['ceiling', 'minFilesWithDiagnostics']) {
+    if (!Number.isInteger(parsed[key])) {
+      process.stderr.write(
+        `ratchet: ${path.relative(repoRoot, configPath)} needs an integer \`${key}\`; ` +
+          `found ${JSON.stringify(parsed[key])}.\n`
+      );
+      process.exit(2);
     }
   }
-  return found;
+  return parsed;
+}
+
+/**
+ * @param {string[]} names - Relative paths as `git ls-files` reports them.
+ * @returns {Promise<string[]>}
+ */
+function listSourceFiles(names) {
+  // `git ls-files` rather than a directory walk, so a file that is present but
+  // untracked is *not* silently excluded from the check: an untracked file in
+  // `src/` is one the author is about to commit, and this is the moment to
+  // notice that tsc is not measuring it.
+  try {
+    return execFileSync('git', ['ls-files', '--', ...names], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    })
+      .split('\n')
+      .filter((line) => line.endsWith('.js'));
+  } catch (err) {
+    process.stderr.write(`ratchet: could not list source files: ${err.message}\n`);
+    process.exit(2);
+  }
+  return [];
+}
+
+const config = readConfig();
+const BASELINE = config.ceiling;
+const MIN_FILES = config.minFilesWithDiagnostics;
+
+const sourceFiles = listSourceFiles(['src/']);
+if (sourceFiles.length === 0) {
+  process.stderr.write('ratchet: `git ls-files src/` matched no .js files; refusing to measure.\n');
+  process.exit(2);
+}
+
+function countDiagnostics(output) {
+  const files = new Set();
+  let n = 0;
+  for (const line of output.split('\n')) {
+    const match = line.match(DIAGNOSTIC);
+    if (!match) continue;
+    n += 1;
+    files.add(line.slice(0, line.indexOf('(')));
+  }
+  return { n, files };
+}
+
+/**
+ * The files tsc says it built, as paths relative to the repository root.
+ *
+ * @param {string} project
+ * @returns {Set<string>}
+ */
+function programFiles(project) {
+  const run = spawnSync(
+    process.execPath,
+    [tsc, '--noEmit', '--project', project, '--listFilesOnly'],
+    { cwd: repoRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+  );
+  if (run.error) {
+    process.stderr.write(
+      `ratchet: could not list the program for ${project}: ${run.error.message}\n`
+    );
+    process.exit(2);
+  }
+  const out = new Set();
+  for (const line of `${run.stdout || ''}${run.stderr || ''}`.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || !path.isAbsolute(trimmed)) continue;
+    out.add(path.relative(repoRoot, trimmed));
+  }
+  return out;
 }
 
 const results = [];
 let total = 0;
+let failEarly = null;
 
 for (const { label, project } of PROJECTS) {
   const run = spawnSync(process.execPath, [tsc, '--noEmit', '--project', project], {
@@ -142,16 +219,33 @@ for (const { label, project } of PROJECTS) {
   }
 
   const output = `${run.stdout || ''}${run.stderr || ''}`;
-  const count = countDiagnostics(output);
-  const syntax = findSyntaxErrors(output);
+  const { n: count, files } = countDiagnostics(output);
   total += count;
-  results.push({ label, project, count, syntax, output });
+  results.push({ label, project, count, files, output, status: run.status });
+
+  // A non-zero exit is the *normal* case — that is what the debt is. The
+  // failure is a non-zero exit with nothing countable to show for it, or a zero
+  // exit from a project that cannot be at zero. Either way the count is not a
+  // measurement, and reporting it as one is the lie this script exists to avoid.
+  if (count === 0) {
+    if (!failEarly) {
+      failEarly =
+        `ratchet: ${project} reported 0 diagnostics, which cannot be right.\n` +
+        `  tsc exit status: ${run.status}\n` +
+        (run.status === 0
+          ? '  Exit 0 means tsc checked the project and found nothing. That is the\n' +
+            '  state this project is furthest from, so the more likely reading is that\n' +
+            '  the include glob matches no files, or `files` does not cover the source.\n'
+          : '  A non-zero exit with nothing countable means tsc never got as far as\n' +
+            '  checking: a deleted tsconfig, a bad compilerOptions entry, or a tsc\n' +
+            '  that could not be resolved.\n') +
+        '  Either way the total below is not a measurement, so nothing is reported.';
+    }
+  }
 
   if (verbose) {
     process.stdout.write(output);
   } else {
-    // Enough to see the shape of the debt, short enough to keep a CI log
-    // readable. Full output is one `--verbose` (or the underlying script) away.
     const shown = output
       .split('\n')
       .filter((line) => DIAGNOSTIC.test(line))
@@ -163,61 +257,146 @@ for (const { label, project } of PROJECTS) {
   }
 }
 
-for (const { label, project, count } of results) {
-  process.stdout.write(`  ${String(count).padStart(4)}  ${label}  (${project})\n`);
-}
-process.stdout.write(`  ${String(total).padStart(4)}  total, ceiling ${BASELINE}\n`);
-
-// A file that does not parse reports no semantic errors, so the count *falls*
-// while the file is actually more broken than it was. Fail before the count is
-// believed.
-const syntaxErrors = results.flatMap((r) => r.syntax);
-if (syntaxErrors.length) {
-  process.stderr.write(
-    `\nType-debt ratchet FAILED: ${syntaxErrors.length} syntax/parse error(s). A file that\n` +
-      'does not parse reports no semantic errors either, so the diagnostic count\n' +
-      'above is understated and must not be used to lower the ceiling:\n\n'
+for (const { label, project, count, status } of results) {
+  process.stdout.write(
+    `  ${String(count).padStart(4)}  ${label}  (${project}, tsc exit ${status})\n`
   );
-  for (const line of syntaxErrors.slice(0, 20)) process.stderr.write(`    ${line}\n`);
-  if (syntaxErrors.length > 20) {
-    process.stderr.write(`    ... and ${syntaxErrors.length - 20} more\n`);
-  }
+}
+const filesWithDiagnostics = new Set();
+for (const r of results) for (const f of r.files) filesWithDiagnostics.add(f);
+process.stdout.write(
+  `  ${String(total).padStart(4)}  total, ceiling ${BASELINE}\n` +
+    `  ${String(filesWithDiagnostics.size).padStart(4)}  files reporting, floor ${MIN_FILES}\n`
+);
+
+if (failEarly) {
+  process.stderr.write(`\nType-debt ratchet FAILED:\n${failEarly}\n`);
   process.exit(1);
+}
+
+// Every source file must be in the program tsc built. A file that is present,
+// tracked, and *not* being checked is a hole in the measurement, and it is
+// invisible from the diagnostic count: a file tsc never loaded reports nothing.
+for (const { project } of results) {
+  const inProgram = programFiles(project);
+  const missing = sourceFiles.filter((f) => !inProgram.has(f));
+  if (missing.length) {
+    process.stderr.write(
+      `\nType-debt ratchet FAILED: ${missing.length} source file(s) are not in the program\n` +
+        `tsc built for ${project}. A file that is not checked is not counted, so the\n` +
+        'total above is optimistic by an unknown amount:\n\n'
+    );
+    for (const f of missing.slice(0, 20)) process.stderr.write(`    ${f}\n`);
+    if (missing.length > 20) process.stderr.write(`    ... and ${missing.length - 20} more\n`);
+    process.stderr.write(
+      "\nCheck the project's `include`/`files` and that the path is not excluded.\n"
+    );
+    process.exit(1);
+  }
+}
+
+// A file that stops parsing stops reporting diagnostics, so it leaves this set,
+// and the aggregate count *falls* while the code is more broken. That is the
+// historical incident: `jsdoc-types.js` stopped parsing, the total dropped from
+// 515 to 62, and it read as a 453-error win.
+//
+// This cannot rot the way the code list it replaces did. A new file starts
+// outside the set and is not counted; a file only leaves when it reaches zero
+// diagnostics, which is the same event as lowering the ceiling, and both are
+// recorded together.
+if (filesWithDiagnostics.size < MIN_FILES) {
+  process.stderr.write(
+    `\nType-debt ratchet FAILED: only ${filesWithDiagnostics.size} file(s) report diagnostics,` +
+      `\nfloor is ${MIN_FILES}.\n\n` +
+      'A file that fails to parse reports no semantic errors either, so this means a\n' +
+      'parse regression far more likely than a cleanup, and the count above is\n' +
+      'understated rather than improved. Compare against the last run with --verbose.\n\n' +
+      `  still reporting: ${[...filesWithDiagnostics].sort().join(', ')}\n\n` +
+      'If the drop is real, record it: npm run typecheck:ratchet -- --lower --reason "..."\n'
+  );
+  process.exit(1);
+}
+
+if (raise || lower) {
+  if (!reason) {
+    process.stderr.write(
+      `\nratchet: --${raise ? 'raise' : 'lower'} needs --reason "..." so the diff says why.\n`
+    );
+    process.exit(2);
+  }
+  if (raise && total < BASELINE) {
+    process.stderr.write(
+      `\nratchet: --raise asked to raise the ceiling to ${total}, which is *below* the\n` +
+        `current ${BASELINE}. Use --lower, or leave it alone.\n`
+    );
+    process.exit(2);
+  }
+  if (lower && total > BASELINE) {
+    process.stderr.write(
+      `\nratchet: --lower asked to lower the ceiling to ${total}, which is *above* the\n` +
+        `current ${BASELINE}. Use --raise, with a reason.\n`
+    );
+    process.exit(2);
+  }
+  const next = {
+    ceiling: total,
+    minFilesWithDiagnostics: Math.min(MIN_FILES, filesWithDiagnostics.size),
+    recordedAt: new Date().toISOString().slice(0, 10),
+    reason,
+  };
+  fs.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`);
+  process.stdout.write(
+    `\nratchet: wrote ${path.relative(repoRoot, configPath)} — ceiling ${total}, ` +
+      `files floor ${next.minFilesWithDiagnostics}.\n`
+  );
+  process.exit(0);
 }
 
 if (total > BASELINE) {
   process.stderr.write(
     `\nType-debt ratchet FAILED: ${total} errors, ceiling is ${BASELINE} (+${total - BASELINE}).\n` +
       'New type errors must not ship. Fix them, or - if the new file is itself\n' +
-      'known debt - raise the ceiling deliberately with --update and say why in\n' +
-      'review.md. `npm run typecheck` prints the detail.\n'
+      'known debt - record the move deliberately:\n' +
+      '  npm run typecheck:ratchet -- --raise --reason "..."\n' +
+      'The ceiling lives in scripts/typecheck-ratchet.json, so the change is a diff.\n' +
+      '`npm run typecheck` prints the detail.\n'
   );
   process.exit(1);
 }
 
 if (update) {
   process.stdout.write(
-    `\nRe-baseline line for scripts/typecheck-ratchet.cjs:\n  const BASELINE = ${total};\n`
+    '\nValues to record in scripts/typecheck-ratchet.json:\n' +
+      `  "ceiling": ${total},\n` +
+      `  "minFilesWithDiagnostics": ${Math.min(MIN_FILES, filesWithDiagnostics.size)}\n`
   );
 } else if (total < BASELINE) {
-  // Not a failure - the debt went down and the ceiling should follow it, or the
-  // ratchet slowly stops being a ratchet.
   const drop = BASELINE - total;
   const fraction = drop / BASELINE;
   if (drop >= implausibleDropFloor && fraction >= implausibleDropFraction) {
     // Half the debt vanishing in one run is almost always a broken parse, a
-    // mis-measured project, or a `types/` regeneration that changed which
-    // files are included - not a good afternoon. Make a human look.
+    // mis-measured project, or a `types/` regeneration that changed which files
+    // are included - not a good afternoon.
+    //
+    // This used to print advice and exit 0, which is the exact shape of the lie
+    // this script exists to prevent: a headline drop is the one thing a ratchet
+    // should never accept silently, and the only reason to keep going is that
+    // the threshold is coarse enough to false-positive on a real cleanup. That
+    // is what a human review is for.
     process.stderr.write(
-      `\nHeads up: the count fell by ${drop} (${(fraction * 100) | 0}%) in one run.\n` +
-        'That is a large enough jump to be worth confirming against the diff\n' +
-        'before re-baselining. Check `git diff --stat -- types` and that no file\n' +
-        'was left unparseable.\n'
+      `\nType-debt ratchet FAILED: the count fell by ${drop} (${(fraction * 100) | 0}%) in one run.\n` +
+        'A drop that size is far more likely a broken parse, a mis-measured project, or a\n' +
+        '`types/` regeneration that changed which files are included than a good\n' +
+        'afternoon — and a ratchet that accepts a headline drop silently is the thing\n' +
+        'this script exists to prevent.\n\n' +
+        'Confirm it against the diff. If it is real, record it:\n' +
+        '  npm run typecheck:ratchet -- --lower --reason "..."\n'
     );
+    process.exit(1);
   }
   process.stdout.write(
     `\nType debt fell by ${drop} (${BASELINE} -> ${total}).\n` +
-      'Re-baseline with: npm run typecheck:ratchet -- --update\n'
+      'Record it with: npm run typecheck:ratchet -- --lower --reason "..."\n'
   );
 }
 
