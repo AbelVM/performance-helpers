@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerBuffer](../README.md) / b2o
 
@@ -14,7 +14,7 @@ Decode an ArrayBuffer/TypedArray/Buffer containing JSON UTF-8 to a value.
 
 ### buf
 
-`any`
+`ArrayBuffer` \| `ArrayBufferView`\<`ArrayBufferLike`\>
 
 Buffer-like input.
 

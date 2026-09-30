@@ -1,18 +1,10 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerScheduler](../README.md) / PowerScheduler
 
 # Class: PowerScheduler
-
-PowerScheduler
-
-Small scheduler helper for coalescing work into a single microtask or macrotask.
-Useful for batching or debouncing flushes while providing `schedule()`,
-`flush()` and `cancel()` controls.
-
- PowerScheduler
 
 ## Constructors
 
@@ -30,15 +22,9 @@ Function called when the scheduled work is flushed.
 
 ##### options?
 
+`PowerSchedulerOptions` = `{}`
+
 Scheduling and error handling options.
-
-###### onError?
-
-((`error`) => `void`) \| `null`
-
-###### scheduling?
-
-`"microtask"` \| `"macrotask"`
 
 #### Returns
 
@@ -50,29 +36,29 @@ Scheduling and error handling options.
 
 > **\_flushFn**: `Function`
 
-***
+---
 
 ### \_onError
 
 > **\_onError**: ((`error`) => `void`) \| `null`
 
-***
+---
 
 ### \_scheduled
 
 > **\_scheduled**: `boolean`
 
-***
+---
 
 ### \_scheduling
 
-> **\_scheduling**: `string`
+> **\_scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"`
 
-***
+---
 
 ### \_timer
 
-> **\_timer**: `number` \| `null`
+> **\_timer**: [`MacrotaskHandle`](../type-aliases/MacrotaskHandle.md) \| \{ `cancel`: () => `void`; \} \| `null`
 
 ## Accessors
 
@@ -88,6 +74,35 @@ Whether a flush is currently scheduled.
 
 `boolean`
 
+---
+
+### strategy
+
+#### Get Signature
+
+> **get** **strategy**(): `object`
+
+The strategy this scheduler was _configured_ with, and whether the runtime
+can actually honour it.
+
+Both halves, because they can differ: `scheduling: 'yield'` falls back to a
+macrotask where `scheduler.yield()` does not exist, and without this a
+caller has no way to know it is running on the fallback. The fallback is a
+degradation in _ordering_, not correctness — the flush still happens
+promptly — which is exactly why it should be visible rather than silent.
+
+##### Returns
+
+`object`
+
+###### scheduling
+
+> **scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"`
+
+###### supported
+
+> **supported**: `boolean`
+
 ## Methods
 
 ### \_run()
@@ -98,7 +113,20 @@ Whether a flush is currently scheduled.
 
 `void`
 
-***
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1), so `using x = new X()` releases the instance
+deterministically at scope exit.
+
+#### Returns
+
+`void`
+
+---
 
 ### cancel()
 
@@ -110,7 +138,23 @@ Cancel any scheduled flush without invoking the callback.
 
 `void`
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds.
+
+Idempotent, and safe to call while the instance is idle. Exists so the
+instance works with `using` / `await using` and gives callers an explicit
+name to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### flush()
 
@@ -122,7 +166,7 @@ Flush immediately if a callback is scheduled.
 
 `void`
 
-***
+---
 
 ### schedule()
 

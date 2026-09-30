@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerTimedCache
 
@@ -25,10 +25,6 @@ timed.set('k', 1);
 @public
 ```
 
-## Indexable
-
-> \[`key`: `number`\]: () => `void`
-
 ## Constructors
 
 ### Constructor
@@ -45,29 +41,7 @@ Default TTL in milliseconds for entries.
 
 ##### options?
 
-###### cacheOptions?
-
-`Object` = `{}`
-
-Additional options forwarded to `PowerCache`.
-
-###### interval?
-
-`number`
-
-Cleanup interval (ms) for automatic cleanup.
-
-###### maxCleanupPerTick?
-
-`number`
-
-Max nodes scanned per cleanup tick.
-
-###### maxEntries?
-
-`number`
-
-Forwarded to `PowerCache`.
+`PowerTimedCacheOptions` = `{}`
 
 #### Returns
 
@@ -91,7 +65,7 @@ Forwarded to `PowerCache`.
 
 `number`
 
-***
+---
 
 ### size
 
@@ -105,6 +79,26 @@ Forwarded to `PowerCache`.
 
 ## Methods
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+#### Returns
+
+`void`
+
+---
+
 ### clear()
 
 > **clear**(): `void`
@@ -113,7 +107,7 @@ Forwarded to `PowerCache`.
 
 `void`
 
-***
+---
 
 ### delete()
 
@@ -129,7 +123,20 @@ Forwarded to `PowerCache`.
 
 `boolean`
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Named alias for the `Symbol.dispose` implementation, so callers who
+do not want to reach for the symbol still have something to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### entries()
 
@@ -145,7 +152,7 @@ Forwarded to `PowerCache`.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
-***
+---
 
 ### get()
 
@@ -161,11 +168,11 @@ Forwarded to `PowerCache`.
 
 `any`
 
-***
+---
 
 ### has()
 
-> **has**(`key`, `options`): `boolean`
+> **has**(`key`, `options?`): `boolean`
 
 #### Parameters
 
@@ -173,15 +180,13 @@ Forwarded to `PowerCache`.
 
 `any`
 
-##### options
-
-`any`
+##### options?
 
 #### Returns
 
 `boolean`
 
-***
+---
 
 ### keys()
 
@@ -197,11 +202,11 @@ Forwarded to `PowerCache`.
 
 `Generator`\<`any`, `void`, `unknown`\>
 
-***
+---
 
 ### set()
 
-> **set**(`key`, `value`, `options`): `false` \| [`PowerCache`](PowerCache.md)
+> **set**(`key`, `value`, `options?`): `false` \| [`PowerCache`](PowerCache.md)
 
 #### Parameters
 
@@ -213,31 +218,29 @@ Forwarded to `PowerCache`.
 
 `any`
 
-##### options
-
-`any`
+##### options?
 
 #### Returns
 
 `false` \| [`PowerCache`](PowerCache.md)
 
-***
+---
 
 ### startCleanup()
 
-> **startCleanup**(`intervalOrOptions`): `void`
+> **startCleanup**(`intervalOrOptions?`): `void`
 
 #### Parameters
 
-##### intervalOrOptions
+##### intervalOrOptions?
 
-`any`
+`undefined` = `undefined`
 
 #### Returns
 
 `void`
 
-***
+---
 
 ### stats()
 
@@ -275,7 +278,7 @@ Forwarded to `PowerCache`.
 
 > **weight**: `number`
 
-***
+---
 
 ### stopCleanup()
 
@@ -285,7 +288,7 @@ Forwarded to `PowerCache`.
 
 `void`
 
-***
+---
 
 ### values()
 

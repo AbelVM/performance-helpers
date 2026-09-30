@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerSlidingWindow](../README.md) / PowerSlidingWindow
 
@@ -16,23 +16,48 @@
 
 ##### options?
 
+`PowerSlidingWindowOptions` = `{}`
+
+`capacity` defaults to 1
+and `windowMs` to one second.
+
 #### Returns
 
 `PowerSlidingWindow`
 
 ## Properties
 
+### \_now
+
+> **\_now**: () => `number`
+
+Clock for this limiter, and whether it was explicitly injected. See
+`resolveLimiterNow` for why the flag is load-bearing: an injected clock
+must outrank a value threaded in by a composition.
+
+#### Returns
+
+`number`
+
+---
+
+### \_nowExplicit
+
+> **\_nowExplicit**: `boolean`
+
+---
+
 ### \_timestamps
 
 > **\_timestamps**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
-***
+---
 
 ### capacity
 
 > **capacity**: `number`
 
-***
+---
 
 ### windowMs
 
@@ -42,31 +67,52 @@
 
 ### available()
 
-> **available**(): `number`
+> **available**(`options?`): `number`
 
 Return how many slots are currently available.
+
+#### Parameters
+
+##### options?
 
 #### Returns
 
 `number`
 
-***
+---
 
-### reset()
+### clear()
 
-> **reset**(): `void`
+> **clear**(): `void`
 
-Reset internal state.
+Alias for [PowerSlidingWindow#reset](#reset).
+
+This one is a true synonym and not a uniformity gesture: `reset()` here
+_is_ a clear - it empties the timestamp queue. Contrast the limiters, where
+`reset()` restores a usable state (refilled tokens, re-closed circuit) and
+`clear()` would read as the exact opposite.
 
 #### Returns
 
 `void`
 
-***
+---
+
+### reset()
+
+> **reset**(): `void`
+
+Drop every recorded timestamp, returning the window to fully available.
+
+#### Returns
+
+`void`
+
+---
 
 ### tryConsume()
 
-> **tryConsume**(`n?`): `boolean`
+> **tryConsume**(`n?`, `options?`): `boolean`
 
 Try to consume `n` slots (default 1).
 
@@ -75,6 +121,8 @@ Try to consume `n` slots (default 1).
 ##### n?
 
 `number` = `1`
+
+##### options?
 
 #### Returns
 

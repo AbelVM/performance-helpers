@@ -2013,6 +2013,52 @@ who filed it.
 
 Closes CACHE-005 and ALGO-011.
 
+#### The generated API reference was not checked by anything, and had been superseded
+
+`docs/` is committed, the project website links into it, and `AGENTS.md` calls it
+the second-most-consulted artefact in the repo — and no check anywhere asked
+whether it matched `src/`. `types/` had `types:generate` then `types:drift`;
+`docs/` had neither. `npm run verify` is now **nine steps**, and the ninth is
+`docs:drift`.
+
+It found real drift immediately. Regenerating produced **106 changed files**,
+mostly deletions: the entire `docs/helpers/jsdoc-types/` tree. `typedoc.json`
+excludes `src/helpers/jsdoc-types.js`, `src/utils/options.js` and
+`src/utils/timers.js`, so those pages stopped being produced when the exclusions
+landed and survived only because `cleanOutputDir: true` means nothing deletes
+them but a regeneration nobody ran. This is the direction of drift that hides
+itself — a stale generated tree still looks exactly like documentation.
+
+Two properties of the new step are not true of the other eight, and both are in
+the script's docblock rather than left to be discovered:
+
+- It is the only step that **rewrites a committed tree** before comparing it.
+  `cleanOutputDir: true` leaves no incremental mode to diff against, so a bare
+  `git diff -- docs` would have passed forever. It regenerates and _then_ asks.
+- It runs **last**, after `types:generate`, so the tree `docs/` was generated
+  from is the one `types/` was generated from — and because at 2.1 s over ~100
+  files it is the slowest step and never the interesting failure.
+
+The gate was **observed failing**, not just passing: with the index reset to the
+stale committed tree it exits 1 and names all 106 files. A first attempt at that
+observation passed, and the reason is worth recording — `git checkout HEAD --
+docs` does not prune the index, so the pathspec checkout left the regenerated
+pages staged and the working tree matched the index, which is what the check
+compares. It compares to the **index** rather than to `HEAD` on purpose, so a
+pre-commit tree passes and a `--no-verify` or squash-bot tree fails, but that
+does mean a polluted index can mask real drift.
+
+`test/verifyGate.test.js`, 9 tests. The one that matters most: every step in
+`verify.mjs` must have a matching `package.json` script, because a typo there is
+not a skipped check — it is a gate that exits 1 with `npm ERR! Missing script`,
+which reads as a broken gate and invites being switched off. The tests also
+assert that each `generate` step precedes its `drift` step, and that the failure
+message no longer hardcodes **"eight steps"** — it did, and a hardcoded total in
+the message that names the failing step is the same class of thing that drifts
+when a step is added.
+
+Closes GATE-010.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

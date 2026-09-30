@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerDeadline](../README.md) / PowerDeadline
 
@@ -11,7 +11,7 @@ Deadline-aware async helper for timeout, retry budget, and abort metadata.
 Use `PowerDeadline` to wrap async work with per-attempt timeouts, a total
 deadline for the whole operation, and optional retry/backoff behavior.
 
- PowerDeadline
+PowerDeadline
 
 ## Constructors
 
@@ -25,7 +25,7 @@ Create a configured `PowerDeadline` instance.
 
 ##### options?
 
-`Object` = `{}`
+`PowerDeadlineOptions` = `{}`
 
 Default options applied to every `run()` invocation.
 
@@ -37,7 +37,7 @@ Default options applied to every `run()` invocation.
 
 ### \_options
 
-> **\_options**: `Object`
+> **\_options**: `PowerDeadlineOptions`
 
 ## Methods
 
@@ -57,13 +57,13 @@ Async function to execute.
 
 ##### options?
 
-[`PowerDeadlineOptions`](../../jsdoc-types/interfaces/PowerDeadlineOptions.md) = `{}`
+`PowerDeadlineOptions` = `{}`
 
 #### Returns
 
 `Promise`\<`any`\>
 
-***
+---
 
 ### run()
 
@@ -81,7 +81,7 @@ Async function to execute.
 
 ##### options?
 
-[`PowerDeadlineOptions`](../../jsdoc-types/interfaces/PowerDeadlineOptions.md) = `{}`
+`PowerDeadlineOptions` = `{}`
 
 #### Returns
 

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
-***
+---
 
 [performance-helpers](../../README.md) / helpers/powerEventBus
 
@@ -10,14 +10,12 @@
 
 - [PowerEventBus](classes/PowerEventBus.md)
 
+## Type Aliases
+
+- [EventBusBucket](type-aliases/EventBusBucket.md)
+
 ## References
 
 ### default
 
 Renames and re-exports [PowerEventBus](classes/PowerEventBus.md)
-
-***
-
-### PowerEventBusOptions
-
-Re-exports [PowerEventBusOptions](../jsdoc-types/interfaces/PowerEventBusOptions.md)

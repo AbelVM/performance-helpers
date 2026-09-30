@@ -39,20 +39,31 @@ reason the next proposal does not repeat the work.
 ## Commands
 
 ```bash
-npm run verify          # the full gate: lint, test, types, ratchet, build, bundle, drift
-npm test                # vitest run — ~1570 tests, ~175 files (the gate, not this number)
+npm run verify          # the full gate: lint, test, types, ratchet, build, bundle, drift, docs
+npm test                # vitest run — ~1726 tests, ~193 files (the gate, not this number)
 npm run test:coverage   # what CI runs
 npm run test:types      # tsc against the public type tests
 npm run lint            # eslint; 0 errors expected, plus a few dozen pre-existing warnings
 npm run types:generate  # regenerate types/ — required after any JSDoc change
 npm run types:drift     # fails if types/ is out of date
+npm run docs            # regenerate docs/ — same trigger, and see the note below
+npm run docs:drift      # fails if docs/ is out of date
 ```
 
-The gate is `scripts/verify.mjs`, and it is the **only** list of checks. CI calls
-it rather than keeping its own copy — it did once, and the copies drifted until
-CI was running neither `test:types` nor `check:bundle` (see the comment at the top
-of `.github/workflows/ci.yml`). **To add a check, add it to that script**, not to
-the workflow.
+The gate is `scripts/verify.mjs`, and it is the **only** list of checks — nine
+steps. CI calls it rather than keeping its own copy: it did once, and the copies
+drifted until CI was running neither `test:types` nor `check:bundle` (see the
+comment at the top of `.github/workflows/ci.yml`). **To add a check, add it to
+that script**, not to the workflow.
+
+`docs:drift` is the one step that **rewrites a committed tree** before comparing
+it. `typedoc.json` sets `cleanOutputDir: true`, so it regenerates all 1.7 MB and
+_then_ asks whether the commit matched — there is no incremental mode to diff
+against, and a bare `git diff -- docs` would pass forever. `git add` the result
+before running `verify`, exactly as with `types/`. It compares against the
+**index**, not `HEAD`, which is what lets a pre-commit tree pass and a
+`--no-verify` or squash-bot tree fail; it also means a polluted index can mask
+real drift.
 
 `VERIFY_TEST=test:coverage npm run verify` is what CI runs: the coverage
 thresholds in `vitest.config.js` only apply under `--coverage`, so plain

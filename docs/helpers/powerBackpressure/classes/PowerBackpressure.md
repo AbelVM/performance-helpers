@@ -1,17 +1,10 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerBackpressure](../README.md) / PowerBackpressure
 
 # Class: PowerBackpressure
-
-PowerBackpressure
-
-Producer-facing backpressure controller built on top of `PowerPermitGate`.
-Provides adaptive refill behavior and FIFO queuing for producers.
-
- PowerBackpressure
 
 ## Extends
 
@@ -27,41 +20,10 @@ Provides adaptive refill behavior and FIFO queuing for producers.
 
 ##### options?
 
-###### capacity?
+`PowerBackpressureOptions` = `{}`
 
-`number`
-
-Maximum number of concurrent permits.
-
-###### initialTokens?
-
-`number`
-
-Initial available permits.
-
-###### lowWaterMark?
-
-`number`
-
-When available tokens drop below this threshold, adaptive refill begins.
-
-###### queueCapacity?
-
-`number`
-
-Maximum number of waiting producers.
-
-###### refillAmount?
-
-`number`
-
-Base refill amount when pressure is detected.
-
-###### refillInterval?
-
-`number`
-
-Refill interval in milliseconds.
+`capacity` and `queueCapacity`
+are inherited from `PowerPermitGate`; the rest tune the refill schedule.
 
 #### Returns
 
@@ -73,6 +35,38 @@ Refill interval in milliseconds.
 
 ## Properties
 
+### \_adaptive
+
+> **\_adaptive**: `object`
+
+#### additiveIncrease
+
+> **additiveIncrease**: `number`
+
+#### beta
+
+> **beta**: `number`
+
+#### enabled
+
+> **enabled**: `boolean`
+
+#### max
+
+> **max**: `number`
+
+#### min
+
+> **min**: `number`
+
+---
+
+### \_adaptiveHeartbeat
+
+> **\_adaptiveHeartbeat**: `boolean`
+
+---
+
 ### \_available
 
 > **\_available**: `number`
@@ -81,7 +75,13 @@ Refill interval in milliseconds.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_available`](../../powerPermitGate/classes/PowerPermitGate.md#_available)
 
-***
+---
+
+### \_baseRefillAmount
+
+> **\_baseRefillAmount**: `number`
+
+---
 
 ### \_capacity
 
@@ -91,13 +91,13 @@ Refill interval in milliseconds.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_capacity`](../../powerPermitGate/classes/PowerPermitGate.md#_capacity)
 
-***
+---
 
 ### \_lowWaterMark
 
 > **\_lowWaterMark**: `number`
 
-***
+---
 
 ### \_queueCapacity
 
@@ -107,25 +107,25 @@ Refill interval in milliseconds.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_queueCapacity`](../../powerPermitGate/classes/PowerPermitGate.md#_queuecapacity)
 
-***
+---
 
 ### \_refillAmount
 
 > **\_refillAmount**: `number`
 
-***
+---
 
 ### \_refillInterval
 
 > **\_refillInterval**: `number`
 
-***
+---
 
 ### \_refillTimer
 
 > **\_refillTimer**: `any`
 
-***
+---
 
 ### \_waiters
 
@@ -143,7 +143,17 @@ Refill interval in milliseconds.
 
 > **get** **active**(): `number`
 
-Number of permits currently held.
+Number of permits currently held by callers that have not released yet.
+
+Read from `_held` rather than computed as `capacity - available`. The two are
+the same number whenever `capacity` is a ceiling on concurrent holders -
+which it is for this class, for `PowerSemaphore` and for `PowerBulkhead`, and
+there the difference is invisible. It stops being the same for a subclass
+whose refill can mint more permits than the pool size while a queue waits,
+and there the difference is the whole point: `capacity - available` cannot
+exceed `capacity`, so on a `PowerBackpressure` with a consumer that is not
+returning its permits it saturates at `capacity` and reports a healthy gate
+while the work is piling up. `_held` keeps counting. See ADR 0004.
 
 ##### Returns
 
@@ -153,7 +163,7 @@ Number of permits currently held.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`active`](../../powerPermitGate/classes/PowerPermitGate.md#active)
 
-***
+---
 
 ### available
 
@@ -171,7 +181,7 @@ Available permits for producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`available`](../../powerPermitGate/classes/PowerPermitGate.md#available)
 
-***
+---
 
 ### capacity
 
@@ -189,7 +199,7 @@ Maximum concurrent permits.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`capacity`](../../powerPermitGate/classes/PowerPermitGate.md#capacity)
 
-***
+---
 
 ### isFull
 
@@ -207,7 +217,7 @@ True when the waiting queue is full.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`isFull`](../../powerPermitGate/classes/PowerPermitGate.md#isfull)
 
-***
+---
 
 ### pending
 
@@ -225,7 +235,7 @@ Number of producers currently waiting for permits.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`pending`](../../powerPermitGate/classes/PowerPermitGate.md#pending)
 
-***
+---
 
 ### queueCapacity
 
@@ -243,21 +253,26 @@ Maximum number of waiting producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`queueCapacity`](../../powerPermitGate/classes/PowerPermitGate.md#queuecapacity)
 
+---
+
+### refillAmount
+
+#### Get Signature
+
+> **get** **refillAmount**(): `number`
+
+The refill amount the controller is currently probing with.
+
+With `adaptive` enabled this moves: up by `additiveIncrease` on every
+refill that finds consumers draining, and down by a factor of `beta` on
+every refill that finds them not. With it disabled it is constant, and
+equal to the `refillAmount` option.
+
+##### Returns
+
+`number`
+
 ## Methods
-
-### \_grant()
-
-> **\_grant**(): () => `void`
-
-#### Returns
-
-() => `void`
-
-#### Overrides
-
-[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_grant`](../../powerPermitGate/classes/PowerPermitGate.md#_grant)
-
-***
 
 ### \_makeRelease()
 
@@ -271,7 +286,7 @@ Maximum number of waiting producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_makeRelease`](../../powerPermitGate/classes/PowerPermitGate.md#_makerelease)
 
-***
+---
 
 ### \_performRefill()
 
@@ -281,7 +296,7 @@ Maximum number of waiting producers.
 
 `void`
 
-***
+---
 
 ### \_scheduleRefill()
 
@@ -291,19 +306,46 @@ Maximum number of waiting producers.
 
 `void`
 
-***
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1), so `using x = new X()` releases the instance
+deterministically at scope exit.
+
+#### Returns
+
+`void`
+
+#### Overrides
+
+[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`[dispose]`](../../powerPermitGate/classes/PowerPermitGate.md#dispose)
+
+---
 
 ### acquire()
 
-> **acquire**(): `Promise`\<`Function`\>
+> **acquire**(`options?`): `Promise`\<`PowerReleaseFn`\>
 
 Acquire a permit asynchronously.
 Resolves immediately when a permit is available.
 Otherwise queues the producer until capacity frees.
 
+#### Parameters
+
+##### options?
+
+`Object` = `{}`
+
+`signal` aborts the wait: the returned promise
+rejects with an `AbortError` and the producer leaves the queue instead of
+holding a slot until a permit is refilled.
+
 #### Returns
 
-`Promise`\<`Function`\>
+`Promise`\<`PowerReleaseFn`\>
 
 Promise resolving to a release callback.
 
@@ -311,11 +353,31 @@ Promise resolving to a release callback.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`acquire`](../../powerPermitGate/classes/PowerPermitGate.md#acquire)
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds.
+
+Idempotent, and safe to call while the instance is idle. Exists so the
+instance works with `using` / `await using` and gives callers an explicit
+name to call.
+
+#### Returns
+
+`void`
+
+#### Overrides
+
+[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`dispose`](../../powerPermitGate/classes/PowerPermitGate.md#dispose-1)
+
+---
 
 ### release()
 
-> **release**(`count?`): `void`
+> **release**(`count?`): `number`
 
 Release one or more permits back to the controller.
 
@@ -327,13 +389,15 @@ Release one or more permits back to the controller.
 
 #### Returns
 
-`void`
+`number`
+
+Permits returned to the gate rather than transferred.
 
 #### Overrides
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`release`](../../powerPermitGate/classes/PowerPermitGate.md#release)
 
-***
+---
 
 ### reset()
 
@@ -349,17 +413,17 @@ Reset the controller to its initial capacity and clear waiting producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`reset`](../../powerPermitGate/classes/PowerPermitGate.md#reset)
 
-***
+---
 
 ### tryAcquire()
 
-> **tryAcquire**(): `Function` \| `null`
+> **tryAcquire**(): `PowerReleaseFn` \| `null`
 
 Try to acquire a permit immediately.
 
 #### Returns
 
-`Function` \| `null`
+`PowerReleaseFn` \| `null`
 
 Release callback, or `null` if no permit is available.
 

@@ -1,10 +1,14 @@
 [**performance-helpers**](../../README.md)
 
-***
+---
 
 [performance-helpers](../../README.md) / helpers/WorkerAgnostic
 
 # helpers/WorkerAgnostic
+
+## Type Aliases
+
+- [NodeRequire](type-aliases/NodeRequire.md)
 
 ## Functions
 

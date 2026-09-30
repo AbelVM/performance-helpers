@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerThrottle](../README.md) / PowerThrottle
 
@@ -12,25 +12,15 @@
 
 > **new PowerThrottle**(`options?`): `PowerThrottle`
 
+See PowerThrottleOptions for the accepted fields; every default is
+stated there, because a bare `@param {Object} [options]` here is what let
+the published type and the destructuring drift apart in the first place.
+
 #### Parameters
 
 ##### options?
 
-###### capacity?
-
-`number`
-
-###### refillInterval?
-
-`number`
-
-###### refillRate?
-
-`number`
-
-###### tokens?
-
-`number`
+`PowerThrottleOptions` = `{}`
 
 #### Returns
 
@@ -42,31 +32,51 @@
 
 > **\_lastRefill**: `number`
 
-***
+---
+
+### \_now
+
+> **\_now**: () => `number`
+
+Clock for this limiter, and whether it was explicitly injected. See
+`resolveLimiterNow` for why the flag is load-bearing: an injected clock
+must outrank a value threaded in by a composition.
+
+#### Returns
+
+`number`
+
+---
+
+### \_nowExplicit
+
+> **\_nowExplicit**: `boolean`
+
+---
 
 ### \_tokenRemainder
 
 > **\_tokenRemainder**: `number`
 
-***
+---
 
 ### capacity
 
 > **capacity**: `number`
 
-***
+---
 
 ### refillInterval
 
 > **refillInterval**: `number`
 
-***
+---
 
 ### refillRate
 
 > **refillRate**: `number`
 
-***
+---
 
 ### tokens
 
@@ -90,19 +100,23 @@ Add tokens to the bucket (forceful, useful for tests).
 
 `void`
 
-***
+---
 
 ### available()
 
-> **available**(): `number`
+> **available**(`options?`): `number`
 
 Current available tokens (performs a refill before reporting).
+
+#### Parameters
+
+##### options?
 
 #### Returns
 
 `number`
 
-***
+---
 
 ### release()
 
@@ -115,7 +129,7 @@ Accepts either a token returned from `reserve()` or a numeric count.
 
 ##### tokenOrN
 
-`number` \| `object`
+`number` \| `PowerThrottleToken`
 
 #### Returns
 
@@ -129,11 +143,11 @@ if (token) throttle.release(token);
 throttle.release(1); // add one token back directly
 ```
 
-***
+---
 
 ### reserve()
 
-> **reserve**(`n?`): \{ `n`: `number`; \} \| `null`
+> **reserve**(`n?`, `options?`): `PowerThrottleToken` \| `null`
 
 Reserve `n` tokens without committing them permanently. If successful,
 returns a token object such as `{ n: 1 }` that may later be passed to
@@ -147,9 +161,11 @@ Returns `null` when the reservation fails due to insufficient tokens.
 
 `number` = `1`
 
+##### options?
+
 #### Returns
 
-\{ `n`: `number`; \} \| `null`
+`PowerThrottleToken` \| `null`
 
 #### Example
 
@@ -161,7 +177,7 @@ if (token) {
 }
 ```
 
-***
+---
 
 ### reset()
 
@@ -179,27 +195,29 @@ Reset the bucket to a given token count (or full when omitted).
 
 `void`
 
-***
+---
 
 ### rollback()
 
 > **rollback**(`nOrToken`): `void`
 
+Alias of [PowerThrottle#release](#release).
+
 #### Parameters
 
 ##### nOrToken
 
-`any`
+`number` \| `PowerThrottleToken`
 
 #### Returns
 
 `void`
 
-***
+---
 
 ### tryConsume()
 
-> **tryConsume**(`n?`): `boolean`
+> **tryConsume**(`n?`, `options?`): `boolean`
 
 Try to consume `n` tokens.
 
@@ -208,6 +226,8 @@ Try to consume `n` tokens.
 ##### n?
 
 `number` = `1`
+
+##### options?
 
 #### Returns
 

@@ -57,6 +57,14 @@ import { spawnSync } from 'node:child_process';
  *   it locally, so the only places that see it are `--no-verify`, a squash bot,
  *   and a fresh clone — which reports it as a confusing "cannot find module"
  *   from `test:types` rather than as "commit types/".
+ * - `docs:drift` is the same idea for the generated API reference, and it is
+ *   the one check here that **rewrites a committed tree before comparing it**,
+ *   because `typedoc.json` sets `cleanOutputDir: true` and there is no
+ *   incremental mode to diff against. It runs last, after `types:generate`, so
+ *   a tree `docs/` was generated from is the one `types/` was generated from.
+ *   It is last rather than earlier for a second reason: it is the slowest step
+ *   by an order of magnitude, and when it fails it is never the interesting
+ *   failure.
  *
  * @type {string[]}
  */
@@ -71,6 +79,7 @@ const STEPS = [
   'check:bundle',
   'types:generate',
   'types:drift',
+  'docs:drift',
 ];
 
 const label = process.env.VERIFY_TEST ? `verify (test: ${process.env.VERIFY_TEST})` : 'verify';
@@ -86,8 +95,10 @@ for (const [index, step] of STEPS.entries()) {
     process.exit(1);
   }
   if (result.status !== 0) {
-    // Naming the step is the point. A gate that exits 1 without saying which of
-    // eight steps failed sends the reader to the scrollback.
+    // Naming the step is the point. A gate that exits 1 without saying which
+    // step failed sends the reader to the scrollback. The count is derived, not
+    // written down: it said "eight" for as long as there were eight, which is
+    // the same class of hardcoded total that drifts the moment a step is added.
     console.error(
       `\nverify: FAILED at step ${position} — "npm run ${step}" exited ${result.status}. ` +
         `${STEPS.length - index - 1} later step(s) did not run.`

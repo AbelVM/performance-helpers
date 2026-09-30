@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerLatch](../README.md) / PowerLatch
 
@@ -22,6 +22,11 @@ initial count required to release the latch
 
 ##### options?
 
+`PowerLatchOptions` = `{}`
+
+`onAbort` is invoked with the
+rejection reason by [PowerLatch#abort](#abort).
+
 #### Returns
 
 `PowerLatch`
@@ -32,35 +37,41 @@ initial count required to release the latch
 
 > **\_aborted**: `boolean`
 
-***
+---
 
 ### \_abortReason
 
 > **\_abortReason**: `any`
 
-***
+---
 
 ### \_count
 
 > **\_count**: `number`
 
-***
+---
+
+### \_disposed
+
+> **\_disposed**: `boolean`
+
+---
 
 ### \_nextWaiterToken
 
 > **\_nextWaiterToken**: `number`
 
-***
+---
 
 ### \_onAbort
 
-> **\_onAbort**: `any`
+> **\_onAbort**: ((`reason`) => `void`) \| `null`
 
-***
+---
 
 ### \_waiters
 
-> **\_waiters**: `Map`\<`number`, \{ `defer`: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md); `signal?`: `AbortSignal`; `signalHandler?`: `Function`; `timer?`: `any`; `token`: `number`; \}\>
+> **\_waiters**: `Map`\<`number`, `PowerLatchWaiter`\>
 
 ## Accessors
 
@@ -76,19 +87,19 @@ True when the latch is already released.
 
 `boolean`
 
-***
+---
 
 ### onAbort
 
 #### Get Signature
 
-> **get** **onAbort**(): `any`
+> **get** **onAbort**(): ((`reason`) => `void`) \| `null`
 
 Optional callback invoked when `abort()` is called: `(reason) => void`.
 
 ##### Returns
 
-`any`
+((`reason`) => `void`) \| `null`
 
 #### Set Signature
 
@@ -98,13 +109,13 @@ Optional callback invoked when `abort()` is called: `(reason) => void`.
 
 ###### fn
 
-`any`
+((`reason`) => `void`) \| `null`
 
 ##### Returns
 
 `void`
 
-***
+---
 
 ### remaining
 
@@ -134,23 +145,30 @@ Number of remaining counts.
 
 `void`
 
-***
+---
 
 ### \_removeWaiter()
 
-> **\_removeWaiter**(`waiterOrToken`): \{ `defer`: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md); `signal?`: `AbortSignal`; `signalHandler?`: `Function`; `timer?`: `any`; `token`: `number`; \} \| `null`
+> **\_removeWaiter**(`waiterOrToken`): `PowerLatchWaiter` \| `null`
+
+Detach a single waiter, either by token or by the waiter object itself.
+
+The object form exists because `_settleAll` and `wait`'s timeout path
+already hold the waiter; the token form is what the abort listener has.
 
 #### Parameters
 
 ##### waiterOrToken
 
-`any`
+`number` \| `PowerLatchWaiter`
 
 #### Returns
 
-\{ `defer`: [`PowerDefer`](../../powerDefer/classes/PowerDefer.md); `signal?`: `AbortSignal`; `signalHandler?`: `Function`; `timer?`: `any`; `token`: `number`; \} \| `null`
+`PowerLatchWaiter` \| `null`
 
-***
+The removed waiter, or `null` if it was already gone.
+
+---
 
 ### \_resolveAll()
 
@@ -160,29 +178,50 @@ Number of remaining counts.
 
 `void`
 
-***
+---
 
 ### \_settleAll()
 
 > **\_settleAll**(`settle`): `void`
 
+Tear down every registered waiter, clearing its timer and abort listener,
+then hand each `PowerDefer` to `settle`. Failures from either teardown are
+swallowed so one bad waiter cannot strand the rest.
+
 #### Parameters
 
 ##### settle
 
-`any`
+(`defer`) => `void`
 
 #### Returns
 
 `void`
 
-***
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1), so `using x = new X()` releases the instance
+deterministically at scope exit.
+
+#### Returns
+
+`void`
+
+---
 
 ### abort()
 
 > **abort**(`reason?`): `void`
 
 Abort pending waiters. If `reason` provided it will be used to reject waiters.
+
+Idempotent. A second call is a no-op rather than a second abort: callers
+abort on both an error path and a cleanup path, and one logical abort must
+fire `onAbort` once.
 
 #### Parameters
 
@@ -194,7 +233,7 @@ Abort pending waiters. If `reason` provided it will be used to reject waiters.
 
 `void`
 
-***
+---
 
 ### countDown()
 
@@ -215,7 +254,7 @@ reaches zero all pending waiters are resolved.
 
 remaining count
 
-***
+---
 
 ### decrementUnlessZero()
 
@@ -228,7 +267,31 @@ Returns remaining count.
 
 `number`
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds. Terminal: pending waiters are
+rejected with `code: 'EDISPOSED'`, the count is zeroed, later `wait()`
+calls reject rather than registering, and `reset()` becomes a no-op.
+
+This is a teardown, not a re-arm. It used to call `reset()` with its
+default count of 1, which left every pending `wait()` unsettled forever and
+left `remaining` at 1 — and because `reset()` clears the aborted state, it
+also made an aborted latch live again. Compare
+`PowerPermitGate.reset()`, which rejects its waiters.
+
+Idempotent, and safe to call while the instance is idle. Exists so the
+instance works with `using` / `await using` and gives callers an explicit
+name to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### reset()
 
@@ -247,7 +310,7 @@ immediately if the new count is zero.
 
 `void`
 
-***
+---
 
 ### wait()
 
@@ -255,19 +318,20 @@ immediately if the new count is zero.
 
 Wait until the latch reaches zero.
 Options: `wait(timeoutMs)` or `wait({ timeout, signal })`.
-If aborted via `abort()` pending waiters are rejected.
+If aborted via `abort()` pending waiters are rejected. A disposed latch
+rejects too, with `code: 'EDISPOSED'` — see [PowerLatch#dispose](#dispose-1).
 
 #### Parameters
 
 ##### opts?
 
-`number` \| `object`
+`number` \| `PowerLatchWaitOptions`
 
 #### Returns
 
 `Promise`\<`void`\>
 
-***
+---
 
 ### one()
 

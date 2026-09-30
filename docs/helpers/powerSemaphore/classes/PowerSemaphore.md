@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerSemaphore](../README.md) / PowerSemaphore
 
@@ -46,7 +46,7 @@ Currently acquired permits.
 
 `number`
 
-***
+---
 
 ### available
 
@@ -60,7 +60,7 @@ Number of permits still available.
 
 `number`
 
-***
+---
 
 ### isLocked
 
@@ -74,7 +74,7 @@ True when the semaphore is fully acquired.
 
 `boolean`
 
-***
+---
 
 ### limit
 
@@ -88,7 +88,7 @@ Maximum concurrent holders.
 
 `number`
 
-***
+---
 
 ### pending
 
@@ -104,20 +104,65 @@ Number of callers waiting for a permit.
 
 ## Methods
 
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1), so `using x = new X()` releases the instance
+deterministically at scope exit.
+
+#### Returns
+
+`void`
+
+---
+
 ### acquire()
 
-> **acquire**(): `Promise`\<`Function`\>
+> **acquire**(`options?`): `Promise`\<() => `void`\>
 
 Acquire a permit asynchronously.
 Resolves immediately when one is available; otherwise waits in FIFO order.
 
+#### Parameters
+
+##### options?
+
+Pass `options.signal` to stop
+waiting: the returned promise rejects with an `AbortError` and the caller
+leaves the queue instead of holding a slot until a permit arrives.
+
+###### signal?
+
+`AbortSignal`
+
 #### Returns
 
-`Promise`\<`Function`\>
+`Promise`\<() => `void`\>
 
-Promise resolving to the release callback.
+Promise resolving to the release
+callback. Spelled as a call signature rather than `Function` because
+`Function` is not assignable to `() => void`, so `.then((release) =>
+  release())` - the documented way to use it - failed to type-check for
+consumers.
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds.
+
+Idempotent, and safe to call while the instance is idle. Exists so the
+instance works with `using` / `await using` and gives callers an explicit
+name to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### reset()
 
@@ -129,7 +174,7 @@ Reset the semaphore and reject any queued waiters.
 
 `void`
 
-***
+---
 
 ### run()
 
@@ -158,16 +203,16 @@ Callback to run under a permit.
 
 The callback result.
 
-***
+---
 
 ### tryAcquire()
 
-> **tryAcquire**(): `Function` \| `null`
+> **tryAcquire**(): `PowerReleaseFn` \| `null`
 
 Try to acquire a permit without waiting.
 
 #### Returns
 
-`Function` \| `null`
+`PowerReleaseFn` \| `null`
 
 Release callback when acquired, otherwise `null`.

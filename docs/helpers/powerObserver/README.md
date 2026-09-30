@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
-***
+---
 
 [performance-helpers](../../README.md) / helpers/powerObserver
 
@@ -15,9 +15,3 @@
 ### default
 
 Renames and re-exports [PowerObserver](classes/PowerObserver.md)
-
-***
-
-### PowerObserverOptions
-
-Re-exports [PowerObserverOptions](../jsdoc-types/interfaces/PowerObserverOptions.md)

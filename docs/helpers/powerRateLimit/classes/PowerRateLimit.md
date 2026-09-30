@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerRateLimit](../README.md) / PowerRateLimit
 
@@ -11,7 +11,7 @@ PowerRateLimit
 Compose multiple rate limiters and provide a unified `tryConsume`/`reserve` API.
 Returns success only when all underlying limiters allow consumption.
 
- PowerRateLimit
+PowerRateLimit
 
 ## Constructors
 
@@ -23,22 +23,21 @@ Returns success only when all underlying limiters allow consumption.
 
 ##### limiters?
 
-`Object`[] = `[]`
+`RateLimiterLike`[] = `[]`
 
-Array of limiter instances implementing
-  `tryConsume(n)` and preferably `available()`.
+Limiter instances to compose. Each
+must provide `tryConsume(n)`; `reserve`, `release`, `addTokens`,
+`rollback` and `available` are used when present.
 
 ##### options?
 
-###### atomic?
+`PowerRateLimitOptions` = `{}`
 
-`boolean`
-
-When `true` attempt to provide
-  atomic semantics: either all limiters allow consumption or none will be
-  left mutated. This requires underlying limiters to expose `available()`
-  or an undo primitive (e.g. `reserve`/`release` or `addTokens`). If a
-  safe rollback cannot be guaranteed the call will return `false`.
+`atomic` attempts all-or-nothing
+semantics: either every limiter allows the consumption or none is left
+mutated. That requires each to expose `available()` or an undo primitive
+(`reserve`/`release`, or `addTokens`). When a safe rollback cannot be
+guaranteed the call returns `false`.
 
 #### Returns
 
@@ -50,11 +49,11 @@ When `true` attempt to provide
 
 > **atomicDefault**: `boolean`
 
-***
+---
 
 ### limiters
 
-> **limiters**: `Object`[]
+> **limiters**: `RateLimiterLike`[]
 
 ## Methods
 
@@ -76,20 +75,24 @@ When `true` attempt to provide
 
 `Promise`\<`any`\>
 
-***
+---
 
 ### available()
 
-> **available**(): `number`
+> **available**(`options?`): `number`
 
 Return the minimum available tokens across all limiters.
 If any limiter does not expose `available()`, this returns `0`.
+
+#### Parameters
+
+##### options?
 
 #### Returns
 
 `number`
 
-***
+---
 
 ### release()
 
@@ -109,7 +112,7 @@ count to return tokens directly.
 
 `void`
 
-***
+---
 
 ### reserve()
 
@@ -130,7 +133,7 @@ be consumed by `release(token)` or `rollback(token)` to restore the limiters.
 
 \{ `n`: `number`; \} \| `null`
 
-***
+---
 
 ### reset()
 
@@ -142,7 +145,7 @@ Reset all underlying limiters where supported.
 
 `void`
 
-***
+---
 
 ### rollback()
 
@@ -158,7 +161,7 @@ Reset all underlying limiters where supported.
 
 `void`
 
-***
+---
 
 ### tryConsume()
 
@@ -185,8 +188,18 @@ if other limiters subsequently fail. Prefer limiters that implement
 
 `number` = `1`
 
+Tokens to consume.
+
 ##### options?
+
+`PowerRateLimitOptions` & `LimiterNowOptions` = `{}`
+
+Per-call
+overrides; `atomic` defaults to the instance setting, and `now` supplies
+the single clock reading threaded into every leg.
 
 #### Returns
 
 `boolean`
+
+`true` only when every composed limiter allowed it.

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
-***
+---
 
 [performance-helpers](../../README.md) / helpers/powerDeadline
 
@@ -15,9 +15,3 @@
 ### default
 
 Renames and re-exports [PowerDeadline](classes/PowerDeadline.md)
-
-***
-
-### PowerDeadlineOptions
-
-Re-exports [PowerDeadlineOptions](../jsdoc-types/interfaces/PowerDeadlineOptions.md)

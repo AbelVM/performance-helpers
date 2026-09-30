@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
-***
+---
 
 [performance-helpers](../../README.md) / [index](../README.md) / WorkerAgnostic
 
@@ -22,18 +22,16 @@ given source.
 `string` \| `Function`
 
 A Worker constructor, a worker
-  factory function, or a path/URL string. When a function is provided it is
-  invoked (or constructed with `new`) to obtain the underlying worker-like
-  object. When a string is provided it is used to construct the appropriate
-  native Worker for the current environment.
+factory function, or a path/URL string. When a function is provided it is
+invoked (or constructed with `new`) to obtain the underlying worker-like
+object. When a string is provided it is used to construct the appropriate
+native Worker for the current environment.
 
 ##### options?
 
-`Object` = `{}`
-
-Options forwarded to the native Worker
-  constructor (e.g. `{ type: 'module' }` for Node, or worker options for
-  the browser).
+Options forwarded to the native
+Worker constructor (e.g. `{ type: 'module' }` for Node, or worker options
+for the browser).
 
 #### Returns
 
@@ -45,29 +43,29 @@ Options forwarded to the native Worker
 
 > **\_listeners**: `Map`\<`any`, `any`\>
 
-***
+---
 
 ### \_nativeModel
 
 > **\_nativeModel**: `string` \| `undefined`
 
-***
+---
 
 ### env
 
 > **env**: `string`
 
-***
+---
 
 ### options
 
-> **options**: `Object`
+> **options**: `object`
 
-***
+---
 
 ### worker
 
-> **worker**: `object`
+> **worker**: `WorkerLike`
 
 ## Methods
 
@@ -79,61 +77,65 @@ Options forwarded to the native Worker
 
 ##### type
 
-`any`
+`string`
 
 ##### handler
 
-`any`
+(`arg0`) => `void`
 
 #### Returns
 
 `WorkerAgnostic`
 
-***
+---
 
 ### off()
 
 > **off**(`type`, `handler`): `WorkerAgnostic`
 
+Node-style alias for [removeEventListener](#removeeventlistener).
+
 #### Parameters
 
 ##### type
 
-`any`
+`string`
 
 ##### handler
 
-`any`
+(`arg0`) => `void`
 
 #### Returns
 
 `WorkerAgnostic`
 
-***
+---
 
 ### on()
 
 > **on**(`type`, `handler`): `WorkerAgnostic`
 
+Node-style alias for [addEventListener](#addeventlistener).
+
 #### Parameters
 
 ##### type
 
-`any`
+`string`
 
 ##### handler
 
-`any`
+(`arg0`) => `void`
 
 #### Returns
 
 `WorkerAgnostic`
 
-***
+---
 
 ### postMessage()
 
-> **postMessage**(`message`, `transfer`): `any`
+> **postMessage**(`message`, `transfer?`): `any`
 
 #### Parameters
 
@@ -141,15 +143,15 @@ Options forwarded to the native Worker
 
 `any`
 
-##### transfer
+##### transfer?
 
-`any`
+`Object` \| `ArrayBuffer`[] \| `ArrayBufferView`\<`ArrayBufferLike`\>[]
 
 #### Returns
 
 `any`
 
-***
+---
 
 ### removeEventListener()
 
@@ -159,27 +161,27 @@ Options forwarded to the native Worker
 
 ##### type
 
-`any`
+`string`
 
 ##### handler
 
-`any`
+(`arg0`) => `void`
 
 #### Returns
 
 `WorkerAgnostic`
 
-***
+---
 
 ### terminate()
 
-> **terminate**(): `any`
+> **terminate**(): `void` \| `Promise`\<`void`\>
 
 #### Returns
 
-`any`
+`void` \| `Promise`\<`void`\>
 
-***
+---
 
 ### create()
 

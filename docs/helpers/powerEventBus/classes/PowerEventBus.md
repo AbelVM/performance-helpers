@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerEventBus](../README.md) / PowerEventBus
 
@@ -16,7 +16,11 @@
 
 ##### options?
 
-\{ `maxListeners?`: `number`; `weak?`: `boolean`; \} \| `undefined`
+`PowerEventBusOptions` = `{}`
+
+`maxListeners` caps listeners per
+event (`0`, the default, is unlimited); `weak` stores them behind
+`WeakRef`.
 
 #### Returns
 
@@ -26,33 +30,33 @@
 
 ### \_eventFinalizationRefs
 
-> **\_eventFinalizationRefs**: `Map`\<`any`, `any`\>
+> **\_eventFinalizationRefs**: `Map`\<`string`, `Set`\<`WeakRef`\<`SubscriberListener`\>\>\>
 
-***
+---
 
 ### \_finalizationRefs
 
-> **\_finalizationRefs**: `WeakMap`\<`object`, `any`\>
+> **\_finalizationRefs**: `WeakMap`\<`SubscriberListener`, `Map`\<`string`, `Set`\<`WeakRef`\<`SubscriberListener`\>\>\>\>
 
-***
+---
 
 ### \_fr
 
-> **\_fr**: `any`
+> **\_fr**: `FinalizationRegistry`\<`EventBusWeakToken`\> \| `null`
 
-***
+---
 
 ### \_listeners
 
-> **\_listeners**: `Map`\<`any`, `any`\>
+> **\_listeners**: `Map`\<`string`, [`EventBusBucket`](../type-aliases/EventBusBucket.md)\>
 
-***
+---
 
 ### \_maxListeners
 
 > **\_maxListeners**: `number`
 
-***
+---
 
 ### \_weak
 
@@ -64,55 +68,9 @@
 
 > **\_clearWeakListenerEvent**(`event`): `void`
 
-#### Parameters
-
-##### event
-
-`any`
-
-#### Returns
-
-`void`
-
-***
-
-### \_ensureFinalizationRegistry()
-
-> **\_ensureFinalizationRegistry**(): `any`
-
-#### Returns
-
-`any`
-
-***
-
-### \_getBucket()
-
-> **\_getBucket**(`event`): [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
+Unregister every weak ref held for one event, and forget the event.
 
 #### Parameters
-
-##### event
-
-`any`
-
-#### Returns
-
-[`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
-
-***
-
-### \_registerWeakListener()
-
-> **\_registerWeakListener**(`fn`, `event`): () => `void`
-
-Subscribe to an event.
-
-#### Parameters
-
-##### fn
-
-(`payload`) => `void`
 
 ##### event
 
@@ -120,31 +78,109 @@ Subscribe to an event.
 
 #### Returns
 
-unsubscribe
+`void`
 
-() => `void`
+---
 
-***
+### \_ensureFinalizationRegistry()
 
-### \_unregisterWeakListener()
+> **\_ensureFinalizationRegistry**(): `FinalizationRegistry`\<`EventBusWeakToken`\> \| `null`
 
-> **\_unregisterWeakListener**(`fn`, `event`): `void`
+Lazily build the `FinalizationRegistry` that prunes collected weak
+listeners. Returns `null` when weak mode is off or the runtime has no
+`FinalizationRegistry`, which is the signal to skip registration entirely.
+
+#### Returns
+
+`FinalizationRegistry`\<`EventBusWeakToken`\> \| `null`
+
+---
+
+### \_getBucket()
+
+> **\_getBucket**(`event`): [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
+
+The live bucket for an event, migrating a legacy plain `Set` of listeners
+into a `PowerSubscriberSet` the first time it is read.
+
+Nothing in this module writes a plain `Set`, so the migration branch is not
+reachable from here - but `_listeners` is a public-ish field on a
+long-lived object and the bus is documented as tolerant of a set that was
+replaced externally, so it stays.
+
+#### Parameters
+
+##### event
+
+`string`
+
+#### Returns
+
+[`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
+
+---
+
+### \_registerWeakListener()
+
+> **\_registerWeakListener**(`fn`, `event`): `WeakRef`\<`SubscriberListener`\> \| `null`
+
+Track a weak listener with the bus's `FinalizationRegistry`, so the
+bookkeeping sets can drop it when it is collected.
 
 #### Parameters
 
 ##### fn
 
-`any`
+`SubscriberListener`
 
 ##### event
 
-`any`
+`string`
+
+#### Returns
+
+`WeakRef`\<`SubscriberListener`\> \| `null`
+
+The registered ref, or `null` when
+weak mode is off or registration failed.
+
+---
+
+### \_unregisterWeakListener()
+
+> **\_unregisterWeakListener**(`fn`, `event?`): `void`
+
+Drop a weak listener's bookkeeping. With no `event`, every event it was
+registered against is cleared.
+
+#### Parameters
+
+##### fn
+
+`SubscriberListener`
+
+##### event?
+
+`string`
 
 #### Returns
 
 `void`
 
-***
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [PowerEventBus#dispose](#dispose-1), so `using bus = new PowerEventBus()`
+releases the listeners and the finalization registry at scope exit.
+
+#### Returns
+
+`void`
+
+---
 
 ### cleanup()
 
@@ -157,7 +193,7 @@ Useful in tests or environments where FinalizationRegistry/GC is unavailable.
 
 `void`
 
-***
+---
 
 ### clear()
 
@@ -175,14 +211,35 @@ Clear listeners for an event or all events when called without args.
 
 `void`
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every listener, and reset the `FinalizationRegistry` so the
+registry's retained callbacks become garbage.
+
+Idempotent, and safe to call while the bus is idle. Exists so a bus works
+with `using` / `await using` (see the `Symbol.dispose` alias below)
+and gives callers an explicit name to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### emit()
 
 > **emit**(`event`, `payload?`): `boolean`
 
 Emit an event to all subscribers. Returns true if any listeners were notified.
-Errors thrown by listeners are swallowed.
+
+Errors thrown by listeners are swallowed, and so are rejections from
+listeners that returned a promise — an `async` listener that throws will not
+reach the process. See notifyListener, which is where both are
+observed.
 
 #### Parameters
 
@@ -198,7 +255,7 @@ Errors thrown by listeners are swallowed.
 
 `boolean`
 
-***
+---
 
 ### emitAsync()
 
@@ -221,6 +278,9 @@ Errors thrown or rejected by listeners are swallowed.
 
 ##### options?
 
+`concurrency` caps how many
+listeners are awaited at once (`Infinity`, the default, is unbounded).
+
 ###### concurrency?
 
 `number` = `Infinity`
@@ -229,11 +289,11 @@ Errors thrown or rejected by listeners are swallowed.
 
 `Promise`\<`boolean`\>
 
-***
+---
 
 ### listeners()
 
-> **listeners**(`event`): `Function`[]
+> **listeners**(`event`): `SubscriberListener`[]
 
 Return array of listeners for an event (copy).
 
@@ -245,9 +305,9 @@ Return array of listeners for an event (copy).
 
 #### Returns
 
-`Function`[]
+`SubscriberListener`[]
 
-***
+---
 
 ### off()
 
@@ -269,7 +329,7 @@ Remove a specific listener for an event.
 
 `void`
 
-***
+---
 
 ### on()
 
@@ -301,7 +361,7 @@ unsubscribe
 
 When `fn` is not a function.
 
-***
+---
 
 ### once()
 
@@ -328,3 +388,30 @@ unsubscribe
 #### Throws
 
 When `fn` is not a function.
+
+---
+
+### reset()
+
+> **reset**(`event?`): `void`
+
+Alias for [PowerEventBus#clear](#clear).
+
+`clear()` here empties the container, and "reset" is a natural second word
+for exactly that - so a caller who reaches for `reset()` on this class gets
+the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+would read as the opposite, and the two are deliberately not synonyms.
+
+#### Parameters
+
+##### event?
+
+`string`
+
+Passed through to `clear()`; clears just that
+event's listeners when given, and every listener when omitted.
+
+#### Returns
+
+`void`

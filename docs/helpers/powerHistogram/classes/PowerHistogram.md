@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerHistogram](../README.md) / PowerHistogram
 
@@ -16,23 +16,7 @@
 
 ##### options?
 
-###### bucketCount?
-
-`number`
-
-Number of buckets used internally.
-
-###### maxValue?
-
-`number`
-
-Upper bound for the sketch range.
-
-###### minValue?
-
-`number`
-
-Lower bound for the first non-zero bucket.
+`PowerHistogramOptions` = `{}`
 
 #### Returns
 
@@ -40,59 +24,115 @@ Lower bound for the first non-zero bucket.
 
 ## Properties
 
-### \_boundaries
+### \_alpha
 
-> **\_boundaries**: `Float64Array`\<`ArrayBuffer`\> \| `undefined`
+> **\_alpha**: `number`
 
-***
+---
 
-### \_bucketCount
+### \_belowRangeCount
 
-> **\_bucketCount**: `number`
+> **\_belowRangeCount**: `number`
 
-***
+---
 
 ### \_buckets
 
-> **\_buckets**: `Uint32Array`\<`ArrayBuffer`\>
+> **\_buckets**: `Map`\<`number`, `number`\>
 
-***
+---
 
 ### \_count
 
 > **\_count**: `number`
 
-***
+---
+
+### \_gamma
+
+> **\_gamma**: `number`
+
+---
+
+### \_infCount
+
+> **\_infCount**: `number`
+
+---
+
+### \_legacyBucketCount
+
+> **\_legacyBucketCount**: `number` \| `null`
+
+---
+
+### \_logGamma
+
+> **\_logGamma**: `number`
+
+---
 
 ### \_max
 
 > **\_max**: `number`
 
-***
+---
 
 ### \_maxValue
 
 > **\_maxValue**: `number`
 
-***
+---
 
 ### \_min
 
 > **\_min**: `number`
 
-***
+---
 
 ### \_minValue
 
 > **\_minValue**: `number`
 
-***
+---
+
+### \_outOfRangeCount
+
+> **\_outOfRangeCount**: `number`
+
+---
+
+### \_sortedIndices
+
+> **\_sortedIndices**: `number`[] \| `null`
+
+---
 
 ### \_sum
 
 > **\_sum**: `number`
 
+---
+
+### \_zeroCount
+
+> **\_zeroCount**: `number`
+
 ## Accessors
+
+### belowRangeCount
+
+#### Get Signature
+
+> **get** **belowRangeCount**(): `number`
+
+Number of records below the advisory `minValue`.
+
+##### Returns
+
+`number`
+
+---
 
 ### bucketCount
 
@@ -100,13 +140,15 @@ Lower bound for the first non-zero bucket.
 
 > **get** **bucketCount**(): `number`
 
-Number of histogram buckets.
+Number of _occupied_ buckets. The legacy option of the same name sized a
+dense array; with sparse DDSketch storage this reports what is actually in
+use, which is the useful number.
 
 ##### Returns
 
 `number`
 
-***
+---
 
 ### count
 
@@ -120,7 +162,7 @@ Number of records added.
 
 `number`
 
-***
+---
 
 ### max
 
@@ -134,7 +176,7 @@ Maximum recorded value, or `undefined` when empty.
 
 `number` \| `undefined`
 
-***
+---
 
 ### mean
 
@@ -142,13 +184,20 @@ Maximum recorded value, or `undefined` when empty.
 
 > **get** **mean**(): `number`
 
-Average of recorded values, or `0` when empty.
+Average of the recorded values, or `0` when empty.
+
+Averaged over the records that carry a value, not over `count`. A `+Infinity`
+record is counted and reported in `infCount` but deliberately contributes
+nothing to `sum`, so dividing `sum` by `count` under-reported every
+histogram that saw one: `[10, Infinity]` gave `mean` of 5 for a single
+finite sample. There is no finite mean over a set containing `Infinity`, so
+the finite samples are averaged and the infinities are left to `infCount`.
 
 ##### Returns
 
 `number`
 
-***
+---
 
 ### min
 
@@ -162,7 +211,37 @@ Minimum recorded value, or `undefined` when empty.
 
 `number` \| `undefined`
 
-***
+---
+
+### outOfRangeCount
+
+#### Get Signature
+
+> **get** **outOfRangeCount**(): `number`
+
+Number of records that fell above the advisory `maxValue`. These are
+stored faithfully - this counter exists so a caller can notice a range that
+no longer matches reality instead of silently reading clamped data.
+
+##### Returns
+
+`number`
+
+---
+
+### relativeAccuracy
+
+#### Get Signature
+
+> **get** **relativeAccuracy**(): `number`
+
+Configured relative error bound for quantiles.
+
+##### Returns
+
+`number`
+
+---
 
 ### sum
 
@@ -178,47 +257,32 @@ Sum of all recorded values.
 
 ## Methods
 
-### \_bucketIndex()
+### merge()
 
-> **\_bucketIndex**(`value`): `number`
+> **merge**(`other`): `PowerHistogram`
 
-#### Parameters
+Merge another sketch into this one.
 
-##### value
-
-`any`
-
-#### Returns
-
-`number`
-
-***
-
-### \_buildBoundaries()
-
-> **\_buildBoundaries**(): `void`
-
-#### Returns
-
-`void`
-
-***
-
-### \_estimateBucketValue()
-
-> **\_estimateBucketValue**(`index`): `number`
+DDSketch buckets are exact multiplicative ranges, so the merge is exact
+up to the same relative bound - unlike rank-error sketches (t-digest,
+GK, KLL) which are only one-way mergeable. This is what makes it safe to
+keep a per-worker histogram and fold them into a pool-level one.
 
 #### Parameters
 
-##### index
+##### other
 
-`any`
+`PowerHistogram`
+
+Sketch to absorb. Must use the same
+`relativeAccuracy`; a mismatch is a configuration error because the
+bucket indices are not comparable.
 
 #### Returns
 
-`number`
+`PowerHistogram`
 
-***
+---
 
 ### percentile()
 
@@ -226,13 +290,21 @@ Sum of all recorded values.
 
 Return the estimated value for the requested percentile.
 
+The estimate is guaranteed to be within `relativeAccuracy` of the true
+quantile, for any value range.
+
 #### Parameters
 
 ##### quantile
 
 `number`
 
-Percentile between `0` and `100`, or fraction between `0` and `1`.
+Percentile between `0` and `100`, or fraction
+between `0` and `1`. **The two ranges overlap at `1`, and the fraction
+reading wins** — `percentile(1)` is the 100th percentile, not the 1st.
+Use `0.5` or `50` for p50 and `100` for the maximum. This is documented
+rather than accidental: see `guides/powerHistogram.md`, which calls `1`
+"the one to watch".
 
 #### Returns
 
@@ -240,7 +312,7 @@ Percentile between `0` and `100`, or fraction between `0` and `1`.
 
 Estimated percentile value, or `undefined` when empty.
 
-***
+---
 
 ### record()
 
@@ -254,13 +326,14 @@ Record a numeric value into the histogram.
 
 `number`
 
-Latency or measurement value.
+Latency or measurement value. Must be finite and
+non-negative.
 
 #### Returns
 
 `PowerHistogram`
 
-***
+---
 
 ### reset()
 
@@ -272,14 +345,71 @@ Reset the histogram to an empty state.
 
 `void`
 
-***
+---
 
 ### snapshot()
 
 > **snapshot**(): `number`[]
 
-Return a snapshot copy of bucket counts.
+Return a snapshot copy of bucket counts, ordered from the lowest occupied
+bucket to the highest.
+
+The array spans only the _occupied_ range, so its length is
+`bucketCount`-1 at most; a single leading entry is the zero bucket.
 
 #### Returns
 
 `number`[]
+
+---
+
+### toJSON()
+
+> **toJSON**(): `object`
+
+Serializable representation, suitable for merging elsewhere or shipping to
+a metrics backend.
+
+#### Returns
+
+`object`
+
+##### belowRangeCount
+
+> **belowRangeCount**: `number`
+
+##### buckets
+
+> **buckets**: \[`number`, `number`\][]
+
+##### count
+
+> **count**: `number`
+
+##### infCount
+
+> **infCount**: `number`
+
+##### max
+
+> **max**: `number`
+
+##### min
+
+> **min**: `number`
+
+##### outOfRangeCount
+
+> **outOfRangeCount**: `number`
+
+##### relativeAccuracy
+
+> **relativeAccuracy**: `number`
+
+##### sum
+
+> **sum**: `number`
+
+##### zeroCount
+
+> **zeroCount**: `number`

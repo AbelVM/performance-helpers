@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerQueue](../README.md) / PowerQueue
 
@@ -11,7 +11,7 @@ PowerQueue
 Lightweight resizable ring-buffer queue with O(1) enqueue/dequeue.
 Designed as a small, dependency-free helper for high-throughput queues.
 
- PowerQueue
+PowerQueue
 
 ## Example
 
@@ -34,7 +34,7 @@ Create a PowerQueue.
 
 ##### initialCapacity?
 
-`number` = `16`
+`number` = `POWER_QUEUE_INITIAL_CAPACITY`
 
 Initial capacity (rounded up to power-of-two).
 
@@ -48,31 +48,31 @@ Initial capacity (rounded up to power-of-two).
 
 > **\_buffer**: `any`[]
 
-***
+---
 
 ### \_capacity
 
 > **\_capacity**: `number`
 
-***
+---
 
 ### \_head
 
 > **\_head**: `number`
 
-***
+---
 
 ### \_mask
 
 > **\_mask**: `number`
 
-***
+---
 
 ### \_size
 
 > **\_size**: `number`
 
-***
+---
 
 ### \_tail
 
@@ -92,7 +92,7 @@ Internal buffer capacity (always a power-of-two).
 
 `number`
 
-***
+---
 
 ### isEmpty
 
@@ -106,7 +106,7 @@ Whether the queue is empty.
 
 `boolean`
 
-***
+---
 
 ### length
 
@@ -133,23 +133,21 @@ Allows `for...of` and spread (`[...queue]`) without consuming the queue.
 
 `Iterator`\<`any`, `any`, `any`\>
 
-***
+---
 
 ### clear()
 
 > **clear**(): `void`
 
-Remove all items from the queue.
-
 #### Returns
 
 `void`
 
-***
+---
 
 ### drain()
 
-> **drain**(): `Iterator`\<`any`, `any`, `any`\>
+> **drain**(): `IterableIterator`\<`any`, `any`, `any`\>
 
 Consuming drain iterator: yields items in FIFO order and removes them
 from the queue as they are iterated.
@@ -157,9 +155,9 @@ Useful for streaming/processing and emptying the queue without manual loops.
 
 #### Returns
 
-`Iterator`\<`any`, `any`, `any`\>
+`IterableIterator`\<`any`, `any`, `any`\>
 
-***
+---
 
 ### entries()
 
@@ -172,7 +170,7 @@ index is the zero-based position in the queue (0 is the head).
 
 `Iterator`\<\[`number`, `any`\], `any`, `any`\>
 
-***
+---
 
 ### keys()
 
@@ -184,7 +182,7 @@ Return an iterator of keys (zero-based indexes from the head).
 
 `Iterator`\<`number`, `any`, `any`\>
 
-***
+---
 
 ### peek()
 
@@ -198,7 +196,7 @@ Peek at the head item without removing it.
 
 The head item or `undefined` when empty.
 
-***
+---
 
 ### push()
 
@@ -220,7 +218,7 @@ Item to enqueue.
 
 New queue length after push.
 
-***
+---
 
 ### pushMany()
 
@@ -241,7 +239,25 @@ copy items in contiguous blocks when possible.
 
 New queue length after all pushes.
 
-***
+---
+
+### reset()
+
+> **reset**(): `void`
+
+Alias for [PowerQueue#clear](#clear).
+
+`clear()` here empties the container, and "reset" is a natural second word
+for exactly that - so a caller who reaches for `reset()` on this class gets
+the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+would read as the opposite, and the two are deliberately not synonyms.
+
+#### Returns
+
+`void`
+
+---
 
 ### shift()
 
@@ -255,7 +271,7 @@ Dequeue and return the head item.
 
 The dequeued item or `undefined` when empty.
 
-***
+---
 
 ### toArray()
 
@@ -268,7 +284,7 @@ This is a convenience helper that does not consume the queue.
 
 `any`[]
 
-***
+---
 
 ### unshiftMany()
 
@@ -289,7 +305,7 @@ The first element of `items` will become the next value returned by `shift()`.
 
 New queue length after all unshifts.
 
-***
+---
 
 ### values()
 

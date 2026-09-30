@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerSubscriberSet](../README.md) / PowerSubscriberSet
 
@@ -11,7 +11,7 @@ PowerSubscriberSet
 Shared subscriber set helper used by event buses and observable stores.
 Supports optional weak references, once-listeners, and max listener counts.
 
- PowerSubscriberSet
+PowerSubscriberSet
 
 ## Constructors
 
@@ -23,13 +23,10 @@ Supports optional weak references, once-listeners, and max listener counts.
 
 ##### options?
 
-###### maxListeners?
+`PowerSubscriberSetOptions` = `{}`
 
-`number`
-
-###### weak?
-
-`boolean`
+`weak` stores listeners
+behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
 
 #### Returns
 
@@ -39,27 +36,27 @@ Supports optional weak references, once-listeners, and max listener counts.
 
 ### \_finalization
 
-> **\_finalization**: `any`
+> **\_finalization**: `FinalizationRegistry`\<\{ `ref`: `WeakRef`\<`SubscriberListener`\>; \}\> \| `null`
 
-***
+---
 
 ### \_listeners
 
-> **\_listeners**: `Set`\<`any`\>
+> **\_listeners**: `Set`\<`SubscriberEntry`\>
 
-***
+---
 
 ### \_maxListeners
 
 > **\_maxListeners**: `number`
 
-***
+---
 
 ### \_onceMap
 
-> **\_onceMap**: `WeakMap`\<`object`, `any`\>
+> **\_onceMap**: `WeakMap`\<`SubscriberListener`, `SubscriberListener`\>
 
-***
+---
 
 ### \_weak
 
@@ -91,53 +88,91 @@ Remove dead weak refs from the set.
 
 `void`
 
-***
+---
 
 ### \_deref()
 
-> **\_deref**(`entry`): `any`
+> **\_deref**(`entry`): `SubscriberListener` \| `undefined`
+
+Resolve a stored entry to the live listener, or `undefined` when the weak
+target has been collected.
 
 #### Parameters
 
 ##### entry
 
-`any`
+`SubscriberEntry`
 
 #### Returns
 
-`any`
+`SubscriberListener` \| `undefined`
 
-***
+---
+
+### \_ensureFinalization()
+
+> **\_ensureFinalization**(): `FinalizationRegistry`\<\{ `ref`: `WeakRef`\<`SubscriberListener`\>; \}\> \| `null`
+
+Lazily build the `FinalizationRegistry` that prunes collected weak
+listeners, and return it — or `null` when weak mode is off or the runtime
+has no `FinalizationRegistry`, which is the signal to skip registration.
+
+`clear()` drops the registry (that is the point of BUG-025), so this has to
+be able to build a _new_ one. Skipping the rebuild instead would silently
+downgrade a cleared-and-reused set to GC-agnostic behaviour, where a dead
+weak ref survives until some later `size`/iteration happens to sweep it.
+
+#### Returns
+
+`FinalizationRegistry`\<\{ `ref`: `WeakRef`\<`SubscriberListener`\>; \}\> \| `null`
+
+---
 
 ### \_makeEntry()
 
-> **\_makeEntry**(`fn`): `any`
+> **\_makeEntry**(`fn`): `SubscriberEntry`
+
+Wrap a listener for storage: a `WeakRef` in weak mode, the function itself
+otherwise. Undefined when weak mode is on but the runtime has no `WeakRef`.
 
 #### Parameters
 
 ##### fn
 
-`any`
+`SubscriberListener`
 
 #### Returns
 
-`any`
+`SubscriberEntry`
 
-***
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1), so `using set = new PowerSubscriberSet()`
+releases the listeners at scope exit.
+
+#### Returns
+
+`void`
+
+---
 
 ### \[iterator\]()
 
-> **\[iterator\]**(): `Generator`\<`any`, `void`, `unknown`\>
+> **\[iterator\]**(): `Generator`\<`SubscriberListener`, `void`, `unknown`\>
 
 Iterate live listeners in insertion order.
 
 #### Returns
 
-`Generator`\<`any`, `void`, `unknown`\>
+`Generator`\<`SubscriberListener`, `void`, `unknown`\>
 
 #### Yields
 
-***
+---
 
 ### add()
 
@@ -149,9 +184,9 @@ Add a listener and return an unsubscribe function.
 
 ##### fn
 
-`any`
+`SubscriberListener` \| `WeakRef`\<`SubscriberListener`\>
 
-Listener function or WeakRef when `weak` mode is enabled.
+Listener function, or its WeakRef when `weak` mode is enabled.
 
 #### Returns
 
@@ -159,7 +194,7 @@ Unsubscribe function that removes the listener.
 
 () => `boolean`
 
-***
+---
 
 ### addOnce()
 
@@ -172,7 +207,7 @@ The original listener will be removed after the first invocation.
 
 ##### fn
 
-`Function`
+`SubscriberListener`
 
 Listener function.
 
@@ -182,19 +217,17 @@ Unsubscribe function.
 
 () => `boolean`
 
-***
+---
 
 ### clear()
 
 > **clear**(): `void`
 
-Clear all listeners.
-
 #### Returns
 
 `void`
 
-***
+---
 
 ### delete()
 
@@ -206,7 +239,7 @@ Delete a listener by original function or once-wrapper.
 
 ##### fn
 
-`any`
+`SubscriberListener` \| `WeakRef`\<`SubscriberListener`\>
 
 Original listener function or its WeakRef wrapper.
 
@@ -216,7 +249,24 @@ Original listener function or its WeakRef wrapper.
 
 `true` if a listener was removed, otherwise `false`.
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds: the listener registry is
+emptied and the `FinalizationRegistry` is replaced, so its retained
+callbacks become collectable.
+
+Idempotent, and safe to call while the instance is idle. Exists so the
+instance works with `using` / `await using`.
+
+#### Returns
+
+`void`
+
+---
 
 ### forEach()
 
@@ -236,16 +286,34 @@ Callback invoked for each live listener.
 
 `void`
 
-***
+---
+
+### reset()
+
+> **reset**(): `void`
+
+Alias for [PowerSubscriberSet#clear](#clear).
+
+`clear()` here empties the container, and "reset" is a natural second word
+for exactly that - so a caller who reaches for `reset()` on this class gets
+the obvious thing instead of a `TypeError`. No limiter gets this alias: for
+`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+would read as the opposite, and the two are deliberately not synonyms.
+
+#### Returns
+
+`void`
+
+---
 
 ### values()
 
-> **values**(): `Function`[]
+> **values**(): `SubscriberListener`[]
 
 Return a safe array copy of live listeners.
 
 #### Returns
 
-`Function`[]
+`SubscriberListener`[]
 
 Array of live listener functions.

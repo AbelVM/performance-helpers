@@ -35,7 +35,7 @@
     "url": "git+https://github.com/AbelVM/performance-helpers.git"
   },
   "license": "MIT",
-  "author": "Abel Vázquez Montoro",
+  "author": "Abel V\u00e1zquez Montoro",
   "type": "module",
   "main": "dist/performance-helpers.cjs",
   "module": "src/index.js",
@@ -258,7 +258,8 @@
     "example": "node scripts/run-example.mjs",
     "types:generate": "tsc --project tsconfig.json --emitDeclarationOnly --declaration --allowJs --outDir types --declarationMap false",
     "build:full": "npm run lint:fix && npm run format && npm run types:generate && npm run bench && npm run build && npm run test && npm run docs",
-    "types:drift": "git diff --quiet -- types || { echo 'types/ differs from the index — run `npm run types:generate`:'; git status --porcelain -- types; exit 1; }; U=$(git ls-files --others --exclude-standard -- types); if [ -n \"$U\" ]; then echo 'types/ has declarations that are not tracked — run `npm run types:generate` and add them:'; echo \"$U\"; exit 1; fi",
+    "types:drift": "git diff --quiet -- types || { echo 'types/ differs from the index \u2014 run `npm run types:generate`:'; git status --porcelain -- types; exit 1; }; U=$(git ls-files --others --exclude-standard -- types); if [ -n \"$U\" ]; then echo 'types/ has declarations that are not tracked \u2014 run `npm run types:generate` and add them:'; echo \"$U\"; exit 1; fi",
+    "docs:drift": "npm run docs && (git diff --quiet -- docs || { echo 'docs/ differs from the index \u2014 run `npm run docs`:'; git status --porcelain -- docs; exit 1; }); U=$(git ls-files --others --exclude-standard -- docs); if [ -n \"$U\" ]; then echo \"docs/ has pages that are not tracked \u2014 run `npm run docs` and add them:\"; echo \"$U\"; exit 1; fi",
     "check:bundle": "node scripts/check-bundle-exports.mjs",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.cjs",
     "review:check": "node scripts/review-row.mjs --check",

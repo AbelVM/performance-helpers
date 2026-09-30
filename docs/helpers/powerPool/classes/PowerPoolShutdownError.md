@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerPool](../README.md) / PowerPoolShutdownError
 
@@ -10,7 +10,17 @@ PowerPoolShutdownError
 
 Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
 
- PowerPoolShutdownError
+Carries `code === 'ERR_POOL_TERMINATED'`, the same code the pool uses for the
+synchronous throw from a dispatch method on a shut-down pool. Both mean the
+same thing — the pool is finished, so is the work — and `guides/errors.md`
+tells callers to branch on `err.code`. Without it, a caller awaiting a
+response at shutdown got an error with no code and fell through the
+documented `switch` to `default`, which is the case most likely to be hit:
+shutting down is exactly when pending promises are still outstanding.
+`name` is unchanged, so `err.name === 'PowerPoolShutdownError'` keeps
+working.
+
+PowerPoolShutdownError
 
 ## Extends
 
@@ -38,6 +48,22 @@ Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
 
 ## Properties
 
+### cause?
+
+> `optional` **cause?**: `unknown`
+
+#### Inherited from
+
+`Error.cause`
+
+---
+
+### code
+
+> **code**: `string`
+
+---
+
 ### message
 
 > **message**: `string`
@@ -46,7 +72,7 @@ Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
 
 `Error.message`
 
-***
+---
 
 ### name
 
@@ -56,7 +82,7 @@ Error thrown when the `PowerPool` is shut down and pending tasks are rejected.
 
 `Error.name`
 
-***
+---
 
 ### stack?
 

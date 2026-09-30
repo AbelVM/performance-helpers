@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerLogger](../README.md) / PowerLogger
 
@@ -24,11 +24,12 @@ Initial debug level (0..3)
 
 ##### options?
 
-###### format?
+`PowerLoggerOptions` = `{}`
 
-`"text"` \| `"json"`
-
-Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format, name }).
+The `PowerLoggerOptions` typedef
+already existed and already declared `name`/`formatter`/`output`; the
+constructor was taking a bare `{Object}` instead, which is why reading
+any of them was an error and a custom sink needed a cast.
 
 #### Returns
 
@@ -40,37 +41,62 @@ Output format. When 'json', logger emits JSON.stringify({ level, msg, ts, format
 
 > **\_counters**: `any`
 
-***
+---
 
 ### \_debugLevel
 
 > **\_debugLevel**: `number`
 
-***
+---
 
 ### \_format
 
-> **\_format**: `"text"` \| `"json"`
+> **\_format**: `"json"` \| `"text"`
 
-***
+---
 
 ### \_formatter
 
-> **\_formatter**: `any`
+> **\_formatter**: ((`payload`) => `string` \| `PowerLoggerPayload` \| `null`) \| `null`
 
-***
+---
 
 ### \_output
 
-> **\_output**: `any`
+> **\_output**: ((`payload`) => `void`) \| `null`
 
-***
+---
 
 ### name
 
-> **name**: `any`
+> **name**: `string` \| `null`
 
 ## Methods
+
+### \_emitSinkError()
+
+> **\_emitSinkError**(`err`): `void`
+
+Report a failure raised by a user-supplied log sink.
+
+A sink that throws must not be able to take the logger - and therefore the
+pool, cache or circuit that owns it - down with it, but the failure still
+has to be visible somewhere. Escalate to `console.error` once, guarded, and
+give up if that fails too.
+
+#### Parameters
+
+##### err
+
+`any`
+
+The value thrown by the sink.
+
+#### Returns
+
+`void`
+
+---
 
 ### debug()
 
@@ -90,7 +116,7 @@ Supports JSON mode similar to other methods.
 
 `void`
 
-***
+---
 
 ### error()
 
@@ -98,6 +124,9 @@ Supports JSON mode similar to other methods.
 
 Log an error-level message when debug level is >= 1.
 Accepts values or functions (lazy evaluated).
+
+Errors are formatted on the way through rather than left to the transport,
+so a sink always receives a readable message instead of an `Error` object.
 
 #### Parameters
 
@@ -109,7 +138,7 @@ Accepts values or functions (lazy evaluated).
 
 `void`
 
-***
+---
 
 ### getDebugCounters()
 
@@ -121,7 +150,7 @@ Read counters as a plain object snapshot.
 
 `Record`\<`string`, `number`\>
 
-***
+---
 
 ### getDebugLevel()
 
@@ -135,7 +164,7 @@ Get the current debug level.
 
 The configured debug level (0..3)
 
-***
+---
 
 ### incrementCounter()
 
@@ -154,7 +183,7 @@ Useful for lightweight instrumentation in tests.
 
 `void`
 
-***
+---
 
 ### info()
 
@@ -172,7 +201,7 @@ Log an info-level message when debug level is >= 3.
 
 `void`
 
-***
+---
 
 ### isDebug()
 
@@ -184,7 +213,7 @@ Convenience: whether any debugging is enabled (level > 0).
 
 `boolean`
 
-***
+---
 
 ### isDebugLevel()
 
@@ -202,7 +231,7 @@ Determine whether the current debug level is >= `level`.
 
 `boolean`
 
-***
+---
 
 ### log()
 
@@ -220,7 +249,7 @@ Log a verbose message when debug level is >= 3.
 
 `void`
 
-***
+---
 
 ### resetDebugCounters()
 
@@ -232,13 +261,17 @@ Reset all internal counters (test helper).
 
 `void`
 
-***
+---
 
 ### setDebugLevel()
 
 > **setDebugLevel**(`level`): `void`
 
 Set the global debug level.
+
+Coerced with `Number()` and clamped to 0..3; anything that does not coerce
+to a finite non-negative number leaves the level at 0. See
+coerceDebugLevel for what the coercion accepts.
 
 #### Parameters
 
@@ -252,7 +285,7 @@ Integer in range 0..3
 
 `void`
 
-***
+---
 
 ### table()
 
@@ -271,7 +304,7 @@ In JSON mode emits `{ level: 'table', msg: args, ts }` where `msg` is an array o
 
 `void`
 
-***
+---
 
 ### warn()
 

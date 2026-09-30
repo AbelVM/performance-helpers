@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerMemoizer
 
@@ -20,7 +20,7 @@ const pm = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
 // call the memoized function via the convenience alias
 await pm.run(1)
 
- PowerMemoizer
+PowerMemoizer
 
 ## Constructors
 
@@ -40,33 +40,7 @@ Optional function to memoize immediately.
 
 ##### options?
 
-###### cacheOptions?
-
-`Object`
-
-Options forwarded to the underlying `PowerCache` constructor. Supported keys: `maxEntries` (number), `maxWeight` (number), `weightFn` (function(value):number), `defaultTTL` (number, ms), `maxPoolSize` (number), `rejectOversized` (boolean), `onEvict` (function(key, value, reason)), `onExpire` (function(key, value)), `initialPoolSize` (number), `maxCleanupPerTick` (number). See `PowerCache` constructor JSDoc for details.
-
-###### keyResolver?
-
-(`arg0`) => `string`
-
-Function that maps the wrapped call args to a cache key. Defaults to `JSON.stringify` on args.
-  Note: `JSON.stringify(args)` is convenient but can be expensive for large or deeply-nested
-  arguments. If the wrapped function is on a hot path, provide a custom `keyResolver`
-  that cheaply and deterministically maps arguments to keys (for example, join simple
-  scalar args with a separator or use a fast hashing function).
-
-###### ttl?
-
-`number`
-
-Default TTL (ms) used when constructing the memoized wrapper for `fn`.
-
-###### weight?
-
-`number`
-
-Default weight used when constructing the memoized wrapper for `fn`.
+`PowerMemoizerOptions` = `{}`
 
 #### Returns
 
@@ -78,31 +52,43 @@ Default weight used when constructing the memoized wrapper for `fn`.
 
 > **\_defaultMemoizeOptions**: `object`
 
-***
+---
 
 ### \_fnWrapper
 
-> **\_fnWrapper**: `Function` \| `undefined`
+> **\_fnWrapper**: `MemoizedFunction`\<`Function`\> \| `undefined`
 
-***
+---
 
 ### \_inflight
 
 > **\_inflight**: `Map`\<`any`, `any`\>
 
-***
+---
+
+### \_nextReceiverId
+
+> **\_nextReceiverId**: `number`
+
+---
 
 ### \_originalFn
 
 > **\_originalFn**: `Function` \| `null`
 
-***
+---
+
+### \_receiverIds
+
+> **\_receiverIds**: `WeakMap`\<`WeakKey`, `any`\>
+
+---
 
 ### cache
 
 > **cache**: [`PowerCache`](PowerCache.md)
 
-***
+---
 
 ### keyResolver
 
@@ -118,7 +104,7 @@ Default weight used when constructing the memoized wrapper for `fn`.
 
 `string`
 
-***
+---
 
 ### run
 
@@ -136,6 +122,23 @@ Default weight used when constructing the memoized wrapper for `fn`.
 
 ## Methods
 
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Release the underlying cache.
+
+`PowerMemoizer` owns no state of its own - it delegates to a `PowerCache`
+
+- so disposal forwards to it. The inner cache is not replaced, so a
+  disposed memoizer's `cache` reference stays readable.
+
+#### Returns
+
+`void`
+
+---
+
 ### clear()
 
 > **clear**(): `void`
@@ -146,7 +149,7 @@ Clear all cached entries and any inflight markers.
 
 `void`
 
-***
+---
 
 ### delete()
 
@@ -165,7 +168,20 @@ Also clears any inflight Promise for the key.
 
 `boolean`
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Named alias for the `Symbol.dispose` implementation, so callers who do not
+want to reach for the symbol still have something to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### get()
 
@@ -183,7 +199,7 @@ Retrieve a cached value for the given call args (if present).
 
 `any`
 
-***
+---
 
 ### has()
 
@@ -201,21 +217,27 @@ Check presence for the given call args.
 
 `boolean`
 
-***
+---
 
 ### memoize()
 
-> **memoize**(`fn`, `options?`): `Function`
+> **memoize**\<`F`\>(`fn`, `options?`): `MemoizedFunction`\<`F`\>
 
 Public API to memoize an arbitrary function using this PowerMemoizer instance's cache.
 Mirrors the behavior used by the constructor when a function is supplied —
 returns a callable memoized function with helpers attached (`get`, `has`, `delete`, `clear`, `stats`, `cache`).
 
+#### Type Parameters
+
+##### F
+
+`F` _extends_ `Function`
+
 #### Parameters
 
 ##### fn
 
-`Function`
+`F`
 
 Function to memoize
 
@@ -227,11 +249,13 @@ Optional per-wrapper options { ttl, weight }
 
 #### Returns
 
-`Function`
+`MemoizedFunction`\<`F`\>
 
-Memoized function
+The memoized
+wrapper, callable like `fn` and
+carrying `get`/`has`/`delete`/`clear`/`stats`/`cache`/`original`.
 
-***
+---
 
 ### stats()
 

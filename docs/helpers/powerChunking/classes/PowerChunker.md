@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerChunking](../README.md) / PowerChunker
 
@@ -15,6 +15,7 @@ The constructor returns the created `PowerPool` instance so callers can
 interact with it (listen `onmessage`, call `drain()`, `terminate()`, etc.).
 
 Usage:
+
 ```js
 const pool = new PowerChunker(iterable, fn, options);
 pool.onmessage = (e) => { // handle per-chunk results };
@@ -22,6 +23,7 @@ await pool.drain();
 ```
 
 Notes:
+
 - This helper creates lightweight inline worker-like instances that execute
   `fn(item, index, chunk)` on each chunk element asynchronously (via
   setTimeout) so tests and environments without real Worker support still work.
@@ -67,7 +69,7 @@ Explicit chunk size to use. When omitted a heuristic is used.
 **options.fnComplexity**
 
 Hint about `fn` complexity to bias chunking.
- PowerChunker
+PowerChunker
 
 ## Constructors
 
@@ -79,13 +81,19 @@ Hint about `fn` complexity to bias chunking.
 
 ##### iterable
 
-`any`
+`Iterable`\<`any`, `any`, `any`\>
+
+Items to process, chunked.
 
 ##### fn
 
-`any`
+`Function`
+
+Called once per chunk.
 
 ##### options?
+
+`PowerChunkingOptions` = `{}`
 
 #### Returns
 

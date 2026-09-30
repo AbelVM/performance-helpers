@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerCache
 
@@ -11,11 +11,7 @@ PowerCache
 In-memory cache with weight-aware eviction, TTLs and optional cleanup.
 Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
 
- PowerCache
-
-## Indexable
-
-> \[`key`: `number`\]: () => `void`
+PowerCache
 
 ## Constructors
 
@@ -25,75 +21,19 @@ Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
 
 Create a PowerCache.
 
+The options type is the `PowerCacheOptions` typedef, not a second inline
+list. The two had drifted: `defaultAsyncTimeout`, `onError` and `policy`
+were destructured here and documented in the typedef, but absent from a
+duplicated `@param` list on this constructor - so TypeScript synthesised an
+options type without them, the body failed to type-check against its own
+signature, and the three options were missing from the published
+declarations. One source of truth, not two that have to be kept in step.
+
 #### Parameters
 
 ##### options?
 
-###### defaultTTL?
-
-`number`
-
-Default TTL (ms) for entries.
-
-###### eagerCleanupOnRead?
-
-`boolean`
-
-If true, `peek()` and `has()` will eagerly remove expired nodes when observed.
-
-###### initialPoolSize?
-
-`number`
-
-Prefill the internal node pool with this many nodes (capped by `maxPoolSize`).
-
-###### maxCleanupPerTick?
-
-`number`
-
-Default max nodes scanned per cleanup tick when running `startCleanup()`.
-
-###### maxEntries?
-
-`number`
-
-Maximum number of entries.
-
-###### maxPoolSize?
-
-`number`
-
-Maximum node pool size for reuse.
-
-###### maxWeight?
-
-`number`
-
-Maximum total weight across entries.
-
-###### onEvict?
-
-(`arg0`, `arg1`, `arg2`) => `void`
-
-Callback invoked when an item is evicted/deleted/rejected. Called as `(key, value, reason)` where reason is `'evicted'|'deleted'|'rejected-oversized'`.
-
-###### onExpire?
-
-(`arg0`, `arg1`) => `void`
-
-Callback invoked when an item expires. Called as `(key, value)`.
-
-###### rejectOversized?
-
-`boolean`
-
-If true, inserting an item whose weight > `maxWeight` will be rejected.
-
-###### weightFn?
-
-(`arg0`) => `number`
-
-Function to compute weight for a value.
+`PowerCacheOptions`
 
 ##### args?
 
@@ -113,201 +53,249 @@ When a non-object is provided as the options argument.
 
 > **\_cleanupCursor**: `any`
 
-***
+---
 
 ### \_cleanupCursorValid
 
 > **\_cleanupCursorValid**: `boolean`
 
-***
+---
 
 ### \_cleanupParams
 
 > **\_cleanupParams**: \{ `interval`: `number`; `maxCleanupPerTick`: `number`; \} \| `null`
 
-***
+---
 
 ### \_cleanupRunning
 
 > **\_cleanupRunning**: `boolean`
 
-***
+---
 
 ### \_cleanupTimer
 
-> **\_cleanupTimer**: `number` \| `null`
+> **\_cleanupTimer**: `any`
 
-***
+---
 
 ### \_currentWeight
 
 > **\_currentWeight**: `number`
 
-***
+---
 
 ### \_defaultAsyncTimeout
 
 > **\_defaultAsyncTimeout**: `number`
 
-***
+---
 
 ### \_evictionCandidate
 
 > **\_evictionCandidate**: `any`
 
-***
+---
 
 ### \_evictions
 
 > **\_evictions**: `number`
 
-***
+---
 
 ### \_expirations
 
 > **\_expirations**: `number`
 
-***
+---
 
 ### \_head
 
-> **\_head**: [`CacheNode`](../../jsdoc-types/interfaces/CacheNode.md) \| `null`
+> **\_head**: `CacheNode` \| `null`
 
-***
+---
 
 ### \_hits
 
 > **\_hits**: `number`
 
-***
+---
 
 ### \_inflightPromises
 
 > **\_inflightPromises**: `Map`\<`any`, `any`\>
 
-***
+---
 
 ### \_map
 
 > **\_map**: `Map`\<`any`, `any`\>
 
-***
+---
+
+### \_metrics
+
+> **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
+
+---
 
 ### \_misses
 
 > **\_misses**: `number`
 
-***
+---
+
+### \_now
+
+> **\_now**: () => `number`
+
+Get a high-resolution timestamp in milliseconds since the epoch.
+
+This function prefers `performance.timeOrigin + performance.now()` when
+available and reasonably close to `Date.now()` to provide higher
+resolution timestamps. On Node.js it uses `process.hrtime.bigint()` with an
+epoch offset when available. Falls back to `Date.now()` if nothing
+better is available or when offsets appear to diverge (e.g. in some
+test harnesses).
+
+#### Returns
+
+`number`
+
+Milliseconds since epoch (floating point for higher resolution).
+
+---
+
+### \_policy
+
+> **\_policy**: `string`
+
+Eviction policy. `'lru'` (default) keeps the previous single-recency-list
+behaviour. `'slru'` splits the list into a probation segment and a
+protected segment and promotes on access, which makes the cache far more
+resistant to a one-off sequential scan evicting the working set.
+
+---
 
 ### \_pool
 
-> **\_pool**: `object`[]
+> **\_pool**: `CacheNode`[]
 
-#### expiresAt
+Recycled nodes, kept to avoid allocating one per insert.
 
-> **expiresAt**: `number` = `0`
+Annotated because an empty `[]` takes its element type from whatever is
+first pushed into it, and the prefill literal below is a _narrower_ type
+than `CacheNode` — which then made every other push into this pool a type
+error. The annotation is the fix; the two prefill fields are the rest of
+it.
 
-#### key
+---
 
-> **key**: `null` = `null`
+### \_probationEnd
 
-#### next
+> **\_probationEnd**: `CacheNode` \| `null`
 
-> **next**: `null` = `null`
+MRU end of the probation segment. With `policy: 'slru'` the list is
+ordered:
 
-#### prev
+head (probation LRU) ... _probationEnd (probation MRU)
+-> protected LRU ... tail (protected MRU)
 
-> **prev**: `null` = `null`
+New entries are spliced in at the probation/protected boundary and a hit
+promotes a node to the tail. `null` when the list is empty.
 
-#### value
-
-> **value**: `null` = `null`
-
-#### weight
-
-> **weight**: `number` = `0`
-
-***
+---
 
 ### \_rejected
 
 > **\_rejected**: `number`
 
-***
+---
+
+### \_rejectedAdmission
+
+> **\_rejectedAdmission**: `number`
+
+---
 
 ### \_tail
 
-> **\_tail**: [`CacheNode`](../../jsdoc-types/interfaces/CacheNode.md) \| `null`
+> **\_tail**: `any`
 
-***
+---
+
+### \_weightErrors
+
+> **\_weightErrors**: `number`
+
+number of times `weightFn` threw; a non-zero value means `maxWeight`
+could not be enforced and should be surfaced by the caller.
+
+---
 
 ### defaultTTL
 
 > **defaultTTL**: `number`
 
-***
+---
 
 ### eagerCleanupOnRead
 
 > **eagerCleanupOnRead**: `boolean`
 
-***
+---
 
 ### maxCleanupPerTick
 
 > **maxCleanupPerTick**: `number`
 
-***
+---
 
 ### maxEntries
 
 > **maxEntries**: `number`
 
-***
+---
 
 ### maxPoolSize
 
 > **maxPoolSize**: `number`
 
-***
+---
 
 ### maxWeight
 
 > **maxWeight**: `number`
 
-***
+---
+
+### onError
+
+> **onError**: ((`arg0`, `arg1`) => `void`) \| `null`
+
+---
 
 ### onEvict
 
 > **onEvict**: ((`arg0`, `arg1`, `arg2`) => `void`) \| `null`
 
-***
+---
 
 ### onExpire
 
 > **onExpire**: ((`arg0`, `arg1`) => `void`) \| `null`
 
-***
+---
 
 ### rejectOversized
 
 > **rejectOversized**: `boolean`
 
-***
+---
 
 ### weightFn
 
-> **weightFn**: (`arg0`) => `number`
-
-#### Parameters
-
-##### arg0
-
-`any`
-
-#### Returns
-
-`number`
+> **weightFn**: ((`arg0`) => `number`) \| `null`
 
 ## Accessors
 
@@ -323,7 +311,7 @@ Hit rate as a fraction (hits / (hits + misses)).
 
 `number`
 
-***
+---
 
 ### size
 
@@ -339,6 +327,30 @@ Current number of entries in cache.
 
 ## Methods
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+Asynchronous disposal hook. Provided for symmetry with `using`/`await using`.
+Cache cleanup is synchronous so this simply performs the same actions and
+returns a resolved Promise for await compatibility.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+---
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+#### Returns
+
+`void`
+
+---
+
 ### \[iterator\]()
 
 > **\[iterator\]**(): `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
@@ -347,7 +359,7 @@ Current number of entries in cache.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
-***
+---
 
 ### cleanupExpired()
 
@@ -359,7 +371,7 @@ Remove expired entries by scanning from least-recently used to most.
 
 `void`
 
-***
+---
 
 ### cleanupExpiredUpTo()
 
@@ -384,7 +396,7 @@ Maximum nodes to scan in this pass.
 
 Number of nodes scanned
 
-***
+---
 
 ### clear()
 
@@ -396,7 +408,7 @@ Clear the cache and return nodes to the pool.
 
 `void`
 
-***
+---
 
 ### delete()
 
@@ -416,7 +428,20 @@ Delete an entry from the cache.
 
 true if the key was removed.
 
-***
+---
+
+### dispose()
+
+> **dispose**(): `void`
+
+Named alias for the `Symbol.dispose` implementation, so callers who do not
+want to reach for the symbol still have something to call.
+
+#### Returns
+
+`void`
+
+---
 
 ### entries()
 
@@ -434,7 +459,7 @@ Iterate entries in LRU or MRU order.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
-***
+---
 
 ### get()
 
@@ -454,11 +479,11 @@ Retrieve a value and mark it as recently used.
 
 The stored value or `undefined` if missing/expired.
 
-***
+---
 
 ### getMany()
 
-> **getMany**(`keys`, `options?`): `Map`\<`any`, `any`\>
+> **getMany**(`keys`, `options?`): `Map`\<`string`, `any`\>
 
 Bulk get multiple keys. Returns a Map of found entries.
 
@@ -476,9 +501,11 @@ Bulk get multiple keys. Returns a Map of found entries.
 
 #### Returns
 
-`Map`\<`any`, `any`\>
+`Map`\<`string`, `any`\>
 
-***
+One entry per resolved key, in input order.
+
+---
 
 ### getOrSet()
 
@@ -527,7 +554,7 @@ If true, return an expired value immediately and refresh the cache in the backgr
 
 `any`
 
-***
+---
 
 ### getOrSetAsync()
 
@@ -557,6 +584,12 @@ Function returning a Promise or value.
 
 If true, return an expired value immediately and refresh the cache in the background.
 
+###### timeout?
+
+`number` = `undefined`
+
+Per-call override of the cache's `defaultAsyncTimeout`, in ms.
+
 ###### ttl?
 
 `number` = `undefined`
@@ -569,7 +602,7 @@ If true, return an expired value immediately and refresh the cache in the backgr
 
 `Promise`\<`any`\>
 
-***
+---
 
 ### has()
 
@@ -595,7 +628,7 @@ If true, consider expired entries as present.
 
 `boolean`
 
-***
+---
 
 ### hasEqual()
 
@@ -605,6 +638,7 @@ Check membership without affecting recency and verify the stored value is deep-e
 to the provided `value`.
 
 Optimizations:
+
 - Fast reference equality short-circuit
 - Fast primitive checks
 - Special-cases for Arrays, TypedArrays/ArrayBuffer, Date, RegExp, Map and Set
@@ -624,54 +658,15 @@ Optimizations:
 
 ###### ignoreExpiry?
 
-`boolean` = `false`
+`boolean`
 
 If true, consider expired entries as present.
 
-###### seen?
-
-`WeakMap`\<`any`, `any`\> = `undefined`
-
-Optional reusable `seen` WeakMap for callers that
-       perform many deep-equality checks and want to avoid per-call allocations.
-
 #### Returns
 
 `boolean`
 
-***
-
-### hasEqualWithSeen()
-
-> **hasEqualWithSeen**(`key`, `value`, `seen`, `options?`): `boolean`
-
-Variant accepting an explicit `seen` WeakMap for reuse across many checks.
-
-#### Parameters
-
-##### key
-
-`any`
-
-##### value
-
-`any`
-
-##### seen
-
-`WeakMap`\<`any`, `any`\>
-
-##### options?
-
-###### ignoreExpiry?
-
-`boolean` = `false`
-
-#### Returns
-
-`boolean`
-
-***
+---
 
 ### keys()
 
@@ -689,7 +684,7 @@ Iterate keys in LRU or MRU order.
 
 `Generator`\<`any`, `void`, `unknown`\>
 
-***
+---
 
 ### peek()
 
@@ -708,7 +703,7 @@ Returns `undefined` for missing or expired entries.
 
 `any`
 
-***
+---
 
 ### resize()
 
@@ -732,7 +727,7 @@ Resize the cache limits and evict if necessary.
 
 `void`
 
-***
+---
 
 ### set()
 
@@ -777,7 +772,7 @@ Optional explicit weight for the entry. If omitted, `weightFn` is used.
 
 `this` on success, or `false` when insertion was rejected due to oversize.
 
-***
+---
 
 ### setMany()
 
@@ -785,6 +780,18 @@ Optional explicit weight for the entry. If omitted, `weightFn` is used.
 
 Bulk set multiple entries. Accepts an iterable/array of [key, value] pairs.
 Computes weight once per value and applies a single eviction pass at the end.
+
+The per-entry decisions are `set`'s, not a second set of them: oversize
+rejection, the TinyLFU sketch and the admission window are all applied here.
+`setMany` used to insert through a simplified path that did none of the
+three, so a bulk load was invisible to admission and a rejected value came
+back out of the bulk eviction pass wearing the wrong `onEvict` reason.
+
+**It still returns `this`, not `false`, when a value is rejected** — that is
+its documented contract for chaining, and changing it would be a breaking API
+change for a batch of a thousand entries. The signal is `onEvict` with
+`'rejected-oversized'`, and `stats().rejected` afterwards. `set` returns
+`false` because it can.
 
 #### Parameters
 
@@ -806,7 +813,7 @@ Computes weight once per value and applies a single eviction pass at the end.
 
 `PowerCache`
 
-***
+---
 
 ### startCleanup()
 
@@ -825,17 +832,16 @@ to ensure the internal timer is cleared and resources can be reclaimed.
 
 `number` \| `Object`
 
-`number`
-
-***
-
-`Object`
+Cleanup interval in ms, or an
+options object `{ interval, maxCleanupPerTick }`. The nested tags were
+removed because a qualified `@param` is only valid when the parent is a
+bare `{Object}`; against `number|Object` it is rejected with TS8032.
 
 #### Returns
 
 `void`
 
-***
+---
 
 ### stats()
 
@@ -875,7 +881,7 @@ Return runtime statistics for the cache.
 
 > **weight**: `number`
 
-***
+---
 
 ### stopCleanup()
 
@@ -887,7 +893,7 @@ Stop periodic cleanup.
 
 `void`
 
-***
+---
 
 ### touch()
 
@@ -914,7 +920,7 @@ Optional per-call TTL in ms. Use `null`/`Infinity` to disable expiry.
 
 True if the entry existed (and was not expired), false otherwise.
 
-***
+---
 
 ### values()
 

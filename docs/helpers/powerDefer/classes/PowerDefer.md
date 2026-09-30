@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
-***
+---
 
 [performance-helpers](../../../README.md) / [helpers/powerDefer](../README.md) / PowerDefer
 
@@ -11,7 +11,7 @@ PowerDefer
 Deferred promise utility exposing `promise`, `resolve` and `reject` helpers.
 Useful when needing a promise whose resolution is controlled externally.
 
- PowerDefer
+PowerDefer
 
 ## Constructors
 
@@ -29,13 +29,13 @@ Useful when needing a promise whose resolution is controlled externally.
 
 > **\_settled**: `boolean`
 
-***
+---
 
 ### \_status
 
-> **\_status**: `string`
+> **\_status**: `"pending"` \| `"fulfilled"` \| `"rejected"`
 
-***
+---
 
 ### promise
 
@@ -55,7 +55,7 @@ Convenience boolean: true if resolved successfully
 
 `boolean`
 
-***
+---
 
 ### rejected
 
@@ -69,7 +69,7 @@ Convenience boolean: true if rejected
 
 `boolean`
 
-***
+---
 
 ### settled
 
@@ -83,7 +83,7 @@ Whether the deferred has been settled.
 
 `boolean`
 
-***
+---
 
 ### status
 
@@ -115,17 +115,22 @@ Reject the deferred promise. No-op if already settled.
 
 `void`
 
-***
+---
 
 ### resolve()
 
-> **resolve**(`value`): `void`
+> **resolve**(`value?`): `void`
 
 Resolve the deferred promise. No-op if already settled.
 
+`value` is optional because the common case is a signal rather than a
+payload: `PowerLatch` resolves each waiter's deferred with no argument to
+fulfil a `Promise<void>`, and requiring `resolve(undefined)` at every such
+call site would be noise.
+
 #### Parameters
 
-##### value
+##### value?
 
 `any`
 
