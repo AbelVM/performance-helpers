@@ -83,7 +83,8 @@ What this does **not** do is know your socket's high-water mark. For a `WebSocke
 
 - `subscribe(topic, handler, options)` → `unsubscribe()`. Options: `maxQueue` (default 64), `slowConsumer`, `maxBatch` (default 32), `id`, `transport`.
 - `publish(topic, message, { retain })` → number of subscribers queued for. `retain: true` keeps the message for later subscribers, in a log bounded to 32 per topic.
-- `flush()` → `Promise<void>`, drains every subscriber immediately, bypassing batching.
+- `flush()` → `Promise<void>`, drains every subscriber immediately, bypassing batching. Resolves once every subscriber's queue has reached the transport — including a subscriber that already had a send in flight, which is **waited for** rather than skipped.
+- **One frame at a time per subscriber.** A second frame is not handed to the transport while the previous one is still outstanding, so frames for one subscription reach it in the order they were published. Work that arrives meanwhile waits for the outstanding send and is then drained; it is never dropped and never reordered.
 - `unsubscribe(id)` → `boolean`.
 - `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, list }`, where `list` has per-subscriber `queued` / `dropped` / `inFlight`.
 - `close()` / `[Symbol.dispose]()` — detaches everything and calls your `close` adapter with a reason (`'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`).

@@ -398,15 +398,18 @@ describe('TEST-003: per-subscriber inFlight', () => {
     // version read `inFlight` straight after it and got 1, not 0, which is the
     // counter being live rather than a bug.
     expect(seen, 'the send adapter was never called').not.toBeNull();
-    expect(max).toBeGreaterThanOrEqual(1);
+    // **Now exactly 1, and the assertion was tightened to match.** This was
+    // written as a characterisation with the target named —
+    // `toBeGreaterThanOrEqual(1)`, which accepts any value and is decoration by
+    // this repository's own rule. It measured 2 or more before RT-007 landed and
+    // reads 1 now, so it is a real assertion: the value is the one the row asked
+    // for, and a regression to overlapping sends fails it here.
+    expect(max).toBe(1);
 
     // Once the transport settles, it comes back to zero. That the counter both
     // rises and falls is what makes `max` meaningful rather than a constant.
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(seen.inFlight).toBe(0);
     hub.dispose();
-    // RT-007 wants `max` to read 1. Recorded as measured, with the target named:
-    // gating the drain on `inFlight` makes this read 1, and the flip is the whole
-    // point of pinning it.
   });
 });

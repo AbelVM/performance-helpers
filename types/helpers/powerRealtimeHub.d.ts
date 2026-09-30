@@ -133,6 +133,18 @@ export class PowerRealtimeHub {
      */
     private _flushAll;
     /**
+     * Deliver everything queued for one subscriber, waiting out any send already
+     * in flight, so the frames reach the transport one at a time and in order.
+     *
+     * Each turn either empties the queue or advances an outstanding send, and the
+     * queue is bounded by `maxQueue`, so this terminates.
+     *
+     * @param {HubSubscriber} sub
+     * @returns {Promise<void>}
+     * @private
+     */
+    private _drainSubscriberFully;
+    /**
      * Build one frame from a subscriber's queue and hand it to the transport.
      * @private
      * @param {HubSubscriber} sub
@@ -210,6 +222,13 @@ export type HubSubscriber = {
      * - Sends currently awaiting the transport.
      */
     inFlight: number;
+    /**
+     * - The promise for the send
+     * currently in flight, **including any follow-up flush it chained**, so
+     * `flush()` can wait for a subscriber's queue to actually empty rather than
+     * for one frame.
+     */
+    _inflightChain?: Promise<void> | null | undefined;
     maxQueue: number;
     maxBatch: number;
     slowConsumer: SlowConsumerPolicy;

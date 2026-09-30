@@ -3449,3 +3449,55 @@ the guide described**, fails 2 of 6. The wrong documentation was itself pinned b
 these tests before this commit.
 
 Closes CACHE-008.
+
+#### A hub could send two frames to one subscriber at once
+
+`PowerRealtimeHub`'s `_drain` and `_flushAll` iterated every subscriber and sent
+whenever the queue was non-empty, **without consulting `sub.inFlight`**. A
+subscriber with a send still awaiting the transport therefore received a _second_
+frame, and the two could reach it in either order — while `stats().list` reported
+an `inFlight` number that gated nothing.
+
+Measured before, with a transport that settles on a timer:
+
+```
+max inFlight: 2+      send trace: start start …
+max inFlight: 1       send trace: start end start end …
+```
+
+The two drain paths needed **different** fixes, and that is the substance:
+
+- `_drain` can skip a busy subscriber outright, because `_flushSubscriber`'s own
+  completion already re-drains when work arrived meanwhile.
+- `_flushAll` **cannot**. `flush()` promises "resolves once all subscribers have
+  been drained", and the guide says `batch: false` is for "transports that cannot
+  take several frames at once" — so skipping a busy subscriber would resolve with
+  that subscriber's queue undelivered, precisely the case the option exists to
+  serve. So `flush()` now _waits the outstanding send out_ instead.
+
+That required the in-flight chain to be **returned** from the completion rather
+than fired and forgotten, so a single await covers the send _and_ the follow-up
+flush that send chained.
+
+`test/powerRealtimeHub.inFlight.test.js`, 8 tests. Worth recording: **the first
+version of that file proved nothing and mutation said so** — all three mutations
+survived. Every test used `batch: false`, where automatic flushing is disabled and
+the caller drives everything through `flush()`, so `_drain` — one of the two paths
+the row names — was never executed, and deleting its gate entirely left 6 of 6
+green. Two arrangement errors followed, each found by a mutation rather than by
+reading: the flag was inverted (`batch: !auto` turned batching _on_ for the tests
+that meant it off, because `this._batch = batch !== false`), and publishing five
+messages in one turn schedules only **one** drain, so nothing was ever in flight
+when the gate was consulted. The tests now publish, let the drain run, and publish
+again.
+
+The TEST-003 characterisation written for this row as instrumentation was
+**tightened from `toBeGreaterThanOrEqual(1)` to `toBe(1)`** — it is now the
+assertion.
+
+One mutation is not caught and is left recorded: reverting the chain to
+fire-and-forget passes, because the drain loop's own `inFlight` check tolerates a
+stale chain. The only difference is a busy-wait rather than a proper await, which no
+public assertion can distinguish.
+
+Closes RT-007.

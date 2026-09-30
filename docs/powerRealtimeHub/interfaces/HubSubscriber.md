@@ -8,6 +8,17 @@
 
 ## Properties
 
+### \_inflightChain?
+
+> `optional` **\_inflightChain?**: `Promise`\<`void`\> \| `null`
+
+The promise for the send
+currently in flight, **including any follow-up flush it chained**, so
+`flush()` can wait for a subscriber's queue to actually empty rather than
+for one frame.
+
+---
+
 ### bytesQueued
 
 > **bytesQueued**: `number`

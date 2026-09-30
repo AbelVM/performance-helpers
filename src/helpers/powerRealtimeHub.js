@@ -68,6 +68,10 @@ import { assertLimitRequired } from '../utils/options.js';
  * @property {number} dropped - Messages discarded by the slow-consumer policy.
  * @property {number} bytesQueued - Approximate bytes currently buffered.
  * @property {number} inFlight - Sends currently awaiting the transport.
+ * @property {Promise<void>|null} [_inflightChain] - The promise for the send
+ *   currently in flight, **including any follow-up flush it chained**, so
+ *   `flush()` can wait for a subscriber's queue to actually empty rather than
+ *   for one frame.
  * @property {number} maxQueue
  * @property {number} maxBatch
  * @property {SlowConsumerPolicy} slowConsumer
@@ -258,6 +262,8 @@ export class PowerRealtimeHub {
       maxBatch: Math.floor(Number(maxBatch)),
       queue: [],
       inFlight: 0,
+      /** @type {?Promise<void>} */
+      _inflightChain: null,
       bytesQueued: 0,
       dropped: 0,
       closed: false,
@@ -489,6 +495,13 @@ export class PowerRealtimeHub {
   _drain() {
     for (const sub of Array.from(this._subs.values())) {
       if (sub.closed || sub.queue.length === 0) continue;
+      // One frame in flight per subscriber. Without this a second drain started
+      // a second send while the first was still awaiting the transport, so two
+      // frames for the same subscriber were outstanding at once and could reach
+      // it in either order — while `stats().list` reported an `inFlight` number
+      // that gated nothing. `_flushSubscriber`'s own completion re-drains when
+      // work arrived meanwhile, so skipping here cannot strand the queue.
+      if (sub.inFlight > 0) continue;
       this._flushSubscriber(sub);
     }
   }
@@ -498,12 +511,42 @@ export class PowerRealtimeHub {
    * @returns {Promise<void>}
    */
   async _flushAll() {
+    // Not the same gate as `_drain`, and the difference is the whole point.
+    // `flush()` promises "resolves once all subscribers have been drained", and
+    // the guide says `batch: false` is for "transports that cannot take several
+    // frames at once" — so a subscriber with a send already outstanding must be
+    // **waited for**, not skipped. Skipping it would return from `flush()` with
+    // that subscriber's queue undelivered, which is precisely the case the option
+    // exists to serve.
     const pending = [];
     for (const sub of Array.from(this._subs.values())) {
       if (sub.closed || sub.queue.length === 0) continue;
-      pending.push(this._flushSubscriber(sub));
+      pending.push(this._drainSubscriberFully(sub));
     }
     await Promise.all(pending);
+  }
+
+  /**
+   * Deliver everything queued for one subscriber, waiting out any send already
+   * in flight, so the frames reach the transport one at a time and in order.
+   *
+   * Each turn either empties the queue or advances an outstanding send, and the
+   * queue is bounded by `maxQueue`, so this terminates.
+   *
+   * @param {HubSubscriber} sub
+   * @returns {Promise<void>}
+   * @private
+   */
+  async _drainSubscriberFully(sub) {
+    while (!sub.closed && (sub.queue.length > 0 || sub.inFlight > 0)) {
+      if (sub.inFlight > 0) {
+        // Wait for the outstanding send *and* any follow-up it chained. The
+        // chain includes the recursive flush, so one await covers both.
+        await sub._inflightChain;
+        continue;
+      }
+      await this._flushSubscriber(sub);
+    }
   }
 
   /**
@@ -536,7 +579,7 @@ export class PowerRealtimeHub {
       this._notify(err, sub);
       return Promise.resolve();
     }
-    return Promise.resolve(result)
+    const chain = Promise.resolve(result)
       .then(
         () => {
           sub.inFlight -= 1;
@@ -557,8 +600,20 @@ export class PowerRealtimeHub {
           }
         }
         // More arrived while the transport was busy.
-        if (sub.queue.length > 0 && !sub.closed) this._flushSubscriber(sub);
+        if (sub.queue.length > 0 && !sub.closed) {
+          // **Returned**, not fired and forgotten. `flush()` has to be able to
+          // await this subscriber to empty, and it reaches the tail of the work
+          // through this chain — a send started but not awaited would resolve
+          // `flush()` one frame early, which is the bug RT-007 is about in the
+          // place it is hardest to notice.
+          return this._flushSubscriber(sub);
+        }
+        return undefined;
       });
+    // The whole chain for this subscriber, including any follow-up flushes, so
+    // `_flushAll` can wait for the queue to actually empty.
+    sub._inflightChain = chain;
+    return chain;
   }
 
   /**
