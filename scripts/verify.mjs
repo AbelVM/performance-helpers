@@ -50,7 +50,13 @@ import { spawnSync } from 'node:child_process';
  * - `check:bundle` reads `dist/`, so `build` must precede it.
  * - `types:generate` then `types:drift` is the sync check: regenerate, then
  *   require the tree to be unchanged, which is the only way a forgotten
- *   regeneration gets caught.
+ *   regeneration gets caught. `types:drift` reads `git status --porcelain`
+ *   rather than `git diff`, so it also catches an **untracked** declaration —
+ *   a newly added source file whose `.d.ts` was never generated. `git diff`
+ *   compares to the index and is blind to that, and the pre-commit hook masks
+ *   it locally, so the only places that see it are `--no-verify`, a squash bot,
+ *   and a fresh clone — which reports it as a confusing "cannot find module"
+ *   from `test:types` rather than as "commit types/".
  *
  * @type {string[]}
  */

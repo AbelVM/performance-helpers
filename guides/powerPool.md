@@ -50,7 +50,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
   - When `options.taskQueue` is enabled, `options.queuePolicy` also applies to batch enqueue behavior in the fire-and-forget path.
   - The return array always matches `items.length`.
 
-- `prepareBuffers(items, { clone = true })` — Prepare an array of normalized `{ message, transfer }` entries for use with `postMessageBatch`. Each returned entry is ready to be dispatched or queued and avoids per-item encoding overhead at send time.
+- `prepareBuffers(items, { clone = false })` — Prepare an array of normalized `{ message, transfer }` entries for use with `postMessageBatch`. **The return value's shape depends on `clone` and on `messageCodec`** — see [what it returns](#what-preparebuffers-returns-and-why-it-is-not-a-uint8array). Under a framing codec the default returns each item unencoded and marked `deferred`, because a cached encode body cannot be both shared and correct on the wire; `clone: true` frames immediately.
 
 - `stopThePressBatch(items, options)` — Atomically clear the queue, terminate (and optionally recreate) inflight workers, reject pending awaitResponse promises, then forward the provided batch. Returns per-item results like `postMessageBatch`. Useful for emergency replacement of queued work with a new batch.
 

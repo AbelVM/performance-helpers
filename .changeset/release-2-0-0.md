@@ -1407,6 +1407,54 @@ actually are, which costs an error at all eight call sites for no gain.
 
 Closes POOL-004, and with it the whole `POOL-00x` block.
 
+#### A row that was already done, and a "verified" throughput figure that was not
+
+Two corrections to the plan itself, both found by checking a row against the tree
+instead of against memory.
+
+**`GATE-003` was half-shipped and left open.** `GATE-002` found a guide
+documenting a method that does not exist, and the fix removed it from the API
+list, a second entry, a cross-reference and a runnable example — but the _other_
+half of `GATE-003`, the `clone` default, was corrected in the prose only. The guide
+said `clone = true` in the API list and `clone = false` in the body, and the API
+list is the line a reader looks up. A P0 row marked `[verified]`, open against work
+that had already shipped, with a self-contradiction surviving three commits — and
+`test/docsCodeAgreement.test.js` could not catch it, because that test checks that
+a _name_ exists, not that a _default_ is right.
+
+**`types:drift` was blind to untracked declarations.** `GATE-008` reproduced by
+hand before changing anything: `git diff --exit-code -- types` compares to the
+index, so a probe `types/__probe.d.ts` left the check reporting clean and exiting 0. That is the whole scenario in the row — a newly added source file ships with no
+declaration — and the pre-commit hook masks it locally by regenerating _and
+committing_ `types/`, so a developer never sees it. Only `--no-verify`, a squash
+bot, or a fresh clone does, and by then it surfaces as a "cannot find module" from
+`test:types`, pointing at the consumer rather than at the missing declaration.
+`types:drift` now reads `git status --porcelain -- types`, so it sees tracked
+modifications and untracked additions alike, and prints what to do about it.
+
+**A SIEVE claim that was `[verified]` and is a concurrency result.**
+`ALGO-009` asked for two corrections to the plan's cache-adoption analysis, and
+both were wrong in the tree:
+
+- §5.1 presented "twice the throughput of an optimised 16-thread LRU" as a
+  property of the algorithm. `go-sieve`'s own benchmark says: _"On a single
+  goroutine, SIEVE and LRU are within 15 % of each other — the ~100–300× gap is a
+  concurrency-scaling story."_ This cache is single-threaded, so the 2× is the
+  16-thread comparison. **SIEVE's advantage here is hit ratio, not throughput.**
+- §5.1 implied SIEVE removes the dangling-cursor class by mapping onto the
+  existing code. It does not: _"the eviction candidate in SIEVE is an object that
+  can be in the middle of the list"_ and _"SIEVE's mid-list removal prevents a
+  simple circular buffer"_ — so it still needs a doubly-linked list and a hand, and
+  a hand that can sit mid-list is the same shape of problem. `GAP-004` is the
+  design that removes it, by not having a hand at all.
+- And a third correction, to the row's own dependency claim: it ended "CACHE-001
+  is required either way". It is not — that defect could not be reproduced, and
+  two candidate fixes were reverted after a differential trace found them
+  observationally identical to the original. SIEVE and the cursor class are
+  separate questions.
+
+Closes GATE-003, GATE-008 and ALGO-009.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
