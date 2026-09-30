@@ -201,6 +201,31 @@ describe.skipIf(!reviewPresent)('review.md plan table', () => {
     expect(true).toBe(true);
   });
 
+  it('has no two rows with the same identifier', () => {
+    // A duplicate is invisible in a rendered table — markdown shows two
+    // perfectly well-formed rows — and it is how a row ends up *shadowing* a real
+    // open item, which is worse than either being absent.
+    //
+    // Found by doing it: a finding was filed as `RT-022`, already in use by an
+    // unrelated open row about `SharedArrayBuffer` transfer lists, and
+    // `scripts/review-row.mjs --check` reported *clean*. The validator checked
+    // columns and the header; a duplicate is neither. The script now checks it,
+    // and this asserts the table the script checks.
+    const seen = new Map();
+    const dupes = [];
+    for (const line of table) {
+      if (!PLAN_ROW.test(line)) continue;
+      const id = line.slice(2, line.indexOf(' |', 2)).trim();
+      if (!seen.has(id)) seen.set(id, line);
+      else dupes.push(id);
+    }
+    expect(
+      [...new Set(dupes)],
+      'two rows share an identifier, so one shadows the other and neither can be ' +
+        'tracked. Re-file under a fresh ID, or close the row you duplicated.'
+    ).toEqual([]);
+  });
+
   it('has a plan row for every open item it claims to track', () => {
     // A sanity floor rather than an exact count: the table grows, and a test
     // that pins the number makes every legitimate addition a failure. It is a

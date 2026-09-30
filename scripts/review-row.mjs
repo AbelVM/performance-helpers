@@ -135,12 +135,35 @@ export function checkTable(text) {
 
   const problems = [];
   let rows = 0;
+  // Where each ID was first seen, so a repeat can name both lines. A duplicate
+  // ID is invisible in a rendered table — markdown shows two perfectly
+  // well-formed rows — and it is how a row ends up *shadowing* a real open item,
+  // which is worse than either being absent.
+  //
+  // Found by doing it: a finding was filed as `RT-022`, which was already in use
+  // by an unrelated open row about `SharedArrayBuffer` transfer lists, and
+  // `--check` reported *clean*. A duplicate is neither a column-count problem nor
+  // a header problem, so this validator had nothing to say about it.
+  const seen = new Map();
   let i = start + 2; // skip header and separator
   while (i < lines.length) {
     const line = lines[i];
     if (line.startsWith('|')) {
       rows += 1;
       const cells = splitRow(line);
+      const rowId = (cells[0] ?? '').trim();
+      if (rowId) {
+        const first = seen.get(rowId);
+        if (first === undefined) seen.set(rowId, i + 1);
+        else {
+          problems.push(
+            `review.md:${i + 1}: duplicate ID ${rowId}, first seen on line ${first}. ` +
+              'Two rows cannot be tracked by one identifier, and the second one ' +
+              'shadows the first — check it is not a re-file of a row that already ' +
+              'exists.'
+          );
+        }
+      }
       if (cells.length !== COLUMNS.length) {
         const id = cells[0] ?? '(no id)';
         problems.push(

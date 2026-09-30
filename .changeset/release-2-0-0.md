@@ -1539,6 +1539,40 @@ had not read correctly, and it is recorded on the row.
 
 Closes RT-001, RT-002 and RT-003.
 
+#### The plan-table validator could not see a duplicate row identifier
+
+A finding was filed under `RT-022`, which was already in use by an unrelated open
+row about `SharedArrayBuffer` transfer lists. Two rows with one identifier render
+perfectly — markdown shows two well-formed rows — and
+`scripts/review-row.mjs --check` reported **clean**, because it validates the
+column count and the plan-table header, and a duplicate is neither. So a new row
+silently shadowed a real open item, and the guard that exists to keep the table
+honest had nothing to say about it.
+
+`checkTable` now records the first line each ID was seen on and reports a repeat
+naming **both** lines, so a shadowing row is visible and says what it is
+shadowing. `test/reviewTable.test.js` asserts uniqueness over the same table.
+Mutation-checked both ways: inserting a duplicate row makes the script exit 1
+naming lines 2019 and 2020, and fails the test. The guard then immediately caught
+its own second collision — a first attempt to file this row under `GATE-015`
+reported a duplicate before it had been written.
+
+**The scope is deliberately narrow.** The table also contains six references to
+identifiers that are not rows — `BUG-011` and `QUAL-006` among them, cited as
+`review2` provenance for findings that were consumed into rows. Those are
+deliberate, so the check asserts uniqueness only. Asserting that every referenced
+ID resolves would demand either the consumed findings stay in the table forever or
+the references be reworded, and both are worse than a pointer to a finding that is
+now a closed row.
+
+This is the **third** guard in this series to report clean about a file it had not
+read correctly: `test/reviewTable.test.js` matching no rows at all, the ratchet's
+21-code grammar list matching 0 of the 29 codes the project actually emits, and
+now this. The common shape is a pass condition that does not cover the property
+the guard is named for, and the cost of each was a defect that looked handled.
+
+Closes GATE-017.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
