@@ -1573,6 +1573,53 @@ the guard is named for, and the cost of each was a defect that looked handled.
 
 Closes GATE-017.
 
+#### A home for interaction bugs, which are the ones that unit tests cannot see
+
+`RES-009` closes with `test/gates.interactions.test.js`: one file over the
+cancel/reset/release/dispose cross-products of `PowerPermitGate`,
+`PowerBackpressure` and `PowerSemaphore`, plus a 200-step seeded random walk over
+the same operations. Counters and shapes only, no durations.
+
+Every bug in the permit-gate family was of a kind the per-unit organisation
+cannot catch — **each component is correct alone**. A reset that minted a permit a
+holder was still using, a cancelled waiter that consumed a permit it never held, a
+release that decremented the outstanding count for a _transfer_ so the count went
+below zero, a queue-drain route that never recorded which worker took a task so
+its promise could never be settled. None of those is a bug in `reset()`, in
+`acquire()` or in `release()`. Each is a bug in the composition, and with no home
+for composition tests they go unwritten.
+
+Mutation-checked against two of the defects that family actually shipped. The
+second is the interesting one: **every permit assertion in the file passes without
+the cancelled-waiter decrement**, because a cancelled waiter does consume a permit
+on the way through and the pool still balances. Its effect is only visible on the
+_counter_ afterwards — `_cancelledWaiters` left one high makes `pending` overstate
+the queue for the rest of the gate's life — and only once something queues behind
+the corpse. So the test saturates the gate before queueing, which is the entire
+difference between catching that mutation and not.
+
+Three versions of this test passed for the wrong reason before the fourth worked,
+and the reasons are the point. A random walk that strands promises (a queued
+`acquire()` with no release and no abort never settles). A **transfer asserted as a
+return**: a release issued before awaiting the waiter is still a transfer, because
+the waiter is still queued and takes the permit directly — the order _is_ the
+claim, and an earlier draft read 4 where it expected 3. And a `pending` assertion
+that failed against correct code because with a permit free the next `acquire`
+takes the fast path and never queues.
+
+**`PowerBulkhead` is deliberately not in the cross-product.** It is a _runner_ —
+`run`/`tryRun`, no `acquire`, refusing with `null` rather than `false` — so the
+permit arithmetic here does not describe it, and a `?.` chain that quietly skipped
+it would have made the file look broader than it is. Establishing that turned up
+something worth recording: with `maxConcurrency: 2`, four concurrent `tryRun`s were
+all accepted and `active` read 4, `isFull` false, `pending` 0. **Whether that is a
+ceiling that is not a ceiling, or `maxConcurrency` means something else, is not
+established** — so it is filed as `GATE-018` as a measurement to take, and asserted
+in neither direction. A test claiming a ceiling I cannot back is the same error as
+one blessing a number I do not understand.
+
+Closes RES-009, and opens GATE-018.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
