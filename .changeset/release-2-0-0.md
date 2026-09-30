@@ -1367,6 +1367,46 @@ that drifted — the direct path, the inline drain, `stopThePress` and
 
 Closes POOL-003.
 
+#### Pool: one dispatch choke point, and the three bugs it would have prevented
+
+The post-and-account sequence existed in **eight copies** — the direct path, the
+inline drain in `worker.onmessage`, `_dispatchQueuedTasks`, the single-worker batch
+fast path, the least-loaded batch loop, the new-worker batch loop, the fallback
+batch loop, and `broadcast` — and each had dropped a different step:
+
+| Copy                               | Missing step           | Symptom                                                                                         |
+| ---------------------------------- | ---------------------- | ----------------------------------------------------------------------------------------------- |
+| single-worker batch fast path      | the deferred encode    | every batched request failed at the first line (`POOL-001`)                                     |
+| inline drain in `worker.onmessage` | the worker association | a queued `awaitResponse` promise hung for good (`POOL-002`)                                     |
+| `stopThePress`                     | preparation entirely   | an unlabelled item in the queue (`POOL-003`)                                                    |
+| direct path only                   | —                      | only it reported a failed post via `_failPost`; idle-state policy differed in three more places |
+
+All four are one defect: **a property is checkable only when one place owns it, so
+a fourth copy of a sequence is a fourth place to forget a step.**
+
+`_dispatchToWorker(workerObj, prepared, { correlationId, startTime })` now owns the
+post, the deferred framing, the worker association, and
+`tasks`/`_activeTasks`/`lastActive`. The fast path's hand-rolled deferred frame is
+gone — that is what the method's `deferred` branch replaces.
+
+`test/powerPool.dispatchChoke.test.js` — **the lead test is syntactic on purpose.**
+"There is exactly one call site" is not something a behavioural test can see, and a
+ninth copy would be re-introducible without any behavioural failure until something
+broke on the wire again. It counts `postMessage` call sites in the source and
+asserts the two inside the choke point, and asserts the four accounting steps are on
+the method rather than on any caller. Mutation-checked: a rogue ninth raw dispatch
+fails it, and removing the worker-association fails it. Behavioural tests sit under
+it as the net.
+
+**Type debt is unchanged at 290**, which is the part worth noting: the duplication
+was not generating measurable debt, only defects. Two intermediate states added 14
+and then 6 errors while getting there, and both are recorded in the row — a JSDoc
+splice that ate `_failPost`'s `@param` block, and annotating `workerObj` as
+`WorkerObj` when that type is over-specified relative to what the worker records
+actually are, which costs an error at all eight call sites for no gain.
+
+Closes POOL-004, and with it the whole `POOL-00x` block.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

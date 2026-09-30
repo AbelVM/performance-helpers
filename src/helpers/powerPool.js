@@ -1032,13 +1032,7 @@ export class PowerPool {
       }
     }
     try {
-      if (prepared.transfer?.length) obj.worker.postMessage(prepared.message, prepared.transfer);
-      else obj.worker.postMessage(prepared.message);
-      if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
-      this._markPendingWorker(correlationKey, obj.id);
-      obj.tasks++;
-      this._activeTasks++;
-      obj.lastActive = startTime;
+      this._dispatchToWorker(obj, prepared, { correlationId: correlationKey, startTime });
       if (this._isIdle) this._updateIdleState();
       return wantResponse ? pendingPromise : true;
     } catch (err) {
@@ -1058,6 +1052,81 @@ export class PowerPool {
    * its **original** error - never with a downstream `DataCloneError` from a
    * retry against the same buffers.
    *
+   * @param {any} err - The error thrown by `postMessage`.
+   * @param {boolean} wantResponse - Whether the caller is awaiting a response.
+   * @param {string|undefined} correlationKey - Pending-response key to reject.
+   * @param {Promise<any>} pendingPromise - The caller's pending promise.
+   * @param {{scope: string}} [info] - Debug-log scope.
+   * @returns {Promise<any>|boolean} `pendingPromise` when awaiting a response,
+   *   `false` otherwise - matching `postMessage`'s contract.
+   * @private
+   */
+  /**
+   * Post one prepared item to one worker, and account for it.
+   *
+   * The single dispatch choke point. There were eight `postMessage` call sites
+   * before this, each with its own copy of the post-and-account sequence, and
+   * they drifted in four different directions:
+   *
+   * - the single-worker batch fast path skipped the deferred encode, so every
+   *   batched request reached the worker as raw JSON and failed at the first line
+   *   (`POOL-001` — `unsupported protocol version 123`, since `{` is 123);
+   * - the inline drain in `worker.onmessage` never recorded which worker took the
+   *   task, so a queued `awaitResponse` promise could never be settled
+   *   (`POOL-002`);
+   * - `stopThePress` enqueued the caller's object with no preparation at all
+   *   (`POOL-003`);
+   * - only the direct path reported a failed post through `_failPost`, and only
+   *   the batch loops and `broadcast` had their own idle-state policy.
+   *
+   * All three defects were *the same defect*. A property is checkable only when
+   * there is one place that owns it, so a fourth copy of a sequence is a fourth
+   * place to forget a step.
+   *
+   * @private
+   * @param {*} workerObj - A `WorkerObj`. Left untyped to match the other
+   *   private dispatch helpers here; annotating it stricter than what the worker
+   *   records actually are would add an error at every call site for no gain.
+   * @param {PreparedItem} prepared - Must be prepared. A `deferred` item is
+   *   framed here, which is why every route can hand one over unchanged.
+   * @param {{correlationId?: (string|undefined), startTime?: (number|undefined)}=} options
+   *   `correlationId` for a task awaiting a response, so the pending entry can be
+   *   tied to this worker; `startTime` when the caller already took a timestamp
+   *   and wants every record in a batch or a broadcast to share it.
+   * @returns {number} The `startTime` used, for a caller that has not taken one.
+   */
+  _dispatchToWorker(workerObj, prepared, options = {}) {
+    const { correlationId, startTime = nowMs() } = options;
+    // Resolve a deferred encode here rather than at each call site. A `deferred`
+    // item is one whose framing is still owed, and posting it verbatim puts raw
+    // bytes on the wire where the worker reads the first byte of a JSON body as
+    // a protocol version — `unsupported protocol version 123 (expected 1)`, since
+    // `{` is 123. That is the `POOL-001` failure, and it happened because the
+    // single-worker batch fast path bypassed `postMessage` and so bypassed the
+    // only place that knew about the marker.
+    const item = prepared.deferred
+      ? { ...this._frameObjectForTransfer(prepared.message, prepared.transfer) }
+      : prepared;
+
+    const { worker } = workerObj;
+    if (item.transfer?.length) worker.postMessage(item.message, item.transfer);
+    else worker.postMessage(item.message);
+    if (typeof workerObj._startTimes?.push === 'function') workerObj._startTimes.push(startTime);
+    // **Every dispatch records which worker took the task.** Skipping this is
+    // how a queued `awaitResponse` promise came to hang for good under
+    // `awaitResponseTimeout: Infinity`: the task was dispatched and counted, but
+    // `_rejectPendingForWorker` had no `workerId` to match, so termination could
+    // never settle it. See `POOL-002`. `correlationId` is `undefined` for a
+    // fire-and-forget message and `_markPendingWorker` returns immediately.
+    this._markPendingWorker(correlationId, workerObj.id);
+    workerObj.tasks += 1;
+    this._activeTasks += 1;
+    workerObj.lastActive = startTime;
+    return startTime;
+  }
+
+  /**
+   * Report a failed `postMessage` and clean up the pending response for it.
    * @param {any} err - The error thrown by `postMessage`.
    * @param {boolean} wantResponse - Whether the caller is awaiting a response.
    * @param {string|undefined} correlationKey - Pending-response key to reject.
@@ -2231,24 +2300,10 @@ export class PowerPool {
         const item = this.queue.shift();
         try {
           const dispatch = this._encodeForWorker(workerObj, item);
-          if (dispatch?.transfer?.length) worker.postMessage(dispatch.message, dispatch.transfer);
-          else worker.postMessage(dispatch?.message);
-          workerObj._startTimes.push(now);
-          // **Record which worker took this task.** Measured on the unfixed
-          // code: the drain dispatched the item (the worker received it) and the
-          // pending entry was still `workerId: undefined`, so
-          // `_rejectPendingForWorker` could never match it and the caller's
-          // promise stayed pending for good under
-          // `awaitResponseTimeout: Infinity`. The task was counted on the worker
-          // (`tasks++`, `_activeTasks++`) while nothing remembered who to reject
-          // for, so the pool's own state claimed the work was outstanding.
-          //
-          // Both other dispatch paths already do this — `_postToWorkerObj` and
-          // `_dispatchQueuedTasks`. This inline copy of the drain was the one
-          // that drifted, which is what `POOL-004` exists to remove.
-          this._markPendingWorker(item.correlationId, workerObj.id);
-          workerObj.tasks++;
-          this._activeTasks++;
+          this._dispatchToWorker(workerObj, dispatch, {
+            correlationId: item.correlationId,
+            startTime: now,
+          });
         } catch (err) {
           this._debugLog?.(err, 'dispatch queued message to worker failed');
           this._logger.error(err, 'Failed to dispatch queued message to worker');
@@ -2767,13 +2822,8 @@ export class PowerPool {
             tr = undefined;
           }
         }
-        if (tr?.length) w.worker.postMessage(msg, tr);
-        else w.worker.postMessage(msg);
-        // record start time for latency tracking (use same timestamp for all records in this iteration)
-        if (typeof w._startTimes?.push === 'function') w._startTimes.push(now);
-        w.tasks++;
-        this._activeTasks++;
-        w.lastActive = now;
+        // One timestamp for the whole broadcast, so every record shares it.
+        this._dispatchToWorker(w, { message: msg, transfer: tr }, { startTime: now });
       } catch (err) {
         this._logger.error(err, 'broadcast error');
       }
@@ -3051,27 +3101,15 @@ export class PowerPool {
       const obj = this.workers[0];
       let idleStateDirty = false;
       for (let i = 0; i < items.length; i += 1) {
-        let prepared = preparedItems[i] || {
+        const prepared = preparedItems[i] || {
           message: items[i]?.message,
           transfer: items[i]?.transfer,
         };
         try {
-          // Honour the deferred marker, or this branch posts raw bytes where a
-          // frame is required. The non-fast path below calls `postMessage` and
-          // gets this for free from `_prepareForTransfer`; this branch bypassed
-          // `postMessage` entirely, which is precisely how the batch path came to
-          // speak a different protocol from the single-message one.
-          if (prepared.deferred) {
-            prepared = { ...this._frameObjectForTransfer(prepared.message, prepared.transfer) };
-          }
-          const startTime = nowMs();
-          if (prepared.transfer?.length)
-            obj.worker.postMessage(prepared.message, prepared.transfer);
-          else obj.worker.postMessage(prepared.message);
-          if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
-          obj.tasks++;
-          this._activeTasks++;
-          obj.lastActive = startTime;
+          // `_dispatchToWorker` resolves a deferred encode, so this branch no
+          // longer speaks a different protocol from `postMessage` — which is how
+          // it used to fail every batched request.
+          this._dispatchToWorker(obj, prepared);
           idleStateDirty = true;
           results[i] = true;
         } catch (err) {
@@ -3106,14 +3144,7 @@ export class PowerPool {
 
       if (least?.tasks < this._maxTasksPerWorker) {
         try {
-          const startTime = nowMs();
-          if (prepared.transfer?.length)
-            least.worker.postMessage(prepared.message, prepared.transfer);
-          else least.worker.postMessage(prepared.message);
-          if (typeof least._startTimes?.push === 'function') least._startTimes.push(startTime);
-          least.tasks++;
-          this._activeTasks++;
-          least.lastActive = startTime;
+          this._dispatchToWorker(least, prepared);
           idleStateDirty = true;
           results[i] = true;
           dispatched = true;
@@ -3134,14 +3165,7 @@ export class PowerPool {
               results[i] = false;
               dispatched = true;
             } else {
-              const startTime = nowMs();
-              if (prepared.transfer?.length)
-                obj.worker.postMessage(prepared.message, prepared.transfer);
-              else obj.worker.postMessage(prepared.message);
-              if (typeof obj._startTimes?.push === 'function') obj._startTimes.push(startTime);
-              obj.tasks++;
-              this._activeTasks++;
-              obj.lastActive = startTime;
+              this._dispatchToWorker(obj, prepared);
               idleStateDirty = true;
               results[i] = true;
               dispatched = true;
@@ -3202,15 +3226,7 @@ export class PowerPool {
             this._nextIndex = (this._nextIndex + 1) % this.workers.length;
             const fallback = this.workers[idx];
             try {
-              const startTime = nowMs();
-              if (prepared.transfer?.length)
-                fallback.worker.postMessage(prepared.message, prepared.transfer);
-              else fallback.worker.postMessage(prepared.message);
-              if (typeof fallback._startTimes?.push === 'function')
-                fallback._startTimes.push(startTime);
-              fallback.tasks++;
-              this._activeTasks++;
-              fallback.lastActive = startTime;
+              this._dispatchToWorker(fallback, prepared);
               idleStateDirty = true;
               results[i] = true;
             } catch (err) {
@@ -4145,12 +4161,10 @@ export class PowerPool {
         const item = queue.shift();
         try {
           const dispatch = this._encodeForWorker(workerObj, item);
-          if (dispatch?.transfer?.length)
-            workerObj.worker.postMessage(dispatch.message, dispatch.transfer);
-          else workerObj.worker.postMessage(dispatch?.message);
-          if (typeof workerObj._startTimes?.push === 'function') workerObj._startTimes.push(now);
-          this._markPendingWorker(item.correlationId, workerObj.id);
-          workerObj.tasks++;
+          this._dispatchToWorker(workerObj, dispatch, {
+            correlationId: item.correlationId,
+            startTime: now,
+          });
           remainingSlots--;
           this._activeTasks++;
           workerObj.lastActive = now;

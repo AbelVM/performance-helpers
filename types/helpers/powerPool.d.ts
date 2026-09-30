@@ -317,6 +317,52 @@ export class PowerPool {
      *   `false` otherwise - matching `postMessage`'s contract.
      * @private
      */
+    /**
+     * Post one prepared item to one worker, and account for it.
+     *
+     * The single dispatch choke point. There were eight `postMessage` call sites
+     * before this, each with its own copy of the post-and-account sequence, and
+     * they drifted in four different directions:
+     *
+     * - the single-worker batch fast path skipped the deferred encode, so every
+     *   batched request reached the worker as raw JSON and failed at the first line
+     *   (`POOL-001` — `unsupported protocol version 123`, since `{` is 123);
+     * - the inline drain in `worker.onmessage` never recorded which worker took the
+     *   task, so a queued `awaitResponse` promise could never be settled
+     *   (`POOL-002`);
+     * - `stopThePress` enqueued the caller's object with no preparation at all
+     *   (`POOL-003`);
+     * - only the direct path reported a failed post through `_failPost`, and only
+     *   the batch loops and `broadcast` had their own idle-state policy.
+     *
+     * All three defects were *the same defect*. A property is checkable only when
+     * there is one place that owns it, so a fourth copy of a sequence is a fourth
+     * place to forget a step.
+     *
+     * @private
+     * @param {*} workerObj - A `WorkerObj`. Left untyped to match the other
+     *   private dispatch helpers here; annotating it stricter than what the worker
+     *   records actually are would add an error at every call site for no gain.
+     * @param {PreparedItem} prepared - Must be prepared. A `deferred` item is
+     *   framed here, which is why every route can hand one over unchanged.
+     * @param {{correlationId?: (string|undefined), startTime?: (number|undefined)}=} options
+     *   `correlationId` for a task awaiting a response, so the pending entry can be
+     *   tied to this worker; `startTime` when the caller already took a timestamp
+     *   and wants every record in a batch or a broadcast to share it.
+     * @returns {number} The `startTime` used, for a caller that has not taken one.
+     */
+    private _dispatchToWorker;
+    /**
+     * Report a failed `postMessage` and clean up the pending response for it.
+     * @param {any} err - The error thrown by `postMessage`.
+     * @param {boolean} wantResponse - Whether the caller is awaiting a response.
+     * @param {string|undefined} correlationKey - Pending-response key to reject.
+     * @param {Promise<any>} pendingPromise - The caller's pending promise.
+     * @param {{scope: string}} [info] - Debug-log scope.
+     * @returns {Promise<any>|boolean} `pendingPromise` when awaiting a response,
+     *   `false` otherwise - matching `postMessage`'s contract.
+     * @private
+     */
     private _failPost;
     /**
      * Attempt to grow the pool by adding a worker and dispatching the message.
