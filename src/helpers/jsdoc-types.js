@@ -201,9 +201,14 @@ export {};
  * @property {(err:any)=>boolean} [retryIf]
  * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
  * @property {number} [attemptTimeout] - Per-attempt timeout in ms. When set,
- *   `fn` receives the attempt's `AbortSignal`, and a timed-out attempt is
- *   **not** retried: the caller asked for that bound, and retrying would
- *   multiply it by `maxAttempts`.
+ *   `fn` receives the attempt's `AbortSignal` and it is aborted when the attempt
+ *   runs long. **A timed-out attempt is retried like any other failure**, so this
+ *   is a per-attempt bound and the worst case is roughly
+ *   `attemptTimeout * maxAttempts` plus the delays — measured with
+ *   `attemptTimeout: 40` and `maxAttempts: 3`, three attempts ran. This used to
+ *   say the opposite ("a timed-out attempt is **not** retried"), which was false
+ *   and would have led a caller to read a hard bound into a per-attempt one. For
+ *   a hard bound on the whole call, use `totalTimeout`.
  * @property {import('./powerRetry.js').PowerRetryBudget|number} [budget] - A
  *   retry budget. A `PowerRetryBudget` bounds retry traffic across calls; a
  *   number is a ratio, which builds a bucket scoped to this call only. `0.2`
@@ -337,7 +342,6 @@ export {};
  * @property {number} [capacity=1] Maximum tokens in the bucket.
  * @property {number} [tokens] Initial tokens. Defaults to `capacity`.
  * @property {number} [refillRate=0] Tokens added per second.
- * @property {number} [refillInterval=1000] Bookkeeping interval in milliseconds.
  *
  * A limiter constructed with its own `now` ignores any per-call value a
  * composition threads in - see `LimiterNowOptions`.

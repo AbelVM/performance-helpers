@@ -267,9 +267,14 @@ export type PowerRetryOptions = {
     onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;
     /**
      * - Per-attempt timeout in ms. When set,
-     * `fn` receives the attempt's `AbortSignal`, and a timed-out attempt is
-     * **not** retried: the caller asked for that bound, and retrying would
-     * multiply it by `maxAttempts`.
+     * `fn` receives the attempt's `AbortSignal` and it is aborted when the attempt
+     * runs long. **A timed-out attempt is retried like any other failure**, so this
+     * is a per-attempt bound and the worst case is roughly
+     * `attemptTimeout * maxAttempts` plus the delays — measured with
+     * `attemptTimeout: 40` and `maxAttempts: 3`, three attempts ran. This used to
+     * say the opposite ("a timed-out attempt is **not** retried"), which was false
+     * and would have led a caller to read a hard bound into a per-attempt one. For
+     * a hard bound on the whole call, use `totalTimeout`.
      */
     attemptTimeout?: number | undefined;
     /**
@@ -458,15 +463,11 @@ export type PowerThrottleOptions = {
     tokens?: number | undefined;
     /**
      * Tokens added per second.
-     */
-    refillRate?: number | undefined;
-    /**
-     * Bookkeeping interval in milliseconds.
      *
      * A limiter constructed with its own `now` ignores any per-call value a
      * composition threads in - see `LimiterNowOptions`.
      */
-    refillInterval?: number | undefined;
+    refillRate?: number | undefined;
     /**
      * - Clock override in ms. Defaults to the
      * library's `nowMs()`. Injected for tests and for compositions; it outranks

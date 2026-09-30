@@ -10,7 +10,6 @@ export class PowerThrottle {
     capacity: number;
     tokens: number;
     refillRate: number;
-    refillInterval: number;
     /**
      * Clock for this limiter, and whether it was explicitly injected. See
      * `resolveLimiterNow` for why the flag is load-bearing: an injected clock

@@ -286,20 +286,14 @@ Consume, or return the exact wait needed.
 
 > **tryConsume**(`n?`, `options?`): `boolean`
 
-Try to consume one operation.
-
 #### Parameters
 
 ##### n?
 
 `number` = `1`
 
-Number of operations to consume.
-
 ##### options?
 
 #### Returns
 
 `boolean`
-
-`true` when the request fits inside the current budget.

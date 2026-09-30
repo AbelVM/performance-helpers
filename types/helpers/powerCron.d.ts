@@ -74,9 +74,15 @@ export class PowerCron {
     /** Absolute timestamp the next fire is aimed at. */
     _nextAt: number;
     /**
-     * Times the task was invoked, including `catch-up` replays of periods
-     * missed while stopped. Exposed as `fireCount` so a caller can see that
-     * `'catch-up'` replayed rather than assume a single resume.
+     * Times the task was invoked. Exposed as `fireCount` so a caller can count
+     * runs rather than assume one per interval.
+     *
+     * It does **not** count catch-up replays, and used to claim it did. `start()`
+     * sets `_nextAt = nowMs() + intervalMs`, so a restart begins a fresh cadence
+     * and periods missed while stopped are not replayed — which is the right
+     * behaviour for a cron, since replaying a backlog after a deploy would stamp
+     * a dozen tasks at once. `'catch-up'` delays *within* a run, but nothing
+     * revives periods missed while stopped.
      * @type {number}
      * @private
      */

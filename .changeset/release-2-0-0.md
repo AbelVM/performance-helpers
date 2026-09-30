@@ -3501,3 +3501,49 @@ stale chain. The only difference is a busy-wait rather than a proper await, whic
 public assertion can distinguish.
 
 Closes RT-007.
+
+#### Four documented options that were not doing what they said
+
+RES-017 grouped four as "inert or contradictory". Measured, they are **three
+different defects** — and only two of them were dead options.
+
+**`PowerThrottle.refillInterval` — removed.** Destructured, validated, typed,
+published, never read. It is also unimplementable as documented: the bucket
+refills lazily and _proportionally_ to elapsed time on every read, so a token is
+earned every `1000 / refillRate` ms whether or not anything observes it. There is
+no interval in the design to configure, and honouring one would mean a timer and
+a strictly worse model to express the same arithmetic. Removed rather than left
+inert, since an inert field lets a caller set it and believe it did something.
+
+**`PowerGCRA.onError` — now called.** Documented for a backwards clock and never
+invoked. But the clamp it describes was already there — `Math.max(now, this._tat)`
+— so the _safety_ half of the promise held while the _observable_ half did not: a
+limiter running on a clock that jumped clamped silently. It is now called with the
+offending reading, and the clamp is what keeps it non-throwing as documented. The
+call is individually guarded, because it runs inside `tryConsume` and a throwing
+handler would replace a rate-limit decision with an exception.
+
+**`PowerRetryOptions.attemptTimeout` — the documentation was wrong.** The
+published type said a timed-out attempt is "**not** retried … retrying would
+multiply it by `maxAttempts`". Measured with `attemptTimeout: 40` and
+`maxAttempts: 3`: **three attempts**, ~328 ms. The doc promised a guarantee the
+code does not make, in the direction that misleads a caller choosing a bound. It
+now says a timeout is retried like any other failure, and points at `totalTimeout`
+for a hard per-call bound.
+
+**`PowerCron._fireCount` — also mis-documented.** The counter is real and read by
+two getters; its _doc_ claimed it counts catch-up replays of periods missed while
+stopped, which `start()` cannot produce — it sets `_nextAt = now + intervalMs`, so
+a restart begins a fresh cadence. That is the right behaviour for a cron, since
+replaying a backlog after a deploy would stamp a dozen tasks at once.
+
+Two rows were dead options; two were documentation promising behaviour the code
+never had. Same class as `eagerCleanupOnRead`, in the other direction.
+
+`test/deadOptions.family.test.js`, 9 tests, three mutations caught. **One is not**:
+removing the pre-existing `Math.max(now, this._tat)` clamp passes 9 of 9. That
+clamp is the safety half of the `onError` promise and this change did not touch
+it; pinning it needs a test of the _forward_ idle path that was not written, so it
+is not claimed to be verified.
+
+Closes RES-017.

@@ -7,7 +7,10 @@
  * - `capacity` (number): maximum tokens in the bucket (default 1)
  * - `tokens` (number): initial tokens (default = capacity)
  * - `refillRate` (number): tokens per second to add (default 0)
- * - `refillInterval` (number): ms interval used for bookkeeping (default 1000)
+ * - There is deliberately no `refillInterval`. The bucket refills lazily and
+ *   proportionally to elapsed time on every read, so a token is earned every
+ *   `1000 / refillRate` ms whether or not anything observes it. An interval
+ *   would need a timer and a worse model to express the same arithmetic.
  *
  * @class PowerThrottle
  * @public
@@ -19,7 +22,7 @@
 import { nowMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { assertLimitRequired } from '../utils/options.js';
-import { DEFAULT_REFILL_INTERVAL_MS, MS_PER_SEC } from './constants.js';
+import { MS_PER_SEC } from './constants.js';
 
 export class PowerThrottle {
   /**
@@ -30,13 +33,7 @@ export class PowerThrottle {
    * @param {PowerThrottleOptions} [options]
    */
   constructor(options = {}) {
-    const {
-      capacity = 1,
-      tokens = undefined,
-      refillRate = 0,
-      refillInterval = DEFAULT_REFILL_INTERVAL_MS,
-      now,
-    } = options;
+    const { capacity = 1, tokens = undefined, refillRate = 0, now } = options;
     // `Math.max(0, Number(x) || 0)` accepted `capacity: 0` - a throttle that
     // can never succeed - and coerced NaN to 0 rather than surfacing it. Both
     // are configuration errors, so they throw.
@@ -58,12 +55,6 @@ export class PowerThrottle {
       className: 'PowerThrottle',
       min: 0,
       fallback: 0,
-    });
-    this.refillInterval = assertLimitRequired(refillInterval, {
-      name: 'refillInterval',
-      className: 'PowerThrottle',
-      min: 1,
-      fallback: DEFAULT_REFILL_INTERVAL_MS,
     });
 
     /**

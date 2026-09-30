@@ -104,10 +104,46 @@ export class PowerGCRA {
    * @param {number} [n=1] - Number of operations to consume.
    * @returns {boolean} `true` when the request fits inside the current budget.
    */
+  /**
+   * Report a backwards clock, without ever letting the report break admission.
+   *
+   * The clamp in {@link tryConsume} already prevents a backwards clock from
+   * admitting unbounded traffic, so this is observability, not safety. It is
+   * individually guarded because a throwing `onError` would replace a rate-limit
+   * decision with a callback error, and the caller would see an exception where
+   * the limiter had a perfectly good answer.
+   *
+   * @param {number} now - The offending clock reading.
+   * @returns {void}
+   * @private
+   */
+  _notifyClock(now) {
+    if (!this._onError) return;
+    try {
+      this._onError(now);
+    } catch {
+      /* a user's error handler must not break admission */
+    }
+  }
+
   tryConsume(n = 1, options = {}) {
     const count = Math.max(0, Math.floor(Number(n) || 0));
     if (count === 0) return true;
     const now = resolveLimiterNow(this._now, this._nowExplicit, options);
+    // A clock that moved backwards relative to the TAT means the injected or
+    // system clock was adjusted (NTP, a suspended host, a test driving it by
+    // hand). The clamp below is what stops that admitting unbounded traffic, and
+    // it is silent — which is why `onError` shipped as an option nobody was ever
+    // called on. It is called now, with the offending reading, so a limiter on a
+    // clock that jumps is *visible* rather than merely safe. Still no throw, which
+    // is what the option documents.
+    //
+    // The anchor for this edit is the whole `tryConsume` preamble rather than the
+    // two lines alone: that pair of lines appears in three consume-shaped methods
+    // here, so a looser anchor matched all three and the edit had to be narrowed.
+    if (this._tat !== Number.NEGATIVE_INFINITY && now < this._tat) {
+      this._notifyClock(now);
+    }
     const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
     // Admit while the *pre-update* TAT is still inside the tolerance window.
     // Checking the post-update value instead would reserve this request's cost

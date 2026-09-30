@@ -64,10 +64,29 @@ describe('PowerThrottle options', () => {
     expect(() => new PowerThrottle({ capacity: Number.NaN })).toThrow(/capacity/);
   });
 
-  it('rejects a nonsensical refillRate or refillInterval', () => {
+  it('rejects a nonsensical refillRate', () => {
+    // **The `refillInterval` half of this test was removed with the option.**
+    // It asserted that `refillInterval: 0` throws, so the option was pinned as
+    // validated-and-live — which is exactly the thing it was not: it was
+    // destructured, validated, typed, published, and then never read. `AGENTS.md`
+    // is explicit that a documented deliberate decision needs its documentation
+    // and its pinning test changed together, and the pin was wrong rather than
+    // the behaviour, so it goes with the option.
+    //
+    // `refillInterval` is not rejected now, it is *ignored*: the throttle's
+    // bucket refills lazily and proportionally to elapsed time, so there is no
+    // interval to validate. See `test/deadOptions.family.test.js` for the
+    // arithmetic that replaces it.
     expect(() => new PowerThrottle({ refillRate: Number.NaN })).toThrow(/refillRate/);
     expect(() => new PowerThrottle({ refillRate: -1 })).toThrow(/refillRate/);
-    expect(() => new PowerThrottle({ refillInterval: 0 })).toThrow(/refillInterval/);
+  });
+
+  it('ignores a refillInterval left over from a caller that still passes it', () => {
+    // The only population that could have been affected by the removal, and they
+    // could not have been depending on the behaviour, because there was none.
+    const t = new PowerThrottle({ capacity: 5, refillRate: 2, refillInterval: 0 });
+    expect('refillInterval' in t).toBe(false);
+    expect(t.capacity).toBe(5);
   });
 
   it('still accepts refillRate: 0, which is a legitimate "no refill"', () => {

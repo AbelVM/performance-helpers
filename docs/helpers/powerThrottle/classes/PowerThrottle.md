@@ -66,12 +66,6 @@ must outrank a value threaded in by a composition.
 
 ---
 
-### refillInterval
-
-> **refillInterval**: `number`
-
----
-
 ### refillRate
 
 > **refillRate**: `number`

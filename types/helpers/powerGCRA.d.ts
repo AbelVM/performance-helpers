@@ -55,6 +55,20 @@ export class PowerGCRA {
      * @param {number} [n=1] - Number of operations to consume.
      * @returns {boolean} `true` when the request fits inside the current budget.
      */
+    /**
+     * Report a backwards clock, without ever letting the report break admission.
+     *
+     * The clamp in {@link tryConsume} already prevents a backwards clock from
+     * admitting unbounded traffic, so this is observability, not safety. It is
+     * individually guarded because a throwing `onError` would replace a rate-limit
+     * decision with a callback error, and the caller would see an exception where
+     * the limiter had a perfectly good answer.
+     *
+     * @param {number} now - The offending clock reading.
+     * @returns {void}
+     * @private
+     */
+    private _notifyClock;
     tryConsume(n?: number, options?: {}): boolean;
     /**
      * Exact milliseconds until `tryConsume()` would succeed.
