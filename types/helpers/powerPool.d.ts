@@ -260,7 +260,7 @@ export class PowerPool {
      * buffers are transferred.
      *
      * @private
-     * @param {{message: *, transfer: (TransferList|undefined)}} prepared
+     * @param {PreparedItem} prepared - Already framed or marked `deferred`.
      * @returns {{message: object, transfer: (TransferList|undefined)}|null}
      */
     private _encodeNativeForWorker;
@@ -379,6 +379,11 @@ export class PowerPool {
     /**
      * Enqueue or reject a prepared message according to the configured queue policy.
      * Returns `pendingPromise`/`true`/`false` to match `postMessage` semantics.
+     *
+     * @param {PreparedItem} prepared - Already prepared by `_prepareForTransfer`
+     *   or `prepareBuffers`. Taking the item whole is deliberate: a signature of
+     *   `(message, transfer)` would let a caller hand in an unprepared object,
+     *   which is the shape of the POOL-003 defect.
      * @private
      */
     private _enqueueOrReject;
@@ -515,21 +520,23 @@ export class PowerPool {
      *
      * @param {Array<any|{message:any,transfer?:Transferable[]}>} items
      * @param {{clone?:boolean}=} options - `clone` defaults to `false`; see above.
-     * @returns {{message:*,transfer:Transferable[]|undefined}[]}
+     * @returns {PreparedItem[]}
      */
     prepareBuffers(items: Array<any | {
         message: any;
         transfer?: Transferable[];
     }>, options?: {
         clone?: boolean;
-    } | undefined): {
-        message: any;
-        transfer: Transferable[] | undefined;
-    }[];
+    } | undefined): PreparedItem[];
     /**
      * Class-level helper to prepare a message and optional transfer list for posting to a worker.
      * Accepts `opts` with `zeroCopy` flag to control forwarding of raw buffers.
+     *
+     * The single preparation path. `prepareBuffers` used to be a third copy of this
+     * logic and drifted from it — see {@link PreparedItem} for what that cost.
+     *
      * @private
+     * @returns {PreparedItem}
      */
     private _prepareForTransfer;
     /**
@@ -542,7 +549,7 @@ export class PowerPool {
      * @private
      * @param {object} msg
      * @param {TransferList|undefined} tr
-     * @returns {{message: *, transfer: (TransferList|undefined)}}
+     * @returns {PreparedItem}
      */
     private _frameObjectForTransfer;
     /**
@@ -1004,6 +1011,40 @@ export class PowerPool {
     [Symbol.asyncDispose](): Promise<void>;
 }
 export type TransferList = import("./jsdoc-types.js").TransferList;
+/**
+ * A message on its way to a worker, after preparation but before it is posted.
+ *
+ * `deferred` is the load-bearing member, and it is what the batch path was
+ * missing. `true` means the encode was **deliberately not done** and the framing
+ * is still owed, so the dispatch site must frame before posting. It is set when
+ * the encode cannot safely be shared — an object message under `messageCodec:
+ * 'negotiated'`, where the carrier is a per-worker decision, or under
+ * `prepareBuffers`' default `clone: false`, where a cached body cannot be both
+ * shared and correct on the wire.
+ *
+ * Posting a `deferred` item verbatim is a protocol error, not a slow path: the
+ * worker reads the first byte of raw JSON — `{`, or 123 — as a protocol version
+ * and rejects the message. Every dispatch site therefore has to check this, which
+ * is why the member is on the type rather than being a local variable at each
+ * one.
+ */
+export type PreparedItem = {
+    /**
+     * - The value to post. A `Uint8Array` under a framing codec,
+     * the original object when `deferred`.
+     */
+    message: any;
+    /**
+     * - Must be `undefined` whenever
+     * `message` is a shared buffer: a transfer list detaches its entries, and a
+     * detached cache entry is the bug `clone` exists to avoid.
+     */
+    transfer: TransferList | undefined;
+    /**
+     * - Framing is still owed; see above.
+     */
+    deferred?: boolean | undefined;
+};
 export type WorkerLike = import("./jsdoc-types.js").WorkerLike;
 export type WorkerObj = import("./jsdoc-types.js").WorkerObj;
 /**

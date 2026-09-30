@@ -73,14 +73,40 @@ describe('PowerPool prepareBuffers modes', () => {
     expect(out[0].transfer).toBeUndefined();
   });
 
-  it('encodes a plain object without transferring under the default mode', () => {
+  it('defers the encode under the default mode, so nothing postable is left unframed', () => {
     const pool = makePool();
     const out = pool.prepareBuffers([{ message: { a: 1 } }]);
-    // Default is `clone: false`: the runtime copies, so the transfer list is
-    // `undefined`. Listing a buffer there would detach the *cached* encode
-    // entry, which is the bug the `clone` option exists to let callers avoid.
+    // **This test used to pin the bug.** It asserted that the default returns the
+    // shared encode-cache body as a `Uint8Array` — which is a bare JSON body, not
+    // an envelope, so posting it verbatim made the worker read `{` (123) as a
+    // protocol version. Every batched request failed at the first line; see
+    // `test/powerPool.framing.test.js`.
+    //
+    // The concern underneath it was always right and is stronger than before: a
+    // transfer list on a *shared* buffer would detach the cached encode entry,
+    // which is what the `clone` option exists to let callers avoid. The deferred
+    // item carries no buffer at all, so there is nothing that can be detached —
+    // and framing wraps the body in a fresh header per call, so a cached body
+    // could never be both shared and correct on the wire.
+    expect(out[0].deferred).toBe(true);
+    expect(out[0].transfer).toBeUndefined();
+    // The object is passed through untouched: no encode happened here, which is
+    // the whole point of deferring.
+    expect(out[0].message).toEqual({ a: 1 });
+  });
+
+  it('pre-encodes the shared body under legacy, where that body is the wire format', () => {
+    // The mode the default `clone: false` optimisation is actually for. Under
+    // `'legacy'` there is no frame, so the cached body *is* what the worker will
+    // read, and pre-encoding it is a real saving rather than a protocol error.
+    const pool = makePool({ messageCodec: 'legacy' });
+    const out = pool.prepareBuffers([{ message: { a: 1 } }]);
     expect(out[0].message).toBeInstanceOf(Uint8Array);
     expect(out[0].transfer).toBeUndefined();
+    expect(out[0].deferred).toBeFalsy();
+    // And it is the shared entry, which is the property the transfer-list
+    // assertion above protects.
+    expect(pool._encodeForTransfer({ a: 1 })).toBe(out[0].message);
   });
 
   it('gives a private transferable copy under clone', () => {

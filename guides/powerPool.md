@@ -368,6 +368,29 @@ const [cached] = pool.prepareBuffers([{ heavy: 'payload' }], { clone: false });
 pool.postMessage(cached.message.slice(), [cached.message.slice().buffer]);
 ```
 
+#### What `prepareBuffers` returns, and why it is not a `Uint8Array`
+
+Under a framing codec, the default (`clone: false`) returns the item
+**unencoded and marked `deferred`**, and framing happens at dispatch. That is not
+an implementation detail you can ignore: a pre-encoded body is a bare JSON body,
+and posting it verbatim makes the worker read `{` — byte 123 — as a protocol
+version, and every batched request fails with
+`unsupported protocol version 123 (expected 1)`.
+
+Framing wraps the body in a fresh header per call, so a _cached_ body can never be
+both shared and correct on the wire. The two modes split cleanly:
+
+| Mode                     | Returns                                                     | When                                                                                          |
+| ------------------------ | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `clone: false` (default) | `{ message, transfer: undefined, deferred: true }`          | The encode is deferred to dispatch, so nothing shared is left unframed.                       |
+| `clone: true`            | `{ message: <framed Uint8Array>, transfer: [ArrayBuffer] }` | The frame is private already, so the work really is done up front.                            |
+| `messageCodec: 'legacy'` | `{ message: <cached body>, transfer: undefined }`           | There is no frame, so the cached body _is_ the wire format and pre-encoding is a real saving. |
+
+`transfer` is `undefined` wherever the buffer is shared, and that is the property
+worth keeping: a transfer list on a shared buffer would detach the cached encode
+entry. A deferred item carries no buffer at all, so there is nothing that _can_ be
+detached.
+
 ### Zero-copy: forwarding raw ArrayBuffers / TypedArrays
 
 When your producer already has an `ArrayBuffer` or a `TypedArray` (for example a decoded image or a pre-serialized payload) you can avoid re-encoding and enable zero-copy transfers by passing the raw buffer directly. The pool will auto-add the underlying `ArrayBuffer` to the transfer list when no `transfer` is provided.

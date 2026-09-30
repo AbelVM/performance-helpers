@@ -94,6 +94,32 @@ function poolRefusal(code, message) {
 /** @typedef {import('./jsdoc-types.js').TransferList} TransferList */
 
 /**
+ * A message on its way to a worker, after preparation but before it is posted.
+ *
+ * `deferred` is the load-bearing member, and it is what the batch path was
+ * missing. `true` means the encode was **deliberately not done** and the framing
+ * is still owed, so the dispatch site must frame before posting. It is set when
+ * the encode cannot safely be shared — an object message under `messageCodec:
+ * 'negotiated'`, where the carrier is a per-worker decision, or under
+ * `prepareBuffers`' default `clone: false`, where a cached body cannot be both
+ * shared and correct on the wire.
+ *
+ * Posting a `deferred` item verbatim is a protocol error, not a slow path: the
+ * worker reads the first byte of raw JSON — `{`, or 123 — as a protocol version
+ * and rejects the message. Every dispatch site therefore has to check this, which
+ * is why the member is on the type rather than being a local variable at each
+ * one.
+ *
+ * @typedef {object} PreparedItem
+ * @property {*} message - The value to post. A `Uint8Array` under a framing codec,
+ *   the original object when `deferred`.
+ * @property {TransferList|undefined} transfer - Must be `undefined` whenever
+ *   `message` is a shared buffer: a transfer list detaches its entries, and a
+ *   detached cache entry is the bug `clone` exists to avoid.
+ * @property {boolean} [deferred] - Framing is still owed; see above.
+ */
+
+/**
  * Are every entry in a transfer list still live?
  *
  * A successful `postMessage` *detaches* everything in its transfer list - that
@@ -872,7 +898,7 @@ export class PowerPool {
    * buffers are transferred.
    *
    * @private
-   * @param {{message: *, transfer: (TransferList|undefined)}} prepared
+   * @param {PreparedItem} prepared - Already framed or marked `deferred`.
    * @returns {{message: object, transfer: (TransferList|undefined)}|null}
    */
   _encodeNativeForWorker(prepared) {
@@ -1217,6 +1243,11 @@ export class PowerPool {
   /**
    * Enqueue or reject a prepared message according to the configured queue policy.
    * Returns `pendingPromise`/`true`/`false` to match `postMessage` semantics.
+   *
+   * @param {PreparedItem} prepared - Already prepared by `_prepareForTransfer`
+   *   or `prepareBuffers`. Taking the item whole is deliberate: a signature of
+   *   `(message, transfer)` would let a caller hand in an unprepared object,
+   *   which is the shape of the POOL-003 defect.
    * @private
    */
   _enqueueOrReject(prepared, wantResponse, correlationKey, pendingPromise) {
@@ -1264,6 +1295,7 @@ export class PowerPool {
       }
       return false;
     }
+    /** @type {PreparedItem & {correlationId?: string}} */
     const queuedItem = { message: prepared.message, transfer: prepared.transfer };
     // A deferred item is still un-encoded, and the drain site resolves the
     // carrier for whichever worker ends up taking it. Dropping this flag would
@@ -1650,11 +1682,12 @@ export class PowerPool {
    *
    * @param {Array<any|{message:any,transfer?:Transferable[]}>} items
    * @param {{clone?:boolean}=} options - `clone` defaults to `false`; see above.
-   * @returns {{message:*,transfer:Transferable[]|undefined}[]}
+   * @returns {PreparedItem[]}
    */
   prepareBuffers(items, options = {}) {
     if (!Array.isArray(items)) throw new Error('prepareBuffers expects an array');
     const { clone = false, zeroCopy = false } = options;
+    /** @type {PreparedItem[]} */
     const out = new Array(items.length);
     for (let i = 0; i < items.length; i++) {
       const it =
@@ -1678,15 +1711,45 @@ export class PowerPool {
           out[i] = { message: msg, transfer: undefined };
           continue;
         }
-        try {
-          const u8 = this._encodeForTransfer(msg);
-          const buf = clone ? u8.slice() : u8;
-          out[i] = { message: buf, transfer: clone ? [buf.buffer] : undefined };
-          continue;
-        } catch (err) {
-          out[i] = { message: msg, transfer: undefined };
-          continue;
+        // **A pre-encoded body is not a framed message.** `clone: false` hands
+        // back the shared encode-cache body, and framing wraps that body in a
+        // new header — a new buffer, per call. So under any codec that frames,
+        // the cached body cannot be both shared and correct on the wire, and
+        // posting it verbatim is what made every batched request fail at the
+        // first line: the worker read `{` (123) as a protocol version and
+        // reported `unsupported protocol version 123 (expected 1)`.
+        //
+        // Two honest answers, and which one is right depends on the mode:
+        //
+        // - `clone: true` asks for a *private transferable* buffer, and a frame
+        //   is already private, so frame it now and the work is done up front.
+        //   This is the mode that can actually save the caller an encode.
+        // - `clone: false` is only meaningful under `'legacy'`, where the
+        //   cached body *is* the wire format. Otherwise mark the item `deferred`
+        //   and let dispatch frame it — the same mechanism `'negotiated'` uses,
+        //   and the only one that keeps the cache shareable.
+        if (clone || this._messageCodec === 'legacy') {
+          try {
+            const u8 = this._encodeForTransfer(msg);
+            const buf = clone ? u8.slice() : u8;
+            out[i] = {
+              message: buf,
+              transfer: clone ? [buf.buffer] : undefined,
+              deferred: this._messageCodec !== 'legacy',
+            };
+            // Under a framing codec `clone: true` must still produce a *frame*,
+            // not a bare body, so redo it through the shared framer.
+            if (this._messageCodec !== 'legacy') {
+              out[i] = { ...this._frameObjectForTransfer(msg, tr), deferred: false };
+            }
+            continue;
+          } catch (err) {
+            out[i] = { message: msg, transfer: undefined };
+            continue;
+          }
         }
+        out[i] = { message: msg, transfer: tr, deferred: true };
+        continue;
       }
       // ArrayBuffer or ArrayBuffer view -> make transferable in one normalized fast path.
       if (msg instanceof ArrayBuffer || ArrayBuffer.isView(msg)) {
@@ -1703,7 +1766,12 @@ export class PowerPool {
   /**
    * Class-level helper to prepare a message and optional transfer list for posting to a worker.
    * Accepts `opts` with `zeroCopy` flag to control forwarding of raw buffers.
+   *
+   * The single preparation path. `prepareBuffers` used to be a third copy of this
+   * logic and drifted from it — see {@link PreparedItem} for what that cost.
+   *
    * @private
+   * @returns {PreparedItem}
    */
   _prepareForTransfer(msg, tr, opts) {
     const zeroCopy = Boolean(opts?.zeroCopy);
@@ -1781,7 +1849,7 @@ export class PowerPool {
    * @private
    * @param {object} msg
    * @param {TransferList|undefined} tr
-   * @returns {{message: *, transfer: (TransferList|undefined)}}
+   * @returns {PreparedItem}
    */
   _frameObjectForTransfer(msg, tr) {
     try {
@@ -2951,12 +3019,20 @@ export class PowerPool {
     ) {
       const obj = this.workers[0];
       let idleStateDirty = false;
-      for (let i = 0; i < items.length; i++) {
-        const prepared = preparedItems[i] || {
+      for (let i = 0; i < items.length; i += 1) {
+        let prepared = preparedItems[i] || {
           message: items[i]?.message,
           transfer: items[i]?.transfer,
         };
         try {
+          // Honour the deferred marker, or this branch posts raw bytes where a
+          // frame is required. The non-fast path below calls `postMessage` and
+          // gets this for free from `_prepareForTransfer`; this branch bypassed
+          // `postMessage` entirely, which is precisely how the batch path came to
+          // speak a different protocol from the single-message one.
+          if (prepared.deferred) {
+            prepared = { ...this._frameObjectForTransfer(prepared.message, prepared.transfer) };
+          }
           const startTime = nowMs();
           if (prepared.transfer?.length)
             obj.worker.postMessage(prepared.message, prepared.transfer);

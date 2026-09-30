@@ -1224,6 +1224,56 @@ and remain a real gap; they are allowlisted with a ceiling, and recorded in
 
 Closes GATE-001 and GATE-002.
 
+#### Pool: every batched request failed at the first line
+
+`postMessageBatch` and `prepareBuffers` did not speak the documented framed
+protocol. The user-visible symptom was `unsupported protocol version 123 (expected
+1)` — and **123 is `{`**, the first byte of a JSON body. Every batched request
+failed, pointing nowhere near the cause.
+
+Measured on the single-worker fast path before the fix: the first byte of every
+message the worker received was 123.
+
+The cause is that `prepareBuffers` was a **third copy** of the pool's message
+preparation logic, and it had drifted from `_prepareForTransfer` twice over: it
+never framed, and it never set the `deferred` marker. The fast path then posted
+`prepared.message` verbatim, because it bypasses `postMessage` entirely — which is
+how the batch path came to speak a different protocol from the single-message path
+that is supposed to be the optimisation.
+
+The fix is a judgement rather than a patch, and the judgement is that
+**`clone: false` is only meaningful under `messageCodec: 'legacy'`.** Framing wraps
+the body in a fresh header on every call, so a _cached_ body can never be both
+shared and correct on the wire:
+
+| Mode                     | Returns                                                                   |
+| ------------------------ | ------------------------------------------------------------------------- |
+| `clone: false` (default) | unencoded, marked `deferred`; framing happens at dispatch                 |
+| `clone: true`            | a framed private `Uint8Array` — the mode that can actually save an encode |
+| `messageCodec: 'legacy'` | the shared cached body, which _is_ the wire format there                  |
+
+`transfer` stays `undefined` wherever the buffer is shared, which is the property
+worth keeping: a transfer list on a shared buffer would detach the cached encode
+entry. A deferred item carries no buffer at all, so nothing there _can_ be
+detached.
+
+**One existing test pinned part of the bug.** `test/powerPool.prepareBuffers.test.js`
+asserted the default returns the shared body as a `Uint8Array` — the bare body. It
+is rewritten to assert the property underneath it rather than the shape, which is
+stronger, plus a `'legacy'` case proving the cache is still shared there.
+
+`test/powerPool.framing.test.js` asserts on the **wire bytes, not a return value**,
+which is the only thing that could have caught this: the defect was that everything
+the API returned looked correct while the bytes were wrong, so the existing
+result-array assertions passed against the broken code. Mutation-checked both
+directions.
+
+`POOL-004` — the single `_dispatchToWorker` choke point across all four dispatch
+sites — is **not** done. This removes the drift at the two sites `POOL-001` names;
+the structural answer remains open and is recorded in the row.
+
+Closes POOL-001.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
