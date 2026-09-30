@@ -469,6 +469,43 @@ export class PowerCache {
      */
     private _expiresAt;
     /**
+     * The oversize rejection, shared by `set` and `setMany`.
+     *
+     * Extracted because `setMany` used to carry its own copy of the insert path and
+     * this check was the first thing it omitted: a 999-byte value written through
+     * `set` was refused with `onEvict` reporting `'rejected-oversized'`, and the
+     * same value written through `setMany` was admitted and then swept out by the
+     * bulk eviction pass with the **wrong reason**, `'evicted'`. A caller watching
+     * `onEvict` to count rejections — which is the only way to observe them, since
+     * `setMany` returns `this` for chaining — was counting the wrong thing.
+     *
+     * @private
+     * @param {*} key
+     * @param {*} value
+     * @param {number} w - Already-computed weight.
+     * @returns {boolean} `true` when the insert was rejected and must be skipped.
+     */
+    private _rejectIfOversized;
+    /**
+     * Insert a key that is not already present, applying the admission policy.
+     *
+     * Shared by `set` and `setMany` for the same reason as
+     * {@link PowerCache#_rejectIfOversized}: `setMany` omitted the TinyLFU sketch
+     * and the admission window entirely, so a bulk load was invisible to admission
+     * — `sketch.estimate(key) === 0` for every key written that way, and a
+     * frequency-driven filter cannot judge a key it has never seen.
+     *
+     * @private
+     * @param {*} key
+     * @param {*} value
+     * @param {number} w - Already-computed weight.
+     * @param {number} expiresAt - Already-computed absolute expiry.
+     * @param {number} previousSize - `this._map.size` before this insert, which the
+     *   window arbitration needs to tell "grew by one" from "replaced one".
+     * @returns {boolean} `false` when the admission filter refused the key.
+     */
+    private _insertNew;
+    /**
      * Set a value in the cache (add or update).
      * Marks the entry as most-recently used.
      * If `rejectOversized` is enabled and the computed/explicit weight exceeds `maxWeight`,
@@ -484,6 +521,22 @@ export class PowerCache {
         ttl?: number | undefined;
         weight?: number | undefined;
     }): this | false;
+    /**
+     * Overwrite an entry that is already in the cache.
+     *
+     * Shared by `set` and `setMany`. Split out for the same reason as the insert
+     * path above: `setMany` had its own copy of this arithmetic too, so the two
+     * had already drifted on the TTL and on admission before the weight bookkeeping
+     * was checked.
+     *
+     * @private
+     * @param {*} key
+     * @param {*} value
+     * @param {number} w - Already-computed weight.
+     * @param {number} expiresAt - Already-computed absolute expiry.
+     * @returns {void}
+     */
+    private _updateExisting;
     /**
      * Retrieve a value and mark it as recently used.
      * @param {*} key
@@ -535,6 +588,19 @@ export class PowerCache {
     /**
      * Bulk set multiple entries. Accepts an iterable/array of [key, value] pairs.
      * Computes weight once per value and applies a single eviction pass at the end.
+     *
+     * The per-entry decisions are `set`'s, not a second set of them: oversize
+     * rejection, the TinyLFU sketch and the admission window are all applied here.
+     * `setMany` used to insert through a simplified path that did none of the
+     * three, so a bulk load was invisible to admission and a rejected value came
+     * back out of the bulk eviction pass wearing the wrong `onEvict` reason.
+     *
+     * **It still returns `this`, not `false`, when a value is rejected** — that is
+     * its documented contract for chaining, and changing it would be a breaking API
+     * change for a batch of a thousand entries. The signal is `onEvict` with
+     * `'rejected-oversized'`, and `stats().rejected` afterwards. `set` returns
+     * `false` because it can.
+     *
      * @param {Iterable<[*,*]>} entries
      * @param {Object} [options]
      * @param {number} [options.ttl]

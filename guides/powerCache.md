@@ -64,7 +64,7 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `hitRate` (getter) — Convenience fraction `hits / (hits + misses)` (0 when no samples).
 
-- `setMany(entries, { ttl, weight })` — Bulk-insert multiple `[key, value]` pairs; performs a single eviction pass after insertion for efficiency.
+- `setMany(entries, { ttl, weight })` — Bulk-insert multiple `[key, value]` pairs; performs a single eviction pass after insertion for efficiency. Applies the **same** per-entry decisions as `set`: `rejectOversized`, the TinyLFU sketch and the admission window. It returns `this` for chaining, so it cannot report a per-entry outcome — a rejected value surfaces as `onEvict` with `'rejected-oversized'` and in `stats().rejected`, whereas `set` returns `false`. Note the default `weightFn` counts _entries_, not bytes, so `rejectOversized` only triggers under a `weightFn` or an explicit `weight` that measures size.
 
 - `getMany(keys, { ignoreExpiry = false })` — Bulk get; returns a `Map` of found keys -> values.
 

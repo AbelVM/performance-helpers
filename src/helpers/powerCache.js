@@ -1067,6 +1067,146 @@ export class PowerCache {
   }
 
   /**
+   * The oversize rejection, shared by `set` and `setMany`.
+   *
+   * Extracted because `setMany` used to carry its own copy of the insert path and
+   * this check was the first thing it omitted: a 999-byte value written through
+   * `set` was refused with `onEvict` reporting `'rejected-oversized'`, and the
+   * same value written through `setMany` was admitted and then swept out by the
+   * bulk eviction pass with the **wrong reason**, `'evicted'`. A caller watching
+   * `onEvict` to count rejections — which is the only way to observe them, since
+   * `setMany` returns `this` for chaining — was counting the wrong thing.
+   *
+   * @private
+   * @param {*} key
+   * @param {*} value
+   * @param {number} w - Already-computed weight.
+   * @returns {boolean} `true` when the insert was rejected and must be skipped.
+   */
+  _rejectIfOversized(key, value, w) {
+    if (!this.rejectOversized || !Number.isFinite(this.maxWeight) || w <= this.maxWeight) {
+      return false;
+    }
+    this._rejected++;
+    try {
+      if (this.onEvict) this.onEvict(key, value, 'rejected-oversized');
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onEvict callback threw (rejected-oversized)');
+    }
+    return true;
+  }
+
+  /**
+   * Insert a key that is not already present, applying the admission policy.
+   *
+   * Shared by `set` and `setMany` for the same reason as
+   * {@link PowerCache#_rejectIfOversized}: `setMany` omitted the TinyLFU sketch
+   * and the admission window entirely, so a bulk load was invisible to admission
+   * — `sketch.estimate(key) === 0` for every key written that way, and a
+   * frequency-driven filter cannot judge a key it has never seen.
+   *
+   * @private
+   * @param {*} key
+   * @param {*} value
+   * @param {number} w - Already-computed weight.
+   * @param {number} expiresAt - Already-computed absolute expiry.
+   * @param {number} previousSize - `this._map.size` before this insert, which the
+   *   window arbitration needs to tell "grew by one" from "replaced one".
+   * @returns {boolean} `false` when the admission filter refused the key.
+   */
+  _insertNew(key, value, w, expiresAt, previousSize) {
+    // **The window path.** A new key is admitted to the window unconditionally —
+    // that is what makes the cold start stop collapsing, because a one-shot key
+    // displaces the previous one-shot key inside the window rather than a
+    // working-set entry in main space. The filter then arbitrates only the
+    // window's oldest entry, which is a comparison between two established keys
+    // rather than between a newcomer and a cold sketch.
+    //
+    // This has to be tested *before* the capacity check below, not after it. As an
+    // `else if` it was unreachable exactly when it mattered: once the cache was
+    // full, the old refuse-on-tie rule ran instead and every arrival was judged
+    // against a single main-space victim, so the window never arbitrated and
+    // nothing was ever evicted through it.
+    if (this._sketch && this._windowSize > 0) {
+      const node = this._allocNode(key, value, w, expiresAt);
+      this._map.set(key, node);
+      node.inWindow = true;
+      this._append(node);
+      this._currentWeight += node.weight || 0;
+      this._arbitrateWindow(previousSize);
+      // The sketch increment and the eviction pass are the caller's, shared with
+      // the no-window path. Doing them here as well double-counted every key
+      // that went through a window.
+      return true;
+    }
+    // Admission, decided *before* the insert. An LRU evicts the coldest by
+    // recency, which a one-off scan does not disturb: the scan's keys are the
+    // *most* recent by definition, and it walks the working set straight out.
+    // A frequency filter asks a different question - is the thing about to be
+    // evicted still wanted - and refuses the insertion when the incumbent is
+    // the better bet.
+    //
+    // Refusing here rather than inside the eviction sweep matters. An earlier
+    // version returned from `_evictIfNeeded` to reject, which skipped the sweep
+    // entirely and let the cache grow to 77 entries against a limit of 10.
+    // Rejection is about *this key*, so it belongs at the insert. Only ever
+    // consulted at capacity. A frequency filter compares the challenger's
+    // popularity against the victim's, and a brand-new key's estimate is 0 - so
+    // applying the rule below capacity refuses every insert after the first and
+    // the cache can never fill. Measured: 200 insertions rejected, `size` 1.
+    // Admission is about what to *displace*, so it needs something to displace.
+    if (this._sketch && this._map.size >= this.maxEntries) {
+      const incumbent = this._evictionCandidate || this._head;
+      // A brand-new key is **refused whenever the incumbent's estimate is greater
+      // than or equal to its own**, and a brand-new key's estimate is 0. In a
+      // cold sketch every estimate is 0, so `0 >= 0` holds and the key is refused.
+      // Read that against the comment this block used to carry, which claimed a
+      // first-seen key was "admitted unconditionally ... the TinyLFU admission
+      // window in its simplest form". That was false, and so was the rest of it,
+      // which simultaneously asserted that "only a *strictly* hotter incumbent
+      // may refuse" (which would need `>`) and that "`>=`, so a tie keeps the
+      // incumbent" (which is what the code does, and which refuses the
+      // challenger).
+      //
+      // **This is a known defect, and the refusal rule above is why
+      // `admission: 'tinylfu'` currently underperforms plain LRU.** Measured on
+      // the paired Zipf + scan workload in `bench/claims.js` (`node bench/claims.js
+      // zipf`): on a cold 40-entry cache preceded by a 460-key scan burst the
+      // working-set hit rate is 2.5% against plain LRU's 66.4%, because the scan
+      // keys fill the cache while it is still below capacity and the working set
+      // is then refused every time. On a sustained Zipf mix, working-set
+      // retention is 15.4/40 against LRU's 17.2/40, with the worst hot keys
+      // sitting at estimate 0 - and a key at 0 can never re-enter. The release note
+      // for this option has been withdrawn; the measurements live in `review.md`
+      // under BENCH-002.
+      //
+      // **The fix is not a comparison operator.** Changing `>=` to `>` admits the
+      // challenger on every tie, which lets a scan walk the working set - the
+      // exact failure this filter exists to prevent. The correct mechanism is
+      // W-TinyLFU's admission *window*: a small region at the MRU end that
+      // accepts new keys unconditionally, so scan traffic is absorbed there and
+      // the frequency filter arbitrates only that window's victim against a
+      // main-space victim. That needs a size choice, its own interaction rules
+      // with `policy: 'slru'` (which currently makes `tinylfu` *worse*), and its
+      // own tests.
+      //
+      // The sketch itself is sound: `test/smallLfu.test.js` asserts at a
+      // production-shaped half-life that a recurring key outranks a one-shot one
+      // on every key, so do not "fix" this by re-tuning the sketch.
+      const challenger = this._sketch.estimate(key);
+      if (incumbent && this._sketch.estimate(incumbent.key) >= challenger) {
+        this._rejectedAdmission += 1;
+        return false;
+      }
+    }
+    const node = this._allocNode(key, value, w, expiresAt);
+    this._map.set(key, node);
+    this._append(node);
+    this._currentWeight += node.weight || 0;
+    return true;
+  }
+
+  /**
    * Set a value in the cache (add or update).
    * Marks the entry as most-recently used.
    * If `rejectOversized` is enabled and the computed/explicit weight exceeds `maxWeight`,
@@ -1083,126 +1223,46 @@ export class PowerCache {
     const expiresAt = this._expiresAt(ttl, now);
     // Compute weight once and validate it before mutating bookkeeping.
     const w = this._computeWeight(value, weight);
-    // If item is heavier than maxWeight, optionally reject insertion
-    if (this.rejectOversized && Number.isFinite(this.maxWeight) && w > this.maxWeight) {
-      this._rejected++;
-      try {
-        if (this.onEvict) this.onEvict(key, value, 'rejected-oversized');
-      } catch (err) {
-        this._notifyError(err, 'PowerCache onEvict callback threw (rejected-oversized)');
-      }
-      return false;
-    }
+    if (this._rejectIfOversized(key, value, w)) return false;
 
     if (this._map.has(key)) {
-      const node = this._map.get(key);
-      this._currentWeight -= node.weight || 0;
-      node.value = value;
-      node.weight = w;
-      node.expiresAt = expiresAt;
-      this._currentWeight += node.weight || 0;
-      this._moveToTail(node);
-    } else {
-      // Admission, decided *before* the insert. An LRU evicts the coldest by
-      // recency, which a one-off scan does not disturb: the scan's keys are the
-      // *most* recent by definition, and it walks the working set straight out.
-      // A frequency filter asks a different question - is the thing about to be
-      // evicted still wanted - and refuses the insertion when the incumbent is
-      // the better bet.
-      //
-      // Refusing here rather than inside the eviction sweep matters. An earlier
-      // version returned from `_evictIfNeeded` to reject, which skipped the
-      // sweep entirely and let the cache grow to 77 entries against a limit of
-      // 10. Rejection is about *this key*, so it belongs at the insert.
-      // Only ever consulted at capacity. A frequency filter compares the
-      // challenger's popularity against the victim's, and a brand-new key's
-      // estimate is 0 - so applying the rule below capacity refuses every
-      // insert after the first and the cache can never fill. Measured: 200
-      // insertions rejected, `size` 1. Admission is about what to *displace*,
-      // so it needs something to displace.
-      if (this._sketch && this._windowSize > 0) {
-        // **The window path.** A new key is admitted to the window
-        // unconditionally — that is what makes the cold start stop collapsing,
-        // because a one-shot key displaces the previous one-shot key inside the
-        // window rather than a working-set entry in main space. The filter then
-        // arbitrates only the window's oldest entry, which is a comparison
-        // between two established keys rather than between a newcomer and a cold
-        // sketch.
-        //
-        // This has to be tested *before* the capacity check below, not after
-        // it. As an `else if` it was unreachable exactly when it mattered: once
-        // the cache was full, the old refuse-on-tie rule ran instead and every
-        // arrival was judged against a single main-space victim, so the window
-        // never arbitrated and nothing was ever evicted through it.
-        const previousSize = this._map.size;
-        const node = this._allocNode(key, value, w, expiresAt);
-        this._map.set(key, node);
-        node.inWindow = true;
-        this._append(node);
-        this._currentWeight += node.weight || 0;
-        this._sketch.increment(key);
-        this._arbitrateWindow(previousSize);
-        this._evictIfNeeded();
-        return this;
-      }
-      if (this._sketch && this._map.size >= this.maxEntries) {
-        const incumbent = this._evictionCandidate || this._head;
-        // A brand-new key is **refused whenever the incumbent's estimate is
-        // greater than or equal to its own**, and a brand-new key's estimate is
-        // 0. In a cold sketch every estimate is 0, so `0 >= 0` holds and the
-        // key is refused. Read that against the comment this block used to
-        // carry, which claimed a first-seen key was "admitted unconditionally
-        // ... the TinyLFU admission window in its simplest form". That was false,
-        // and so was the rest of it, which simultaneously asserted that "only a
-        // *strictly* hotter incumbent may refuse" (which would need `>`) and
-        // that "`>=`, so a tie keeps the incumbent" (which is what the code does,
-        // and which refuses the challenger).
-        //
-        // **This is a known defect, and the refusal rule above is why
-        // `admission: 'tynilfu'` currently underperforms plain LRU.** Measured on
-        // the paired Zipf + scan workload in `bench/claims.js` (`node bench/claims.js
-        // zipf`): on a cold 40-entry cache preceded by a 460-key scan burst the
-        // working-set hit rate is 2.5% against plain LRU's 66.4%, because the
-        // scan keys fill the cache while it is still below capacity and the
-        // working set is then refused every time. On a sustained Zipf mix,
-        // working-set retention is 15.4/40 against LRU's 17.2/40, with the
-        // worst hot keys sitting at estimate 0 — and a key at 0 can never
-        // re-enter. The release note for this option has been withdrawn; the
-        // measurements live in `review.md` under BENCH-002.
-        //
-        // **The fix is not a comparison operator.** Changing `>=` to `>` admits
-        // the challenger on every tie, which lets a scan walk the working set —
-        // the exact failure this filter exists to prevent. The correct mechanism
-        // is W-TinyLFU's admission *window*: a small region at the MRU end that
-        // accepts new keys unconditionally, so scan traffic is absorbed there
-        // and the frequency filter arbitrates only that window's victim against
-        // a main-space victim. That needs a size choice, its own interaction
-        // rules with `policy: 'slru'` (which currently makes `tynilfu` *worse*),
-        // and its own tests.
-        //
-        // The sketch itself is sound: `test/smallLfu.test.js` asserts at a
-        // production-shaped half-life that a recurring key outranks a one-shot
-        // one on every key, so do not "fix" this by re-tuning the sketch.
-        const challenger = this._sketch.estimate(key);
-        if (incumbent && this._sketch.estimate(incumbent.key) >= challenger) {
-          this._rejectedAdmission += 1;
-          return this;
-        }
-      }
-      const node = this._allocNode(key, value, w, expiresAt);
-      this._map.set(key, node);
-      this._append(node);
-      this._currentWeight += node.weight || 0;
+      this._updateExisting(key, value, w, expiresAt);
+    } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
+      // Refused by the admission filter. The key is deliberately *not*
+      // recorded in the sketch: it did not reach the cache, and counting a
+      // refusal would let a scan inflate its own estimate by being refused.
+      return this;
     }
-    // Evict after both inserts and in-place updates. An update that grows an
-    // entry's weight can push the cache over `maxWeight`, and only the insert
-    // branch used to trigger eviction — leaving the cache permanently over
-    // budget until the next insert.
-    // The key is recorded even when the insert is admitted, so the sketch
+    // The key is recorded even when the insert was admitted, so the sketch
     // reflects attempted demand rather than only what survived.
     this._sketch?.increment(key);
-    this._evictIfNeeded(key);
+    this._evictIfNeeded();
     return this;
+  }
+
+  /**
+   * Overwrite an entry that is already in the cache.
+   *
+   * Shared by `set` and `setMany`. Split out for the same reason as the insert
+   * path above: `setMany` had its own copy of this arithmetic too, so the two
+   * had already drifted on the TTL and on admission before the weight bookkeeping
+   * was checked.
+   *
+   * @private
+   * @param {*} key
+   * @param {*} value
+   * @param {number} w - Already-computed weight.
+   * @param {number} expiresAt - Already-computed absolute expiry.
+   * @returns {void}
+   */
+  _updateExisting(key, value, w, expiresAt) {
+    const node = this._map.get(key);
+    this._currentWeight -= node.weight || 0;
+    node.value = value;
+    node.weight = w;
+    node.expiresAt = expiresAt;
+    this._currentWeight += node.weight || 0;
+    this._moveToTail(node);
   }
 
   /**
@@ -1320,6 +1380,19 @@ export class PowerCache {
   /**
    * Bulk set multiple entries. Accepts an iterable/array of [key, value] pairs.
    * Computes weight once per value and applies a single eviction pass at the end.
+   *
+   * The per-entry decisions are `set`'s, not a second set of them: oversize
+   * rejection, the TinyLFU sketch and the admission window are all applied here.
+   * `setMany` used to insert through a simplified path that did none of the
+   * three, so a bulk load was invisible to admission and a rejected value came
+   * back out of the bulk eviction pass wearing the wrong `onEvict` reason.
+   *
+   * **It still returns `this`, not `false`, when a value is rejected** — that is
+   * its documented contract for chaining, and changing it would be a breaking API
+   * change for a batch of a thousand entries. The signal is `onEvict` with
+   * `'rejected-oversized'`, and `stats().rejected` afterwards. `set` returns
+   * `false` because it can.
+   *
    * @param {Iterable<[*,*]>} entries
    * @param {Object} [options]
    * @param {number} [options.ttl]
@@ -1333,23 +1406,18 @@ export class PowerCache {
       if (!pair) continue;
       const [key, value] = pair;
       const w = this._computeWeight(value, weight);
+      if (this._rejectIfOversized(key, value, w)) continue;
 
       if (this._map.has(key)) {
-        const node = this._map.get(key);
-        this._currentWeight -= node.weight || 0;
-        node.value = value;
-        node.weight = w;
-        node.expiresAt = expiresAt;
-        this._currentWeight += node.weight || 0;
-        this._moveToTail(node);
-      } else {
-        const node = this._allocNode(key, value, w, expiresAt);
-        this._map.set(key, node);
-        this._append(node);
-        this._currentWeight += node.weight || 0;
+        this._updateExisting(key, value, w, expiresAt);
+      } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
+        continue;
       }
+      this._sketch?.increment(key);
     }
-    // Perform eviction once after bulk insertions
+    // One eviction pass for the whole batch, which is the point of `setMany` and
+    // the reason it does not simply loop over `set`: an N-entry load would
+    // otherwise walk the eviction list N times.
     this._evictIfNeeded();
     return this;
   }

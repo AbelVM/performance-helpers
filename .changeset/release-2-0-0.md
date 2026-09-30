@@ -927,6 +927,42 @@ plan's `[verified]` label was not, and `resize()`'s
 asserted the other way round on the strength of one misread probe before the alias
 was checked.
 
+#### Cache: `setMany` was making different decisions from `set`
+
+`setMany` had its own copy of the insert path, and it was a simplified one. Three
+of `set`'s per-entry decisions were simply absent from it:
+
+- **`rejectOversized` was ignored.** An oversized value written through `set` was
+  refused with `onEvict` reporting `'rejected-oversized'`; the same value written
+  through `setMany` was admitted, then swept out by the bulk eviction pass
+  wearing the **wrong reason**, `'evicted'`. Anyone counting rejections from
+  `onEvict` — which is the only way to count them, since `setMany` returns `this`
+  — was counting the wrong thing, and `stats().rejected` stayed at 0.
+- **The TinyLFU sketch never saw the writes.** `sketch.estimate(k) === 0` after a
+  bulk load, and a frequency-driven filter cannot judge a key it has never seen.
+  Combined with the admission filter's own defect (a key at estimate 0 can never
+  re-enter), a bulk-loaded key was effectively locked out of a cache it was in.
+- **The admission window was bypassed entirely**, so a bulk load skipped the one
+  mechanism that makes `windowSize > 0` worth having.
+
+`setMany` still returns `this` and still gives no per-entry signal — that is its
+chaining contract, and changing it would break a thousand-entry load for a
+`false` nobody can use. The signal is `onEvict` and `stats().rejected`, and both
+are now correct.
+
+The fix deletes the duplication rather than patching the second copy: the insert
+path, the oversize check and the update arithmetic are now `_insertNew`,
+`_rejectIfOversized` and `_updateExisting`, and `set` and `setMany` both call
+them. `set` went from 127 lines to 47. That is the same lesson as the TTL defect
+above — three copies of one arithmetic, three places to get it wrong — and the
+reason `CACHE-003` and `CACHE-004` are one change in spirit even though the rows
+do not say so.
+
+Worth knowing if you hit an oversize rejection and cannot work out why: the
+**default `weightFn` counts entries, not bytes**, so `set('k', <999 bytes>)` is
+weight 1 and is not rejected however small you make `maxWeight`. The rejection
+only fires under a size-based `weightFn` or an explicit `weight`.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

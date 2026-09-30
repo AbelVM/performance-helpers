@@ -207,3 +207,81 @@ describe('PowerCache eviction cursor (CACHE-001, CACHE-002)', () => {
     expect(cache.size).toBe(4);
   });
 });
+
+describe('PowerCache.setMany makes the same decisions as set (CACHE-004)', () => {
+  /**
+   * `setMany` used to carry its own copy of the insert path, and it was a
+   * simplified one: no oversize rejection, no TinyLFU sketch, no admission
+   * window. Three copies of one insert is two too many, and these are the
+   * divergences that had already accumulated.
+   *
+   * Before/after on the same script, which is the shape of every assertion here:
+   *
+   *   onEvict reasons  ["big2:evicted"]           ->  ["big2:rejected-oversized"]
+   *   stats().rejected 0                           ->  1
+   *   sketch estimates 0, 0, 0                     ->  1, 1, 1
+   */
+  it('rejects an oversized value with the right reason, as set does', () => {
+    const reasons = [];
+    const cache = new PowerCache({
+      maxEntries: 10,
+      maxWeight: 100,
+      rejectOversized: true,
+      // The default `weightFn` counts *entries*, not bytes, so a large value is
+      // only oversized under a weight function that says so — which is how a
+      // caller using a byte budget would configure it.
+      weightFn: (v) => String(v).length,
+      onEvict: (key, value, reason) => reasons.push(`${key}:${reason}`),
+    });
+
+    // The single-key path, for the comparison this row is really about.
+    expect(cache.set('big1', 'x'.repeat(999))).toBe(false);
+    expect(reasons).toEqual(['big1:rejected-oversized']);
+
+    // The bulk path. `setMany` returns `this` for chaining and cannot report a
+    // per-entry outcome, so `onEvict` and the counter are the signal.
+    expect(cache.setMany([['big2', 'x'.repeat(999)]])).toBe(cache);
+    expect(reasons).toEqual(['big1:rejected-oversized', 'big2:rejected-oversized']);
+    expect(cache.stats().rejected).toBe(2);
+    expect(cache.has('big2')).toBe(false);
+
+    // A value that fits is still admitted, so this is not "reject everything".
+    cache.setMany([['small', 'ok']]);
+    expect(cache.get('small')).toBe('ok');
+    expect(cache.stats().rejected).toBe(2);
+  });
+
+  it('makes bulk writes visible to the admission sketch', () => {
+    // A frequency-driven filter cannot judge a key it has never seen, so
+    // `estimate === 0` after a bulk load meant a batch of ten thousand entries
+    // was invisible to admission — and a key at 0 can never re-enter.
+    const cache = new PowerCache({ maxEntries: 10, admission: 'tinylfu', windowSize: 0 });
+    cache.setMany([['a'], ['b'], ['c']]);
+    for (const key of ['a', 'b', 'c']) {
+      expect(cache._sketch.estimate(key)).toBeGreaterThan(0);
+    }
+  });
+
+  it('applies the admission window on a bulk load', () => {
+    // The window is what makes `windowSize > 0` worth having: a one-shot key
+    // displaces the previous one-shot key inside the window rather than a
+    // working-set entry in main space. `setMany` skipped it, so a bulk load
+    // bypassed the mechanism entirely.
+    const cache = new PowerCache({ maxEntries: 6, admission: 'tinylfu', windowSize: 4 });
+    cache.setMany(Array.from({ length: 6 }, (_, i) => [`k${i}`, i]));
+    expect(cache.size).toBeLessThanOrEqual(6);
+    const inWindow = [...cache.entries('MRU')].filter(([k]) => cache._map.get(k)?.inWindow);
+    expect(inWindow.length).toBeGreaterThan(0);
+  });
+
+  it('updates existing entries with the same weight bookkeeping as set', () => {
+    // The third copy of the update arithmetic. A bulk overwrite that miscounted
+    // weight would drift the budget without ever tripping a size assertion.
+    const cache = new PowerCache({ maxEntries: 10, weightFn: (v) => String(v).length });
+    cache.setMany([['a', 'x'.repeat(50)]]);
+    expect(cache.currentWeight).toBe(50);
+    cache.setMany([['a', 'x'.repeat(10)]]);
+    expect(cache.get('a')).toBe('x'.repeat(10));
+    expect(cache.currentWeight).toBe(10);
+  });
+});
