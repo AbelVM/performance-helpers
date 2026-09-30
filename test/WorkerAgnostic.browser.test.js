@@ -7,11 +7,18 @@
  * takes the second half.
  *
  * `createWebWorkerFromString` decides *where* a string worker source resolves
- * from, by looking for a base URL in three places in order: `import.meta.url`,
- * `document.currentScript.src`, then `location.href`. Under a `new URL(source,
- * baseUrl)` — which is how a browser resolves a relative worker path — getting
- * this wrong means the worker 404s, and a 404 from a worker constructor is
- * indistinguishable from a typo in the path.
+ * from. Under a `new URL(source, baseUrl)` — which is how a browser resolves a
+ * relative worker path — getting this wrong means the worker 404s, and a 404 from
+ * a worker constructor is indistinguishable from a typo in the path.
+ *
+ * It used to look for a base in three places, starting with `import.meta.url`.
+ * **That first one was dead**, and this file's header asserted otherwise until
+ * `WRK-001`: `new Function(...)` evaluates in global scope, so `import.meta` is a
+ * syntax error there and the branch always returned `undefined`. The bases that
+ * actually run are `document.currentScript.src` and then `location.href` — and in
+ * a `<script type="module">` the first is `null` by spec, so the module's own URL
+ * is never used. The fix is `options.baseUrl`, because the module URL is
+ * unreachable from that code rather than merely awkward to get.
  *
  * All three fallbacks run under Node with a `Worker` stub, so this needs no
  * browser and no jsdom. What it does need is a global `Worker`, which is
@@ -79,6 +86,35 @@ describe('string worker sources in a browser environment', () => {
     vi.stubGlobal('location', { href: 'https://app.example/index.html' });
     new WorkerAgnostic('./task.js');
     expect(FakeWorker.constructed[0].source).toBe('https://app.example/task.js');
+  });
+
+  it('resolves against an explicit baseUrl, which is the only way in a module script', () => {
+    // `WRK-001`. In a `<script type="module">` `document.currentScript` is
+    // `null` per the HTML spec, and the module's own URL is unreachable from
+    // inside a `new Function` — that evaluates in global scope, where
+    // `import.meta` is a syntax error. So the automatic fallbacks resolve a
+    // module-relative worker path against the **page**, and the worker 404s with
+    // an error that reads as a typo. The caller knows where its module is, and
+    // this is the only honest way to let it say so.
+    vi.stubGlobal('document', { currentScript: null });
+    vi.stubGlobal('location', { href: 'https://app.example/index.html' });
+
+    // Without the option, the page is the base — the wrong one here, which is the
+    // whole defect. Asserted first so the next assertion has a contrast.
+    new WorkerAgnostic('./workers/task.js');
+    expect(FakeWorker.constructed[0].source).toBe('https://app.example/workers/task.js');
+
+    new WorkerAgnostic('./workers/task.js', { baseUrl: 'https://cdn.example/app/main.js' });
+    expect(FakeWorker.constructed[1].source).toBe('https://cdn.example/app/workers/task.js');
+  });
+
+  it('prefers baseUrl over currentScript when both are available', () => {
+    // An explicit base must win even where the automatic one would have worked,
+    // or the option is only usable in the case that is already broken.
+    vi.stubGlobal('document', { currentScript: { src: 'https://app.example/assets/app.js' } });
+    vi.stubGlobal('location', { href: 'https://app.example/index.html' });
+    new WorkerAgnostic('./task.js', { baseUrl: 'https://cdn.example/bundle.js' });
+    expect(FakeWorker.constructed[0].source).toBe('https://cdn.example/task.js');
   });
 
   it('passes the raw string through when no base URL can be found', () => {

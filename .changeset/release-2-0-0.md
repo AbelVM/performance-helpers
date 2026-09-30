@@ -1620,6 +1620,46 @@ one blessing a number I do not understand.
 
 Closes RES-009, and opens GATE-018.
 
+#### A string worker path in a browser: `baseUrl`, and a dead branch that looked alive
+
+`WorkerAgnostic` resolved a _string_ worker source against the first base URL it
+could find, starting with `import.meta.url` via
+`new Function('try { return import.meta?.url } …')()`. **That branch has never run.**
+`new Function` evaluates in **global** scope, where `import.meta` is a syntax
+error, so the generated function fails to parse, the inner `catch` swallows it, and
+the branch yields `undefined`. Verified directly.
+
+The consequence is browser-only and matches the plan: `document.currentScript` is
+`null` in a `<script type="module">` per the HTML spec, so the _module's own URL is
+never used_. The base falls through to `location.href` — **the page** — so a worker
+path written relative to the module resolves against the page and 404s. And because
+the fetch is asynchronous the failure arrives as an `error` event on the worker
+rather than a throw at construction, so it reads as a typo in the path rather than
+as a resolution failure.
+
+The fix is an option, not a repair, because the code **cannot** do what it was
+trying to do. The module URL is unreachable from a `new Function` in global scope
+rather than awkwardly obtainable, and writing a bare `import.meta.url` would fix
+the browser while breaking the CJS and UMD builds the same file must support.
+
+```js
+new WorkerAgnostic('./workers/task.js', { baseUrl: import.meta.url });
+```
+
+Unnecessary for a classic script or an absolute worker source; Node is unaffected,
+since a string source goes to `node:worker_threads` directly. Documented in
+`WorkerAgnosticOptions` and in the guide, and the browser test file's header — which
+asserted the false claim that `import.meta.url` was one of three fallbacks — is
+corrected.
+
+Three tests, mutation-checked: ignoring `baseUrl` fails 2 of 8. **One mutation
+survived and it was my code, not the test's** — accepting an empty `baseUrl` as a
+base also passed, because `if (baseUrl)` already treats `''` as absent, so the
+guard was redundant and the test claiming to pin it was decoration. The guard and
+the test were removed rather than loosened.
+
+Closes WRK-001.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

@@ -920,6 +920,18 @@ export {};
  * actually change behaviour here and are named for discoverability; the index
  * signature is what stops the type from rejecting the rest.
  *
+ * @property {string} [baseUrl] - The URL a *string* worker source is resolved
+ *   against, in a **browser** with a path rather than inline code.
+ *
+ *   Needed in a `<script type="module">`, and only there. `document.currentScript`
+ *   is `null` in a module script per the HTML spec, and the module's own URL is
+ *   unreachable from inside a `new Function` -- that evaluates in global scope,
+ *   where `import.meta` is a syntax error. So the only base left to fall back on
+ *   is `location.href`, which is the **page**, not the module: a worker path
+ *   written relative to the module resolves against the page and 404s, and the
+ *   error arrives asynchronously on the worker, where it reads as a typo.
+ *   Unnecessary for a classic script or an absolute worker source.
+ *
  * @typedef {Object.<string, *>} WorkerAgnosticOptions
  */
 

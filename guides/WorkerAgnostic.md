@@ -32,6 +32,42 @@ A **class** is accepted directly and constructed with `new`. An **arrow function
 - `preloadNode()` → `Promise<Worker>`. See the ESM caveat below.
 - Instance: `postMessage(message, transfer)`, `terminate()`, `addEventListener` / `removeEventListener`, `on` / `off`, plus `env` and `readyState`.
 
+## A string worker path in a browser: `baseUrl`
+
+```js
+new WorkerAgnostic('./workers/task.js', { baseUrl: import.meta.url });
+```
+
+In a **browser**, a _string_ worker source that is a **path** (rather than inline
+code) is resolved with `new URL(source, baseUrl)`. The base is looked for in this
+order:
+
+1. **`options.baseUrl`**, if you supplied it.
+2. `document.currentScript.src` — the classic-script base.
+3. `location.href` — **the page**.
+
+**You need `baseUrl` in a `<script type="module">`, and only there.** Two things
+combine:
+
+- `document.currentScript` is `null` in a module script, per the HTML spec, so step 2
+  finds nothing.
+- The module's own URL cannot be recovered by this code. The obvious attempt —
+  `new Function('return import.meta.url')()` — **does not work**: `new Function`
+  evaluates in _global_ scope, where `import.meta` is a syntax error, so the
+  generated function fails to parse and the branch silently yields nothing.
+
+So the base falls through to `location.href`, which is the **page**, not the
+module. A worker path written relative to the module then resolves against the
+page and 404s — and because the fetch is asynchronous, the failure arrives as an
+`error` event on the worker rather than a throw at construction, so it reads as a
+typo in the path rather than as a resolution failure. That is the failure mode
+`baseUrl` exists to remove.
+
+Not needed for a classic script (step 2 works) or for an absolute worker source
+(step 1 is unnecessary when nothing has to be resolved). Node is unaffected: a
+string source is handed to `node:worker_threads` directly, which does its own
+resolution.
+
 ## The pure-ESM caveat in Node
 
 Node's `node:worker_threads` is a CommonJS builtin, so in a **pure ESM** module you cannot `require()` it synchronously. `WorkerAgnostic` needs a synchronous `require` **only** for a path/string source; it loads one lazily via `new Function('return import("node:module")')`.

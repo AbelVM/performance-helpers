@@ -254,26 +254,57 @@ function coerceFactoryResult(result, WorkerCtor, options, env) {
 
 /**
  * Create a Web Worker from a (possibly relative) path string, resolving it
- * against the current module URL in bundler contexts when possible.
+ * against `options.baseUrl`, then `document.currentScript.src`, then
+ * `location.href` — see the note in the body for why the module's own URL is
+ * not among them and cannot be.
+ *
  * @param {string} workerSource
- * @param {Object} [options]
+ * @param {import('./jsdoc-types.js').WorkerAgnosticOptions} [options]
  * @returns {import('./jsdoc-types.js').WorkerLike} A worker-like object.
  * @private
  */
 function createWebWorkerFromString(workerSource, options) {
-  let baseUrl;
-  try {
-    // Read `import.meta.url` at runtime via a dynamic function so bundlers do
-    // not statically parse (and thus externalize) `import.meta`.
-    baseUrl = new Function('try { return import.meta?.url } catch (e) { return undefined }')();
-  } catch (e) {
-    baseUrl = undefined;
-  }
+  // **The base URL cannot be discovered here, and the reason is worth recording
+  // because the old code looked like it was discovering it.**
+  //
+  // `new Function(...)` evaluates in *global* scope, so `import.meta` is not in
+  // scope inside it: the generated function fails to parse, the inner `catch`
+  // swallows it, and the branch returns `undefined`. Verified:
+  // `new Function('try { return import.meta?.url } catch (e) { return undefined }')()`
+  // yields `undefined` and throws `Cannot use 'import.meta' outside a module`. So
+  // the module URL is not merely awkward to reach from here, it is **unreachable**,
+  // and no rewrite of that expression can recover it. Writing a bare
+  // `import.meta.url` would fix the browser case and break the CJS and UMD
+  // builds, which the same file has to support.
+  //
+  // What is left is the two bases that *are* reachable, and both are the wrong
+  // one in a `<script type="module">`:
+  //
+  // - `document.currentScript` is `null` there, per the HTML spec, so a module
+  //   script falls through;
+  // - `location.href` is the **page**, not the module — so a worker path written
+  //   relative to the module resolves against the page and 404s, and the error is
+  //   reported asynchronously on the worker, where it reads as a typo rather than
+  //   as a resolution failure.
+  //
+  // Hence `options.baseUrl`: the caller knows where its module is, and the only
+  // honest resolution is to let it say so. For a classic script, or a
+  // fully-absolute worker source, the automatic fallbacks below are correct and
+  // this option is unnecessary.
+  const explicitBase = options && typeof options === 'object' ? options.baseUrl : undefined;
+
+  let baseUrl = typeof explicitBase === 'string' ? explicitBase : undefined;
+
   if (!baseUrl && typeof document !== 'undefined') {
     const cs = document.currentScript;
     if (cs?.src) baseUrl = cs.src;
   }
-  if (!baseUrl && typeof location !== 'undefined' && location.href) baseUrl = location.href;
+  if (!baseUrl && typeof location !== 'undefined' && location.href) {
+    // The **page** URL, which is the right base for a classic script and the
+    // wrong one for a module script. Documented rather than fixed, because the
+    // module URL is not reachable from here.
+    baseUrl = location.href;
+  }
   try {
     if (baseUrl) return new Worker(new URL(workerSource, baseUrl), options);
   } catch (e) {
