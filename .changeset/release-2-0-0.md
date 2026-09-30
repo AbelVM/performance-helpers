@@ -2059,6 +2059,36 @@ when a step is added.
 
 Closes GATE-010.
 
+#### The gate that checks the generated docs could not fail
+
+`docs:drift` was committed wrapped in parentheses, and the parentheses made it
+unfailable. `exit 1` inside braces inside a subshell exits the **subshell** — the
+rest of the script carried on, the exit status came from whatever ran last, and
+the gate reported success on a tree it had just found dirty.
+
+It went unnoticed _despite being observed failing once, on a tree that really was
+drifted_, because that failure came from the untracked-pages arm, which is at
+top level. This is the limit of "did I see it fail", and it is worth stating
+plainly: **a guard whose failure has been observed can still be failing in the
+wrong place.** That is an argument for pinning the structure and not only the
+behaviour, which is what the three new assertions in
+`test/verifyGate.test.js` do — no `exit 1` reachable from an unclosed `(`, a
+top-level `exit 1` for the diff rather than no arm at all, and the generate step
+guarded separately, because `A and B or C` groups as `(A and B) or C` in the
+shell and a **typedoc crash was being reported as "docs/ differs from the
+index"** — a misleading message about the wrong problem.
+
+The same commit shipped the wrong `docs/` content for a related reason: typedoc
+writes a `***` thematic break, the committed tree held `---`, and 132 files were
+diverging. The cause was that `.husky/pre-commit` runs `prettier --write` on
+`*.{json,md,yml,yaml}`, which matches every generated `docs/**/*.md` — so the
+commit hook and the generator were **two writers to one committed tree**, and
+which one won depended on whether a commit happened. `docs/` is now excluded
+from lint-staged, and the regenerated tree is committed. Generated output must
+never be handed to a commit-hook formatter.
+
+Closes GATE-010.
+
 #### The quick chooser told a newcomer to call a method that does not exist
 
 `guides/metaGuide.md` attributed `eventLoopUtilization()` to

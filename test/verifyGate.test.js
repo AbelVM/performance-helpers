@@ -118,3 +118,63 @@ describe('docs:drift', () => {
     expect(scoped.length).toBeGreaterThanOrEqual(3); // diff --quiet, status, ls-files
   });
 });
+
+/**
+ * The drift scripts are shell one-liners, and a shell one-liner can fail open.
+ *
+ * `docs:drift` was first written as
+ *
+ * ```sh
+ * npm run docs && ( git diff --quiet -- docs || { echo …; exit 1; } ); U=$(…); if …
+ * ```
+ *
+ * The parentheses look like ordinary grouping and are not: **`exit 1` inside
+ * braces inside a subshell exits the subshell, not the script.** The `; U=$(…)`
+ * after the closing paren runs regardless, the script's exit status is that of
+ * the trailing `if`, and the whole gate reports success on a tree it just found
+ * to be dirty.
+ *
+ * It went unnoticed here because the gate *did* fail once, on the correct tree —
+ * via the untracked-pages arm, which is at top level. So the guard had been
+ * observed failing, which is the check this project relies on, and the failure
+ * still proved nothing about the diff arm. A guard whose failure has been seen
+ * can still be failing in the wrong place; that is the limit of "did I see it
+ * fail", and it is why the structure is pinned here rather than the behaviour.
+ *
+ * The check is textual and narrow: a `(` that opens before an `exit 1` and has
+ * not closed by then is a subshell, and an `exit 1` inside one cannot fail the
+ * script. Deliberately not a shell parser — a regex that catches the mistake
+ * worth catching is worth more than a parser nobody runs.
+ */
+describe('the drift scripts cannot fail open', () => {
+  const DRIFT_SCRIPTS = ['types:drift', 'docs:drift'];
+
+  it('no exit 1 is wrapped in a subshell', () => {
+    const wrapped = DRIFT_SCRIPTS.filter((name) => /\([^)]*exit 1/.test(scripts[name]));
+    expect(
+      wrapped,
+      'an `exit 1` inside `( … )` exits the subshell only, so the script carries\n' +
+        'on and its exit status comes from whatever runs last. That is a gate that\n' +
+        'reports success on a dirty tree. Remove the parentheses.'
+    ).toEqual([]);
+  });
+
+  it('each drift script still has a top-level failure for a modified tree', () => {
+    // The counterpart: a script that never mentions `exit 1` for the diff would
+    // satisfy the check above by having no arm at all.
+    for (const name of DRIFT_SCRIPTS) {
+      expect(scripts[name], `${name} has no diff check`).toContain('git diff --quiet');
+      const afterDiff = scripts[name].slice(scripts[name].indexOf('git diff --quiet'));
+      expect(afterDiff.slice(0, 200), `${name} does not exit on a dirty tree`).toContain('exit 1');
+    }
+  });
+
+  it('the generate step is not swallowed by the diff check', () => {
+    // `A && B || C` groups as `(A && B) || C` in the shell, so a failed
+    // regeneration would be reported as "docs/ differs from the index" — a
+    // misleading message about the wrong problem. `docs:drift` therefore
+    // guards the generate step separately.
+    expect(scripts['docs:drift']).not.toMatch(/npm run docs\s*&&\s*git diff/);
+    expect(scripts['docs:drift']).toMatch(/npm run docs\s*\|\|/);
+  });
+});
