@@ -49,6 +49,34 @@ import { MS_PER_SEC, READY_STATE } from './constants.js';
 const KINDS = /** @type {const} */ (['stream', 'websocket', 'ws']);
 
 /**
+ * Retry schedule for a stream whose `readable` is not available yet.
+ *
+ * A `WebSocketStream` reports `readable: null` until its connection opens, and
+ * the pump used to read that property once and give up — so a stream that was
+ * not yet open was **permanently deaf**: `backpressureMode` reported `'streams'`,
+ * `send()` worked, and not one inbound message was ever delivered.
+ *
+ * There is no event to wait for. `WebSocketStream` from `ws` emits `'open'`, but
+ * a browser `WebSocket` exposed as a stream may not, and an object that merely
+ * gains a `readable` later certainly does not, so an event-based wait would fix
+ * the one case that is easy and leave the rest. Polling costs nothing when the
+ * stream is already readable — the first attempt is synchronous and this is only
+ * armed after that fails.
+ *
+ * The interval **grows**, because the failure mode of a stream that will never
+ * open is a socket that polls forever. Backing off caps that at a few wakeups a
+ * second indefinitely, rather than a fixed short interval at 100+/s, and it costs
+ * a slow connect at most a few extra milliseconds. The timers are unref'd
+ * (`setSafeTimeout`), so a waiting adapter cannot hold a Node process open.
+ *
+ * There is no attempt limit and no timeout: a connection that takes a minute to
+ * open should still be read when it does, and `close()` and `dispose()` both stop
+ * the wait. A deadline here would be a new option and a new documented failure.
+ */
+const STREAM_RETRY_MIN_MS = 5;
+const STREAM_RETRY_MAX_MS = 250;
+
+/**
  * The four states of a socket's lifecycle, as constants.
  *
  * Re-exported from `constants.js` rather than declared here, so it is the *same*
@@ -251,6 +279,10 @@ export class PowerSocketAdapter {
      */
     this._streamWriter = null;
     this._streamWritePending = 0;
+    /** @type {any} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
+    this._streamRetryTimer = null;
+    /** @type {number} Current retry delay, so the backoff actually grows. */
+    this._streamRetryDelay = STREAM_RETRY_MIN_MS;
 
     this._counters = {
       messages: 0,
@@ -616,8 +648,18 @@ export class PowerSocketAdapter {
     this._streamReader = null;
     this._pumpStream = async () => {
       const readable = this.socket?.readable;
-      if (!readable || typeof readable.getReader !== 'function') return;
+      if (!readable || typeof readable.getReader !== 'function') {
+        // A `WebSocketStream` is not readable until it has connected. Returning
+        // here left the adapter reporting `'streams'` with a working `send()`
+        // and no way to ever receive anything, so this now waits — see
+        // `STREAM_RETRY_MIN_MS` for why polling rather than an event.
+        this._armStreamRetry();
+        return;
+      }
       this._streamReader = readable.getReader();
+      // Armed and no longer needed. Resetting the backoff means a *second*
+      // wait, after a reconnect, starts fast again.
+      this._streamRetryDelay = STREAM_RETRY_MIN_MS;
       try {
         for (;;) {
           const { value, done } = await this._streamReader.read();
@@ -634,6 +676,30 @@ export class PowerSocketAdapter {
       this._handleClose(1000, '');
     };
     this._streamPromise = this._pumpStream();
+  }
+
+  /**
+   * Re-check `socket.readable` after a growing delay.
+   *
+   * A no-op once the reader is attached, and once the adapter is closed or
+   * disposed, so a waiting adapter stops as soon as it is no longer wanted.
+   *
+   * @private
+   */
+  _armStreamRetry() {
+    if (this._streamReader) return;
+    if (this._disposed || this._state === READY_STATE.CLOSED) return;
+    if (this._streamRetryTimer) return;
+    this._streamRetryTimer = setSafeTimeout(() => {
+      this._streamRetryTimer = null;
+      // Optional call, not a bare one: `_pumpStream` is installed as a property
+      // by `_attachStream` rather than declared as a field, so the checker is
+      // right that it may be absent — and a retry cannot fire before the attach
+      // that armed it. `typecheck:ratchet` caught this at 291 against a 290
+      // ceiling, which is the ratchet doing the one job it exists for.
+      this._pumpStream?.();
+    }, this._streamRetryDelay);
+    this._streamRetryDelay = Math.min(this._streamRetryDelay * 2, STREAM_RETRY_MAX_MS);
   }
 
   /**
@@ -859,6 +925,13 @@ export class PowerSocketAdapter {
     if (this._drainTimer) {
       clearTimeout(this._drainTimer);
       this._drainTimer = null;
+    }
+    // A pending stream retry is a timer like any other, and it is the one that
+    // would otherwise outlive a close: nothing else re-arms it, so it would sit
+    // re-checking `readable` on a socket the adapter has finished with.
+    if (this._streamRetryTimer) {
+      clearTimeout(this._streamRetryTimer);
+      this._streamRetryTimer = null;
     }
   }
 

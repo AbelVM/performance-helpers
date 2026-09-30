@@ -100,6 +100,10 @@ export class PowerSocketAdapter {
      */
     _streamWriter: any;
     _streamWritePending: number;
+    /** @type {any} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
+    _streamRetryTimer: any;
+    /** @type {number} Current retry delay, so the backoff actually grows. */
+    _streamRetryDelay: number;
     _counters: {
         messages: number;
         handled: number;
@@ -255,6 +259,15 @@ export class PowerSocketAdapter {
     _streamReader: any;
     _pumpStream: (() => Promise<void>) | undefined;
     _streamPromise: Promise<void> | undefined;
+    /**
+     * Re-check `socket.readable` after a growing delay.
+     *
+     * A no-op once the reader is attached, and once the adapter is closed or
+     * disposed, so a waiting adapter stops as soon as it is no longer wanted.
+     *
+     * @private
+     */
+    private _armStreamRetry;
     /**
      * @private
      */

@@ -281,6 +281,18 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 ---
 
+### \_streamRetryDelay
+
+> **\_streamRetryDelay**: `number`
+
+---
+
+### \_streamRetryTimer
+
+> **\_streamRetryTimer**: `any`
+
+---
+
 ### \_streamWritePending
 
 > **\_streamWritePending**: `number`

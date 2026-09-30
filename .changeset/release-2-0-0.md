@@ -2130,6 +2130,57 @@ reintroducing the bad sentence in the guide.
 
 Closes GATE-004 and GATE-005.
 
+#### A `WebSocketStream` that had not connected yet was permanently deaf
+
+`PowerSocketAdapter`'s stream pump read `socket.readable` **once** and returned
+if it was not a `ReadableStream`. A `WebSocketStream` reports `readable: null`
+until its connection opens, so the pump gave up before there was anything to
+read, and nothing ever re-armed it. The adapter's own state was
+indistinguishable from health the whole time: `kind` was `'stream'`, `isOpen`
+was `true`, `send()` returned `true` and `bufferedAmount` was `0`. Measured
+before the fix, 0 of 1 messages delivered with the stream opened and the message
+pushed afterwards.
+
+It now waits, and the choice of mechanism is the interesting part: **a poll with
+backoff, not an event.** `WebSocketStream` from `ws` does emit `'open'`, but a
+browser `WebSocket` exposed as a stream may not, and an object that merely gains
+a `readable` later certainly does not — an event-based wait would fix the easy
+case and leave the rest.
+
+The interval starts at 5 ms and doubles to a 250 ms cap. Backing off is not
+cosmetic: the failure mode of this design is a stream that never opens, and a
+fixed short interval would cost 100+ wakeups a second for as long as the socket
+lives. There is **no attempt limit**, because a connection that takes a minute to
+open should still be read when it does, and a deadline would be a new option and
+a new documented failure. `close()` and `dispose()` both stop the wait, and the
+retry timer is cleared with the rest — it had to be, because nothing else re-arms
+it, so it would have sat re-checking `readable` on a socket the adapter had
+finished with.
+
+Two properties worth stating plainly:
+
+- The cost on the ordinary path is **zero**. The first attempt is synchronous and
+  the timer is only armed after it fails, so a stream that is already readable
+  never schedules work.
+- The timers are unref'd, so an adapter waiting on a socket that never connects
+  cannot hold a Node process open.
+
+Until the stream opens the adapter looks entirely healthy, so a socket that is
+never going to open is not distinguishable from a slow one. That is deliberate:
+failing a merely-slow connection is the worse outcome, and the pump cannot tell
+"not yet" from "never".
+
+`test/powerSocketAdapter.streamWait.test.js`, 7 tests against real
+`ReadableStream`/`WritableStream`, four mutations checked. Two claims in the
+review row were wrong and are corrected on it: **there is no `backpressureMode`
+on `PowerSocketAdapter`** — it is a getter on `PowerWebSocketClient` — and the
+adapter's equivalents are `stats().kind` and a `bufferedAmount` of `0`.
+
+This completes RT-004; the `releaseLock()` half shipped in the socket-adapter
+commit above.
+
+Closes RT-004.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.
