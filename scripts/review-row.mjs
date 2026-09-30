@@ -16,7 +16,20 @@
  * A blank line inside the table is a third, and it terminates the whole table,
  * so a single stray newline splits the plan in half.
  *
- * This module makes all three loud:
+ * A fourth is a **stale status**, and it is the one `AGENTS.md` calls worse than
+ * a missing row: a row whose note says the work is done while its status still
+ * reads open. Nothing structural is wrong with it — the column count is right,
+ * the prose is coherent, and the work really was done — so every other check here
+ * passes and the table confidently sends someone to rebuild something that is
+ * already built.
+ *
+ * It is not hypothetical. `RT-005` sat that way for four commits: a hand-rolled
+ * edit wrote the note and left the status cell untouched, so the prose and the
+ * marker disagreed and the row validator said everything was fine. The fix was
+ * `scripts/close-review-row.mjs`, which existed to make exactly this edit
+ * correctly, and which had not been used.
+ *
+ * This module makes all four loud:
  *
  *   node scripts/review-row.mjs --check                 validate the whole table
  *   node scripts/review-row.mjs --row '<json>'          print one checked row
@@ -99,6 +112,25 @@ export function buildRow({ id, status, task, priority, roi, risk, effort, note, 
   return row;
 }
 
+/** Status marker for a row that is still to do. */
+export const OPEN_MARKER = '⬜';
+
+/**
+ * Does this note claim the work is finished?
+ *
+ * Deliberately narrow. It matches the phrase this document's own closures use —
+ * `Done,` or `Done.` as its own token — and nothing looser, because a gate that
+ * fires on the word "done" anywhere in 130 rows of prose is a gate that gets
+ * switched off. Measured against the whole table it currently matches nothing,
+ * which is the only evidence that it is quiet rather than merely unused.
+ *
+ * @param {string} note
+ * @returns {boolean}
+ */
+export function claimsCompletion(note) {
+  return /(^|\s)Done[.,]/.test(String(note ?? ''));
+}
+
 /**
  * @param {string} key
  * @param {Object} values
@@ -170,6 +202,18 @@ export function checkTable(text) {
           `review.md:${i + 1}: ${id} has ${cells.length} cells, expected ` +
             `${COLUMNS.length}. Usually a bare \`|\` in the note, or the note ` +
             'written into the Priority column instead of last.'
+        );
+      } else if ((cells[1] ?? '').trim() === OPEN_MARKER && claimsCompletion(cells[7])) {
+        // Only meaningful once the row splits into the right number of cells;
+        // otherwise `cells[7]` is not the note and this would read nonsense.
+        problems.push(
+          `review.md:${i + 1}: ${rowId || '(no id)'} is marked open but its note ` +
+            'claims the work is done. A stale row is worse than a missing one: it ' +
+            'sends someone to rebuild something that is already built. If the work ' +
+            'landed, set the status; if it did not, delete the claim. Use ' +
+            '`scripts/close-review-row.mjs --id ' +
+            `${rowId} --note '…'\`, which replaces the status and appends the note ` +
+            'together.'
         );
       }
       i += 1;
