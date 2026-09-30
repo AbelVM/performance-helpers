@@ -3240,3 +3240,40 @@ element hit reference equality and both budgets counted 1. A counter that counts
 nothing is worse than no counter, because it looks like coverage.
 
 Closes TEST-001.
+
+#### A batched post that failed was a `false` in an array and nothing else
+
+`postMessageBatch` answers with a per-item boolean. Three sites can set one to
+`false`, and **two of them caught the error and discarded it** — no log, no
+`pool:error` event, no counter. The third already logged and emitted, which is
+what made the omission visible rather than a matter of opinion.
+
+The consequence is a caller who cannot tell a dispatch failure from a busy
+worker, and an operator with no signal that a batch silently lost items. A batch
+is where this matters most: one `postMessage` failing is a `false` the caller can
+check, but a batch of a thousand returns an array with a handful of quietly-wrong
+entries.
+
+All three sites now route through one helper that counts, logs and emits:
+
+```js
+this._bus.emit('pool:error', { phase: 'postMessageBatch', error: err, scope });
+this._logger.error(err, `${scope}: failed to post`);
+// and getStats().postFailures
+```
+
+The per-item boolean contract is unchanged. The count is what makes a drop
+_countable_ rather than only visible in a log.
+
+Every step is individually guarded, and that is not defensiveness for its own
+sake: this runs **inside a `catch`**, so a logger or bus that throws would replace
+the original failure with its own and the item would be neither sent nor
+reported. A mutation that removes a guard fails the test that pins it.
+
+`test/powerPool.postFailures.test.js`, 6 tests, four mutations caught. They
+assert a count, an event carrying the `Error` rather than a bare flag, a log
+call, that only the _failed_ items are counted rather than the whole batch, that a
+clean batch reports and counts nothing, and that a throwing logger does not
+swallow the report.
+
+Closes POOL-005.

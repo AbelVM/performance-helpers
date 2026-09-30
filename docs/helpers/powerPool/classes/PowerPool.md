@@ -283,6 +283,12 @@ framed path rather than throwing per message.
 
 ---
 
+### \_postFailures
+
+> **\_postFailures**: `number`
+
+---
+
 ### \_queueHighCrossed
 
 > **\_queueHighCrossed**: `boolean`

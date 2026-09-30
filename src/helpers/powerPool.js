@@ -509,6 +509,11 @@ export class PowerPool {
     this._createdAt = nowMs(); // pool creation timestamp (ms)
     this._totalWorkersCreated = 0; // increments for every created worker instance
     this._totalTasksCompleted = 0; // increments for every finished task
+    // Batched posts that could not be dispatched. `postMessageBatch` reports a
+    // per-item boolean, so a failure used to be a `false` in an array and
+    // nothing else — no log, no event, no count — which is the one failure mode a
+    // caller cannot tell from "the worker was busy".
+    this._postFailures = 0;
     // Welford streaming statistics for O(1) memory: count, mean, M2 (for variance)
     this._taskDurationsWelfordCount = 0;
     this._taskDurationsWelfordMean = 0;
@@ -1123,6 +1128,41 @@ export class PowerPool {
     this._activeTasks += 1;
     workerObj.lastActive = startTime;
     return startTime;
+  }
+
+  /**
+   * Report a batched post that could not be dispatched.
+   *
+   * `postMessageBatch` answers with a per-item boolean, so a failure is a
+   * `false` in an array and — before this — nothing else. Two of the three
+   * failure sites caught the error and dropped it on the floor: no log, no
+   * `pool:error` event, no count. A caller seeing `false` could not tell a
+   * dispatch failure from a busy worker, and an operator had no way to know a
+   * batch had silently lost half its items. The third site already logged and
+   * emitted, which is the pattern; this gives all three one, and adds the count.
+   *
+   * Every step is individually guarded because this runs **inside a `catch`**:
+   * a logger or an event bus that throws would replace the original failure with
+   * its own, and the item would be reported as neither failed nor sent.
+   *
+   * @param {any} err - The error thrown while dispatching.
+   * @param {string} scope - Which site failed, for the log and the event.
+   * @returns {false} So a call site can assign it straight to its result slot.
+   * @private
+   */
+  _reportPostFailure(err, scope) {
+    this._postFailures += 1;
+    try {
+      this._logger.error(err, `${scope}: failed to post`);
+    } catch (e) {
+      this._debugLog?.(e, `${scope}: logger.error failed`);
+    }
+    try {
+      this._bus.emit('pool:error', { phase: 'postMessageBatch', error: err, scope });
+    } catch (e) {
+      this._debugLog?.(e, `${scope}: bus.emit failed`);
+    }
+    return false;
   }
 
   /**
@@ -3113,7 +3153,7 @@ export class PowerPool {
           idleStateDirty = true;
           results[i] = true;
         } catch (err) {
-          results[i] = false;
+          results[i] = this._reportPostFailure(err, 'postMessageBatch:single-worker');
         }
       }
       if (idleStateDirty) this._updateIdleState();
@@ -3151,7 +3191,7 @@ export class PowerPool {
           // keep using this worker until it becomes saturated
           chosen = least.tasks < this._maxTasksPerWorker ? least : null;
         } catch (err) {
-          results[i] = false;
+          results[i] = this._reportPostFailure(err, 'postMessageBatch:dispatch');
           dispatched = true;
         }
       }
@@ -3173,17 +3213,7 @@ export class PowerPool {
               chosen = obj.tasks < this._maxTasksPerWorker ? obj : null;
             }
           } catch (err) {
-            try {
-              this._logger.error(err, 'postMessageBatch: add worker failed');
-            } catch (e) {
-              this._debugLog?.(e, 'postMessageBatch: logger.error failed');
-            }
-            try {
-              this._bus.emit('pool:error', { phase: 'postMessageBatch', error: err });
-            } catch (e) {
-              this._debugLog?.(e, 'postMessageBatch: bus.emit failed');
-            }
-            results[i] = false;
+            results[i] = this._reportPostFailure(err, 'postMessageBatch:add-worker');
             dispatched = true;
           }
         }
@@ -3890,6 +3920,8 @@ export class PowerPool {
         autoScalePolicy: this._autoScale ? this._autoScale.policy : null,
         congestion: this._autoScale ? Boolean(this._congestion) : null,
       },
+      // Silent batch drops were invisible; this makes them countable.
+      postFailures: this._postFailures,
       queueLength: this.queue.length,
       activeTasks: this._activeTasks,
       workerCount: this.workers.length,

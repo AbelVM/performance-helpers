@@ -111,6 +111,7 @@ export class PowerPool {
     _createdAt: number;
     _totalWorkersCreated: number;
     _totalTasksCompleted: number;
+    _postFailures: number;
     _taskDurationsWelfordCount: number;
     _taskDurationsWelfordMean: number;
     _taskDurationsWelfordM2: number;
@@ -352,6 +353,27 @@ export class PowerPool {
      * @returns {number} The `startTime` used, for a caller that has not taken one.
      */
     private _dispatchToWorker;
+    /**
+     * Report a batched post that could not be dispatched.
+     *
+     * `postMessageBatch` answers with a per-item boolean, so a failure is a
+     * `false` in an array and — before this — nothing else. Two of the three
+     * failure sites caught the error and dropped it on the floor: no log, no
+     * `pool:error` event, no count. A caller seeing `false` could not tell a
+     * dispatch failure from a busy worker, and an operator had no way to know a
+     * batch had silently lost half its items. The third site already logged and
+     * emitted, which is the pattern; this gives all three one, and adds the count.
+     *
+     * Every step is individually guarded because this runs **inside a `catch`**:
+     * a logger or an event bus that throws would replace the original failure with
+     * its own, and the item would be reported as neither failed nor sent.
+     *
+     * @param {any} err - The error thrown while dispatching.
+     * @param {string} scope - Which site failed, for the log and the event.
+     * @returns {false} So a call site can assign it straight to its result slot.
+     * @private
+     */
+    private _reportPostFailure;
     /**
      * Report a failed `postMessage` and clean up the pending response for it.
      * @param {any} err - The error thrown by `postMessage`.
