@@ -1274,6 +1274,54 @@ the structural answer remains open and is recorded in the row.
 
 Closes POOL-001.
 
+#### Pool: a queued `awaitResponse` promise could hang forever
+
+A task that was queued and then dispatched by the **inline drain inside
+`worker.onmessage`** was never associated with the worker that took it. So when
+that worker was terminated, `_rejectPendingForWorker` walked the pending map for
+entries whose `workerId` matched, found none, and the caller's promise was never
+settled. Under `awaitResponseTimeout: Infinity` — which is the documented way to
+say "wait as long as it takes" — that is a permanent hang with no error and no
+timeout.
+
+Meanwhile the drain had already counted the task on the worker (`tasks++`,
+`_activeTasks++`), so the pool's own state claimed the work was outstanding. It
+was not a lost task; it was a promise nobody was going to answer.
+
+Reproduced before fixing: with a worker that accepts work and never replies, and
+two `postMessage` calls in flight together, the drain **dispatched** the queued
+item — the worker's send count went 1 → 2 — and the pending entry was still
+`workerId: undefined`. After the fix the same probe shows the entry marked, and
+the promise **rejected** on `terminate()`.
+
+The fix is one line. Two of the three dispatch paths — `_postToWorkerObj` and
+`_dispatchQueuedTasks` — already did this marking; the inline copy of the drain
+was the one that drifted, which is `POOL-004`'s reason for wanting a single
+`_dispatchToWorker` choke point. `POOL-004` is not done and is recorded there.
+
+**Three things about this bug are worth more than the fix.** Getting a
+reproduction took three attempts, and each failure mode was one that makes the
+defect _unreachable_ rather than absent — which is exactly how a passing test gets
+written about a real bug:
+
+- Both `postMessage` calls must be in flight **together**. Awaiting the first lets
+  `tasks` fall back to 0, so the second is dispatched directly and the queue stays
+  empty — the drain never runs, and a test asserting the hang passes.
+- The worker must **never answer**. A worker that echoes the frame settles the
+  promise by another route, so the hang cannot be demonstrated with one.
+- The response event has to be delivered by hand, as the frame the worker actually
+  received, since that is what the pool decodes to find the correlation id.
+
+Two smaller versions of the same trap, both caught: `pool.workers[0].worker` is
+**not** the fake worker object, so a first draft threw on every case in the costume
+of a broken pool; and `void promise` discards the reference without attaching a
+handler, so a rejected promise became an **unhandled rejection** and the suite
+reported "1625 passed" with 2 errors that were invisible in the test count. That
+last one is the same defect `OBS-003` fixed in the event bus, and a test must not
+reintroduce it.
+
+Closes POOL-002.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

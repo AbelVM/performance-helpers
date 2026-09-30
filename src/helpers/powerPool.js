@@ -2234,6 +2234,19 @@ export class PowerPool {
           if (dispatch?.transfer?.length) worker.postMessage(dispatch.message, dispatch.transfer);
           else worker.postMessage(dispatch?.message);
           workerObj._startTimes.push(now);
+          // **Record which worker took this task.** Measured on the unfixed
+          // code: the drain dispatched the item (the worker received it) and the
+          // pending entry was still `workerId: undefined`, so
+          // `_rejectPendingForWorker` could never match it and the caller's
+          // promise stayed pending for good under
+          // `awaitResponseTimeout: Infinity`. The task was counted on the worker
+          // (`tasks++`, `_activeTasks++`) while nothing remembered who to reject
+          // for, so the pool's own state claimed the work was outstanding.
+          //
+          // Both other dispatch paths already do this — `_postToWorkerObj` and
+          // `_dispatchQueuedTasks`. This inline copy of the drain was the one
+          // that drifted, which is what `POOL-004` exists to remove.
+          this._markPendingWorker(item.correlationId, workerObj.id);
           workerObj.tasks++;
           this._activeTasks++;
         } catch (err) {
