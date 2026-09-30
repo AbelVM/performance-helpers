@@ -1166,6 +1166,64 @@ person does not try them again.
 
 Closes GATE-006, GATE-007 and GATE-011.
 
+#### Two new gates, and a guide documenting a method that does not exist
+
+`GATE-001` and `GATE-002` are the same kind of row — _make a claim about the
+codebase checkable_ — and one of them found a bug immediately.
+
+**A guide documented `pool.prepareBuffer(...)` in its API list and called it in a
+runnable example.** No such method exists; only `prepareBuffers` does. The
+description was also wrong twice over: the real method returns
+`{ message, transfer }` entries rather than a bare `Uint8Array`, and `clone`
+defaults to `false`, not `true`. A reader following that example got a
+`TypeError`, and nothing in the build noticed — the guide is prose, and prose does
+not fail `tsc`. The guide is fixed in four places, and the example now shows the
+array form unwrapped and says why there is no singular method.
+
+`test/docsCodeAgreement.test.js` makes that class of mistake checkable. The scale
+is worth knowing: a scan finds **54** backticked calls in `guides/power*.md` that
+are not methods of the same-named helper, and **53 are correct** — a builtin, a
+shared util, a callback parameter the guide is documenting, or a method of another
+class. So the test ships a stop-list grouped by _why_ an entry is exempt, and
+asserts that the list's guide-specific half has no dead entries, because a list
+that only grows is how the real bug walks back in.
+
+**Every swallowed error in `src/` now has to say why it is safe.** `QUAL-006`
+claimed that listener errors are swallowed deliberately and that this "cannot
+regrow silently" — which was structurally false, since ESLint's `no-empty` ignores
+a block whose body is a comment, and that is every one of them. Measured with the
+TypeScript parser: **273 `catch` clauses, 72 with no statement at all**, across 21
+files. `test/catchJustification.test.js` requires either an empty body to be
+impossible or the comment to be a _justification_.
+
+The interesting part is how "is this a justification?" is decided: structurally,
+not by a word list. A comment is a **dismissal** if it is a swallowing verb with
+no second clause. That matches 44 sites across 16 distinct texts with **zero false
+positives**, and it correctly keeps out `ignore formatter errors **and fall back
+to** original payload` and `swallow undo errors **— nothing more we can do**` — the
+two of us who wrote it first tried a keyword list, and it would have needed
+re-tuning for every correctly-written sentence.
+
+**The first version of that gate did not work, and mutation-checking is why it was
+found.** Keyed by allowlist text alone, it accepted a _new site_ of an existing
+dismissal — a freshly added `/* ignore */` passed. Each entry now records how many
+sites may use it, so a twentieth one fails with a message saying to fix the comment
+rather than the ceiling. Four mutations: a new `/* ignore */` site fails, a new
+dismissal text (`/* skip */`) fails, a truly empty catch fails, and a genuine
+justification passes.
+
+The first three of those were also **vacuous on the first attempt** — the injections
+targeted `powerBuffer.js`, which has no class, so nothing landed and the mutants
+appeared to "survive" for entirely the wrong reason. Re-run against `powerCache.js`
+they all fire. A surviving mutant is only evidence once you have checked the
+injection landed.
+
+The 26 sites behind `/* ignore */` and `/* swallow */` carry no information at all
+and remain a real gap; they are allowlisted with a ceiling, and recorded in
+`review.md` as follow-up.
+
+Closes GATE-001 and GATE-002.
+
 #### Message protocol
 
 Adds **protocol negotiation** to `PowerPool`, and corrects a claim.

@@ -50,8 +50,6 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
   - When `options.taskQueue` is enabled, `options.queuePolicy` also applies to batch enqueue behavior in the fire-and-forget path.
   - The return array always matches `items.length`.
 
-- `prepareBuffer(obj, { clone = true })` — Prepare a single transferable `Uint8Array` for `obj`. When `clone` is `true` returns a clone safe to transfer; when `clone` is `false` returns a cached internal buffer that must not be transferred. Useful to pre-encode hot payloads.
-
 - `prepareBuffers(items, { clone = true })` — Prepare an array of normalized `{ message, transfer }` entries for use with `postMessageBatch`. Each returned entry is ready to be dispatched or queued and avoids per-item encoding overhead at send time.
 
 - `stopThePressBatch(items, options)` — Atomically clear the queue, terminate (and optionally recreate) inflight workers, reject pending awaitResponse promises, then forward the provided batch. Returns per-item results like `postMessageBatch`. Useful for emergency replacement of queued work with a new batch.
@@ -337,7 +335,13 @@ console.log('batch responses', responses);
 
 ### Preparing buffers for hotspot workloads
 
-`prepareBuffers(items, { clone = true })` lets you pre-encode a batch of messages into transferable `Uint8Array` buffers so you can avoid repeated encoding during `postMessageBatch` or `broadcast`. Each `items` entry may be a plain object, a `Uint8Array`/TypedArray, or `{ message, transfer? }`.
+`prepareBuffers(items, { clone = false })` lets you pre-encode a batch of messages so you can
+avoid repeated encoding during `postMessageBatch` or `broadcast`. It returns one
+`{ message, transfer }` entry per item — **not** a bare `Uint8Array` — where
+`message` is a `Uint8Array` for a plain object and `transfer` is `[buffer]` under
+`clone: true`, `undefined` under `clone: false` because the cached buffer must not be
+detached. Each `items` entry may be a plain object, a `Uint8Array`/TypedArray, or
+`{ message, transfer? }`.
 
 Example — pre-encode a large shared payload and send cloned transferable buffers per worker:
 
@@ -354,9 +358,14 @@ const res = pool.postMessageBatch(prepared);
 Example — prepare once and reuse cached buffer references (clone=false). WARNING: do not transfer the returned buffers when `clone:false` — they are shared cached objects.
 
 ```javascript
-const cached = pool.prepareBuffer({ heavy: 'payload' }, { clone: false });
-// Use clone when sending to workers to avoid transferring the cached buffer itself:
-pool.postMessage(cached.slice(), [cached.buffer]);
+// One payload, prepared: the array form unwrapped, because there is no singular
+// method. `test/docsCodeAgreement.test.js` is what stops that sentence from
+// drifting back — this guide previously documented a `prepareBuffer` that never
+// existed, and called it in a runnable example.
+const [cached] = pool.prepareBuffers([{ heavy: 'payload' }], { clone: false });
+// `cached.message` is the shared cached buffer and `cached.transfer` is
+// undefined. Clone before sending, so the cache entry is not detached:
+pool.postMessage(cached.message.slice(), [cached.message.slice().buffer]);
 ```
 
 ### Zero-copy: forwarding raw ArrayBuffers / TypedArrays
@@ -381,7 +390,7 @@ pool.postMessageBatch(batch, { zeroCopy: true });
 Notes:
 
 - `zeroCopy: true` only affects `ArrayBuffer`/TypedArray messages — plain objects cannot be forwarded zero-copy and will be encoded as before.
-- When using cached buffers via `prepareBuffer(..., { clone: false })`, do NOT transfer the cached buffer itself; clone it first via `slice()` if you need a transferable copy.
+- When using cached buffers via `prepareBuffers([...], { clone: false })`, do NOT transfer the cached buffer itself; clone it first via `slice()` if you need a transferable copy.
 
 ## Migrating to the framed protocol (breaking change in 2.0)
 
