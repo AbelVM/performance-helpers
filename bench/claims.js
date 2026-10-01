@@ -49,6 +49,7 @@
 
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { PowerCache } from '../src/helpers/powerCache.js';
+import { SmallLfuSketch } from '../src/utils/smallLfu.js';
 import { PowerHistogram } from '../src/helpers/powerHistogram.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { decodeMessage, encodeNativeEnvelope } from '../src/helpers/powerMessageCodec.js';
@@ -1684,6 +1685,164 @@ function runSieveWorkload() {
   return { workloads: all, config: { capacity, seed, workingSet, scanEvery, scanKeys, zipf } };
 }
 
+// ─── Workload 9: what the TinyLFU sketch spends its time on ──────────────────
+//
+// CACHE-007. `SmallLfuSketch` derived each row's column from
+// `_index(key, row)`, and `hashKey` did `String(key)` plus a full FNV pass over
+// the key's characters — so at `depth: 4` one call cost four string coercions and
+// four FNV loops, and the cost scaled with key length rather than staying fixed.
+// The key is now hashed once per call and the four indices derived from it, with
+// `mix32` still per row so the rows stay independent.
+//
+// This mode exists because **the number is the deliverable**. The change is a
+// hash refactor, and a hash refactor is the one edit that can quietly degrade an
+// admission filter while every test stays green: the bucket assignment shifts and
+// nothing fails. So the cost has to be reproducible, and the *distribution* has
+// to be checkable, and a one-off measurement in a shell is neither.
+//
+// Read the distribution rows before the timings. A faster sketch that reports a
+// higher frequency for a key is a worse sketch, and the hit rate is what the
+// filter is for.
+
+/**
+ * Time `fn` over `iterations` calls, reporting the median of `runs` batches.
+ *
+ * The median rather than the mean because this harness sees a ~29 % median
+ * min/max spread, and because the claim being made is about a cost that should be
+ * visibly smaller, not a nanosecond.
+ *
+ * @param {function(number):*} fn
+ * @param {number} iterations
+ * @param {number} [runs]
+ * @returns {number} ns per call.
+ */
+function timePerCall(fn, iterations, runs = 5) {
+  for (let i = 0; i < Math.min(iterations, 20_000); i++) fn(i);
+  const samples = [];
+  for (let r = 0; r < runs; r++) {
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < iterations; i++) fn(i);
+    samples.push(Number(process.hrtime.bigint() - t0) / iterations);
+  }
+  samples.sort((a, b) => a - b);
+  return samples[Math.floor(runs / 2)];
+}
+
+/**
+ * CACHE-007: the sketch's hashing cost, and whether the distribution survived.
+ *
+ * @returns {object}
+ */
+function runSketchWorkload() {
+  const iterations = Number(process.env.CLAIM_SKETCH_ITERATIONS || 200_000);
+  const keyLen = Number(process.env.CLAIM_SKETCH_KEYLEN || 6);
+  const key = 'k' + 'x'.repeat(Math.max(0, keyLen - 1));
+
+  const sketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
+
+  console.log('CACHE-007 — TinyLFU sketch: one hash per call, not per row\n');
+  console.log(`  ${iterations} calls per measurement, median of 5. Key length ${keyLen}.\n`);
+  console.log('  cost');
+  const inc = timePerCall((i) => sketch.increment(key), iterations);
+  const est = timePerCall((i) => sketch.estimate(key), iterations);
+  console.log(`    increment (depth 4)          ${inc.toFixed(1).padStart(7)} ns`);
+  console.log(`    estimate  (depth 4)          ${est.toFixed(1).padStart(7)} ns`);
+  console.log(`    both                        ${(inc + est).toFixed(1).padStart(7)} ns`);
+
+  console.log('\n  how cost scaled with key length, before vs after');
+  console.log('  (the "before" figures are the same shape with the hash recomputed per row)');
+  console.log(
+    `    ${'length'.padStart(6)}${'4x FNV (was)'.padStart(14)}${'1x FNV (now)'.padStart(14)}${'saved'.padStart(9)}`
+  );
+  for (const len of [6, 24, 64]) {
+    const k = 'k' + 'x'.repeat(len - 1);
+    const perRow = timePerCall(() => {
+      let acc = 0;
+      for (let r = 0; r < 4; r++) {
+        const t = String(k);
+        let h = 0x811c9dc5 | 0;
+        for (let j = 0; j < t.length; j += 1) h = Math.imul(h ^ t.charCodeAt(j), 0x01000193);
+        acc += h;
+      }
+      return acc;
+    }, iterations);
+    const once = timePerCall(() => {
+      const t = String(k);
+      let h = 0x811c9dc5 | 0;
+      for (let j = 0; j < t.length; j += 1) h = Math.imul(h ^ t.charCodeAt(j), 0x01000193);
+      return h;
+    }, iterations);
+    console.log(
+      `    ${String(len).padStart(6)}${perRow.toFixed(1).padStart(12)} ns${once.toFixed(1).padStart(12)} ns` +
+        `${((1 - once / perRow) * 100).toFixed(0).padStart(8)}%`
+    );
+  }
+
+  console.log('\n  and the distribution the filter actually depends on');
+  // 200 keys into 64 columns, reported as the minimum across four rows.
+  //
+  // **The collapsed figure is computed in the same run rather than quoted.** The
+  // sketch seeds itself randomly when none is given, so a hard-coded reference
+  // ("481 with independent rows, 808 collapsed") is one seed's number and will
+  // not match the next run - the first version of this mode printed exactly that
+  // line and then reported 492 beside it. Both sides have to come from the same
+  // seed for the comparison to mean anything, which is what this does.
+  const seed = 0x5eed;
+  const measureDistribution = () => {
+    const s = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000, seed });
+    for (let i = 0; i < 200; i++) s.increment(`k${i}`);
+    let total = 0;
+    let alone = 0;
+    for (let i = 0; i < 200; i++) {
+      const e = s.estimate(`k${i}`);
+      total += e;
+      if (e === 1) alone++;
+    }
+    return { total, alone };
+  };
+  const good = measureDistribution();
+
+  // The counterfactual: the same sketch with the per-row seed dropped, so every
+  // key lands in the same column of every row.
+  //
+  // Written by **pinning `_indexFor` to row 0** rather than by re-implementing
+  // the hashing and the index arithmetic. The first version built the collapsed
+  // sketch by hand and reported 287 against the library's 484, i.e. it was not
+  // measuring the thing it claimed to — a hand-rolled "counterfactual" is just
+  // another implementation to get wrong, and it did. Pinning one private helper
+  // to a constant *is* the mutation, and it cannot drift from the real code.
+  const collapsed = (() => {
+    const s = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000, seed });
+    const realIndexFor = s._indexFor.bind(s);
+    s._indexFor = (hash) => realIndexFor(hash, 0);
+    for (let i = 0; i < 200; i++) s.increment(`k${i}`);
+    let total = 0;
+    let alone = 0;
+    for (let i = 0; i < 200; i++) {
+      const e = s.estimate(`k${i}`);
+      total += e;
+      if (e === 1) alone++;
+    }
+    return { total, alone };
+  })();
+
+  console.log(
+    `    independent rows (shipped)     sum ${good.total}, ${good.alone}/200 at frequency 1`
+  );
+  console.log(
+    `    collapsed rows (counterfactual) sum ${collapsed.total}, ${collapsed.alone}/200 at frequency 1`
+  );
+  console.log(
+    good.total < collapsed.total
+      ? '    => independent rows report a LOWER frequency, which is the point of count-min. A\n' +
+          '       faster sketch that raised this number would be a worse filter.'
+      : '    => **the per-row spread is not working**: independent rows must report a lower\n' +
+          '       frequency than collapsed ones, or the sketch is effectively one row deep.'
+  );
+
+  return { incrementNs: inc, estimateNs: est, distributionSum: good.total };
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 const mode = process.argv[2] || 'zipf';
@@ -1705,9 +1864,11 @@ async function dispatch() {
     await runStreamWorkload();
   } else if (mode === 'sieve') {
     runSieveWorkload();
+  } else if (mode === 'sketch') {
+    runSketchWorkload();
   } else {
     console.error(
-      `Unknown mode: ${mode}. Use "zipf", "sieve", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
+      `Unknown mode: ${mode}. Use "zipf", "sieve", "sketch", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
     );
     process.exit(1);
   }

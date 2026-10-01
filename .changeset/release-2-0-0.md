@@ -4278,3 +4278,163 @@ name has nothing to do with the code under test. Re-pinned to the property that
 matters: structurally equal arguments share a key, different ones do not.
 
 Closes CACHE-009.
+
+#### Event-loop utilisation is now readable over an interval
+
+`PowerEventLoopMonitor` already resolved Node's `eventLoopUtilization()` lazily
+and exposed it as `utilization()` — that half of the proposal was already in
+place, which the review row does not record. What was missing is the half its
+whole argument rests on.
+
+`utilization()` hands back the **cumulative** reading, so `active` and `idle`
+grow for the life of the process and the method answers _"how busy has this
+process been since it started"_. A lifetime average barely moves. The property
+that makes the built-in worth reaching for is that it is **defined over a
+measured interval**, and getting there meant subtracting two readings by hand.
+
+`utilizationSince(previous)` returns `{ active, idle, utilization, ratio,
+elapsed }` for the interval between two readings. Measured:
+
+| What happened                  | delta                                          |
+| ------------------------------ | ---------------------------------------------- |
+| 1 s of synchronous blocking    | `active` +1000 ms, `idle` +20 ms → ratio 0.98  |
+| 200 ms awaiting a timer        | `active` +0.3 ms, `idle` +200 ms → ratio 0.001 |
+| 300 ms of synchronous blocking | `active` +300 ms, `idle` +20 ms → ratio 0.94   |
+
+A cumulative reading reports the same lifetime average for all three.
+
+**The sensitivity is not academic.** The _same_ 500 ms block, read at a different
+moment in the process's life, reported **+0.2 ms** of active time — ELU's counters
+are refreshed by the loop, so a reading taken at the wrong moment misses the
+interval entirely. That is precisely why the interval has to be explicit rather
+than left to a caller's polling discipline.
+
+`null` is returned, rather than a number, when there is no previous reading, the
+runtime cannot measure, or the counters went backwards — a negative interval
+would read as a large stall in the other direction. `ratio` is `0` rather than
+`NaN` for an empty interval, so polling faster than the loop ticks does not
+poison every comparison.
+
+`utilization()` is unchanged and still cumulative. That is a pin rather than a
+preference: had it been changed to a delta, every caller reading it as a lifetime
+figure would silently start reporting an interval.
+
+`test/powerEventLoopMonitor.utilization.test.js`, 9 tests, 6 mutants all caught.
+
+**The review row's premise was out of date, and the part that was missing is the
+part worth having.** It is closed as written rather than as described.
+
+Closes GAP-001.
+
+#### An in-flight fetch is now signalled when its key stops being wanted
+
+`getOrSetAsync` called its factory with no arguments, so a factory had no way to
+know the result was no longer wanted. `AbortController` appeared nowhere in
+`powerCache.js`: an evicted key's factory ran to completion and then wrote its
+result into a cache that no longer wanted it.
+
+The factory is now called as `asyncFactory(signal)` — the `fetch` shape, so a
+factory written for `fetch` or `lru-cache` works unchanged — and the signal fires
+when the key is **evicted** by a later write, **deleted** or **cleared**, and when
+the caller's **timeout** elapses.
+
+**Aborting is a request, not a kill.** A factory written before this takes no
+argument, cannot be stopped, and still has its value cached. Refusing to store it
+would lose work a caller wanted. The signal is for a factory that can cooperate.
+
+**The in-flight slot is still released at the timeout, and that is a deliberate
+trade rather than an oversight.** Holding it until the factory settled stopped a
+duplicate factory from starting — and leaked: a factory that never settles
+(`() => new Promise(() => {})`, which the timeout tests use twice) would hold its
+slot forever, so the key could never fetch again and every entry accumulated one
+Map row per hanging factory. A duplicate costs compute; a permanent slot is a
+memory leak _and_ a permanently broken key.
+
+So the residual F-09 named is reduced, not eliminated, and it is stated rather than
+buried:
+
+- a caller arriving **before** the timeout joins the running factory and receives
+  its value — the common case, and the one the retry path wants;
+- a caller arriving **after** it starts a new fetch, which for a factory that
+  ignores the signal means the work is done twice.
+
+**A `try`/`catch` around the aborting call does not contain a throwing listener**,
+which the implementation's own comment originally claimed it did. `runAbort`
+re-reports a listener exception on `process.nextTick`, so it surfaces as an
+uncaught exception rather than something the cache can catch. The cache does not
+throw from `delete()` — the node stays linked and the map consistent — but it
+cannot rescue a caller whose own handler throws. That is the platform's contract,
+the same as for any `abort()`.
+
+The controllers live in a **parallel Map** rather than by widening the in-flight
+entry to a `{promise, controller}` record. That was the first attempt and it was
+the wrong call: 13 assertions across 4 files read the in-flight map and expect a
+bare promise, and every one would have had to change for no gain. A test pins the
+shape so a later tidy-up does not re-introduce the migration.
+
+`test/powerCache.inflightAbort.test.js`, 14 tests, 8 mutants all caught.
+
+**The review row's cost and its blocker were both wrong.** It rated the work "S"
+and, when I first took it, I recorded "31 tests across 8 files" as the blast
+radius — that number was a failure count from a half-applied edit, not a call-site
+count. The real figure is 13 references in 4 files, and the design above needs
+none of them changed. The row also said the work "must land as two changes" — the
+record-shape migration first, then the signal — and the parallel map removes the
+first one entirely.
+
+Closes GAP-003.
+
+#### The TinyLFU sketch hashed the key once per row, four times over
+
+`SmallLfuSketch` derived each row's column from `_index(key, row)`, and
+`hashKey` did `String(key)` **plus a full FNV pass over the key's characters**.
+At `depth: 4` that is four string coercions and four FNV loops to do what is one
+of each, so the cost scaled with key length rather than staying fixed.
+
+Measured before and after, median of five runs over 200 000 operations:
+
+| quantity                 | before |      after |
+| ------------------------ | -----: | ---------: |
+| `increment` (depth 4)    |  75 ns |  **17 ns** |
+| `estimate` (depth 4)     |  76 ns |  **14 ns** |
+| both, short key          | 152 ns |  **31 ns** |
+| hashing work, key len 24 | 229 ns | **118 ns** |
+| hashing work, key len 64 | 411 ns | **240 ns** |
+
+The key is now hashed once per `increment` and once per `estimate`, and the four
+row indices are derived from that one hash — the same thing Caffeine's `spread()`
+does. `mix32` still runs per row, so the rows stay independent; collapsing them
+would leave a 4-row sketch behaving like a 1-row one.
+
+**No behaviour changes and no test needed changing**: the bucket assignment
+shifts, and every existing test still passes. That is worth stating rather than
+assuming, because a hash change is exactly the kind of edit that quietly
+degrades an admission filter while every test stays green — which is why the new
+tests assert the properties that would detect it, below.
+
+`test/smallLfu.hashOnce.test.js`, 10 tests, **every assertion a counter rather
+than a duration** — this project's timing harness has a ~29 % median min/max
+spread, so a wall-clock assertion would be decoration. The primary one gives the
+key a counting `toString` and asserts one coercion per call at depths 1, 2, 4 and
+8; before the change that number was `depth`.
+
+**The mutation check found an uncaught mutant here, and the first two tests I
+wrote to catch it were both wrong.** Dropping the per-row seed
+(`row * 0x9e3779b1`) leaves every row using the same column — and was NOT caught,
+because:
+
+- the index is `row * width + column`, so even with one shared column the four
+  rows still land on four _different_ counters. The sketch keeps working, and a
+  test counting distinct touched bytes sees four either way;
+- counting _distinct estimate values_ and assuming more spread means more variety
+  measured the opposite: 5 distinct with the spread, **7** without. A collapsed
+  sketch groups all four rows identically, so the minimum across rows is one
+  consistent count — more uniform, and therefore more varied across keys.
+
+The property that does separate them is the one count-min exists for:
+independent rows make the minimum **lower**. Summed over 200 keys into 64
+columns, **481 with the spread against 808 without**. The first two attempts
+reasoned about the wrong statistic, and would have shipped an unprotected
+invariant on the strength of an assertion that could not fail.
+
+Closes CACHE-007.

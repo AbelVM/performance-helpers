@@ -82,6 +82,7 @@ Environment variables (defaults shown)
 ```bash
 node bench/claims.js zipf      # cache admission policies under a Zipf + scan workload
 node bench/claims.js sieve     # SIEVE eviction policy, against what ships
+node bench/claims.js sketch    # TinyLFU sketch hashing cost, and its distribution
 node bench/claims.js latency   # PowerHistogram quantile accuracy across 4 decades of scale
 ```
 
@@ -100,6 +101,25 @@ Read the row, not just the verdict: **the benchmark is silent on the paper's hea
 Two trace-design notes worth keeping, because both produced wrong numbers before the right one. The working set must **exceed** capacity: the first scan-heavy run used 300 against 500 and every policy survived 300/300, so the scan fit in the slack and nothing was ever evicted — the comparison was vacuous. And SIEVE's hand is **persistent and one-way**; resetting it per eviction is a CLOCK sweep, a weaker policy that is not SIEVE, and it reported a 5-point loss. Hit rates here are deterministic — same seed, identical survivors across runs — so only the ns/op column moves.
 
 Parameters: `CLAIM_SIEVE_CAPACITY`, `CLAIM_SIEVE_SEED`, `CLAIM_SIEVE_WORKING`, `CLAIM_SIEVE_SCAN_EVERY`, `CLAIM_SIEVE_SCAN_KEYS`, `CLAIM_SIEVE_ZIPF`.
+
+**`sketch` reports the hashing cost of the TinyLFU sketch, and one number that is not
+a timing.** The sketch now hashes a key once per `increment`/`estimate` rather than once
+per row, which was `depth` string coercions and `depth` FNV passes. It also prints a
+**distribution** row, and that is the part to read first.
+
+A hash refactor is the one edit that can silently degrade an admission filter: the bucket
+assignment shifts and every test stays green. So the mode computes the collapsed
+counterfactual _in the same run_, at a fixed seed, by pinning the private `_indexFor` to
+row 0 — which _is_ the mutation, and cannot drift from the real code the way a hand-rolled
+re-implementation can. (The first version of this mode re-implemented the hashing by hand
+and reported 287 against the library's 484, i.e. it was not measuring the thing it
+claimed to. Both sides now come from the same code and the same seed.)
+
+Independent rows report a **lower** frequency than collapsed ones, which is the entire
+point of count-min. If that ever inverts, the sketch is effectively one row deep and the
+faster hashing bought nothing that matters.
+
+Parameters: `CLAIM_SKETCH_ITERATIONS`, `CLAIM_SKETCH_KEYLEN`.
 
 The same mode also benches the **generational two-`Map`** structure (`quick-lru` / `hashlru`), and that row is the more interesting one. At the configured `maxEntries` it shows the largest number in the table — **+13.0 points** over LRU on scan-heavy — and gets there by **peaking at 1003 entries against a configured 500**. That is the row's own "up to 2x over-fill" bound, reproduced exactly. Sized so its peak lands at 502 instead, it scores **35.5 %** against LRU's 51.0 %: **the entire margin was the memory.**
 

@@ -124,6 +124,12 @@ const CROSS_CLASS = new Set([
   // because its own example used a name the per-guide rule cannot resolve.
   'memoize',
   'memo',
+  // The *parameter* of `PowerCache.getOrSetAsync`, not a member. The guide
+  // documents the factory as `asyncFactory(signal)` because that is the shape a
+  // caller writes, and a backticked call to it is what the per-guide rule
+  // cannot distinguish from a method the cache does not have. Same category as
+  // `memo` above: a local binding named in a runnable example.
+  'asyncFactory',
   // powerMessageCodec, referenced from powerPool and powerChunking.
   'encodeMessage',
   'decodeMessage',
@@ -147,6 +153,13 @@ const CROSS_CLASS = new Set([
   'ping',
   // Node process metrics, referenced from powerEventLoopMonitor.
   'eventLoopUtilization',
+  // `AbortSignal` / `AbortController` members, named by the cancellation
+  // section in powerCache. `abort()` is not a method of the cache or of anything
+  // else this guide documents, so the per-guide rule cannot resolve it - but it
+  // is a real API with a real contract, and the guide's advice ("a throwing
+  // abort listener is the caller's own risk") is only meaningful against the
+  // platform's own method.
+  'abort',
 ]);
 
 /** Everything this test is willing to accept without it being a method. */
