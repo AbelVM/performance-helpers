@@ -1,6 +1,7 @@
 import { PowerPool } from './powerPool.js';
 import { decodeInbound } from './powerMessageCodec.js';
 import { normalizeError } from '../utils/errors.js';
+import { assertKnownOptions } from '../utils/options.js';
 import {
   CHUNKS_PER_WORKER_TARGET,
   CHUNK_WINDOW_MULTIPLIER,
@@ -53,6 +54,11 @@ export class PowerChunker {
    * @param {PowerChunkingOptions} [options]
    */
   constructor(iterable, fn, options = {}) {
+    assertKnownOptions(
+      options,
+      ['poolOptions', 'postOptions', 'chunkSize', 'fnComplexity'],
+      'PowerChunker'
+    );
     if (!iterable || typeof fn !== 'function') {
       throw new Error('PowerChunker requires an iterable and a function');
     }

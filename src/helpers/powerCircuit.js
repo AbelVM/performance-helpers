@@ -22,7 +22,7 @@
  */
 import { PowerEventBus } from './powerEventBus.js';
 import { nowMs } from '../utils/now.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import {
   DEFAULT_CIRCUIT_MAX_OPEN_FACTOR,
   DEFAULT_CIRCUIT_MIN_JITTER_RATIO,
@@ -61,6 +61,11 @@ export class PowerCircuit {
    *   `maxTimeout` and jitter the result.
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      ['threshold', 'timeout', 'maxTimeout', 'onStateChange', 'eventBus'],
+      'PowerCircuit'
+    );
     const {
       threshold = 5,
       timeout = DEFAULT_TIMEOUT_MS,

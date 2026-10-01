@@ -210,3 +210,44 @@ export function assertFunction(value: any, { name, className, optional }: {
     className: string;
     optional?: boolean | undefined;
 }): Function | null | undefined;
+/**
+ * Reject constructor options the class does not accept.
+ *
+ * ## Why this throws, when the previous behaviour was to ignore them
+ *
+ * Every helper in this library silently ignored unrecognised option keys. The
+ * reasoning that got it there (9a1f9d5, which removed four inert options) was
+ * sound for the population it considered: a caller already passing a *removed*
+ * option could not have been depending on the behaviour, because there was none.
+ *
+ * That does not cover the far more common case — a **misspelled** option:
+ *
+ *     new PowerThrottle({ capacity: 10, refillRat: 5 })
+ *
+ * The bucket never refills, nothing is thrown or warned, and the limiter is
+ * indistinguishable from a correct one until a request is refused in production.
+ *
+ * ## What ignoring unknown keys actually cost
+ *
+ * Turning this on for a commit found nine tests across six classes passing
+ * options that do not exist. Every one **passed**, and every one was asserting
+ * nothing. Three passed both the real option and a misspelling of it, such as
+ * `new PowerThrottle({ capacity: 10, windowMs: 1000, capacity: 10 })`, where
+ * `windowMs` is a `PowerSlidingWindow` option: read as intent that is ambiguous,
+ * which is the real damage. The same defect had reached `guides/powerThrottle.md`
+ * as a documented option. Both directions are now guarded.
+ *
+ * ## The suggestion
+ *
+ * "unknown option `refillRat`" is far less use than "did you mean
+ * `refillRate`?". Levenshtein over a list this small needs no dependency. It is
+ * deliberately not fuzzy — a wrong suggestion is worse than none — so the
+ * threshold scales with the length of the word.
+ *
+ * @param {object} options - The options object exactly as supplied.
+ * @param {readonly string[]} known - Every option name the class accepts.
+ * @param {string} className - Used in the message.
+ * @returns {void}
+ * @throws {TypeError} Carrying `code: 'ERR_UNKNOWN_OPTION'` and `option: <key>`.
+ */
+export function assertKnownOptions(options: object, known: readonly string[], className: string): void;

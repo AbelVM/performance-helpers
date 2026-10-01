@@ -8,9 +8,9 @@
  * amount of connection pooling makes that cheap. Batching turns them into one.
  *
  * The trade is latency, and the trade is explicit. `maxSize` bounds how much is
- * held; `maxWaitMs` bounds how long the oldest item waits. Which one you should
- * care about depends entirely on whether the tail of your request is latency-
- * or throughput-bound, and picking both small is the usual mistake.
+ * held; a tail under it waits for `flush()`, or for the `scheduling` strategy to
+ * fire. Which one you should care about depends entirely on whether the tail of
+ * your request is latency- or throughput-bound.
  */
 import { PowerBatch } from 'performance-helpers';
 
@@ -21,12 +21,12 @@ const batch = new PowerBatch(
     written.push(items);
     console.log(`  flush: ${items.length} items in one call`);
   },
-  { maxSize: 100, maxWaitMs: 10 }
+  { maxSize: 100 }
 );
 
-console.log('PowerBatch — maxSize 100, maxWaitMs 10ms\n');
+console.log('PowerBatch — maxSize 100\n');
 
-// A burst well under maxSize: still one call, because maxWaitMs elapsed.
+// A burst well under maxSize: held, until flush() below forces it out.
 console.log('a burst of 8, then a wait:');
 for (let i = 0; i < 8; i += 1) batch.add({ id: i });
 await new Promise((r) => setTimeout(r, 30));

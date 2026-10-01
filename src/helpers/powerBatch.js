@@ -15,7 +15,7 @@
  */
 import { PowerQueue } from './powerQueue.js';
 import { abortReason, raceWithAbort } from '../utils/abort.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerScheduler } from './powerScheduler.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 
@@ -41,6 +41,7 @@ export class PowerBatch {
    *   `scheduling` to `'microtask'`.
    */
   constructor(handler, options = {}) {
+    assertKnownOptions(options, ['maxSize', 'scheduling', 'onError'], 'PowerBatch');
     if (typeof handler !== 'function') throw new TypeError('handler must be a function');
     const { maxSize = Number.POSITIVE_INFINITY, scheduling = 'microtask' } = options;
     const onError = typeof options.onError === 'function' ? options.onError : undefined;

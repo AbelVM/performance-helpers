@@ -44,7 +44,6 @@ const clockA = makeClock();
 const bucket = new PowerThrottle({
   capacity: 5,
   refillRate: 10,
-  refillInterval: 1000,
   now: clockA.now,
 });
 

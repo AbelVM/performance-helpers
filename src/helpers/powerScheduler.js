@@ -1,3 +1,4 @@
+import { assertKnownOptions } from '../utils/options.js';
 /**
  * PowerScheduler
  *
@@ -217,6 +218,7 @@ export class PowerScheduler {
    * @param {PowerSchedulerOptions} [options] Scheduling and error handling options.
    */
   constructor(flushFn, options = {}) {
+    assertKnownOptions(options, ['scheduling', 'onError'], 'PowerScheduler');
     if (typeof flushFn !== 'function') {
       throw new TypeError('PowerScheduler requires a flush function');
     }

@@ -50,7 +50,7 @@ import {
   DEFAULT_AUTOSCALE_LONG_WINDOW_ALPHA,
   DEFAULT_AUTOSCALE_AIMD_BETA,
 } from './constants.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
 
@@ -393,6 +393,35 @@ export class PowerPool {
    * @param {number} [options.maxDrainWaiters=100] - Cap on concurrent `drain()` waits, so a caller that drains in a loop cannot accumulate unbounded `idle` listeners. (Internally `DEFAULT_MAX_DRAIN_WAITERS`; not exported.)
    */
   constructor(workerSource, options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'size',
+        'minSize',
+        'maxSize',
+        'workerOptions',
+        'maxTasksPerWorker',
+        'idleTimeout',
+        'taskQueue',
+        'queuePolicy',
+        'lazy',
+        'debugLevel',
+        'listenerMaxListeners',
+        'weakListeners',
+        'queueHighThreshold',
+        'maxQueueLength',
+        'observability',
+        'maxDrainWaiters',
+        'autoScale',
+        'awaitResponseTimeout',
+        'slowTaskThreshold',
+        'maxListeners',
+        'messageCodec',
+        'encodeCacheLimit',
+        'encodeCacheByteLimit',
+      ],
+      'PowerPool'
+    );
     // A default parameter only covers `undefined`, so `new PowerPool(W, null)`
     // reached the destructuring below with `null` and threw
     // `TypeError: Cannot read properties of null (reading 'size')` - naming an

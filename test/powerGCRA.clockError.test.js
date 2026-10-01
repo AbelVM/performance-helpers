@@ -7,7 +7,7 @@ import { PowerGCRA } from '../src/helpers/powerGCRA.js';
  *
  * The predicate was `now < this._tat`. A TAT ahead of `now` is not a clock
  * fault — it is **the normal saturated state**, and it is exactly what a limiter
- * looks like while it is doing its job. Measured at `rate: 1, capacity: 1`:
+ * looks like while it is doing its job. Measured at `rate: 1, burst: 1`:
  * **19 refusals produced 19 `onError` calls**, each carrying the raw clock
  * reading (a number, not an `Error`), on a clock that never moved backwards.
  *
@@ -28,7 +28,7 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     const errors = [];
     const g = new PowerGCRA({
       rate: 1,
-      capacity: 1,
+      burst: 1,
       now: () => 1000,
       onError: (e) => errors.push(e),
     });
@@ -48,7 +48,7 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     // the fix is not simply "never report".
     const errors = [];
     let t = 0;
-    const g = new PowerGCRA({ rate: 1, capacity: 1, now: () => t, onError: (e) => errors.push(e) });
+    const g = new PowerGCRA({ rate: 1, burst: 1, now: () => t, onError: (e) => errors.push(e) });
 
     for (let i = 0; i < 10; i += 1) {
       t += 1000;
@@ -63,7 +63,7 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     // clock by hand: the reading moves backwards while the limiter is idle.
     const errors = [];
     let t = 100_000;
-    const g = new PowerGCRA({ rate: 1, capacity: 1, now: () => t, onError: (e) => errors.push(e) });
+    const g = new PowerGCRA({ rate: 1, burst: 1, now: () => t, onError: (e) => errors.push(e) });
 
     g.tryConsume(1); // first reading: no previous one to compare against
     t -= 10_000; // the clock jumps back ten seconds
@@ -79,7 +79,7 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     // false positive as a refusal — just once.
     const errors = [];
     const t = 5_000;
-    const g = new PowerGCRA({ rate: 1, capacity: 1, now: () => t, onError: (e) => errors.push(e) });
+    const g = new PowerGCRA({ rate: 1, burst: 1, now: () => t, onError: (e) => errors.push(e) });
     g.tryConsume(1);
     expect(errors).toHaveLength(0);
   });
@@ -92,7 +92,7 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     let t = 100_000;
     const g = new PowerGCRA({
       rate: 10,
-      capacity: 1,
+      burst: 1,
       now: () => t,
       onError: (e) => errors.push(e),
     });
@@ -111,7 +111,7 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     let t = 1000;
     const g = new PowerGCRA({
       rate: 1,
-      capacity: 1,
+      burst: 1,
       now: () => t,
       onError: () => {
         throw new Error('logger exploded');

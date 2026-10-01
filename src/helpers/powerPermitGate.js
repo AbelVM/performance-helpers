@@ -10,7 +10,7 @@
  */
 import { PowerQueue } from './powerQueue.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { abortReason } from '../utils/abort.js';
 import { queueFullError } from '../utils/errors.js';
 
@@ -43,6 +43,11 @@ export class PowerPermitGate {
    *   {@link PowerPermitGateOptions}.
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      ['capacity', 'queueCapacity', 'initialTokens', 'className', 'limitName'],
+      'PowerPermitGate'
+    );
     const { capacity, queueCapacity, initialTokens } = options || {};
     // Only `capacity` borrows the wrapper's vocabulary. `queueCapacity` and
     // `initialTokens` keep the gate's own names: a class that exposes neither

@@ -3,6 +3,7 @@ import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { detectEnv } from './WorkerAgnostic.js';
+import { assertKnownOptions } from '../utils/options.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').EventLoopMonitorOptions} EventLoopMonitorOptions
@@ -47,6 +48,18 @@ export class PowerEventLoopMonitor {
    * @param {EventLoopMonitorOptions} [options]
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'intervalMs',
+        'observability',
+        'relativeAccuracy',
+        'onDrift',
+        'keepProcessAlive',
+        'utilizationProvider',
+      ],
+      'PowerEventLoopMonitor'
+    );
     const {
       intervalMs = 20,
       relativeAccuracy = 0.01,

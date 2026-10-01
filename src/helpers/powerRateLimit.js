@@ -18,7 +18,7 @@
  */
 
 import { resolveComposerNow } from '../utils/limiterClock.js';
-import { assertCount } from '../utils/options.js';
+import { assertCount, assertKnownOptions } from '../utils/options.js';
 
 /** @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions */
 
@@ -58,6 +58,7 @@ export class PowerRateLimit {
    *   guaranteed the call returns `false`.
    */
   constructor(limiters = [], options = {}) {
+    assertKnownOptions(options, ['atomic', 'keyFn', 'buckets'], 'PowerRateLimit');
     if (!Array.isArray(limiters)) throw new TypeError('limiters must be an array');
     // `Array<Object>` was the declared type, and the body then calls
     // `tryConsume`, `reserve` and reads `available` on each element - none of

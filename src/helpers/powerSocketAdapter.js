@@ -34,7 +34,7 @@
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerSlidingWindow } from './powerSlidingWindow.js';
 import { MS_PER_SEC, READY_STATE } from './constants.js';
 
@@ -175,6 +175,25 @@ export class PowerSocketAdapter {
    * @param {PowerSocketAdapterOptions} [options]
    */
   constructor(socket, options = /** @type {PowerSocketAdapterOptions} */ ({})) {
+    assertKnownOptions(
+      options,
+      [
+        'kind',
+        'observability',
+        'onMessage',
+        'onOpen',
+        'onClose',
+        'onError',
+        'onRateLimited',
+        'heartbeatIntervalMs',
+        'heartbeatTimeoutMs',
+        'idleTimeoutMs',
+        'rateLimit',
+        'rateLimitAction',
+        'drainTimeoutMs',
+      ],
+      'PowerSocketAdapter'
+    );
     const {
       kind,
       onMessage,

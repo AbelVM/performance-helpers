@@ -1,4 +1,4 @@
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
 
 /**
@@ -74,6 +74,7 @@ export class PowerEventBus {
    *   `WeakRef`.
    */
   constructor(options = {}) {
+    assertKnownOptions(options, ['maxListeners', 'weak'], 'PowerEventBus');
     /** @type {Map<string, EventBusBucket>} */
     this._listeners = new Map();
     // `0` means unlimited, which is a real configuration and is kept. What was

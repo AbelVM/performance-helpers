@@ -11,12 +11,13 @@ import {
   toSeries,
   METRICS_VERSION,
   defaultMetrics,
+  attach,
 } from '../src/helpers/metrics.js';
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { PowerGCRA } from '../src/helpers/powerGCRA.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { PowerBulkhead } from '../src/helpers/powerBulkhead.js';
-import { PowerRetry, PowerRetryBudget } from '../src/helpers/powerRetry.js';
+import { PowerRetryBudget } from '../src/helpers/powerRetry.js';
 import { PowerEventLoopMonitor } from '../src/helpers/powerEventLoopMonitor.js';
 import { PowerSocketAdapter } from '../src/helpers/powerSocketAdapter.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
@@ -379,11 +380,17 @@ describe('observability: true on the helpers', () => {
   });
 
   it('a helper with no stats() registers nothing rather than an empty series', () => {
-    // `PowerRetry` has no counters of its own — the budget it holds does. An
-    // empty series would read as "this helper is idle", which is a different
+    // An empty series would read as "this helper is idle", which is a different
     // and wrong claim.
-    const retry = new PowerRetry({ observability: true });
-    expect(retry._metrics ?? null).toBeNull();
+    //
+    // Asserted against `attach()` directly rather than through a constructor,
+    // because every class that accepts `observability` now has counters of its
+    // own — `PowerRetryBudget` included, which is what this used to build. The
+    // branch is still reachable from the library's own side, and this is the
+    // only way in.
+    const statsless = { notAHelper: true };
+    expect(attach(statsless, 'statsless', { observability: true })).toBeNull();
+    expect(defaultMetrics.names()).not.toContain('statsless');
   });
 
   it('a disposed helper stops being sampled', () => {

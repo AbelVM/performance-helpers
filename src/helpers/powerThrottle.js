@@ -22,7 +22,7 @@
  */
 import { nowMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
-import { assertCount, assertLimitRequired } from '../utils/options.js';
+import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { MS_PER_SEC } from './constants.js';
 
 export class PowerThrottle {
@@ -34,6 +34,7 @@ export class PowerThrottle {
    * @param {PowerThrottleOptions} [options]
    */
   constructor(options = {}) {
+    assertKnownOptions(options, ['capacity', 'tokens', 'refillRate', 'now'], 'PowerThrottle');
     const { capacity = 1, tokens = undefined, refillRate = 0, now } = options;
     // `Math.max(0, Number(x) || 0)` accepted `capacity: 0` - a throttle that
     // can never succeed - and coerced NaN to 0 rather than surfacing it. Both

@@ -1,4 +1,4 @@
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 /**
  * Shared subscriber set helper used by event buses and observable stores.
  *
@@ -43,6 +43,7 @@ export class PowerSubscriberSet {
    *   behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
    */
   constructor(options = {}) {
+    assertKnownOptions(options, ['weak', 'maxListeners'], 'PowerSubscriberSet');
     const { weak = false, maxListeners = 0 } = options || {};
     // `0` is the documented "unlimited"; see the note below the assignment.
     this._weak = Boolean(weak);

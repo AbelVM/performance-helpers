@@ -28,7 +28,7 @@
  * @typedef {import('./jsdoc-types.js').PowerRetryBudgetOptions} PowerRetryBudgetOptions
  * @typedef {import('./jsdoc-types.js').PowerRetryBudgetStats} PowerRetryBudgetStats
  */
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { attach, detach } from './metrics.js';
 import {
   DECORRELATED_JITTER_FACTOR,
@@ -68,6 +68,7 @@ export class PowerRetryBudget {
    *   tokens. See {@link PowerRetryBudgetOptions}.
    */
   constructor(options = {}) {
+    assertKnownOptions(options, ['ratio', 'observability', 'capacity'], 'PowerRetryBudget');
     const { ratio = DEFAULT_RETRY_BUDGET_RATIO, capacity = DEFAULT_RETRY_BUDGET_CAPACITY } =
       options || {};
     this._ratio = assertLimitRequired(ratio, {
@@ -405,6 +406,22 @@ export class PowerRetry {
    *   shared by every {@link PowerRetry#run} on this instance.
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'maxAttempts',
+        'backoff',
+        'baseDelay',
+        'maxDelay',
+        'jitter',
+        'retryIf',
+        'onRetry',
+        'attemptTimeout',
+        'budget',
+        'hedgeDelay',
+      ],
+      'PowerRetry'
+    );
     const { budget = null, ...rest } = options || {};
     /** @type {PowerRetryOptions} */
     this._options = rest;

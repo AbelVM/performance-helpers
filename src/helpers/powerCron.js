@@ -1,6 +1,6 @@
 import { MS_PER_MIN } from './constants.js';
 import { nowMs } from '../utils/now.js';
-import { assertFunction, assertLimitRequired } from '../utils/options.js';
+import { assertFunction, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /**
  * @typedef {'skip'|'catch-up'|'run-once'} CatchUpPolicy
@@ -65,6 +65,11 @@ export class PowerCron {
    * @param {PowerCronOptions} [options]
    */
   constructor(task, options = {}) {
+    assertKnownOptions(
+      options,
+      ['intervalMs', 'catchUp', 'jitter', 'runOnStart', 'onError', 'onFire', 'unref'],
+      'PowerCron'
+    );
     assertFunction(task, { name: 'task', className: 'PowerCron', optional: false });
 
     this._task = task;

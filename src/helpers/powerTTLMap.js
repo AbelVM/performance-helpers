@@ -4,7 +4,7 @@
  * is unnecessary and a simple time-to-live map is desired.
  */
 import { nowMs } from '../utils/now.js';
-import { normalizeTtl } from '../utils/options.js';
+import { normalizeTtl, assertKnownOptions } from '../utils/options.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
@@ -28,6 +28,7 @@ export class PowerTTLMap {
    * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
    */
   constructor(defaultTTL = 0, options = {}) {
+    assertKnownOptions(options, ['defaultTTL', 'onExpire', 'now'], 'PowerTTLMap');
     // Allow `new PowerTTLMap({ defaultTTL, onExpire })` (options-object convention).
     // Reassigning the parameter lost the declared options type at the two reads
     // below, so the normalised value gets its own binding instead.

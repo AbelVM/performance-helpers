@@ -19,7 +19,7 @@ describe('PowerThrottle / PowerSlidingWindow rate invariants', () => {
         fc.integer({ min: 1, max: 6 }),
         fc.array(fc.boolean(), { minLength: 1, maxLength: 120 }),
         (limit, attempts) => {
-          const throttle = new PowerThrottle({ limit, windowMs: 1000, capacity: limit });
+          const throttle = new PowerThrottle({ capacity: limit });
           let granted = 0;
           for (let i = 0; i < attempts.length; i++) {
             if (throttle.tryConsume()) granted++;
@@ -42,7 +42,7 @@ describe('PowerThrottle / PowerSlidingWindow rate invariants', () => {
           fc.integer({ min: 1, max: 5 }),
           fc.array(fc.nat(), { minLength: 1, maxLength: 40 }),
           (limit, gaps) => {
-            const throttle = new PowerThrottle({ limit, windowMs: 1000, capacity: limit });
+            const throttle = new PowerThrottle({ capacity: limit });
             for (const gap of gaps) {
               throttle.tryConsume();
               vi.advanceTimersByTime(Math.min(gap, 2000));

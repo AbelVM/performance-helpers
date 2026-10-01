@@ -7,6 +7,7 @@
  */
 import { PowerPermitGate } from './powerPermitGate.js';
 import { setSafeTimeout } from '../utils/timers.js';
+import { assertKnownOptions } from '../utils/options.js';
 import {
   DEFAULT_QUEUE_CAPACITY,
   DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
@@ -71,6 +72,19 @@ export class PowerBackpressure extends PowerPermitGate {
    *   are inherited from `PowerPermitGate`; the rest tune the refill schedule.
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'capacity',
+        'queueCapacity',
+        'initialTokens',
+        'lowWaterMark',
+        'refillAmount',
+        'refillInterval',
+        'adaptive',
+      ],
+      'PowerBackpressure'
+    );
     const {
       capacity = DEFAULT_QUEUE_CAPACITY,
       queueCapacity = DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,

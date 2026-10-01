@@ -81,12 +81,15 @@ describe('PowerThrottle options', () => {
     expect(() => new PowerThrottle({ refillRate: -1 })).toThrow(/refillRate/);
   });
 
-  it('ignores a refillInterval left over from a caller that still passes it', () => {
-    // The only population that could have been affected by the removal, and they
-    // could not have been depending on the behaviour, because there was none.
-    const t = new PowerThrottle({ capacity: 5, refillRate: 2, refillInterval: 0 });
-    expect('refillInterval' in t).toBe(false);
-    expect(t.capacity).toBe(5);
+  it('rejects a refillInterval left over from a caller that still passes it', () => {
+    // Previously "ignores a refillInterval left over from a caller that still
+    // passes it". That tolerance is sound for a removed option and silent for a
+    // misspelled one, and it is the same tolerance that let this repository's own
+    // tests pass nine nonexistent options and let `guides/powerThrottle.md`
+    // document `refillInterval` as live while the generated types omitted it.
+    expect(() => new PowerThrottle({ capacity: 5, refillRate: 2, refillInterval: 0 })).toThrow(
+      /^PowerThrottle: unknown option `refillInterval`\./
+    );
   });
 
   it('still accepts refillRate: 0, which is a legitimate "no refill"', () => {
@@ -114,7 +117,7 @@ describe('PowerSlidingWindow options', () => {
   });
 
   it('accepts valid options and still grants up to the limit', () => {
-    const w = new PowerSlidingWindow({ limit: 3, windowMs: 1000, capacity: 3 });
+    const w = new PowerSlidingWindow({ capacity: 3, windowMs: 1000 });
     expect(w.tryConsume()).toBe(true);
     expect(w.tryConsume()).toBe(true);
     expect(w.tryConsume()).toBe(true);
@@ -184,7 +187,7 @@ describe('validation never breaks a valid configuration', () => {
         fc.integer({ min: 1, max: 100_000 }),
         (capacity, windowMs, rate) => {
           expect(() => new PowerSlidingWindow({ capacity, windowMs })).not.toThrow();
-          expect(() => new PowerThrottle({ capacity, refillInterval: windowMs })).not.toThrow();
+          expect(() => new PowerThrottle({ capacity, refillRate: rate / 1000 })).not.toThrow();
           expect(() => new PowerGCRA({ rate, per: windowMs })).not.toThrow();
           expect(() => new PowerQueue(capacity)).not.toThrow();
           expect(() => new PowerBatch(() => {}, { maxSize: capacity })).not.toThrow();

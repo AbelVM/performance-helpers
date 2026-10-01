@@ -10,7 +10,7 @@ import { nowMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { MS_PER_SEC, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
-import { assertCount, assertLimitRequired } from '../utils/options.js';
+import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 export class PowerSlidingWindow {
   /**
@@ -18,6 +18,7 @@ export class PowerSlidingWindow {
    *   and `windowMs` to one second.
    */
   constructor(options = {}) {
+    assertKnownOptions(options, ['capacity', 'windowMs', 'now'], 'PowerSlidingWindow');
     const { capacity = 1, windowMs = MS_PER_SEC, now } = options;
     // `Math.max(0, Number(capacity) || 0)` accepted `capacity: 0`, producing a
     // window that refuses everything, and coerced NaN to 0 rather than

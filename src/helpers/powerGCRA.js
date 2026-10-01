@@ -33,7 +33,7 @@
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
-import { assertCount, assertLimitRequired } from '../utils/options.js';
+import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /**
  */
@@ -70,6 +70,11 @@ export class PowerGCRA {
    *   `new PowerGCRA()` must stay callable to reach it.
    */
   constructor(options) {
+    assertKnownOptions(
+      options,
+      ['rate', 'per', 'burst', 'observability', 'now', 'onError'],
+      'PowerGCRA'
+    );
     const { per = 1000, burst = 0, onError = null } = options || {};
 
     const r = Number(options?.rate);

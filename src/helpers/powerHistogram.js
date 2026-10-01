@@ -1,3 +1,4 @@
+import { assertKnownOptions } from '../utils/options.js';
 /**
  * Lock-free in-process histogram for latency telemetry and percentile estimation.
  *
@@ -50,6 +51,11 @@ export class PowerHistogram {
    * @param {PowerHistogramOptions} [options]
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      ['relativeAccuracy', 'maxValue', 'minValue', 'bucketCount'],
+      'PowerHistogram'
+    );
     const {
       relativeAccuracy = DEFAULT_HISTOGRAM_RELATIVE_ACCURACY,
       maxValue = DEFAULT_HISTOGRAM_MAX_VALUE,

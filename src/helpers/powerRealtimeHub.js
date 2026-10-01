@@ -30,7 +30,7 @@
 import { encodeMessage, frameEncodedJson } from './powerMessageCodec.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /**
  * What to do when a subscriber's queue is full.
@@ -166,6 +166,11 @@ export class PowerRealtimeHub {
    *   without it, so the parameter is not defaulted.
    */
   constructor(options) {
+    assertKnownOptions(
+      options,
+      ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError', 'now'],
+      'PowerRealtimeHub'
+    );
     const {
       send,
       close,

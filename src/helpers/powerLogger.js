@@ -1,5 +1,6 @@
 import { formatErrorObj, normalizeError } from '../utils/errors.js';
 import { nowMs } from '../utils/now.js';
+import { assertKnownOptions } from '../utils/options.js';
 
 // Reuse common textual level labels from a single frozen object to avoid
 // repeated literal allocations in hot logging paths.
@@ -161,6 +162,7 @@ export class PowerLogger {
    *   any of them was an error and a custom sink needed a cast.
    */
   constructor(level = 0, options = {}) {
+    assertKnownOptions(options, ['format', 'name', 'formatter', 'output'], 'PowerLogger');
     this._debugLevel = 0;
     this._counters = Object.create(null);
     this._format = options?.format || 'text';

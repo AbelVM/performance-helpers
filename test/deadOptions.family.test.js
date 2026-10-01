@@ -145,17 +145,49 @@ describe('PowerThrottle has no refillInterval', () => {
     expect(throttle.tokens).toBe(9);
   });
 
-  it('an unknown option is ignored rather than erroring', () => {
-    // What happens to a caller who was already passing it. They could not have
-    // been depending on the behaviour, since there was none.
-    const t = 1_000_000;
-    const throttle = new PowerThrottle({
-      capacity: 10,
-      refillRate: 5,
-      now: () => t,
-      refillInterval: 999,
-    });
-    expect(throttle.tokens).toBe(10);
+  it('an unknown option is an error naming the option, not a silent no-op', () => {
+    // This previously read "an unknown option is ignored rather than erroring",
+    // justified by: a caller already passing `refillInterval` could not have
+    // been depending on behaviour that never existed. Sound for a **removed**
+    // option; it does not cover a **misspelled** one, which is the common case
+    // and the one that reaches production:
+    //
+    //     new PowerThrottle({ capacity: 10, refillRat: 5 })
+    //
+    // builds a bucket that never refills — nothing thrown, nothing warned, and
+    // indistinguishable from a correct limiter until a request is refused. The
+    // same tolerance let nine tests across six classes pass options that do not
+    // exist, every one of them asserting nothing, and let
+    // `guides/powerThrottle.md` document `refillInterval` as live.
+    //
+    // The removed-option caller now gets an error at construction rather than
+    // silence at request time.
+    expect(() => new PowerThrottle({ capacity: 10, refillRate: 5, refillInterval: 999 })).toThrow(
+      /^PowerThrottle: unknown option `refillInterval`\./
+    );
+  });
+
+  it('names the intended option when there is an obvious near miss', () => {
+    // "unknown option `refillRat`" is much less use than this.
+    let err = null;
+    try {
+      new PowerThrottle({ capacity: 10, refillRat: 5 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(TypeError);
+    expect(err.message).toMatch(/Did you mean `refillRate`\?/);
+    // Machine-readable, so a caller need not parse the message.
+    expect(err.code).toBe('ERR_UNKNOWN_OPTION');
+    expect(err.option).toBe('refillRat');
+  });
+
+  it('offers no suggestion when nothing is close enough', () => {
+    // A wrong suggestion is worse than none, so the threshold scales with the
+    // length of the word rather than always naming the nearest option.
+    expect(() => new PowerThrottle({ capacity: 10, zzzzzzzzzzz: 5 })).toThrow(
+      /^PowerThrottle: unknown option `zzzzzzzzzzz`\. Accepted options:/
+    );
   });
 });
 

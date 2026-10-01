@@ -65,7 +65,7 @@ describe('PowerChunker defers chunks to a macrotask, not a timer', () => {
     // future change reached for `queueMicrotask` *and* a pool, this is the test
     // that would notice before the ordering guarantee did.
     const items = Array.from({ length: 40 }, (_, i) => i);
-    const pool = new PowerChunker(items, (x) => x, { poolOptions: { size: 1, chunkSize: 1 } });
+    const pool = new PowerChunker(items, (x) => x, { poolOptions: { size: 1 } });
     const order = [];
     pool.onmessage = (e) => {
       const r = e?.data?.results;

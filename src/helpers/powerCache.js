@@ -107,7 +107,12 @@ function sketchWidthFor(maxEntries) {
  */
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
-import { assertFunction, assertLimitRequired, normalizeTtl } from '../utils/options.js';
+import {
+  assertFunction,
+  assertLimitRequired,
+  normalizeTtl,
+  assertKnownOptions,
+} from '../utils/options.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import {
   DEFAULT_MAX_CLEANUP_PER_TICK,
@@ -2495,6 +2500,37 @@ export class PowerMemoizer {
    * @param {PowerMemoizerOptions} [options]
    */
   constructor(fn, options = {}) {
+    assertKnownOptions(options, ['keyResolver', 'cacheOptions', 'ttl', 'weight'], 'PowerMemoizer');
+    assertKnownOptions(
+      options,
+      [
+        'admission',
+        'allowStale',
+        'cacheOptions',
+        'defaultAsyncTimeout',
+        'defaultTTL',
+        'fetchMethod',
+        'initialPoolSize',
+        'keyResolver',
+        'maxCleanupPerTick',
+        'maxEntries',
+        'maxPoolSize',
+        'maxWeight',
+        'now',
+        'observability',
+        'onError',
+        'onEvict',
+        'onExpire',
+        'policy',
+        'rejectOversized',
+        'staleTtl',
+        'ttl',
+        'weight',
+        'weightFn',
+        'windowSize',
+      ],
+      'PowerCache'
+    );
     const { keyResolver = simpleArgsKey, cacheOptions = {}, ttl, weight } = options;
     // `simpleArgsKey` is the default rather than `JSON.stringify` (PERF-005). It
     // is ~35% cheaper for the scalar arguments memoizers are actually called
@@ -2909,6 +2945,7 @@ export class PowerTimedCache {
    * @param {PowerTimedCacheOptions} [options]
    */
   constructor(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions = {} } = {}) {
+    assertKnownOptions(cacheOptions, ['ttl', 'weight', 'cacheOptions'], 'PowerTimedCache');
     if (!Number.isFinite(+ttl) || ttl <= 0) throw new TypeError('ttl must be a positive number');
     const cfg = Object.assign({}, cacheOptions);
     if (maxEntries !== undefined) cfg.maxEntries = maxEntries;

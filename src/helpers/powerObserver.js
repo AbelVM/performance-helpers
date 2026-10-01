@@ -15,6 +15,7 @@
  */
 import { PowerScheduler } from './powerScheduler.js';
 import { PowerSubscriberSet } from './powerSubscriberSet.js';
+import { assertKnownOptions } from '../utils/options.js';
 
 /**
  * Translate a source's internal schedule mode into a constructor `async` option.
@@ -110,6 +111,7 @@ export class PowerObserver {
    * @param {PowerObserverOptions} options
    */
   constructor(initial, options = {}) {
+    assertKnownOptions(options, ['map', 'distinct', 'async'], 'PowerObserver');
     this._value = initial;
     this._subs = new PowerSubscriberSet();
     this._map = typeof options.map === 'function' ? options.map : null;

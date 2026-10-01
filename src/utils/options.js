@@ -314,3 +314,110 @@ export function assertFunction(value, { name, className, optional = true }) {
   }
   return value;
 }
+
+/**
+ * Reject constructor options the class does not accept.
+ *
+ * ## Why this throws, when the previous behaviour was to ignore them
+ *
+ * Every helper in this library silently ignored unrecognised option keys. The
+ * reasoning that got it there (9a1f9d5, which removed four inert options) was
+ * sound for the population it considered: a caller already passing a *removed*
+ * option could not have been depending on the behaviour, because there was none.
+ *
+ * That does not cover the far more common case — a **misspelled** option:
+ *
+ *     new PowerThrottle({ capacity: 10, refillRat: 5 })
+ *
+ * The bucket never refills, nothing is thrown or warned, and the limiter is
+ * indistinguishable from a correct one until a request is refused in production.
+ *
+ * ## What ignoring unknown keys actually cost
+ *
+ * Turning this on for a commit found nine tests across six classes passing
+ * options that do not exist. Every one **passed**, and every one was asserting
+ * nothing. Three passed both the real option and a misspelling of it, such as
+ * `new PowerThrottle({ capacity: 10, windowMs: 1000, capacity: 10 })`, where
+ * `windowMs` is a `PowerSlidingWindow` option: read as intent that is ambiguous,
+ * which is the real damage. The same defect had reached `guides/powerThrottle.md`
+ * as a documented option. Both directions are now guarded.
+ *
+ * ## The suggestion
+ *
+ * "unknown option `refillRat`" is far less use than "did you mean
+ * `refillRate`?". Levenshtein over a list this small needs no dependency. It is
+ * deliberately not fuzzy — a wrong suggestion is worse than none — so the
+ * threshold scales with the length of the word.
+ *
+ * @param {object} options - The options object exactly as supplied.
+ * @param {readonly string[]} known - Every option name the class accepts.
+ * @param {string} className - Used in the message.
+ * @returns {void}
+ * @throws {TypeError} Carrying `code: 'ERR_UNKNOWN_OPTION'` and `option: <key>`.
+ */
+export function assertKnownOptions(options, known, className) {
+  if (!options || typeof options !== 'object') return;
+  const allowed = new Set(known);
+  for (const key of Object.keys(options)) {
+    if (allowed.has(key)) continue;
+    const parts = [`${className}: unknown option \`${key}\`.`];
+    const near = suggestOption(key, known);
+    if (near) parts.push(`Did you mean \`${near}\`?`);
+    parts.push(`Accepted options: ${[...allowed].sort().join(', ')}.`);
+    const err = new TypeError(parts.join(' '));
+    /** @type {any} */ (err).code = 'ERR_UNKNOWN_OPTION';
+    /** @type {any} */ (err).option = key;
+    throw err;
+  }
+}
+
+/**
+ * The nearest known option name, when close enough to be worth naming.
+ *
+ * Threshold `max(2, floor(maxLen / 3))`: long names need a closer match before
+ * the suggestion is believable, and short names are all within two edits anyway.
+ *
+ * @param {string} word
+ * @param {readonly string[]} candidates
+ * @returns {string|null} the option name, or `null` when nothing is close
+ */
+function suggestOption(word, candidates) {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const candidate of candidates) {
+    const d = levenshtein(word, candidate);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = candidate;
+    }
+  }
+  if (best === null) return null;
+  const limit = Math.max(2, Math.floor(Math.max(word.length, best.length) / 3));
+  return bestDistance > 0 && bestDistance <= limit ? best : null;
+}
+
+/**
+ * Levenshtein edit distance, two-row variant.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i += 1) {
+    const curr = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      curr[j] = Math.min(
+        prev[j] + 1,
+        curr[j - 1] + 1,
+        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    prev = curr;
+  }
+  return prev[b.length];
+}

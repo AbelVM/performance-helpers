@@ -41,7 +41,7 @@ import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { READY_STATE } from './constants.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /** @typedef {'connecting'|'open'|'closing'|'closed'} WebSocketReadyState */
 
@@ -133,6 +133,38 @@ export class PowerWebSocketClient {
    * @param {WebSocketClientOptions} options
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'url',
+        'WebSocketImpl',
+        'WebSocketStreamImpl',
+        'codec',
+        'connectTimeoutMs',
+        'highWaterMarkBytes',
+        'lowWaterMarkBytes',
+        'pollIntervalMs',
+        'protocols',
+        'maxPollIntervalMs',
+        'heartbeatIntervalMs',
+        'heartbeatTimeoutMs',
+        'maxReconnectAttempts',
+        'reconnectBaseMs',
+        'reconnectMaxMs',
+        'autoReconnect',
+        'reconnectOnHeartbeatTimeout',
+        'dropOnBackpressure',
+        'onMessage',
+        'onOpen',
+        'onClose',
+        'onError',
+        'onPause',
+        'onResume',
+        'rtt',
+        'observability',
+      ],
+      'PowerWebSocketClient'
+    );
     const {
       url,
       WebSocketImpl,

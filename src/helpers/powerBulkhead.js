@@ -4,7 +4,7 @@
  * Use `PowerBulkhead` to execute tasks in partitioned concurrency lanes so a
  * heavy or noisy partition cannot starve other partitions.
  */
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
 import { DEFAULT_QUEUE_CAPACITY, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
@@ -30,6 +30,11 @@ export class PowerBulkhead {
    * @param {PowerBulkheadOptions} [options]
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      ['partitions', 'maxConcurrency', 'queueCapacity', 'observability', 'partitioner', 'onError'],
+      'PowerBulkhead'
+    );
     const {
       partitions = 4,
       maxConcurrency = 1,

@@ -1,6 +1,6 @@
 import { PowerRetry } from './powerRetry.js';
 import { nowMs } from '../utils/now.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerDeadlineOptions} PowerDeadlineOptions
@@ -205,6 +205,23 @@ export class PowerDeadline {
    * @param {PowerDeadlineOptions} [options] Default options applied to every `run()` invocation.
    */
   constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'maxAttempts',
+        'attemptTimeout',
+        'totalTimeout',
+        'retryDelay',
+        'retryIf',
+        'signal',
+        'onRetry',
+        'backoff',
+        'baseDelay',
+        'maxDelay',
+        'jitter',
+      ],
+      'PowerDeadline'
+    );
     this._options = options || {};
   }
 
