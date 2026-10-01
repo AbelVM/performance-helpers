@@ -205,7 +205,28 @@ for (const guide of GUIDES_WITH_OPTION_TABLES) {
     }
   }
   if (!rows || known.size === 0) {
-    notes.push(`${guide}: no options table or no options typedef; option names not checked`);
+    // The two causes are reported separately, and the reason is `c1af61b`.
+    // `PowerRealtimeHub`'s constructor is `constructor(options: HubOptions)` -
+    // **required**, not optional - and a parser matching only `?:` resolved no
+    // options for it at all. That miss was reported here as this same benign
+    // note, so a guide that was silently unchecked read exactly like a guide
+    // that genuinely has no options. A reader must be able to tell them apart.
+    // Only one thing is known for certain here, so only one thing is claimed.
+    // `known` empty means this parser could not read an options type off the
+    // declaration — which is true both for a class that takes no options
+    // (`powerDefer`) and for one whose signature it does not recognise
+    // (`PowerQueue`'s `constructor(initialCapacity?: number, options?: X)`). An
+    // earlier version of this note asserted "takes no options object", which is
+    // false for the second group; guessing the reason is what hid the
+    // `PowerRealtimeHub` miss in the first place.
+    notes.push(
+      known.size > 0
+        ? `${guide}: the helper declares ${known.size} option(s) but the guide has ` +
+            'no options table - NOT CHECKED'
+        : `${guide}: no options type resolvable from the declaration; option names ` +
+            'NOT CHECKED (positional constructor, or a signature this parser does ' +
+            'not recognise - it cannot tell which)'
+    );
     continue;
   }
   // The first row after the header is the leading positional when the table
