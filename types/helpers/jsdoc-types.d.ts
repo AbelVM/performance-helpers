@@ -126,6 +126,20 @@ export type PowerPoolOptions = {
      * See the migration note in `guides/powerPool.md`.
      */
     messageCodec?: "framed" | "legacy" | "negotiated" | undefined;
+    /**
+     * Entry count for the LRU that caches
+     * serialized messages, so an identical message is not re-encoded every time.
+     * Clamped to a floor of 16. Absent from this typedef until a typo-check
+     * pass found it read at `powerPool.js:_encodeCacheLimit` and not declared —
+     * a TypeScript caller could not pass it at all.
+     */
+    encodeCacheLimit?: number | undefined;
+    /**
+     * Total byte ceiling for that same
+     * cache; the oldest entries are evicted until it fits. Defaults to `Infinity`,
+     * which disables the byte bound and preserves the count-only behaviour.
+     */
+    encodeCacheByteLimit?: number | undefined;
 };
 /**
  * Adaptive-concurrency configuration for `PowerPool` (`autoScale`).

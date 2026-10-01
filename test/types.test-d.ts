@@ -377,3 +377,27 @@ const budgetTyped = new PowerRetryBudget();
 const budgetForward: ReturnType<PowerRetryBudget['stats']> = budgetTyped.getStats();
 const budgetBackward: ReturnType<PowerRetryBudget['getStats']> = budgetTyped.stats();
 void [budgetForward, budgetBackward];
+
+// --- PowerPool encode-cache options were read but never declared ------------
+//
+// Both were read by the constructor (`powerPool.js:_encodeCacheLimit`,
+// `_encodeCacheByteLimit`) and absent from `PowerPoolOptions`, so a TypeScript
+// caller could not pass them at all — a real defect, found by a pass that was
+// checking for unknown options and turned up two that the published type was
+// missing. Asserted here so neither can go missing again.
+const poolWithEncodeCache = new PowerPool(function EncodeCacheWorker(this: any) {
+  this.onmessage = null;
+  this.postMessage = () => {};
+  this.terminate = () => {};
+}, {
+  size: 1,
+  minSize: 1,
+  maxSize: 1,
+  lazy: false,
+  encodeCacheLimit: 128,
+  encodeCacheByteLimit: 1 << 20,
+});
+poolWithEncodeCache.terminate();
+// @ts-expect-error `encodeCacheLimit` is a number of entries, not a string.
+const poolBadEncodeCache = new PowerPool(function W(this: any) {}, { encodeCacheLimit: 'lots' });
+void poolBadEncodeCache;

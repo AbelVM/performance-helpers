@@ -87,6 +87,14 @@
  *   `'framed'` until a worker advertises the native structured-clone carrier
  *   with `announceCapabilities()`, and sends that carrier to that worker alone.
  *   See the migration note in `guides/powerPool.md`.
+ * @property {number} [encodeCacheLimit=64] Entry count for the LRU that caches
+ *   serialized messages, so an identical message is not re-encoded every time.
+ *   Clamped to a floor of 16. Absent from this typedef until a typo-check
+ *   pass found it read at `powerPool.js:_encodeCacheLimit` and not declared —
+ *   a TypeScript caller could not pass it at all.
+ * @property {number} [encodeCacheByteLimit] Total byte ceiling for that same
+ *   cache; the oldest entries are evicted until it fits. Defaults to `Infinity`,
+ *   which disables the byte bound and preserves the count-only behaviour.
  */
 
 /**
