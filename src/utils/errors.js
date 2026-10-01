@@ -11,10 +11,14 @@
  * three lines and to the one place the capability is read, at module load, which
  * is the whole point of F-16.
  *
- * @type {{isError?: (value: unknown) => boolean}}
+ * @type {{isError?: (value: unknown) => value is Error}}
  */
 const ErrorCtor = /** @type {any} */ (Error);
 
+/**
+ * @type {(value: unknown) => value is Error}
+ * @private
+ */
 const _isErrorFn =
   typeof ErrorCtor.isError === 'function'
     ? ErrorCtor.isError
@@ -46,8 +50,16 @@ const _isErrorFn =
  * cross-realm error has the brand but not this realm's prototype (`instanceof`
  * says `false`, this says `true`).
  *
- * @param {any} value - Any value, including a non-object.
- * @returns {boolean} `true` if `value` is an `Error` object.
+ * Declared as a **type predicate** rather than returning plain `boolean`.
+ * That is not decoration: without it `tsc` cannot narrow at the call site, and
+ * the first caller to rely on narrowing introduced two type errors -
+ * `options.reason instanceof Error ? reason : new Error(...)` in
+ * `PowerBulkhead#reset` widened to `string | Error | undefined` at the merge,
+ * because nothing told the checker the true branch was an `Error`. It is also
+ * strictly more useful than `boolean` at every other site.
+ *
+ * @param {unknown} value - Any value, including a non-object.
+ * @returns {value is Error} `true` if `value` is an `Error` object.
  */
 export function isError(value) {
   return _isErrorFn(value);
