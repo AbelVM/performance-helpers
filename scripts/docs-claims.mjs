@@ -93,11 +93,22 @@ function optionNamesFromDeclaration(src, shared, unresolved) {
   // A guard that checks nothing while printing `ok` is worse than no guard, so
   // the parse targets the emitted shape and an unresolved typedef is an error
   // rather than a note.
-  for (const m of src.matchAll(/\?: ([A-Za-z_$][\w$]*(?:Options|Config))\b/g)) {
+  //
+  // Both `shared` (jsdoc-types.d.ts) and `src` (the helper's own declaration) are
+  // searched, because a typedef is not always in `jsdoc-types.js`: `PowerGCRAOptions`
+  // and `HubOptions` are declared in their own files and exported from there.
+  // Searching only the shared file silently skipped those two guides.
+  const pool = `${shared}\n${src}`;
+  // Two spellings occur in the emitted declarations, and missing either one
+  // silently skips a guide: a bare name (`options?: PowerThrottleOptions`) and an
+  // inline import (`options?: import("./jsdoc-types.js").PowerBatchOptions`).
+  // The second is what `powerBatch` and `powerLatch` emit, and they went
+  // unchecked until this matched it.
+  for (const m of src.matchAll(
+    /\?: (?:import\("[^"]*"\)\.)?([A-Za-z_$][\w$]*(?:Options|Config))\b/g
+  )) {
     const typedefName = m[1];
-    const block = shared.match(
-      new RegExp(`^export type ${typedefName} = \\{([\\s\\S]*?)^\\};`, 'm')
-    );
+    const block = pool.match(new RegExp(`^export type ${typedefName} = \\{([\\s\\S]*?)^\\};`, 'm'));
     if (!block) {
       unresolved.push(typedefName);
       continue;
@@ -164,26 +175,33 @@ for (const guide of GUIDES_WITH_OPTION_TABLES) {
   // bare heading and the check silently compared nothing. eslint flags `\Z` as a
   // useless escape; it is not, and the alternative costs the whole check. Hence
   // the disable, which is the narrowest one that keeps the intent honest.
-  const section = text.match(/^##+ Constructor[\s\S]*?(?=^##?\s|\Z)/m); // eslint-disable-line no-useless-escape
-  if (!section || known.size === 0) {
+  // Locate the options table by its **header row**, wherever it sits, rather than
+  // by looking for a `## Constructor` heading. The headings vary across the
+  // guides — `## Constructor`, `## Options`, `### API` — and matching one name
+  // left 16 guides silently unchecked, which is coverage the report claimed not
+  // to have. Keying on the header is both more robust and the actual intent: a
+  // table whose first column is `option` *is* an options table.
+  //
+  // This also removes the false positive that made the heading approach
+  // necessary: `powerSocketAdapter.md` has a `## Constructor` heading followed by
+  // a transport-detection table (`stream` / `websocket` / `ws` — how a socket is
+  // recognised at runtime), which is not an options table at all.
+  const tableRe = /^\|[^\n]*\|[^\n]*\n\|\s*-{2,}[^\n]*\n(?:\|[^\n]*\n)+/gm;
+  let rows = null;
+  for (const t of text.matchAll(tableRe)) {
+    const cells = t[0]
+      .split('\n')[0]
+      .split('|')
+      .map((c) => c.trim());
+    if (/^`?options?`?$/i.test(cells[1] ?? '')) {
+      rows = [...t[0].matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((m) => m[1]);
+      break;
+    }
+  }
+  if (!rows || known.size === 0) {
     notes.push(`${guide}: no options table or no options typedef; option names not checked`);
     continue;
   }
-  // Confirm the first table in the section is an **options** table before reading
-  // its rows. `powerSocketAdapter.md` has a `## Constructor` heading followed by
-  // a transport-detection table (`stream` / `websocket` / `ws` — how a given
-  // socket is recognised at runtime), and treating that as the options table
-  // reported two nonexistent options on the first run. The distinguishing
-  // feature is the header row: an options table always names its first column
-  // `option`.
-  const headerRow = section[0].match(/^\|[^\n]*\|[^\n]*\n\|\s*-{2,}/m);
-  const headerCells = headerRow ? headerRow[0].split('|').map((c) => c.trim()) : [];
-  if (!/^`?options?`?$/i.test(headerCells[1] ?? '')) {
-    notes.push(`${guide}: constructor section has no options table; option names not checked`);
-    continue;
-  }
-
-  const rows = [...section[0].matchAll(/^\|\s*`([^`]+)`\s*\|/gm)].map((m) => m[1]);
   // The first row after the header is the leading positional when the table
   // carries one; every subsequent row is an option.
   const skipFirst = /^\w+$/.test(rows[0] ?? '') && known.size > 0 && !known.has(rows[0]);

@@ -167,6 +167,8 @@ export function checkTable(text) {
 
   const problems = [];
   let rows = 0;
+  /** @type {string[][]} Every parsed row, in table order, for the histograms below. */
+  const parsedRows = [];
   // Where each ID was first seen, so a repeat can name both lines. A duplicate
   // ID is invisible in a rendered table — markdown shows two perfectly
   // well-formed rows — and it is how a row ends up *shadowing* a real open item,
@@ -183,6 +185,7 @@ export function checkTable(text) {
     if (line.startsWith('|')) {
       rows += 1;
       const cells = splitRow(line);
+      parsedRows.push(cells);
       const rowId = (cells[0] ?? '').trim();
       if (rowId) {
         const first = seen.get(rowId);
@@ -235,7 +238,7 @@ export function checkTable(text) {
     }
     break; // end of the table
   }
-  return { rows, problems };
+  return { rows, problems, parsedRows };
 }
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
@@ -271,13 +274,44 @@ if (!isMain) {
       console.error(`review-row: ${REVIEW} not found`);
       process.exit(2);
     }
-    const { rows, problems } = checkTable(readFileSync(REVIEW, 'utf8'));
+    const { rows, problems, parsedRows } = checkTable(readFileSync(REVIEW, 'utf8'));
     if (problems.length) {
       for (const p of problems) console.error(p);
       console.error(`\nreview-row: ${problems.length} problem(s) across ${rows} rows.`);
       process.exit(1);
     }
     console.log(`review-row: ${rows} plan rows, all ${COLUMNS.length} columns.`);
+
+    // **The histograms, printed on every run.**
+    //
+    // §8 of `review.md` states these numbers in prose, and they were wrong three
+    // times in a row — 131 when the table held 170, then 179, then 193 when it
+    // held 199. Not because anyone miscounted: because each audit adds rows, and
+    // nothing recomputed a number that only a human retyped. This check already
+    // parsed every row, so the counts were one map away; printing them makes the
+    // prose number *checkable* rather than trusted, which is the only version of
+    // a hand-maintained count worth having.
+    const statuses = new Map();
+    const priorities = new Map();
+    for (const cells of parsedRows) {
+      const count = (map, key) => map.set(key, (map.get(key) ?? 0) + 1);
+      // Strip emphasis so `**P0**` and `P0` are one bucket rather than two.
+      count(statuses, cells[1].replaceAll('*', '').trim());
+      count(priorities, cells[3].replaceAll('*', '').trim());
+    }
+    const tally = (map) =>
+      [...map.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([k, n]) => `${k} ${n}`)
+        .join(', ');
+    // `parsedRows.length`, not `rows.length`: `rows` is the *count* `checkTable`
+    // reports, and reading `.length` off a number prints `undefined`. They agree
+    // today, so a wrong total would print `undefined` here rather than a wrong
+    // number — which is why it is worth deriving the total from the array the
+    // histograms were actually built from.
+    console.log(`  by status   (${parsedRows.length}): ${tally(statuses)}`);
+    console.log(`  by priority (${parsedRows.length}): ${tally(priorities)}`);
+    console.log('  §8 quotes these — if they differ, the prose is stale, not the table.');
   } else {
     console.log('usage: node scripts/review-row.mjs --check | --row \'{"id":...}\'');
     console.log(`columns: ${COLUMNS.join(', ')}`);

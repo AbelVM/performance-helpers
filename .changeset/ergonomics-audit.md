@@ -177,3 +177,28 @@ _defaults_ — a default is not recorded in the published `.d.ts` at all, and
 `refillInterval`'s wrong default was the more misleading half of that row. And
 ten guides report "option names not checked" because they have no options typedef
 in the declaration; that is reported honestly rather than counted as a pass.
+
+**`docs:claims` now covers 26 guides rather than 10.** The six it skipped were not
+skipped because they have no options — two of them were skipped by a regex that
+missed the inline-import spelling the emitted declarations use for a type that
+lives outside `jsdoc-types.js`:
+
+    options?: PowerThrottleOptions                              // matched
+    options?: import("./jsdoc-types.js").PowerBatchOptions      // was not
+
+and the rest because the table was found by looking for a `## Constructor`
+heading, when the guides variously use `## Constructor`, `## Options` and
+`### API`. Both were silent: the script reported "not checked" and exited 0. It
+now locates an options table by its _header row_ — first column named `option` —
+which is the actual intent, and drops the heading match that had also produced a
+false positive on `powerSocketAdapter.md`, whose `## Constructor` section is a
+transport-detection table, not an options table.
+
+Six guides remain unchecked and all six are correct: `powerQueue` and
+`powerSemaphore` take a positional primitive, `powerDefer` has no constructor,
+`WorkerAgnostic`, `metrics` and `powerRealtimeHub` document their options as prose
+rather than a table. The report says so rather than claiming a pass.
+
+Mutation-checked against four of the newly-covered guides — injecting a bogus
+option row into `powerGCRA`, `powerCache`, `powerPool` and `powerRetry` fails the
+guard on all four, including the two whose typedef spelling it previously missed.
