@@ -90,7 +90,7 @@ describe('PowerThrottle options', () => {
   });
 
   it('still accepts refillRate: 0, which is a legitimate "no refill"', () => {
-    const t = new PowerThrottle({ limit: 5, capacity: 5, refillRate: 0 });
+    const t = new PowerThrottle({ capacity: 5, refillRate: 0 });
     expect(t.refillRate).toBe(0);
     expect(t.capacity).toBe(5);
   });

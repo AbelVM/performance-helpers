@@ -99,8 +99,8 @@ describe('PowerRateLimit composition invariants', () => {
         fc.integer({ min: 1, max: 8 }),
         fc.array(fc.nat({ max: 10 }), { minLength: 1, maxLength: 40 }),
         (a, b, n) => {
-          const l1 = new PowerThrottle({ limit: a, windowMs: 1000, capacity: a });
-          const l2 = new PowerSlidingWindow({ limit: b, windowMs: 1000 });
+          const l1 = new PowerThrottle({ capacity: a });
+          const l2 = new PowerSlidingWindow({ capacity: b, windowMs: 1000 });
           const combined = new PowerRateLimit([l1, l2]);
           let granted = 0;
           for (let i = 0; i < n.length; i++) {
@@ -117,9 +117,7 @@ describe('PowerRateLimit composition invariants', () => {
   it('treats a non-positive ask as a no-op and never throws', () => {
     fc.assert(
       fc.property(fc.integer({ min: -5, max: 0 }), (n) => {
-        const r = new PowerRateLimit([
-          new PowerThrottle({ limit: 2, windowMs: 1000, capacity: 2 }),
-        ]);
+        const r = new PowerRateLimit([new PowerThrottle({ capacity: 2 })]);
         // Nothing is consumed, so the next real ask still succeeds.
         expect(r.tryConsume(n)).toBe(true);
         expect(r.tryConsume(2)).toBe(true);
@@ -131,9 +129,7 @@ describe('PowerRateLimit composition invariants', () => {
   it('refuses an ask larger than the limit without throwing', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1, max: 20 }), (n) => {
-        const r = new PowerRateLimit([
-          new PowerThrottle({ limit: 2, windowMs: 1000, capacity: 2 }),
-        ]);
+        const r = new PowerRateLimit([new PowerThrottle({ capacity: 2 })]);
         // Must be a boolean either way - the contract is "returns a boolean",
         // so an over-sized ask is a `false`, never a TypeError.
         expect(typeof r.tryConsume(n)).toBe('boolean');

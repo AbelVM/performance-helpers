@@ -18,7 +18,7 @@ import PowerEventLoopMonitorDefault from '../src/helpers/powerEventLoopMonitor.j
  */
 function blockFor(ms) {
   const until = Date.now() + ms;
-  // eslint-disable-next-line no-empty
+
   while (Date.now() < until) {
     /* spin */
   }

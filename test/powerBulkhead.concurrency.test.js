@@ -44,7 +44,7 @@ import { PowerBulkhead } from '../src/helpers/powerBulkhead.js';
  * @param {Object} options
  */
 function makeBulkhead(options) {
-  return new PowerBulkhead({ size: 1, minSize: 1, maxSize: 1, lazy: false, ...options });
+  return new PowerBulkhead({ maxConcurrency: 1, minSize: 1, maxSize: 1, lazy: false, ...options });
 }
 
 /**

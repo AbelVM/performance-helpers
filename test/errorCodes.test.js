@@ -94,7 +94,7 @@ describe('the error-code table matches the library', () => {
       expect(code, `expected ${expected} to be observable`).toBe(expected);
     }
 
-    const circuit = new PowerCircuit({ threshold: 1, resetTimeoutMs: 60_000 });
+    const circuit = new PowerCircuit({ threshold: 1, timeout: 60_000 });
     await capture(() =>
       circuit.call(async () => {
         throw new Error('boom');
@@ -159,7 +159,7 @@ describe('the claims the table makes about meaning', () => {
     // request, and must not be counted upstream. Asserted directly, because it
     // is the claim most likely to be wrong: were `fn` called before the state
     // check, a code-only assertion would still pass.
-    const circuit = new PowerCircuit({ threshold: 1, resetTimeoutMs: 60_000 });
+    const circuit = new PowerCircuit({ threshold: 1, timeout: 60_000 });
     await capture(() =>
       circuit.call(async () => {
         throw new Error('boom');

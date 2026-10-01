@@ -29,7 +29,7 @@ import { describe, it, expect } from 'vitest';
 import { PowerHistogram } from '../src/helpers/powerHistogram.js';
 
 /** @returns {PowerHistogram} a histogram with 5 buckets over `[0, 10]`. */
-const small = () => new PowerHistogram({ maxValue: 10, buckets: 5 });
+const small = () => new PowerHistogram({ maxValue: 10, bucketCount: 5 });
 
 describe('PowerHistogram max tracks a zero record', () => {
   it('reports max 0 for an all-zeros histogram, not -Infinity', () => {
@@ -220,7 +220,7 @@ describe('percentile(1) is the maximum, and that is on purpose', () => {
     // and "fixes" silently. A caller who wants p100 has two spellings and both
     // keep working; a caller who wants p1 has to write `1%`-style intent out
     // longhand, which is the cost the guide warns about.
-    const h = new PowerHistogram({ maxValue: 100, buckets: 100 });
+    const h = new PowerHistogram({ maxValue: 100, bucketCount: 100 });
     for (let v = 1; v <= 100; v += 1) h.record(v);
 
     expect(h.percentile(1)).toBe(100);
@@ -232,7 +232,7 @@ describe('percentile(1) is the maximum, and that is on purpose', () => {
     // The half of the range that is unambiguous, and the one a caller reaching
     // for p50 by habit actually types. Guarded because the two spellings share
     // one comparison, so a change to the boundary could take this with it.
-    const h = new PowerHistogram({ maxValue: 100, buckets: 100 });
+    const h = new PowerHistogram({ maxValue: 100, bucketCount: 100 });
     for (let v = 1; v <= 100; v += 1) h.record(v);
 
     expect(h.percentile(0.5)).toBeCloseTo(50, -1);

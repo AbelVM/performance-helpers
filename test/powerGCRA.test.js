@@ -346,7 +346,7 @@ describe('PowerGCRA invariants', () => {
 
   it('composes with PowerRateLimit as a limiter component', () => {
     const gcra = new PowerGCRA({ rate: 2, per: 1000, burst: 0 });
-    const throttle = new PowerThrottle({ limit: 10, windowMs: 1000, capacity: 10 });
+    const throttle = new PowerThrottle({ capacity: 10 });
     const combined = new PowerRateLimit([gcra, throttle]);
 
     let granted = 0;
