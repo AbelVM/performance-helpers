@@ -257,14 +257,23 @@ export const defaultMetrics = new MetricsCollector();
  */
 export function attach(instance, name, options) {
   const requested = options?.observability;
+  // Anything falsy means "off". Anything else must be `true` or a collector —
+  // validated rather than ignored, because the ignored case is the same failure
+  // this library has elsewhere: `observability: 'yes'` is truthy, is not `true`,
+  // and has no `register`, so it used to register nothing and say nothing. A
+  // caller who asked to be measured and was not would never find out.
   if (!requested) return null;
-  const collector =
-    requested === true
-      ? defaultMetrics
-      : requested && typeof requested.register === 'function'
-        ? requested
-        : null;
-  if (!collector) return null;
+  if (requested === true) {
+    // fall through to the shared collector below
+  } else if (typeof requested === 'object' && typeof requested.register === 'function') {
+    // fall through to the caller's own collector below
+  } else {
+    throw new TypeError(
+      `${name}: \`observability\` must be \`true\` or a MetricsCollector, ` +
+        `not ${typeof requested} (${String(requested)}).`
+    );
+  }
+  const collector = requested === true ? defaultMetrics : /** @type {*} */ (requested);
   const target = /** @type {{getStats?: function(): *, stats?: function(): *}} */ (
     /** @type {*} */ (instance)
   );

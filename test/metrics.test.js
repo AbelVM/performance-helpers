@@ -359,12 +359,23 @@ describe('observability: true on the helpers', () => {
     expect(defaultMetrics.names().length).toBe(0);
   });
 
-  it('ignores a value that is not a collector', () => {
-    const helper = new PowerCache({ observability: 'yes' });
-    // A typo must be inert rather than fatal, and must not create a series
-    // under a name nothing can find.
-    expect(helper._metrics).toBeNull();
-    helper.dispose();
+  it('rejects a value that is neither true nor a collector', () => {
+    // This used to be "ignores a value that is not a collector", and the
+    // leniency was the bug rather than the virtue. `'yes'` is truthy, is not
+    // `true`, and has no `register`, so it registered nothing and reported
+    // nothing: a caller who asked to be measured was silently not measured, and
+    // would find out from a dashboard that looked plausible.
+    //
+    // The same reasoning that made every other option in this library throw on a
+    // wrong value applies here, and a falsy value is still the way to say "off".
+    for (const bad of ['yes', 1, {}, [], Symbol('x')]) {
+      expect(() => new PowerCache({ observability: bad }), String(bad)).toThrow(
+        /`observability` must be `true` or a MetricsCollector/
+      );
+    }
+    // Falsy stays inert, because "off" is a legitimate answer.
+    expect(new PowerCache({ observability: false })._metrics).toBeNull();
+    expect(new PowerCache()._metrics).toBeNull();
   });
 
   it('a helper with no stats() registers nothing rather than an empty series', () => {
