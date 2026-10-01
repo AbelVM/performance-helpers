@@ -99,13 +99,19 @@ function optionNamesFromDeclaration(src, shared, unresolved) {
   // and `HubOptions` are declared in their own files and exported from there.
   // Searching only the shared file silently skipped those two guides.
   const pool = `${shared}\n${src}`;
-  // Two spellings occur in the emitted declarations, and missing either one
-  // silently skips a guide: a bare name (`options?: PowerThrottleOptions`) and an
-  // inline import (`options?: import("./jsdoc-types.js").PowerBatchOptions`).
+  // The leading `\??` matters: `PowerRealtimeHub`'s constructor is
+  // `constructor(options: HubOptions)` — **required**, not optional — and
+  // matching only `\?:` resolved no options for it at all, so its table was
+  // unchecked while the report said nothing was wrong with it. A required
+  // options parameter lists exactly the same accepted names as an optional one.
+  //
+  // Two spellings also occur, and missing either silently skips a guide: a bare
+  // name (`options?: PowerThrottleOptions`) and an inline import
+  // (`options?: import("./jsdoc-types.js").PowerBatchOptions`).
   // The second is what `powerBatch` and `powerLatch` emit, and they went
   // unchecked until this matched it.
   for (const m of src.matchAll(
-    /\?: (?:import\("[^"]*"\)\.)?([A-Za-z_$][\w$]*(?:Options|Config))\b/g
+    /\??: (?:import\("[^"]*"\)\.)?([A-Za-z_$][\w$]*(?:Options|Config))\b/g
   )) {
     const typedefName = m[1];
     const block = pool.match(new RegExp(`^export type ${typedefName} = \\{([\\s\\S]*?)^\\};`, 'm'));
