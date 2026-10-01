@@ -54,11 +54,11 @@ and reaching for a platform broadcast primitive to extend it is slower, unbounde
 and — written the obvious way — an infinite message loop. `guides/powerEventBus.md`
 has the measurements; `guides/troubleshooting.md` has the two platform properties
 that make it counter-intuitive.
-| Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                             |
-| Coordinate callbacks or multi-step async completion                   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                    |
-| Batch near-synchronous calls into one flush                           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                           |
-| Run something on a fixed cadence without drift                        | `PowerCron`                                        | `PowerScheduler` (one flush per turn, not a cadence)       | `setInterval`, which drifts and queues                       |
-| Tell whether a latency regression is yours or the host's              | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site |
+| Expose a single changing value reactively | `PowerObserver` | `PowerEventBus` | a full event bus |
+| Coordinate callbacks or multi-step async completion | `PowerDefer`, `PowerLatch` | `PowerLogger` | hand-rolled promise state |
+| Batch near-synchronous calls into one flush | `PowerBatch` | `PowerScheduler`, `PowerQueue` | `PowerQueue` alone |
+| Run something on a fixed cadence without drift | `PowerCron` | `PowerScheduler` (one flush per turn, not a cadence) | `setInterval`, which drifts and queues |
+| Tell whether a latency regression is yours or the host's | `PowerEventLoopMonitor` | `PowerHistogram`, `PowerLogger` | adding `performance.now()` deltas around the whole call site |
 
 ---
 
@@ -106,6 +106,44 @@ Important distinction:
 - `PowerSemaphore` limits total concurrency.
 - `PowerBulkhead` isolates lanes of concurrency.
 - `PowerPermitGate` is the primitive, not the typical app-level answer.
+
+### If you need `SharedArrayBuffer` in a worker
+
+The library uses it nowhere — a `SharedArrayBuffer` permit pool was measured at
+**6.4× more expensive** than the plain field read already in the path, so
+`PowerPermitGate` does not need it. But `SharedArrayBuffer`, `Atomics.wait` and
+the higher timer precision are gated behind **cross-origin isolation**, and the
+support matrix for the two ways to get it is the part most often stated wrongly:
+
+| Route                                       | Browser support                                                              | Notes                                                                                                                                                                        |
+| ------------------------------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COOP: same-origin` + `COEP: require-corp`  | **Universal** — Safari 15.2+, Chrome 91+, Firefox 93+                        | The only route that works everywhere. Requires `Cross-Origin-Resource-Policy` on every cross-origin subresource.                                                             |
+| `COEP: credentialless`                      | Chrome 96+ **and Firefox 119+** — **not Safari, any version, including iOS** | Strips credentials, so no CORP needed on subresources. Widely misreported as "Chrome and Edge".                                                                              |
+| A service worker shim (`coi-serviceworker`) | Chrome-family only, plus Firefox                                             | Works without header control, but **reloads the page on first load** and must be an unbundled file on your own origin. A UX change only your application can decide to make. |
+
+**Prefer `require-corp`.** `credentialless` is lighter for subresources but has no
+Safari path at all, so a deployment that adopts it and tests on an iPhone has no
+isolation and will not be told why — `SharedArrayBuffer` simply will not exist.
+
+`SharedArrayBuffer` itself is now Baseline, at ~96% global usage. What is gated is
+not the type but the isolation that makes it constructible.
+
+The library cannot set headers for you, so what it can do is tell you whether
+isolation is actually in force, and degrade rather than throw:
+
+```js
+const isolated = typeof crossOriginIsolated !== 'undefined' && crossOriginIsolated;
+// Node needs no isolation at all: worker_threads already provides
+// SharedArrayBuffer and Atomics.wait, so the same code works on both.
+
+if (typeof SharedArrayBuffer === 'undefined' || !isolated) {
+  // fall back to postMessage; do not assume the buffer exists
+}
+```
+
+Detect, do not sniff the user agent as a primary signal. `navigator.userAgentData?.brands`
+is the honest version of that and is Chromium-only in practice, so treat it as
+diagnostic detail in a bug report rather than as the decision.
 
 ### Rate limits and resilience
 
