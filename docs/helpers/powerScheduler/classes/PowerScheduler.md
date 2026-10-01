@@ -38,6 +38,12 @@ Scheduling and error handling options.
 
 ---
 
+### \_generation
+
+> **\_generation**: `number`
+
+---
+
 ### \_onError
 
 > **\_onError**: ((`error`) => `void`) \| `null`

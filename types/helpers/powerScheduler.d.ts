@@ -12,6 +12,7 @@ export class PowerScheduler {
     _timer: MacrotaskHandle | {
         cancel: () => void;
     } | null;
+    _generation: number;
     /** Whether a flush is currently scheduled. */
     get scheduled(): boolean;
     /**

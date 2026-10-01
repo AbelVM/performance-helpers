@@ -3643,3 +3643,43 @@ against releases**, the same one PERF-001 and POOL-006 use — counting is exact
 and a duration would be measuring the thing being removed.
 
 Closes RT-008.
+
+#### An abandoned `scheduler.yield()` continuation flushed the _next_ schedule early
+
+The yield strategy has no cancellable handle — `scheduler.yield()` returns a
+promise that resolves when the continuation is resumed, and it is already queued
+by the time anyone could detach it. A continuation left over from a previous
+`schedule()` therefore needs to be able to tell that it has been superseded.
+
+The code carried a comment saying it could not, and it was wrong in one clause.
+It read: _"`_run()` opens with `if (!this._scheduled) return`, and both `flush()`
+and `cancel()` clear `_scheduled` before returning, so an abandoned continuation
+finds the schedule already closed and does nothing"_ — and it called a generation
+counter an **equivalent mutant**, because removing it left all seven yield-path
+tests green.
+
+**`flush()` does not clear `_scheduled` — `_run()` does, as a side effect of
+_running_.** `cancel()` does clear it, so the reasoning was half right and reached
+the wrong conclusion. After `schedule(); flush(); schedule()` the flag is true
+again, and the abandoned continuation finds a _live_ schedule and runs it:
+
+```
+schedule(); flush(); schedule()     ->  1 flush, 2 continuations queued
+resume the ABANDONED continuation  ->  2 flushes, _timer null
+```
+
+The newer schedule was flushed a whole window early, and its timer handle was
+clobbered on the way past. The seven tests stayed green throughout because none of
+them resumed an abandoned continuation.
+
+The fix is one integer: a generation captured at the arm and compared on
+resumption. The check has to be on the generation rather than the flag, precisely
+because the later `schedule()` re-set the flag.
+
+`test/powerScheduler.yieldGeneration.test.js`, 5 tests on flush counts and handle
+shapes — the ordering is driven by resolving promises by hand, so no duration is
+involved. Three mutations caught. It also pins that the _current_ continuation
+still runs, since a guard that skipped every continuation would pass both the
+no-early-flush and the no-clobber tests and break the scheduler.
+
+Closes RES-006.

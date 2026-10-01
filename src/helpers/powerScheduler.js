@@ -208,6 +208,12 @@ export class PowerScheduler {
     this._onError = typeof options.onError === 'function' ? options.onError : null;
     this._scheduled = false;
     this._timer = null;
+    // Bumped by every `schedule()` that actually starts one, so a continuation
+    // left over from a previous schedule can tell that it has been superseded.
+    // Only the yield path needs it — the other strategies hold a cancellable
+    // handle — but it is one integer, and it is the only thing standing between
+    // an abandoned continuation and a double flush.
+    this._generation = 0;
   }
 
   /** Whether a flush is currently scheduled. */
@@ -253,15 +259,27 @@ export class PowerScheduler {
       // looked like it needed a generation counter to make the continuation go
       // stale.
       //
-      // It does not. `_run()` opens with `if (!this._scheduled) return`, and
-      // both `flush()` and `cancel()` clear `_scheduled` before returning, so an
-      // abandoned continuation finds the schedule already closed and does
-      // nothing. A generation counter here was an **equivalent mutant**: removing
-      // it entirely left all 7 yield-path tests green. The `cancel` handle is
-      // kept only so the two strategies share one teardown shape, and it is
-      // honestly a no-op.
+      // **This comment used to say no counter was needed**, and the reason it was
+      // wrong is worth keeping. `_run()` opens with `if (!this._scheduled)
+      // return`, and `flush()` does **not** clear `_scheduled` — `_run()` does, as
+      // a side effect of *running*. So after `schedule(); flush(); schedule()` the
+      // flag is true again, and the abandoned first continuation finds a *live*
+      // schedule and runs it. Measured with a controllable `scheduler.yield`:
+      // `schedule/flush/schedule` left one flush, and resuming the abandoned
+      // continuation produced a second — the newer schedule flushed early — and
+      // nulled `_timer` on the way, clobbering the newer handle. The seven
+      // yield-path tests stayed green throughout because none of them resumed an
+      // abandoned continuation.
+      const generation = ++this._generation;
+      // The placeholder handle is kept only so the strategies share one teardown
+      // shape. It is honestly a no-op, and says so rather than pretending
+      // otherwise.
       this._timer = { cancel: () => {} };
       Promise.resolve(globalThis.scheduler.yield()).then(() => {
+        // Superseded by a later `schedule()`. Note that `_run()`'s own
+        // `_scheduled` guard does **not** catch this: the later `schedule()` re-set
+        // that flag, so the check has to be on the generation.
+        if (generation !== this._generation) return;
         this._timer = null;
         this._run();
       });
