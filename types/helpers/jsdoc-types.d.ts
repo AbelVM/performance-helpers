@@ -1106,6 +1106,14 @@ export type PowerCacheOptions = {
      * {@link PowerCache#getOrFetch}. A per-call factory overrides it.
      */
     fetchMethod?: (() => (Promise<any> | any)) | null | undefined;
+    /**
+     * `true` to register
+     * with the shared `MetricsCollector`; a collector instance registers with that
+     * one instead. Absent from this typedef until a pass checking for unknown
+     * options found the constructor reading it via `attach()` and the type not
+     * saying so — a TypeScript caller could not pass it.
+     */
+    observability?: boolean | any;
 };
 /**
  * A memoized wrapper returned by `PowerMemoizer.memoize()`.

@@ -793,7 +793,17 @@ export {};
  *   `Infinity` to opt out of one on purpose.
  * @property {?(function(): (Promise<*>|*))} [fetchMethod] Default producer for
  *   {@link PowerCache#getOrFetch}. A per-call factory overrides it.
-
+ * @property {boolean|import('../utils/metrics.js').MetricsCollector} [observability=false] `true` to register
+ *   with the shared `MetricsCollector`; a collector instance registers with that
+ *   one instead. Absent from this typedef until a pass checking for unknown
+ *   options found the constructor reading it via `attach()` and the type not
+ *   saying so — a TypeScript caller could not pass it.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability=false] - Opt in
+ *   to metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Read by the constructor via `attach()` in
+ *   `src/helpers/metrics.js`, and absent from this typedef until a pass checking
+ *   for unknown options found the mismatch — a TypeScript caller could not pass
+ *   it at all. Every other `attach()` caller declared it.
  */
 
 /**

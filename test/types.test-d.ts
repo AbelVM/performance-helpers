@@ -31,6 +31,9 @@ import {
   PowerRetry,
   PowerEventLoopMonitor,
   PowerRetryBudget,
+  PowerSocketAdapter,
+  defaultMetrics,
+  MetricsCollector,
   PowerDeadline,
   PowerHistogram,
   PowerRealtimeHub,
@@ -385,19 +388,48 @@ void [budgetForward, budgetBackward];
 // caller could not pass them at all — a real defect, found by a pass that was
 // checking for unknown options and turned up two that the published type was
 // missing. Asserted here so neither can go missing again.
-const poolWithEncodeCache = new PowerPool(function EncodeCacheWorker(this: any) {
-  this.onmessage = null;
-  this.postMessage = () => {};
-  this.terminate = () => {};
-}, {
-  size: 1,
-  minSize: 1,
-  maxSize: 1,
-  lazy: false,
-  encodeCacheLimit: 128,
-  encodeCacheByteLimit: 1 << 20,
-});
+const poolWithEncodeCache = new PowerPool(
+  function EncodeCacheWorker(this: any) {
+    this.onmessage = null;
+    this.postMessage = () => {};
+    this.terminate = () => {};
+  },
+  {
+    size: 1,
+    minSize: 1,
+    maxSize: 1,
+    lazy: false,
+    encodeCacheLimit: 128,
+    encodeCacheByteLimit: 1 << 20,
+  }
+);
 poolWithEncodeCache.terminate();
 // @ts-expect-error `encodeCacheLimit` is a number of entries, not a string.
 const poolBadEncodeCache = new PowerPool(function W(this: any) {}, { encodeCacheLimit: 'lots' });
 void poolBadEncodeCache;
+
+// --- observability was read by eight constructors and typed by seven --------
+//
+// `attach(instance, name, options)` in `src/helpers/metrics.js` reads
+// `options.observability`, and eight constructors call it. `PowerCacheOptions`
+// did not declare the field, so a TypeScript caller could not pass it — the same
+// defect as `PowerPool`'s `encodeCacheLimit` pair in 3d54d29, found by the same
+// kind of pass. Asserted per class so a future option removal is caught here
+// rather than by a consumer's compiler.
+new PowerCache({ observability: true });
+new PowerGCRA({ rate: 1, per: 1000, observability: true });
+new PowerBulkhead({ maxConcurrency: 1, observability: true });
+new PowerRetryBudget({ ratio: 0.2, observability: true });
+new PowerEventLoopMonitor({ observability: true });
+new PowerRealtimeHub({ send: () => {}, observability: true });
+new PowerWebSocketClient({ url: 'ws://x', observability: true });
+new PowerSocketAdapter({ readyState: 1 } as any, { observability: true });
+// A collector instance registers with that collector instead of the shared one.
+// `defaultMetrics` is already an instance, not a factory (src/index.js:18).
+new PowerCache({ observability: defaultMetrics });
+new PowerCache({ observability: new MetricsCollector() });
+// No `@ts-expect-error` for a wrong *value*: `new PowerCache({ observability:
+// 'yes' })` compiles, so the declared union is not enforced at the constructor.
+// Asserting it would be asserting something untrue; the useful half of this test
+// is that the option is *accepted* at all, which was the defect. Tightening the
+// value type is separate work and needs its own investigation.
