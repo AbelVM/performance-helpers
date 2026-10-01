@@ -99,6 +99,7 @@ describe('API surface', () => {
         'b2o',
         'canUseNativeClone',
         'collectTransferables',
+        'createFrameDecoder',
         'decodeInbound',
         'decodeMessage',
         'detectEnv',

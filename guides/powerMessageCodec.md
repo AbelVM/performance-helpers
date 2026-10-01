@@ -16,7 +16,7 @@ bytes 6..    payload
 A length prefix beats newline-delimited JSON for anything but tiny text frames:
 
 - No escaping is needed, and a payload may contain newlines or arbitrary bytes.
-- The reader knows the frame length **before** allocating, so a stream reader can consume exactly one message and keep the remainder.
+- The reader knows the frame length **before** allocating, so a stream reader can consume exactly one message and keep the remainder. `createFrameDecoder` is that reader — see [Reading a stream](#reading-a-stream).
 - Frames are self-delimiting, which is what a `WebSocket` fan-out needs to batch several messages per send.
 
 ## Why there is no `v8` frame
@@ -35,7 +35,8 @@ So the two things are split by what they actually are:
 ## API
 
 - `encodeMessage(value, { codec })` — value to a framed `Uint8Array`. `codec` defaults to `selectCodec(value)`.
-- `decodeMessage(input, { strict, rawAsBytes })` — frame to `{ version, codec, value, byteLength }`. Accepts a `Uint8Array`, `ArrayBuffer` or `DataView`.
+- `decodeMessage(input, { strict, rawAsBytes })` — **one whole frame** to `{ version, codec, value, byteLength }`. Accepts a `Uint8Array`, `ArrayBuffer` or `DataView`. Throws on a partial frame; use `createFrameDecoder` for a stream.
+- `createFrameDecoder({ maxFrameBytes, strict, rawAsBytes })` — an incremental decoder over a byte stream. See [Reading a stream](#reading-a-stream).
 - `encodeNative(value)` — `{ message, transfer }` for a `MessagePort`/`Worker`, using the platform's structured clone.
 - `canUseNativeClone()` — whether `encodeNative` is usable.
 - `selectCodec(value)` / `isRawPayload(value)` — codec choice helpers.
@@ -79,25 +80,54 @@ port.postMessage(message, transfer);
 
 `encodeNative` is lossless for `Map`, `Set`, `Date`, `RegExp`, cycles and binary — none of which the `json` codec supports — and it clones first, so the returned object shares no memory with the input.
 
-## Batching over a stream
+## Reading a stream
 
-Because `decodeMessage` reports `byteLength`, a reader can split a byte stream into frames:
+`decodeMessage` reads one **whole** frame and throws on anything less, so it cannot be pointed at a socket, a `ReadableStream` or a `node:stream` chunk. Two things go wrong if you feed it one anyway:
+
+- **A frame split across two reads** throws `RangeError: … truncated frame`. That is the _normal_ state of a stream roughly once per frame, so the error arrives at a rate that trains you to swallow `RangeError`s — including the one that means the peer is genuinely corrupt.
+- **Two frames in one read** returns the first and stops, reporting a `byteLength` smaller than its input. Nothing throws. The remaining bytes are never looked at, and the loss is invisible at the call site.
+
+`createFrameDecoder` is the reader for that job. It is transport-neutral and synchronous — not a `ReadableStream` transformer, not a generator:
 
 ```javascript
-let buffered = new Uint8Array(0);
+import { createFrameDecoder } from 'performance-helpers/powerMessageCodec';
+
+const decoder = createFrameDecoder({ maxFrameBytes: 1 << 20 });
+
 for await (const chunk of stream) {
-  buffered = concat(buffered, chunk);
-  for (;;) {
-    if (buffered.length < HEADER_BYTES) break;
-    const declared =
-      (buffered[2] | (buffered[3] << 8) | (buffered[4] << 16) | (buffered[5] << 24)) >>> 0;
-    if (buffered.length < HEADER_BYTES + declared) break;
-    const { value, byteLength } = decodeMessage(buffered);
-    handle(value);
-    buffered = buffered.subarray(byteLength);
-  }
+  // `push` returns EVERY complete frame in the chunk, not the first.
+  for (const { value } of decoder.push(chunk)) handle(value);
 }
+
+const tail = decoder.flush(); // zero-length if the stream ended on a boundary
+if (tail.length) console.warn('stream ended mid-frame', tail.length, 'bytes short');
+// ...or have it name the shortfall for you:
+// decoder.flush({ strict: true })  →  RangeError: … 17 of 23 bytes buffered
 ```
+
+| member                           | behaviour                                                                                                                                                 |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `push(chunk)`                    | Copies the chunk in and returns every frame it completed. `[]` when it completed none — including a chunk too short to hold a header, which never throws. |
+| `flush({ strict })`              | A **copy** of the bytes still buffered. `strict: true` throws a `RangeError` naming the shortfall instead.                                                |
+| `pendingBytes`                   | Bytes held for an incomplete frame.                                                                                                                       |
+| `reset()`                        | Drop an incomplete frame and start over, keeping the buffer.                                                                                              |
+| `dispose()` / `[Symbol.dispose]` | Release the buffer. A state reset, not a cancellation — the decoder owns no timer or listener, and stays usable afterwards.                               |
+
+The chunk is copied in, so a transport may reuse or transfer its own buffer as soon as `push` returns.
+
+### `maxFrameBytes` is required
+
+There is no default, and that is deliberate. A frame declares its own payload length, so a peer that sends a 6-byte header and then nothing holds the decoder's buffer open at whatever size it named — with no bound, no counter and no error. A default would be a limit that sounds like one and is not. Pass `Infinity` to opt out; that call is greppable, which a default is not.
+
+The ceiling is checked **when the 6 header bytes arrive**, not when the frame completes, so an oversized frame is refused before its payload is buffered rather than after. It bounds one frame, so a chunk carrying many small frames may still transiently exceed it.
+
+### It is not a speedup
+
+`decodeMessage`'s `byteLength` has always made a hand-rolled reader possible, and this section used to be one — a re-concatenating buffer with a declared-length check. `createFrameDecoder` replaces it because of the two failures above, not because it decodes faster.
+
+Measured against a naive re-concatenate-per-chunk decoder at the shape this was designed against (500 frames of ~422 bytes in 157 chunks of 1400, arms interleaved to cancel JIT warm-up): **1.00× and 1.19× on two runs**, with a 55–60 % min/max spread against the 28 % noise floor this repository measures. Indistinguishable. At 422 bytes a frame the copy is L1-resident and essentially free.
+
+The two only separate when a frame is big enough for the copy to matter — 1.9× at 32 KB frames — which is an asymptotic property, not a number to quote. Mutation is what settled the rest, and it cuts both ways. Of 21 mutants, 16 are caught. The compaction and the growth factor are **not**: reverting either leaves all 34 tests green, because neither changes a single decoded byte, and that is the honest reason to adopt this and not the reason to claim it as an optimisation. The drained-cursor rewind _is_ caught, by exactly one test and for an indirect reason — it changes buffer reuse, so it changes what a `rawAsBytes` view sees on the next `push`, not what any frame decodes to.
 
 ## Negotiation: the carrier is a per-worker decision
 
@@ -179,9 +209,18 @@ A tie for small objects, up to ~1.7× **slower** for deep structure, and faster 
 
 `encodeMessage` throws a `TypeError` for an unknown codec name, and for `raw` on a non-binary value.
 
+`createFrameDecoder` adds:
+
+- `TypeError` at construction — `maxFrameBytes` absent, not a whole number, or below `HEADER_BYTES`. A byte count has to be a whole number, and not merely for tidiness: a fractional ceiling is compared against a length that is always an integer, so `1024.5` and `1024` admit exactly the same frames and the `.5` reads as a tolerance that is not there.
+- `RangeError` from `push`, naming `maxFrameBytes`, when a frame declares a total length over the ceiling. This fires on the header, so the offending payload is never buffered.
+- `RangeError` from `push` for anything `decodeMessage` would have thrown — an unknown version or codec id, per frame. A throw leaves the buffered bytes in place and the decoder stuck, because a mis-parsed frame means the length prefix is no longer trustworthy; call `reset()` to recover.
+- `RangeError` from `flush({ strict: true })` when the stream ended mid-frame.
+
 ## Notes
 
+- `createFrameDecoder` knows nothing about sockets, and [`PowerSocketAdapter`](powerSocketAdapter.md) does not use it — the two are independent, and connecting them is separate work.
 - `decodeMessage(..., { rawAsBytes: true })` returns a `Uint8Array` **view** over the frame, scoped to the payload — no copy. The default copies with `slice()`, which is what you want if you intend to keep the payload after the frame is transferred away.
+- On a **stream**, `rawAsBytes: true` is sharper than the same option on a complete frame: the view aliases the decoder's own buffer, so the next `push` overwrites it. Keep the bytes, or leave the option off.
 - The `raw` codec respects a typed array's `byteOffset`/`byteLength`, so a `subarray` of a larger buffer encodes only its own window.
 - `strict: false` is there for a rolling upgrade, where a newer peer may send version 2 and a reader should decide for itself. It is off the default deliberately.
 - Every frame is written with a hand-rolled little-endian length rather than a `DataView`, to avoid allocating one per message on a hot path.

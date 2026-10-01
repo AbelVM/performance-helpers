@@ -60,7 +60,8 @@ export function frameEncodedJson(json: Uint8Array | string): Uint8Array;
  *   `Uint8Array` view over the frame instead of copying the payload out.
  * @returns {{version:number, codec:'json'|'raw', value:any, byteLength:number}}
  *   `byteLength` is the total framed length, which lets a stream reader know how
- *   much to consume.
+ *   much to consume. Consuming it is {@link createFrameDecoder}'s job; this
+ *   function still requires one whole frame.
  */
 export function decodeMessage(input: Uint8Array | ArrayBuffer | DataView, options?: {
     strict?: boolean | undefined;
@@ -70,6 +71,102 @@ export function decodeMessage(input: Uint8Array | ArrayBuffer | DataView, option
     codec: "json" | "raw";
     value: any;
     byteLength: number;
+};
+/**
+ * Create an incremental frame decoder over an arbitrary byte stream.
+ *
+ * {@link decodeMessage} reads **one whole frame** and throws on anything less,
+ * so it cannot be pointed at a socket, a `ReadableStream` or a `node:stream`
+ * chunk — and it does throw, with a `RangeError` that says nothing about the
+ * fact that the frame was merely *incomplete* rather than corrupt. That is the
+ * normal state of a stream roughly once per frame, so the error arrives at a
+ * rate that trains the reader to swallow it.
+ *
+ * A second, quieter failure sits behind it: feed `decodeMessage` a chunk
+ * carrying two frames and it returns the first and stops, reporting a
+ * `byteLength` smaller than the input. Nothing throws. The remaining bytes are
+ * simply never looked at, and the loss is invisible at the call site.
+ *
+ * ```javascript
+ * const decoder = createFrameDecoder({ maxFrameBytes: 1 << 20 });
+ * for await (const chunk of stream) {
+ *   for (const { value } of decoder.push(chunk)) handle(value);
+ * }
+ * const tail = decoder.flush();
+ * if (tail.length) console.warn('stream ended mid-frame', tail.length, 'bytes short');
+ * ```
+ *
+ * The object is transport-neutral and synchronous. It is not a
+ * `ReadableStream` transformer and not a generator, because the one thing it
+ * has to get right — never mistaking a half-written payload for a whole one —
+ * is a property of *byte counts*, and wrapping it in a stream abstraction moves
+ * that arithmetic somewhere nobody will read it.
+ *
+ * ## How it buffers
+ *
+ * A read cursor and a write cursor over one growable buffer. The accumulated
+ * bytes are **not** re-copied on every `push`: the copy happens when the buffer
+ * has to grow, and the live remainder is compacted in place when it would
+ * otherwise force a growth it does not need. Re-concatenating per `push` is
+ * O(n²) in the chunk count; this is linear in the bytes.
+ *
+ * That is a statement about asymptotics, deliberately **not** a speed claim.
+ * Measured at the shape this was designed against — 500 frames of ~422 bytes
+ * delivered in 157 chunks of 1400 — offset bookkeeping and a naive
+ * re-concatenate per chunk are indistinguishable: 1.00x and 1.19x on two runs,
+ * with a 55-60 % min/max spread against a 28 % noise floor on this machine. The
+ * two only separate once a frame is big enough for the copy to matter (1.9x at
+ * 32 KB frames), because at 422 bytes the copy is L1-resident and free. See the
+ * "Not a speedup" section of the guide.
+ *
+ * ## The ceiling is required
+ *
+ * `maxFrameBytes` has no default and is not optional. A frame declares its own
+ * payload length, so a peer that sends a 6-byte header and then nothing holds
+ * this decoder's buffer open at whatever size it named — with no bound, no
+ * counter and no error. A default would be the same defect as RT-009's: a limit
+ * that sounds like one and is not. Pass `Infinity` to say so out loud; that
+ * call is greppable, which a default is not.
+ *
+ * The ceiling is checked **when the header arrives**, not when the frame
+ * completes, so an oversized frame is refused before its payload is buffered
+ * rather than after. It bounds one frame, so a chunk carrying many small frames
+ * may still transiently exceed it.
+ *
+ * @param {Object} options
+ * @param {number} options.maxFrameBytes - Largest acceptable **total** framed
+ *   length, header included. Required; `Infinity` opts out of the ceiling.
+ * @param {boolean} [options.strict=true] - Passed to {@link decodeMessage} per
+ *   frame. An unknown protocol version throws from `push`.
+ * @param {boolean} [options.rawAsBytes=false] - Passed to
+ *   {@link decodeMessage} per frame. Note that with a stream the view is only
+ *   valid until the next `push`, which is a stronger caveat than it is for a
+ *   complete frame.
+ * @returns {{push: (chunk: Uint8Array|ArrayBuffer|DataView) => Array<{version:number, codec:'json'|'raw', value:any, byteLength:number}>, flush: (options?: {strict?: boolean}) => Uint8Array, reset: () => void, dispose: () => void, readonly pendingBytes: number, [Symbol.dispose]: () => void}}
+ * @throws {TypeError} If `maxFrameBytes` is absent, not a whole number, or
+ *   below {@link HEADER_BYTES}.
+ * @throws {RangeError} From `push`, naming `maxFrameBytes`, when a frame
+ *   declares a length over the ceiling. From `flush({ strict: true })`, when the
+ *   stream ended mid-frame.
+ */
+export function createFrameDecoder(options: {
+    maxFrameBytes: number;
+    strict?: boolean | undefined;
+    rawAsBytes?: boolean | undefined;
+}): {
+    push: (chunk: Uint8Array | ArrayBuffer | DataView) => Array<{
+        version: number;
+        codec: "json" | "raw";
+        value: any;
+        byteLength: number;
+    }>;
+    flush: (options?: {
+        strict?: boolean;
+    }) => Uint8Array;
+    reset: () => void;
+    dispose: () => void;
+    readonly pendingBytes: number;
+    [Symbol.dispose]: () => void;
 };
 /**
  * Encode a value for a `MessagePort` / `Worker` using the platform's structured
@@ -266,6 +363,7 @@ export const PowerMessageCodec: Readonly<{
     HEADER_BYTES: 6;
     encodeMessage: typeof encodeMessage;
     decodeMessage: typeof decodeMessage;
+    createFrameDecoder: typeof createFrameDecoder;
     frameEncodedJson: typeof frameEncodedJson;
     encodeNative: typeof encodeNative;
     canUseNativeClone: typeof canUseNativeClone;

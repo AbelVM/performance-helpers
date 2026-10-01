@@ -40,7 +40,8 @@ Reject an unknown protocol version
 `object`
 
 `byteLength` is the total framed length, which lets a stream reader know how
-  much to consume.
+  much to consume. Consuming it is [createFrameDecoder](createFrameDecoder.md)'s job; this
+  function still requires one whole frame.
 
 ### byteLength
 

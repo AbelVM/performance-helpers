@@ -48,6 +48,7 @@ export {
   HEADER_BYTES,
   encodeMessage,
   decodeMessage,
+  createFrameDecoder,
   frameEncodedJson,
   encodeNative,
   canUseNativeClone,

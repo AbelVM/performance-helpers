@@ -75,6 +75,7 @@ read that handles all three carriers.
 - [announceCapabilities](functions/announceCapabilities.md)
 - [canUseNativeClone](functions/canUseNativeClone.md)
 - [collectTransferables](functions/collectTransferables.md)
+- [createFrameDecoder](functions/createFrameDecoder.md)
 - [decodeInbound](functions/decodeInbound.md)
 - [decodeMessage](functions/decodeMessage.md)
 - [encodeMessage](functions/encodeMessage.md)

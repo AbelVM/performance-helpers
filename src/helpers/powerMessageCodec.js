@@ -54,6 +54,7 @@
  * @public
  */
 import { o2u8, u82o } from './powerBuffer.js';
+import { assertLimitRequired } from '../utils/options.js';
 
 /** Current protocol version written into every frame. */
 export const MESSAGE_PROTOCOL_VERSION = 1;
@@ -227,6 +228,32 @@ export function frameEncodedJson(json) {
 }
 
 /**
+ * Read a frame's declared payload length out of its header.
+ *
+ * Extracted rather than inlined in {@link decodeMessage} because
+ * {@link createFrameDecoder} has to read the length at a different moment —
+ * as soon as the 6 header bytes arrive, before the payload does, so it can
+ * refuse a frame the peer has only half-sent. Two copies of this expression is
+ * precisely the shape that survives a v2 layout change in one place and not
+ * the other, and this project has already paid for a drifted copy of a return
+ * type in nine JSDoc blocks.
+ *
+ * @private
+ * @param {Uint8Array} bytes
+ * @param {number} [offset=0] Index of the header's first byte.
+ * @returns {number} The declared payload length, unsigned.
+ */
+function _readLength(bytes, offset = 0) {
+  return (
+    (bytes[offset + 2] |
+      (bytes[offset + 3] << 8) |
+      (bytes[offset + 4] << 16) |
+      (bytes[offset + 5] << 24)) >>>
+    0
+  );
+}
+
+/**
  * Decode a framed message.
  *
  * @param {Uint8Array|ArrayBuffer|DataView} input - The frame.
@@ -238,7 +265,8 @@ export function frameEncodedJson(json) {
  *   `Uint8Array` view over the frame instead of copying the payload out.
  * @returns {{version:number, codec:'json'|'raw', value:any, byteLength:number}}
  *   `byteLength` is the total framed length, which lets a stream reader know how
- *   much to consume.
+ *   much to consume. Consuming it is {@link createFrameDecoder}'s job; this
+ *   function still requires one whole frame.
  */
 export function decodeMessage(input, options = {}) {
   const strict = options.strict !== false;
@@ -262,7 +290,7 @@ export function decodeMessage(input, options = {}) {
     throw new RangeError(`PowerMessageCodec: unknown codec id ${bytes[1]}`);
   }
 
-  const length = (bytes[2] | (bytes[3] << 8) | (bytes[4] << 16) | (bytes[5] << 24)) >>> 0;
+  const length = _readLength(bytes);
   if (bytes.length < HEADER_BYTES + length) {
     throw new RangeError(
       `PowerMessageCodec: frame declares a ${length}-byte payload but only ` +
@@ -279,6 +307,251 @@ export function decodeMessage(input, options = {}) {
         : bytes.slice(start, end)
       : u82o(bytes.subarray(start, end));
   return { version, codec, value, byteLength: end };
+}
+
+/**
+ * Create an incremental frame decoder over an arbitrary byte stream.
+ *
+ * {@link decodeMessage} reads **one whole frame** and throws on anything less,
+ * so it cannot be pointed at a socket, a `ReadableStream` or a `node:stream`
+ * chunk — and it does throw, with a `RangeError` that says nothing about the
+ * fact that the frame was merely *incomplete* rather than corrupt. That is the
+ * normal state of a stream roughly once per frame, so the error arrives at a
+ * rate that trains the reader to swallow it.
+ *
+ * A second, quieter failure sits behind it: feed `decodeMessage` a chunk
+ * carrying two frames and it returns the first and stops, reporting a
+ * `byteLength` smaller than the input. Nothing throws. The remaining bytes are
+ * simply never looked at, and the loss is invisible at the call site.
+ *
+ * ```javascript
+ * const decoder = createFrameDecoder({ maxFrameBytes: 1 << 20 });
+ * for await (const chunk of stream) {
+ *   for (const { value } of decoder.push(chunk)) handle(value);
+ * }
+ * const tail = decoder.flush();
+ * if (tail.length) console.warn('stream ended mid-frame', tail.length, 'bytes short');
+ * ```
+ *
+ * The object is transport-neutral and synchronous. It is not a
+ * `ReadableStream` transformer and not a generator, because the one thing it
+ * has to get right — never mistaking a half-written payload for a whole one —
+ * is a property of *byte counts*, and wrapping it in a stream abstraction moves
+ * that arithmetic somewhere nobody will read it.
+ *
+ * ## How it buffers
+ *
+ * A read cursor and a write cursor over one growable buffer. The accumulated
+ * bytes are **not** re-copied on every `push`: the copy happens when the buffer
+ * has to grow, and the live remainder is compacted in place when it would
+ * otherwise force a growth it does not need. Re-concatenating per `push` is
+ * O(n²) in the chunk count; this is linear in the bytes.
+ *
+ * That is a statement about asymptotics, deliberately **not** a speed claim.
+ * Measured at the shape this was designed against — 500 frames of ~422 bytes
+ * delivered in 157 chunks of 1400 — offset bookkeeping and a naive
+ * re-concatenate per chunk are indistinguishable: 1.00x and 1.19x on two runs,
+ * with a 55-60 % min/max spread against a 28 % noise floor on this machine. The
+ * two only separate once a frame is big enough for the copy to matter (1.9x at
+ * 32 KB frames), because at 422 bytes the copy is L1-resident and free. See the
+ * "Not a speedup" section of the guide.
+ *
+ * ## The ceiling is required
+ *
+ * `maxFrameBytes` has no default and is not optional. A frame declares its own
+ * payload length, so a peer that sends a 6-byte header and then nothing holds
+ * this decoder's buffer open at whatever size it named — with no bound, no
+ * counter and no error. A default would be the same defect as RT-009's: a limit
+ * that sounds like one and is not. Pass `Infinity` to say so out loud; that
+ * call is greppable, which a default is not.
+ *
+ * The ceiling is checked **when the header arrives**, not when the frame
+ * completes, so an oversized frame is refused before its payload is buffered
+ * rather than after. It bounds one frame, so a chunk carrying many small frames
+ * may still transiently exceed it.
+ *
+ * @param {Object} options
+ * @param {number} options.maxFrameBytes - Largest acceptable **total** framed
+ *   length, header included. Required; `Infinity` opts out of the ceiling.
+ * @param {boolean} [options.strict=true] - Passed to {@link decodeMessage} per
+ *   frame. An unknown protocol version throws from `push`.
+ * @param {boolean} [options.rawAsBytes=false] - Passed to
+ *   {@link decodeMessage} per frame. Note that with a stream the view is only
+ *   valid until the next `push`, which is a stronger caveat than it is for a
+ *   complete frame.
+ * @returns {{push: (chunk: Uint8Array|ArrayBuffer|DataView) => Array<{version:number, codec:'json'|'raw', value:any, byteLength:number}>, flush: (options?: {strict?: boolean}) => Uint8Array, reset: () => void, dispose: () => void, readonly pendingBytes: number, [Symbol.dispose]: () => void}}
+ * @throws {TypeError} If `maxFrameBytes` is absent, not a whole number, or
+ *   below {@link HEADER_BYTES}.
+ * @throws {RangeError} From `push`, naming `maxFrameBytes`, when a frame
+ *   declares a length over the ceiling. From `flush({ strict: true })`, when the
+ *   stream ended mid-frame.
+ */
+// No `= {}` default, and the type error that cost is the point: the parameter is
+// genuinely required, so the published signature says so, and a caller in
+// TypeScript finds out at the call site rather than at the first oversized
+// frame. The optional chain below is what keeps the *runtime* message useful
+// for the JavaScript caller who passes nothing at all.
+export function createFrameDecoder(options) {
+  if (options?.maxFrameBytes === undefined) {
+    throw new TypeError(
+      'PowerMessageCodec: createFrameDecoder() requires `maxFrameBytes`. A frame declares ' +
+        'its own payload length, so a peer that sends a header and then stops would pin this ' +
+        'buffer at whatever size it named. Pass `Infinity` to accept that risk explicitly.'
+    );
+  }
+  const maxFrameBytes = assertLimitRequired(options.maxFrameBytes, {
+    name: 'maxFrameBytes',
+    className: 'PowerMessageCodec.createFrameDecoder',
+    min: HEADER_BYTES,
+    integer: true,
+    allowInfinity: true,
+  });
+  const strict = options.strict !== false;
+  const rawAsBytes = options.rawAsBytes === true;
+
+  // 1 KB holds a typical small JSON frame whole, so the common
+  // message-per-chunk case never grows the buffer at all.
+  const INITIAL_BYTES = 1024;
+  let buf = new Uint8Array(INITIAL_BYTES);
+  let start = 0;
+  let end = 0;
+
+  /**
+   * Make room for `incoming` more bytes, compacting before growing.
+   * @param {number} incoming
+   * @returns {void}
+   */
+  function _reserve(incoming) {
+    if (end + incoming <= buf.length) return;
+    const live = end - start;
+    // Compaction alone is enough when the live remainder plus the chunk fits in
+    // the space already allocated. Worth trying first: a stream that delivers
+    // one frame per chunk would otherwise reallocate on a predictable cadence.
+    if (live + incoming <= buf.length) {
+      buf.copyWithin(0, start, end);
+    } else {
+      // `|| INITIAL_BYTES` because `dispose()` leaves a zero-length buffer, and
+      // doubling zero is zero — the loop below would never terminate.
+      let capacity = buf.length || INITIAL_BYTES;
+      while (capacity < live + incoming) capacity *= 2;
+      const grown = new Uint8Array(capacity);
+      // Copying from `start` compacts as a side effect of growing.
+      grown.set(buf.subarray(start, end));
+      buf = grown;
+    }
+    start = 0;
+    end = live;
+  }
+
+  return {
+    /**
+     * Feed the next chunk of the stream, and take every complete frame out of it.
+     *
+     * @param {Uint8Array|ArrayBuffer|DataView} chunk - Whatever the transport
+     *   handed over. It is copied in, so the caller may reuse or transfer its
+     *   buffer immediately.
+     * @returns {Array<{version:number, codec:'json'|'raw', value:any, byteLength:number}>}
+     *   The frames completed by this chunk — **every** one of them, not the
+     *   first. Empty when the chunk held no complete frame, which includes the
+     *   ordinary case of a chunk too short to hold a header yet.
+     */
+    push(chunk) {
+      const bytes = toBytes(chunk);
+      _reserve(bytes.length);
+      buf.set(bytes, end);
+      end += bytes.length;
+
+      const frames = [];
+      while (end - start >= HEADER_BYTES) {
+        const declared = _readLength(buf, start);
+        // Checked before the completeness test below, and that ordering is the
+        // whole reason the ceiling exists: an oversized frame is refused on its
+        // header, so the declared payload is never buffered.
+        if (HEADER_BYTES + declared > maxFrameBytes) {
+          throw new RangeError(
+            `PowerMessageCodec: frame declares ${HEADER_BYTES + declared} bytes, over the ` +
+              `maxFrameBytes limit of ${maxFrameBytes}`
+          );
+        }
+        if (end - start < HEADER_BYTES + declared) break;
+        // Bounded to the write cursor rather than the buffer's capacity, which
+        // is what keeps the raw view and the JSON parse looking only at bytes
+        // that were actually received. It is not the guard, though: the check
+        // above is. Slicing to capacity here instead leaves every test in
+        // `powerMessageCodec.frameDecoder.test.js` green, because
+        // `decodeMessage` is never reached with an incomplete frame. Kept
+        // because the two have to agree and only one of them is checked.
+        const frame = decodeMessage(buf.subarray(start, end), { strict, rawAsBytes });
+        frames.push(frame);
+        start += frame.byteLength;
+      }
+
+      // Fully drained. Rewind rather than allocate, so the steady state of a
+      // stream that keeps up costs no garbage.
+      if (start === end) {
+        start = 0;
+        end = 0;
+      }
+      return frames;
+    },
+
+    /**
+     * Report what is still buffered, for end-of-stream.
+     *
+     * @param {Object} [flushOptions]
+     * @param {boolean} [flushOptions.strict=false] - Throw a `RangeError`
+     *   naming the shortfall instead of returning the bytes.
+     * @returns {Uint8Array} A **copy** of the unconsumed remainder, safe to
+     *   keep after the decoder is reused or disposed. Zero-length means the
+     *   stream ended on a frame boundary and nothing was lost.
+     */
+    flush(flushOptions = {}) {
+      const buffered = end - start;
+      if (buffered > 0 && flushOptions.strict === true) {
+        const declared = buffered < HEADER_BYTES ? null : _readLength(buf, start);
+        const needed = declared === null ? HEADER_BYTES : HEADER_BYTES + declared;
+        throw new RangeError(
+          `PowerMessageCodec: stream ended mid-frame — ${buffered} of ${needed} bytes buffered` +
+            (declared === null ? ', not even a whole header' : '')
+        );
+      }
+      return buf.slice(start, end);
+    },
+
+    /** Bytes currently held for an incomplete frame. */
+    get pendingBytes() {
+      return end - start;
+    },
+
+    /**
+     * Drop any incomplete frame and start over, keeping the buffer for reuse.
+     *
+     * For a stream that has desynchronised and cannot be resynchronised: once a
+     * frame is mis-parsed the length prefix is no longer trustworthy, so the
+     * bytes after it cannot be framed either.
+     */
+    reset() {
+      start = 0;
+      end = 0;
+    },
+
+    /**
+     * Release the buffer.
+     *
+     * This is a **state reset**, not a cancellation: the decoder owns no timer,
+     * no listener and no handle of any kind, only bytes. It is safe to keep
+     * pushing afterwards — the next `push` allocates a fresh buffer — so a
+     * `using` block that disposes early does not leave a dead object behind.
+     */
+    dispose() {
+      this.reset();
+      buf = new Uint8Array(0);
+    },
+
+    [Symbol.dispose]() {
+      this.dispose();
+    },
+  };
 }
 
 /**
@@ -576,6 +849,7 @@ export const PowerMessageCodec = Object.freeze({
   HEADER_BYTES,
   encodeMessage,
   decodeMessage,
+  createFrameDecoder,
   frameEncodedJson,
   encodeNative,
   canUseNativeClone,

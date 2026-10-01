@@ -42,6 +42,12 @@ Re-exports [collectTransferables](../powerMessageCodec/functions/collectTransfer
 
 ***
 
+### createFrameDecoder
+
+Re-exports [createFrameDecoder](../powerMessageCodec/functions/createFrameDecoder.md)
+
+***
+
 ### decodeInbound
 
 Re-exports [decodeInbound](../powerMessageCodec/functions/decodeInbound.md)
