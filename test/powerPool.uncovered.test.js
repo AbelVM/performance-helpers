@@ -394,7 +394,7 @@ describe('PowerPool uncovered branches', () => {
       lazy: true,
       maxSize: 1,
       maxTasksPerWorker: 1,
-      taskQueueEnabled: true,
+      taskQueue: true,
     });
     pool._logger = { error: vi.fn(), log: () => {} };
     const w = pool.addWorker();

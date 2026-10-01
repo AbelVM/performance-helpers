@@ -226,7 +226,7 @@ describe('PowerGCRA operation counts', () => {
 describe('PowerBatch operation counts', () => {
   it('splits on exactly maxSize, never over', async () => {
     const seen = [];
-    const batch = new PowerBatch((items) => seen.push(items.length), { maxSize: 10, maxWaitMs: 0 });
+    const batch = new PowerBatch((items) => seen.push(items.length), { maxSize: 10 });
     for (let i = 0; i < 35; i += 1) batch.add(i);
     // The tail (5) is below maxSize, so it waits for the timer. `flush()` is
     // what forces it out, and it is a Promise - the full batches have already
@@ -240,7 +240,7 @@ describe('PowerBatch operation counts', () => {
 
   it('delivers every item exactly once', async () => {
     const seen = [];
-    const batch = new PowerBatch((items) => seen.push(...items), { maxSize: 8, maxWaitMs: 0 });
+    const batch = new PowerBatch((items) => seen.push(...items), { maxSize: 8 });
     for (let i = 0; i < 50; i += 1) batch.add(i);
     await batch.flush();
     // A batch that drops is worse than no batch, and a duplicate is worse than
@@ -252,7 +252,7 @@ describe('PowerBatch operation counts', () => {
 
   it('preserves order within and across batches', async () => {
     const seen = [];
-    const batch = new PowerBatch((items) => seen.push(...items), { maxSize: 4, maxWaitMs: 0 });
+    const batch = new PowerBatch((items) => seen.push(...items), { maxSize: 4 });
     for (let i = 0; i < 12; i += 1) batch.add(i);
     await batch.flush();
     expect(seen).toEqual([...Array(12).keys()]);

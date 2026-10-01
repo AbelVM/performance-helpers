@@ -50,7 +50,7 @@ const RESOURCE_OWNERS = [
   ['PowerBatch', () => new PowerBatch(() => {}, { maxSize: 8 })],
   [
     'PowerBackpressure',
-    () => new PowerBackpressure({ highWaterMark: 2, lowWaterMark: 1, refillRate: 1 }),
+    () => new PowerBackpressure({ capacity: 2, lowWaterMark: 1, refillAmount: 1 }),
   ],
   ['PowerCache', () => new PowerCache()],
   ['PowerTimedCache', () => new PowerTimedCache(1000)],
@@ -162,7 +162,7 @@ describe('disposal actually releases the resource', () => {
   });
 
   it('PowerBackpressure releases its permit gate', () => {
-    const bp = new PowerBackpressure({ highWaterMark: 2, lowWaterMark: 1, refillRate: 1 });
+    const bp = new PowerBackpressure({ capacity: 2, lowWaterMark: 1, refillAmount: 1 });
     bp.reset();
     expect(() => bp.dispose()).not.toThrow();
     expect(bp._refillTimer).toBeFalsy();
@@ -197,7 +197,7 @@ describe('disposal is safe under repeated use', () => {
       // NB: `PowerBackpressure.reset()` *clears* the refill timer rather than
       // scheduling one, so there is no "timer before dispose" precondition to
       // assert here. What matters is that dispose is safe and leaves none.
-      const bp = new PowerBackpressure({ highWaterMark: 1, lowWaterMark: 1, refillRate: 1 });
+      const bp = new PowerBackpressure({ capacity: 1, lowWaterMark: 1, refillAmount: 1 });
       expect(() => bp.dispose()).not.toThrow();
       expect(bp._refillTimer).toBeFalsy();
     }
