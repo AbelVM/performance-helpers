@@ -61376,7 +61376,63 @@
 									},
 									{
 										"kind": "text",
-										"text": ")."
+										"text": ").\n\nDeclared as a **type predicate** rather than returning plain "
+									},
+									{
+										"kind": "code",
+										"text": "`boolean`"
+									},
+									{
+										"kind": "text",
+										"text": ".\nThat is not decoration: without it "
+									},
+									{
+										"kind": "code",
+										"text": "`tsc`"
+									},
+									{
+										"kind": "text",
+										"text": " cannot narrow at the call site, and\nthe first caller to rely on narrowing introduced two type errors -\n"
+									},
+									{
+										"kind": "code",
+										"text": "`options.reason instanceof Error ? reason : new Error(...)`"
+									},
+									{
+										"kind": "text",
+										"text": " in\n"
+									},
+									{
+										"kind": "code",
+										"text": "`PowerBulkhead#reset`"
+									},
+									{
+										"kind": "text",
+										"text": " widened to "
+									},
+									{
+										"kind": "code",
+										"text": "`string | Error | undefined`"
+									},
+									{
+										"kind": "text",
+										"text": " at the merge,\nbecause nothing told the checker the true branch was an "
+									},
+									{
+										"kind": "code",
+										"text": "`Error`"
+									},
+									{
+										"kind": "text",
+										"text": ". It is also\nstrictly more useful than "
+									},
+									{
+										"kind": "code",
+										"text": "`boolean`"
+									},
+									{
+										"kind": "text",
+										"text": " at every other site."
 									}
 								],
 								"blockTags": [
@@ -61428,13 +61484,24 @@
 									},
 									"type": {
 										"type": "intrinsic",
-										"name": "any"
+										"name": "unknown"
 									}
 								}
 							],
 							"type": {
-								"type": "intrinsic",
-								"name": "boolean"
+								"type": "predicate",
+								"name": "value",
+								"asserts": false,
+								"targetType": {
+									"type": "reference",
+									"target": {
+										"packageName": "typescript",
+										"packagePath": "lib/lib.es5.d.ts",
+										"qualifiedName": "Error"
+									},
+									"name": "Error",
+									"package": "typescript"
+								}
 							}
 						}
 					]

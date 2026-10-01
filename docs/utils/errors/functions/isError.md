@@ -6,7 +6,7 @@
 
 # Function: isError()
 
-> **isError**(`value`): `boolean`
+> **isError**(`value`): `value is Error`
 
 Whether `value` is an `Error`, across realms where the platform can say so.
 
@@ -33,16 +33,24 @@ not the brand (`instanceof` says `true`, this says `false`), and a
 cross-realm error has the brand but not this realm's prototype (`instanceof`
 says `false`, this says `true`).
 
+Declared as a **type predicate** rather than returning plain `boolean`.
+That is not decoration: without it `tsc` cannot narrow at the call site, and
+the first caller to rely on narrowing introduced two type errors -
+`options.reason instanceof Error ? reason : new Error(...)` in
+`PowerBulkhead#reset` widened to `string | Error | undefined` at the merge,
+because nothing told the checker the true branch was an `Error`. It is also
+strictly more useful than `boolean` at every other site.
+
 ## Parameters
 
 ### value
 
-`any`
+`unknown`
 
 Any value, including a non-object.
 
 ## Returns
 
-`boolean`
+`value is Error`
 
 `true` if `value` is an `Error` object.
