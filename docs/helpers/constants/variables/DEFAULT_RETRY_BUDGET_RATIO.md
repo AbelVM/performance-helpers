@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / DEFAULT\_RETRY\_BUDGET\_RATIO
 
@@ -11,7 +11,7 @@
 Default retry-budget ratio: the fraction of ordinary requests that may be
 retried before the budget refuses more.
 
-Google SRE Workbook, _Handling Overload_ (2018) puts the recommended band at
+Google SRE Workbook, *Handling Overload* (2018) puts the recommended band at
 10-20 % of total requests; the top of that band is the default because a
 budget exists to stop an amplification loop, not to ration retries in normal
 operation. Every retry is a request the dependency did not ask for, and at

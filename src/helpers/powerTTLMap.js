@@ -4,6 +4,7 @@
  * is unnecessary and a simple time-to-live map is desired.
  */
 import { nowMs } from '../utils/now.js';
+import { normalizeTtl } from '../utils/options.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerTTLMapOptions} PowerTTLMapOptions
@@ -62,8 +63,37 @@ export class PowerTTLMap {
    * @returns {number} Resolved TTL in ms (0 = no expiry).
    */
   _resolveTtl(ttl, fallback) {
-    if (ttl != null && typeof ttl === 'object') ttl = ttl.ttl;
-    return ttl == null ? fallback : Number(ttl) || 0;
+    // The `{ ttl }` object form. An array is deliberately **not** unwrapped:
+    // `[]` is a non-duration that `PowerCache` rejects, and unwrapping it here
+    // would silently hand `[]` the meaning "no ttl given, use the default"
+    // instead. `{}` still unwraps to `undefined` and means "use the default",
+    // which is what an empty options object says.
+    if (ttl != null && typeof ttl === 'object' && !Array.isArray(ttl)) ttl = ttl.ttl;
+    if (ttl == null) return fallback;
+    // **This used to be `Number(ttl) || 0`,** which is the whole of CACHE-015.
+    // A value that is not a number made every expiry comparison false, so the
+    // entry never expired: verified that `PowerTTLMap.set(k, 1, 'abc')` stored
+    // `expiresAt === 0` — *immortal* — while `PowerCache`, fixed by CACHE-003
+    // in the same repository, threw a `TypeError` naming the value for the same
+    // input. `PowerCache` fixed it by extracting its check into `powerCache.js`,
+    // where this class cannot reach it, so the defect survived the fix in the
+    // sibling.
+    //
+    // The negative case matters too: a negative TTL is a caller mistake, not a
+    // request to never expire, and `|| 0` quietly granted it. `Infinity` still
+    // means no expiry, which is why it is checked before normalisation.
+    if (ttl === Infinity) return 0;
+    const ms = normalizeTtl(ttl, 'PowerTTLMap');
+    // `0` is the stored sentinel for "no expiry" in this class too, and a
+    // negative TTL would store a past timestamp that compares as *live*, so it
+    // is rejected rather than clamped.
+    if (ms < 0) {
+      throw new RangeError(
+        `PowerTTLMap: \`ttl\` must be zero (no expiry) or positive (received ${String(ttl)}). ` +
+          'A negative TTL would store an expiry in the past that every comparison reads as live.'
+      );
+    }
+    return ms;
   }
 
   /**

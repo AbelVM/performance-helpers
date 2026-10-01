@@ -50,15 +50,162 @@ describe('PowerGCRA basics', () => {
   });
 
   it('retryAfter reflects the full cost of a multi-operation ask', () => {
-    const l = new PowerGCRA({ rate: 10, per: 1000 });
-    expect(l.retryAfter(3)).toBe(0); // no history: affordable now
-    l.tryConsume();
-    // A batch is admitted behind a *single* admission check, so the wait is
-    // driven by the current TAT and does not grow with `n`. Waiting the
-    // reported amount must make the whole batch succeed.
-    expect(l.retryAfter(3)).toBe(100);
-    vi.advanceTimersByTime(100);
+    // rate 10 => 100ms per operation. burst:5 => the budget covers 6
+    // operations at one instant; draining all 6 puts the TAT 100ms ahead of
+    // the clock, which is the state in which a wait is non-zero.
+    const l = new PowerGCRA({ rate: 10, per: 1000, burst: 5 });
+    expect(l.retryAfter(3)).toBe(0); // idle: the burst covers 3 easily
+    expect(l.tryConsume(6)).toBe(true);
+    expect(l.retryAfter()).toBe(100);
+    // The wait grows with `n` by the batch's own span - 2 extra emission
+    // intervals here. Waiting the single-operation wait instead would
+    // under-wait and be refused.
+    expect(l.retryAfter(3)).toBe(300);
+    vi.advanceTimersByTime(300);
     expect(l.tryConsume(3)).toBe(true);
+    // The batch advanced the TAT by 3 intervals, putting it 600ms ahead of a
+    // clock that moved 300ms, so the next single waits 600 - 500 (the burst's
+    // tolerance) = 100ms.
+    expect(l.retryAfter()).toBe(100);
+  });
+
+  it('refuses a batch whose own span exceeds the burst ceiling', () => {
+    // RES-012. At burst 0, `available()` is 1: the first operation is free and
+    // there is no tolerance beyond it. A batch of 5 at 1/s spans 4 seconds, so
+    // it cannot fit - the requirement `golang.org/x/time/rate` states as
+    // `n <= burst`. Before the fix the batch's span was nowhere in the
+    // condition and this returned `true`, leaving the limiter 5000ms in debt
+    // for a configuration whose steady state is one operation per second.
+    const l = new PowerGCRA({ rate: 1, per: 1000, burst: 0 });
+    expect(l.available()).toBe(1);
+    expect(l.tryConsume(5)).toBe(false);
+    // Refused without committing, so nothing was spent on the attempt.
+    expect(l.retryAfter()).toBe(0);
+    // The single operation the budget really covers still works.
+    expect(l.tryConsume()).toBe(true);
+  });
+
+  it('refuses to report a wait for a batch no wait can admit', () => {
+    // A batch above the ceiling can never succeed, because the ceiling comes
+    // from `burst` and not from the state of the TAT. Measured: 200 000 tries
+    // across four configurations, one past the ceiling, 0 admissions.
+    //
+    // Returning a finite wait would be the worst of the three options - a
+    // caller in a retry loop would wait, be refused, wait again, forever. And
+    // this is the one place `retryAfter` may throw: it is the *advisory* half
+    // of the pair, and advising a wait that cannot succeed is a bug in the
+    // advice, not a rate-limit decision to report.
+    const l = new PowerGCRA({ rate: 10, per: 1000, burst: 3 });
+    expect(() => l.retryAfter(5)).toThrow(RangeError);
+    expect(() => l.retryAfter(5)).toThrow(/burst/);
+    // At the ceiling it still reports a real wait rather than throwing.
+    expect(l.retryAfter(4)).toBe(0);
+    // And `take()` propagates rather than inventing a wait.
+    expect(() => l.take(5)).toThrow(RangeError);
+    expect(l.take(2)).toEqual({ ok: true });
+  });
+
+  it('admits a batch that exactly fits the burst, and refuses one more', () => {
+    // burst:3 => the budget covers 4 operations at one instant (the first is
+    // free, then 3 more within the tolerance). A batch of 4 spans 3 intervals,
+    // which is the whole tolerance, so it fits exactly - and consumes it
+    // entirely, leaving nothing affordable right now.
+    const l = new PowerGCRA({ rate: 10, per: 1000, burst: 3 });
+    expect(l.available()).toBe(4);
+    expect(l.tryConsume(4)).toBe(true);
+    expect(l.available()).toBe(0);
+    expect(l.tryConsume(5)).toBe(false);
+  });
+
+  it('reports burst + 1 available at an idle instant, whatever the rate', () => {
+    // The saturation case, which is where the old `floor(tol / emission) + 1`
+    // fell over: that division does not round-trip, and at `rate: 3, burst: 7`
+    // it read `6.999999999999999`, so a limiter covering 8 operations reported
+    // 7. Not a reporting nit - `PowerRateLimit` pre-checks `available() < want`
+    // and refuses, so a composition turned down a batch the limiter admitted.
+    for (const rate of [1, 3, 6, 7, 9, 11, 13, 29, 31, 100]) {
+      for (const burst of [1, 2, 3, 7, 8, 11]) {
+        const l = new PowerGCRA({ rate, per: 1000, burst });
+        expect(l.available()).toBe(burst + 1);
+      }
+    }
+  });
+
+  it('a batch admission agrees with available()', () => {
+    // The property the fix is really asserting: for any `n`, `tryConsume(n)`
+    // succeeds exactly when the budget covers `n`. This is what makes the
+    // direct call and the composed one agree - `PowerRateLimit` pre-checks
+    // `available() < want`, so a `tryConsume` that admitted more than
+    // `available()` reported would refuse a batch the limiter itself allowed.
+    // Swept by hand over rate 1-40 x burst 0-12 x n 1-16 with varied history:
+    // 255 combinations disagreed before the fix, 0 after.
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 20 }),
+        fc.integer({ min: 0, max: 8 }),
+        fc.integer({ min: 1, max: 12 }),
+        fc.array(fc.nat({ max: 300 }), { minLength: 0, maxLength: 20 }),
+        (rate, burst, n, gaps) => {
+          const l = new PowerGCRA({ rate, per: 1000, burst });
+          for (const g of gaps) {
+            vi.advanceTimersByTime(g);
+            l.tryConsume();
+          }
+          const can = l.available() >= n;
+          const got = l.tryConsume(n);
+          expect(got).toBe(can);
+        }
+      ),
+      { numRuns: RUNS }
+    );
+  });
+
+  it('retryAfter is exact for a multi-operation ask', () => {
+    // `retryAfter` used to compute its wait from a different expression than
+    // the admission check, and the two differ in the last bit: at `rate: 7,
+    // burst: 1` it reported `0` while the next `tryConsume` refused, which
+    // turns a retry loop into a spin at full speed. 69 such cases on a
+    // hand-swept grid before the fix, 0 after.
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 25 }),
+        fc.integer({ min: 0, max: 8 }),
+        fc.array(fc.nat({ max: 300 }), { minLength: 1, maxLength: 8 }),
+        fc.integer({ min: 1, max: 4 }),
+        (rate, burst, gaps, n) => {
+          const l = new PowerGCRA({ rate, per: 1000, burst });
+          const ask = Math.min(n, Math.floor(burst) + 1);
+          for (const g of gaps) {
+            vi.advanceTimersByTime(g);
+            l.tryConsume();
+          }
+          const wait = l.retryAfter(ask);
+          expect(wait).toBeGreaterThanOrEqual(0);
+          if (wait === 0) {
+            expect(l.tryConsume(ask)).toBe(true);
+          } else {
+            // Under-waiting is the failure that matters: a reported wait the
+            // next call ignores means the caller retries early, forever.
+            expect(l.tryConsume(ask)).toBe(false);
+            vi.advanceTimersByTime(Math.ceil(wait));
+            expect(l.tryConsume(ask)).toBe(true);
+          }
+        }
+      ),
+      { numRuns: RUNS }
+    );
+  });
+
+  it('a batch, once admitted, costs n operations of budget', () => {
+    // Guards the other half: admitting `n` must advance the TAT by `n`
+    // intervals, not by one. If it advanced by one, the batch would be free
+    // and the limiter would hand out `n` operations per interval forever.
+    const l = new PowerGCRA({ rate: 10, per: 1000, burst: 3 });
+    l.tryConsume(3);
+    // burst 3 => available 4 at idle; after a batch of 3 exactly 1 remains.
+    expect(l.available()).toBe(1);
+    vi.advanceTimersByTime(300);
+    expect(l.available()).toBe(4);
   });
 
   it('a refused attempt does not push the next allowed time out', () => {

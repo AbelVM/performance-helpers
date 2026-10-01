@@ -159,7 +159,20 @@ export class PowerLatch {
    * @param {number} [count=1]
    */
   reset(count = 1) {
-    this._count = Math.max(0, Number(count) || 0);
+    // Through the same validator the constructor uses, because this used to run
+    // `Math.max(0, Number(count) || 0)` and accepted everything the constructor
+    // rejected. A fractional count is not a smaller latch, it is a latch that
+    // can never reach zero: `reset(2.5)` then one `countDown()` leaves
+    // `remaining` at 1.5, and `wait()` never settles. Verified. `reset(NaN)`
+    // and `reset(-5)` both landed on 0 and so *resolved* every waiter — a bad
+    // argument fabricating completion is worse than the hang.
+    this._count = assertLimitRequired(count, {
+      name: 'count',
+      className: 'PowerLatch',
+      integer: true,
+      min: 0,
+      fallback: 1,
+    });
     if (this._count === 0) this._resolveAll();
     // resetting clears aborted state
     this._aborted = false;

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / helpers/powerSocketAdapter
 
@@ -22,7 +22,7 @@
 
 Renames and re-exports [PowerSocketAdapter](classes/PowerSocketAdapter.md)
 
----
+***
 
 ### READY\_STATE
 

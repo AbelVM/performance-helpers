@@ -38,12 +38,22 @@ export class PowerCache {
      * @param {PowerCacheOptions} [options]
      * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, defaultAsyncTimeout, onError, policy, admission, windowSize, now, }?: PowerCacheOptions, ...args: any[]);
+    constructor({ maxEntries, maxWeight, weightFn, defaultTTL, allowStale, staleTtl, fetchMethod, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, defaultAsyncTimeout, onError, policy, admission, windowSize, now, }?: PowerCacheOptions, ...args: any[]);
     maxEntries: number;
     maxWeight: number;
     maxPoolSize: number;
     weightFn: ((arg0: any) => number) | null;
     defaultTTL: number;
+    /**
+     * Serve a stale value on `getOrSet`/`getOrSetAsync` by default, so a caller
+     * does not have to pass `staleWhileRevalidate` at every call site. The
+     * per-call flag still wins, and `false` here does not remove the per-call
+     * option - it only stops it being the default.
+     */
+    allowStale: boolean;
+    staleTtl: number;
+    /** @type {Function|null} */
+    fetchMethod: Function | null;
     _now: () => number;
     rejectOversized: boolean;
     onEvict: ((arg0: any, arg1: any, arg2: string) => void) | null;
@@ -70,6 +80,19 @@ export class PowerCache {
     _pool: CacheNode[];
     _currentWeight: number;
     _hits: number;
+    /**
+     * Serves of an **expired** value, from the stale-while-revalidate path.
+     *
+     * Separate from `_hits` because a stale serve is the one case where the cache
+     * answered without having fresh data, and a caller cannot otherwise tell
+     * it apart from a real hit. Operating stale-while-revalidate blind to that
+     * rate is how a broken upstream turns into a silently wrong service: every
+     * request is "successful" and the numbers look like a warm cache.
+     *
+     * A subset of `_hits` — a stale serve still counts as a hit, because from the
+     * caller's side it was served.
+     */
+    _staleServes: number;
     _misses: number;
     _evictions: number;
     _rejected: number;
@@ -231,6 +254,24 @@ export class PowerCache {
      * @returns {CacheNode|null}
      */
     private _fetchValidNode;
+    /**
+     * Whether an expired node may still be served at `now`.
+     *
+     * The whole point of the row, and the predicate that makes
+     * `staleWhileRevalidate` safe: a stale value is servable only **within
+     * `staleTtl` of its `expiresAt`**. Before this, the flag had no upper bound at
+     * all and a value five years past expiry was still returned as "stale".
+     *
+     * `staleTtl === 0` means the feature is off, which is the default and the
+     * pre-existing behaviour, so nothing changes for a caller who never asked for
+     * it. `Infinity` means explicitly unbounded.
+     *
+     * @private
+     * @param {CacheNode} node
+     * @param {number} now
+     * @returns {boolean}
+     */
+    private _staleServable;
     /**
      * Start a background refresh for an expired entry.
      *
@@ -560,6 +601,22 @@ export class PowerCache {
         ignoreExpiry?: boolean | undefined;
     }): boolean;
     /**
+     * `getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is
+     * given.
+     *
+     * The reason this exists rather than as a required argument: the row's shape
+     * (`fetchMethod` on the instance) removes a function literal from **every**
+     * call site, which is most of the cost of the async cache API in a hot path.
+     * The per-call factory still wins, so one caller can override a cache-wide
+     * default — a cache is often keyed by more than one kind of resource.
+     *
+     * @param {*} key
+     * @param {Function} [factory] Overrides the cache's `fetchMethod`.
+     * @param {PowerCacheGetOrFetchOptions} [options] Passed through to `getOrSetAsync`.
+     * @returns {Promise<*>}
+     */
+    getOrFetch(key: any, factory?: Function, options?: PowerCacheGetOrFetchOptions): Promise<any>;
+    /**
      * Atomically read-or-compute a value for `key`.
      * If the key is present and not expired the stored value is returned.
      * Otherwise `factory` is invoked to produce the value which is stored
@@ -641,7 +698,7 @@ export class PowerCache {
      * @param {number} [options.timeout] Per-call override of the cache's `defaultAsyncTimeout`, in ms.
      * @returns {Promise<*>}
      */
-    getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate, timeout }?: {
+    getOrSetAsync(key: any, asyncFactory: Function, { ttl, weight, staleWhileRevalidate, timeout, }?: {
         ttl?: number | undefined;
         weight?: number | undefined;
         staleWhileRevalidate?: boolean | undefined;
@@ -738,14 +795,54 @@ export class PowerCache {
     get hitRate(): number;
     /**
      * Return runtime statistics for the cache.
-     * @returns {{size:number, weight:number, hits:number, misses:number, evictions:number, rejected:number, poolSize:number}}
+     * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
+     *   evictions:number, expirations:number, rejected:number, poolSize:number}}
      */
     stats(): {
         size: number;
         weight: number;
         hits: number;
         misses: number;
+        staleServes: number;
         evictions: number;
+        expirations: number;
+        rejected: number;
+        poolSize: number;
+    };
+    /**
+     * Alias for {@link stats}, so a caller who learned `getStats()` from
+     * `PowerPool` — the one class that has always spelled it this way — is not
+     * handed `TypeError: x.getStats is not a function` here.
+     *
+     * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+     * `getStats()`, with no stated rule and nothing pinning it, which reached the
+     * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+     * spellings work everywhere now. `stats()` is canonical and this delegates to
+     * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+     * library would be a breaking change.
+     *
+     * Written out per class rather than installed on the prototype on purpose: a
+     * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+     * `types/` omitted it and a TypeScript caller got a type error on a method
+     * that worked at runtime. That was the first implementation.
+     *
+     * **No `@returns` tag, and that is load-bearing.** The first version carried a
+     * hand-copied copy of the `stats()` return shape, on the reasoning that an
+     * explicit type was safer. It is not: the copy went stale the moment a
+     * concurrent change added `staleServes` and `expirations` to `PowerCache`
+     * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+     * byte-identical published type and cannot drift, because there is nothing to
+     * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+     * which is the property a consumer relies on.
+     */
+    getStats(): {
+        size: number;
+        weight: number;
+        hits: number;
+        misses: number;
+        staleServes: number;
+        evictions: number;
+        expirations: number;
         rejected: number;
         poolSize: number;
     };
@@ -966,6 +1063,33 @@ export class PowerMemoizer {
      */
     stats(): Object;
     /**
+     * Alias for {@link stats}, so a caller who learned `getStats()` from
+     * `PowerPool` — the one class that has always spelled it this way — is not
+     * handed `TypeError: x.getStats is not a function` here.
+     *
+     * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+     * `getStats()`, with no stated rule and nothing pinning it, which reached the
+     * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+     * spellings work everywhere now. `stats()` is canonical and this delegates to
+     * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+     * library would be a breaking change.
+     *
+     * Written out per class rather than installed on the prototype on purpose: a
+     * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+     * `types/` omitted it and a TypeScript caller got a type error on a method
+     * that worked at runtime. That was the first implementation.
+     *
+     * **No `@returns` tag, and that is load-bearing.** The first version carried a
+     * hand-copied copy of the `stats()` return shape, on the reasoning that an
+     * explicit type was safer. It is not: the copy went stale the moment a
+     * concurrent change added `staleServes` and `expirations` to `PowerCache`
+     * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+     * byte-identical published type and cannot drift, because there is nothing to
+     * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+     * which is the property a consumer relies on.
+     */
+    getStats(): Object;
+    /**
      * Named alias for the `Symbol.dispose` implementation, so callers who do not
      * want to reach for the symbol still have something to call.
      * @returns {void}
@@ -1007,8 +1131,30 @@ export class PowerTimedCache {
     constructor(ttl: number, { maxEntries, interval, maxCleanupPerTick, cacheOptions }?: PowerTimedCacheOptions);
     cache: PowerCache;
     get(key: any): any;
-    set(key: any, value: any, options?: {}): false | PowerCache;
-    has(key: any, options?: {}): boolean;
+    /**
+     * @param {any} key
+     * @param {any} value
+     * @param {{ttl?: number, weight?: number}} [options] Per-entry TTL in ms and
+     *   weight. Both are ignored when this instance was constructed with a
+     *   non-null TTL — the constructor's TTL wins.
+     * @returns {false|PowerTimedCache}
+     */
+    set(key: any, value: any, options?: {
+        ttl?: number;
+        weight?: number;
+    }): false | PowerTimedCache;
+    /**
+     * @param {any} key
+     * @param {{allowStale?: boolean, staleTtl?: number}} [options] `allowStale`
+     *   returns an expired entry and refreshes in the background, bounded by
+     *   `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
+     *   serves a value of any age.
+     * @returns {boolean}
+     */
+    has(key: any, options?: {
+        allowStale?: boolean;
+        staleTtl?: number;
+    }): boolean;
     delete(key: any): boolean;
     clear(): void;
     stats(): {
@@ -1016,7 +1162,46 @@ export class PowerTimedCache {
         weight: number;
         hits: number;
         misses: number;
+        staleServes: number;
         evictions: number;
+        expirations: number;
+        rejected: number;
+        poolSize: number;
+    };
+    /**
+     * Alias for {@link stats}, so a caller who learned `getStats()` from
+     * `PowerPool` — the one class that has always spelled it this way — is not
+     * handed `TypeError: x.getStats is not a function` here.
+     *
+     * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+     * `getStats()`, with no stated rule and nothing pinning it, which reached the
+     * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+     * spellings work everywhere now. `stats()` is canonical and this delegates to
+     * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+     * library would be a breaking change.
+     *
+     * Written out per class rather than installed on the prototype on purpose: a
+     * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+     * `types/` omitted it and a TypeScript caller got a type error on a method
+     * that worked at runtime. That was the first implementation.
+     *
+     * **No `@returns` tag, and that is load-bearing.** The first version carried a
+     * hand-copied copy of the `stats()` return shape, on the reasoning that an
+     * explicit type was safer. It is not: the copy went stale the moment a
+     * concurrent change added `staleServes` and `expirations` to `PowerCache`
+     * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+     * byte-identical published type and cannot drift, because there is nothing to
+     * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+     * which is the property a consumer relies on.
+     */
+    getStats(): {
+        size: number;
+        weight: number;
+        hits: number;
+        misses: number;
+        staleServes: number;
+        evictions: number;
+        expirations: number;
         rejected: number;
         poolSize: number;
     };
@@ -1038,5 +1223,6 @@ export class PowerTimedCache {
 }
 export type CacheNode = import("./jsdoc-types.js").CacheNode;
 export type PowerCacheOptions = import("./jsdoc-types.js").PowerCacheOptions;
+export type PowerCacheGetOrFetchOptions = import("./jsdoc-types.js").PowerCacheGetOrFetchOptions;
 export type PowerMemoizerOptions = import("./jsdoc-types.js").PowerMemoizerOptions;
 export type PowerTimedCacheOptions = import("./jsdoc-types.js").PowerTimedCacheOptions;

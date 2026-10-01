@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerTTLMap](../README.md) / PowerTTLMap
 
@@ -11,7 +11,7 @@ PowerTTLMap
 Lightweight Map-like store where each key has an optional TTL (milliseconds).
 Entries expire lazily on access or iteration.
 
-PowerTTLMap
+ PowerTTLMap
 
 ## Constructors
 
@@ -26,8 +26,8 @@ PowerTTLMap
 `number` \| `PowerTTLMapOptions`
 
 Default TTL in milliseconds for keys set
-without explicit ttl (0 = no expiry). Accepts either a positional number or an options
-object `{ defaultTTL, onExpire }` for consistency with the other helpers.
+  without explicit ttl (0 = no expiry). Accepts either a positional number or an options
+  object `{ defaultTTL, onExpire }` for consistency with the other helpers.
 
 ##### options?
 
@@ -45,31 +45,31 @@ Options object (used when the first arg is a number).
 
 > **\_defaultTTL**: `number`
 
----
+***
 
 ### \_expirations
 
 > **\_expirations**: `Map`\<`any`, `number`\>
 
----
+***
 
 ### \_map
 
 > **\_map**: `Map`\<`any`, `TTLMapEntry`\>
 
----
+***
 
 ### \_nextExpiryAt
 
 > **\_nextExpiryAt**: `number`
 
----
+***
 
 ### \_nextExpiryDirty
 
 > **\_nextExpiryDirty**: `boolean`
 
----
+***
 
 ### \_now
 
@@ -90,7 +90,7 @@ test harnesses).
 
 Milliseconds since epoch (floating point for higher resolution).
 
----
+***
 
 ### \_onExpire
 
@@ -109,14 +109,14 @@ How many resident entries are past their expiry and awaiting collection.
 The live count is `size - expiredCount`. Read-only: this does not sweep and
 does not fire `onExpire`, so it is safe to use as a diagnostic without
 changing the map. It does walk the expiration index, so it is O(k) in the
-number of entries that _have_ an expiry — which is why the hot path reads
+number of entries that *have* an expiry — which is why the hot path reads
 [PowerTTLMap#size](#size) and this is for reporting.
 
 ##### Returns
 
 `number`
 
----
+***
 
 ### size
 
@@ -166,7 +166,7 @@ Whether a key needs removing: absent, or present and past its expiry.
 
 `boolean`
 
----
+***
 
 ### \_sweepExpirations()
 
@@ -185,7 +185,7 @@ the soonest remaining expiry.
 
 `void`
 
----
+***
 
 ### \_updateNextExpiryOnWrite()
 
@@ -212,7 +212,7 @@ The key's expiry after this write, `0` if none.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -225,7 +225,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### \[iterator\]()
 
@@ -237,7 +237,7 @@ Default iterator yielding `[key, value]` pairs for non-expired entries.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
----
+***
 
 ### clear()
 
@@ -247,7 +247,7 @@ Default iterator yielding `[key, value]` pairs for non-expired entries.
 
 `void`
 
----
+***
 
 ### delete()
 
@@ -265,7 +265,7 @@ Delete a key.
 
 `boolean`
 
----
+***
 
 ### dispose()
 
@@ -281,7 +281,7 @@ name to call.
 
 `void`
 
----
+***
 
 ### entries()
 
@@ -298,7 +298,7 @@ see it happen, whereas a property read cannot.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
----
+***
 
 ### forEach()
 
@@ -320,7 +320,7 @@ Call `cb` for each non-expired entry.
 
 `void`
 
----
+***
 
 ### get()
 
@@ -338,7 +338,7 @@ Get a value, returning `undefined` when missing or expired.
 
 `any`
 
----
+***
 
 ### has()
 
@@ -356,7 +356,7 @@ Check whether a key exists and is not expired.
 
 `boolean`
 
----
+***
 
 ### keys()
 
@@ -368,7 +368,7 @@ Iterate keys of non-expired entries.
 
 `IterableIterator`\<`any`, `any`, `any`\>
 
----
+***
 
 ### purge()
 
@@ -386,7 +386,7 @@ The explicit spelling of what `size` used to do implicitly. Reads and
 
 How many entries were removed.
 
----
+***
 
 ### reset()
 
@@ -397,14 +397,14 @@ Alias for [PowerTTLMap#clear](#clear).
 `clear()` here empties the container, and "reset" is a natural second word
 for exactly that - so a caller who reaches for `reset()` on this class gets
 the obvious thing instead of a `TypeError`. No limiter gets this alias: for
-`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+`PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
 would read as the opposite, and the two are deliberately not synonyms.
 
 #### Returns
 
 `void`
 
----
+***
 
 ### set()
 
@@ -427,13 +427,13 @@ Set a key with optional TTL (ms).
 `number` \| \{ `ttl?`: `number`; \}
 
 TTL in milliseconds for this key. Accepts either a
-positional number or an options object `{ ttl }` for consistency with `PowerCache.set`.
+  positional number or an options object `{ ttl }` for consistency with `PowerCache.set`.
 
 #### Returns
 
 `PowerTTLMap`
 
----
+***
 
 ### touch()
 
@@ -457,7 +457,7 @@ Refresh TTL for an existing key. No-op if missing/expired.
 
 True when TTL refreshed.
 
----
+***
 
 ### values()
 

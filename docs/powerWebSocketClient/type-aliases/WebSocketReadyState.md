@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerWebSocketClient](../README.md) / WebSocketReadyState
 

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerScheduler](../README.md) / PowerScheduler
 
@@ -36,31 +36,31 @@ Scheduling and error handling options.
 
 > **\_flushFn**: `Function`
 
----
+***
 
 ### \_generation
 
 > **\_generation**: `number`
 
----
+***
 
 ### \_onError
 
 > **\_onError**: ((`error`) => `void`) \| `null`
 
----
+***
 
 ### \_scheduled
 
 > **\_scheduled**: `boolean`
 
----
+***
 
 ### \_scheduling
 
 > **\_scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"`
 
----
+***
 
 ### \_timer
 
@@ -80,7 +80,7 @@ Whether a flush is currently scheduled.
 
 `boolean`
 
----
+***
 
 ### strategy
 
@@ -88,13 +88,13 @@ Whether a flush is currently scheduled.
 
 > **get** **strategy**(): `object`
 
-The strategy this scheduler was _configured_ with, and whether the runtime
+The strategy this scheduler was *configured* with, and whether the runtime
 can actually honour it.
 
 Both halves, because they can differ: `scheduling: 'yield'` falls back to a
 macrotask where `scheduler.yield()` does not exist, and without this a
 caller has no way to know it is running on the fallback. The fallback is a
-degradation in _ordering_, not correctness — the flush still happens
+degradation in *ordering*, not correctness — the flush still happens
 promptly — which is exactly why it should be visible rather than silent.
 
 ##### Returns
@@ -119,7 +119,7 @@ promptly — which is exactly why it should be visible rather than silent.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -132,7 +132,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### cancel()
 
@@ -144,7 +144,7 @@ Cancel any scheduled flush without invoking the callback.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -160,7 +160,7 @@ name to call.
 
 `void`
 
----
+***
 
 ### flush()
 
@@ -172,7 +172,7 @@ Flush immediately if a callback is scheduled.
 
 `void`
 
----
+***
 
 ### schedule()
 

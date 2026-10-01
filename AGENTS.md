@@ -47,10 +47,11 @@ npm run lint            # eslint; 0 errors expected, plus a few dozen pre-existi
 npm run types:generate  # regenerate types/ — required after any JSDoc change
 npm run types:drift     # fails if types/ is out of date
 npm run docs            # regenerate docs/ — same trigger, and see the note below
+npm run docs:claims     # fails if a guide documents an option the types don't have
 npm run docs:drift      # fails if docs/ is out of date
 ```
 
-The gate is `scripts/verify.mjs`, and it is the **only** list of checks — nine
+The gate is `scripts/verify.mjs`, and it is the **only** list of checks — ten
 steps. CI calls it rather than keeping its own copy: it did once, and the copies
 drifted until CI was running neither `test:types` nor `check:bundle` (see the
 comment at the top of `.github/workflows/ci.yml`). **To add a check, add it to
@@ -118,6 +119,40 @@ was a real product bug.
 **A test that cannot fail on the regression it names is decoration — delete it,
 do not loosen it.** A timing assertion that passed with the fix reverted was
 removed rather than given a bigger threshold.
+
+**A guard that has never been observed failing is a hypothesis, and a guard that
+prints `ok` while checking nothing is worse than one that is absent.** The first
+version of `docs:claims` matched the JSDoc spelling of a typedef (`@typedef
+{Object}`) when `types/` emits the compiled one (`export type X = {`), so it
+found nothing to compare against and reported "no options typedef" for all ten
+guides it existed to check — including the one whose stale row it was written
+for. Two further rounds of mutation-checking _passed_ for the same reason: the
+defect was present and the guard was not running. What finally exposed it was
+noticing that a green guard is suspicious when a known defect is in the tree, and
+re-injecting it. A pass from a new gate is a hypothesis until you have seen it
+fail on a real defect. The same script's third failure mode was a regex where
+replacing `\Z` with `$` satisfied eslint's `no-useless-escape` while breaking a
+section match, because the pattern carried the `m` flag and `$` then matched every
+line end. It is now `// eslint-disable-line` with the reason written down.
+
+**A duplicated return type drifts the moment the original changes — delete the
+copy, do not assert it stays in sync.** The `getStats()` alias first repeated each
+`stats()` return shape by hand in nine JSDoc blocks. A concurrent change added
+`staleServes` and `expirations` to `PowerCache.stats()` and the copies were stale
+within the same session. A test caught it, which papered over the cause: nine
+copies of nine shapes, each with a comment claiming an explicit type was safer.
+It was not. Omitting `@returns` lets `tsc` infer a byte-identical published type,
+which is what it does now — the copies are gone, so there is nothing to keep in
+sync. The lesson is the shape of it, not the case: **if a type must be written
+twice, expect it to be wrong once, and prefer deleting the second one over testing
+it.**
+
+That same test was then asserting _string_ equality between the two declarations,
+which reported a false mismatch (`PowerRetryBudgetStats` versus
+`import("./jsdoc-types.js").PowerRetryBudgetStats`) and pushed the hand-written
+`@returns` back. Semantic equivalence is now asserted where it belongs, in
+`test/types.test-d.ts`, by compiling bidirectional assignments — the property a
+consumer relies on, rather than the spelling they happen to use.
 
 **Behaviour versus coverage.** Lines 47–65 of `WorkerAgnostic.js` are uncollectable
 under vitest (they need a real pure-ESM process, and `vi.stubGlobal('require')`

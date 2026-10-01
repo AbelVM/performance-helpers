@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerTimedCache
 
@@ -65,7 +65,7 @@ Default TTL in milliseconds for entries.
 
 `number`
 
----
+***
 
 ### size
 
@@ -87,7 +87,7 @@ Default TTL in milliseconds for entries.
 
 `Promise`\<`void`\>
 
----
+***
 
 ### \[dispose\]()
 
@@ -97,7 +97,7 @@ Default TTL in milliseconds for entries.
 
 `void`
 
----
+***
 
 ### clear()
 
@@ -107,7 +107,7 @@ Default TTL in milliseconds for entries.
 
 `void`
 
----
+***
 
 ### delete()
 
@@ -123,7 +123,7 @@ Default TTL in milliseconds for entries.
 
 `boolean`
 
----
+***
 
 ### dispose()
 
@@ -136,7 +136,7 @@ do not want to reach for the symbol still have something to call.
 
 `void`
 
----
+***
 
 ### entries()
 
@@ -152,7 +152,7 @@ do not want to reach for the symbol still have something to call.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
----
+***
 
 ### get()
 
@@ -168,83 +168,36 @@ do not want to reach for the symbol still have something to call.
 
 `any`
 
----
+***
 
-### has()
+### getStats()
 
-> **has**(`key`, `options?`): `boolean`
+> **getStats**(): `object`
 
-#### Parameters
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
 
-##### key
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
 
-`any`
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
 
-##### options?
-
-#### Returns
-
-`boolean`
-
----
-
-### keys()
-
-> **keys**(`order`): `Generator`\<`any`, `void`, `unknown`\>
-
-#### Parameters
-
-##### order
-
-`any`
-
-#### Returns
-
-`Generator`\<`any`, `void`, `unknown`\>
-
----
-
-### set()
-
-> **set**(`key`, `value`, `options?`): `false` \| [`PowerCache`](PowerCache.md)
-
-#### Parameters
-
-##### key
-
-`any`
-
-##### value
-
-`any`
-
-##### options?
-
-#### Returns
-
-`false` \| [`PowerCache`](PowerCache.md)
-
----
-
-### startCleanup()
-
-> **startCleanup**(`intervalOrOptions?`): `void`
-
-#### Parameters
-
-##### intervalOrOptions?
-
-`undefined` = `undefined`
-
-#### Returns
-
-`void`
-
----
-
-### stats()
-
-> **stats**(): `object`
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
 
 #### Returns
 
@@ -253,6 +206,10 @@ do not want to reach for the symbol still have something to call.
 ##### evictions
 
 > **evictions**: `number`
+
+##### expirations
+
+> **expirations**: `number`
 
 ##### hits
 
@@ -274,11 +231,158 @@ do not want to reach for the symbol still have something to call.
 
 > **size**: `number`
 
+##### staleServes
+
+> **staleServes**: `number`
+
 ##### weight
 
 > **weight**: `number`
 
----
+***
+
+### has()
+
+> **has**(`key`, `options?`): `boolean`
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### options?
+
+`allowStale`
+  returns an expired entry and refreshes in the background, bounded by
+  `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
+  serves a value of any age.
+
+###### allowStale?
+
+`boolean`
+
+###### staleTtl?
+
+`number`
+
+#### Returns
+
+`boolean`
+
+***
+
+### keys()
+
+> **keys**(`order`): `Generator`\<`any`, `void`, `unknown`\>
+
+#### Parameters
+
+##### order
+
+`any`
+
+#### Returns
+
+`Generator`\<`any`, `void`, `unknown`\>
+
+***
+
+### set()
+
+> **set**(`key`, `value`, `options?`): `false` \| `PowerTimedCache`
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### value
+
+`any`
+
+##### options?
+
+Per-entry TTL in ms and
+  weight. Both are ignored when this instance was constructed with a
+  non-null TTL — the constructor's TTL wins.
+
+###### ttl?
+
+`number`
+
+###### weight?
+
+`number`
+
+#### Returns
+
+`false` \| `PowerTimedCache`
+
+***
+
+### startCleanup()
+
+> **startCleanup**(`intervalOrOptions?`): `void`
+
+#### Parameters
+
+##### intervalOrOptions?
+
+`undefined` = `undefined`
+
+#### Returns
+
+`void`
+
+***
+
+### stats()
+
+> **stats**(): `object`
+
+#### Returns
+
+`object`
+
+##### evictions
+
+> **evictions**: `number`
+
+##### expirations
+
+> **expirations**: `number`
+
+##### hits
+
+> **hits**: `number`
+
+##### misses
+
+> **misses**: `number`
+
+##### poolSize
+
+> **poolSize**: `number`
+
+##### rejected
+
+> **rejected**: `number`
+
+##### size
+
+> **size**: `number`
+
+##### staleServes
+
+> **staleServes**: `number`
+
+##### weight
+
+> **weight**: `number`
+
+***
 
 ### stopCleanup()
 
@@ -288,7 +392,7 @@ do not want to reach for the symbol still have something to call.
 
 `void`
 
----
+***
 
 ### values()
 

@@ -62,6 +62,13 @@ import { spawnSync } from 'node:child_process';
  *   because `typedoc.json` sets `cleanOutputDir: true` and there is no
  *   incremental mode to diff against. It runs last, after `types:generate`, so
  *   a tree `docs/` was generated from is the one `types/` was generated from.
+ * - `docs:claims` sits between `types:drift` and `docs:drift` because it reads the
+ *   **generated** declarations: it compares the option names a guide documents
+ *   against `types/helpers/*.d.ts`. Before `types:generate` it would compare
+ *   against a stale tree and report drift that has already been fixed. It also
+ *   checks `llm.txt`, which nothing else reads at all. See the script's docblock
+ *   for the two shipped defects it was written for; both had passed every other
+ *   gate.
  *   It is last rather than earlier for a second reason: it is the slowest step
  *   by an order of magnitude, and when it fails it is never the interesting
  *   failure.
@@ -79,6 +86,7 @@ const STEPS = [
   'check:bundle',
   'types:generate',
   'types:drift',
+  'docs:claims',
   'docs:drift',
 ];
 

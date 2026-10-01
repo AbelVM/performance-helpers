@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerHistogram](../README.md) / PowerHistogram
 
@@ -28,91 +28,91 @@
 
 > **\_alpha**: `number`
 
----
+***
 
 ### \_belowRangeCount
 
 > **\_belowRangeCount**: `number`
 
----
+***
 
 ### \_buckets
 
 > **\_buckets**: `Map`\<`number`, `number`\>
 
----
+***
 
 ### \_count
 
 > **\_count**: `number`
 
----
+***
 
 ### \_gamma
 
 > **\_gamma**: `number`
 
----
+***
 
 ### \_infCount
 
 > **\_infCount**: `number`
 
----
+***
 
 ### \_legacyBucketCount
 
 > **\_legacyBucketCount**: `number` \| `null`
 
----
+***
 
 ### \_logGamma
 
 > **\_logGamma**: `number`
 
----
+***
 
 ### \_max
 
 > **\_max**: `number`
 
----
+***
 
 ### \_maxValue
 
 > **\_maxValue**: `number`
 
----
+***
 
 ### \_min
 
 > **\_min**: `number`
 
----
+***
 
 ### \_minValue
 
 > **\_minValue**: `number`
 
----
+***
 
 ### \_outOfRangeCount
 
 > **\_outOfRangeCount**: `number`
 
----
+***
 
 ### \_sortedIndices
 
 > **\_sortedIndices**: `number`[] \| `null`
 
----
+***
 
 ### \_sum
 
 > **\_sum**: `number`
 
----
+***
 
 ### \_zeroCount
 
@@ -132,7 +132,7 @@ Number of records below the advisory `minValue`.
 
 `number`
 
----
+***
 
 ### bucketCount
 
@@ -140,7 +140,7 @@ Number of records below the advisory `minValue`.
 
 > **get** **bucketCount**(): `number`
 
-Number of _occupied_ buckets. The legacy option of the same name sized a
+Number of *occupied* buckets. The legacy option of the same name sized a
 dense array; with sparse DDSketch storage this reports what is actually in
 use, which is the useful number.
 
@@ -148,7 +148,7 @@ use, which is the useful number.
 
 `number`
 
----
+***
 
 ### count
 
@@ -162,7 +162,7 @@ Number of records added.
 
 `number`
 
----
+***
 
 ### max
 
@@ -176,7 +176,7 @@ Maximum recorded value, or `undefined` when empty.
 
 `number` \| `undefined`
 
----
+***
 
 ### mean
 
@@ -197,7 +197,7 @@ the finite samples are averaged and the infinities are left to `infCount`.
 
 `number`
 
----
+***
 
 ### min
 
@@ -211,7 +211,7 @@ Minimum recorded value, or `undefined` when empty.
 
 `number` \| `undefined`
 
----
+***
 
 ### outOfRangeCount
 
@@ -227,7 +227,7 @@ no longer matches reality instead of silently reading clamped data.
 
 `number`
 
----
+***
 
 ### relativeAccuracy
 
@@ -241,7 +241,7 @@ Configured relative error bound for quantiles.
 
 `number`
 
----
+***
 
 ### sum
 
@@ -275,14 +275,14 @@ keep a per-worker histogram and fold them into a pool-level one.
 `PowerHistogram`
 
 Sketch to absorb. Must use the same
-`relativeAccuracy`; a mismatch is a configuration error because the
-bucket indices are not comparable.
+  `relativeAccuracy`; a mismatch is a configuration error because the
+  bucket indices are not comparable.
 
 #### Returns
 
 `PowerHistogram`
 
----
+***
 
 ### percentile()
 
@@ -300,11 +300,11 @@ quantile, for any value range.
 `number`
 
 Percentile between `0` and `100`, or fraction
-between `0` and `1`. **The two ranges overlap at `1`, and the fraction
-reading wins** — `percentile(1)` is the 100th percentile, not the 1st.
-Use `0.5` or `50` for p50 and `100` for the maximum. This is documented
-rather than accidental: see `guides/powerHistogram.md`, which calls `1`
-"the one to watch".
+  between `0` and `1`. **The two ranges overlap at `1`, and the fraction
+  reading wins** — `percentile(1)` is the 100th percentile, not the 1st.
+  Use `0.5` or `50` for p50 and `100` for the maximum. This is documented
+  rather than accidental: see `guides/powerHistogram.md`, which calls `1`
+  "the one to watch".
 
 #### Returns
 
@@ -312,7 +312,7 @@ rather than accidental: see `guides/powerHistogram.md`, which calls `1`
 
 Estimated percentile value, or `undefined` when empty.
 
----
+***
 
 ### record()
 
@@ -327,13 +327,13 @@ Record a numeric value into the histogram.
 `number`
 
 Latency or measurement value. Must be finite and
-non-negative.
+  non-negative.
 
 #### Returns
 
 `PowerHistogram`
 
----
+***
 
 ### reset()
 
@@ -345,7 +345,7 @@ Reset the histogram to an empty state.
 
 `void`
 
----
+***
 
 ### snapshot()
 
@@ -354,14 +354,14 @@ Reset the histogram to an empty state.
 Return a snapshot copy of bucket counts, ordered from the lowest occupied
 bucket to the highest.
 
-The array spans only the _occupied_ range, so its length is
+The array spans only the *occupied* range, so its length is
 `bucketCount`-1 at most; a single leading entry is the zero bucket.
 
 #### Returns
 
 `number`[]
 
----
+***
 
 ### toJSON()
 

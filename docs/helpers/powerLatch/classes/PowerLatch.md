@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerLatch](../README.md) / PowerLatch
 
@@ -25,7 +25,7 @@ initial count required to release the latch
 `PowerLatchOptions` = `{}`
 
 `onAbort` is invoked with the
-rejection reason by [PowerLatch#abort](#abort).
+  rejection reason by [PowerLatch#abort](#abort).
 
 #### Returns
 
@@ -37,37 +37,37 @@ rejection reason by [PowerLatch#abort](#abort).
 
 > **\_aborted**: `boolean`
 
----
+***
 
 ### \_abortReason
 
 > **\_abortReason**: `any`
 
----
+***
 
 ### \_count
 
 > **\_count**: `number`
 
----
+***
 
 ### \_disposed
 
 > **\_disposed**: `boolean`
 
----
+***
 
 ### \_nextWaiterToken
 
 > **\_nextWaiterToken**: `number`
 
----
+***
 
 ### \_onAbort
 
 > **\_onAbort**: ((`reason`) => `void`) \| `null`
 
----
+***
 
 ### \_waiters
 
@@ -87,7 +87,7 @@ True when the latch is already released.
 
 `boolean`
 
----
+***
 
 ### onAbort
 
@@ -115,7 +115,7 @@ Optional callback invoked when `abort()` is called: `(reason) => void`.
 
 `void`
 
----
+***
 
 ### remaining
 
@@ -145,7 +145,7 @@ Number of remaining counts.
 
 `void`
 
----
+***
 
 ### \_removeWaiter()
 
@@ -168,7 +168,7 @@ already hold the waiter; the token form is what the abort listener has.
 
 The removed waiter, or `null` if it was already gone.
 
----
+***
 
 ### \_resolveAll()
 
@@ -178,7 +178,7 @@ The removed waiter, or `null` if it was already gone.
 
 `void`
 
----
+***
 
 ### \_settleAll()
 
@@ -198,7 +198,7 @@ swallowed so one bad waiter cannot strand the rest.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -211,7 +211,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### abort()
 
@@ -233,7 +233,7 @@ fire `onAbort` once.
 
 `void`
 
----
+***
 
 ### countDown()
 
@@ -254,7 +254,7 @@ reaches zero all pending waiters are resolved.
 
 remaining count
 
----
+***
 
 ### decrementUnlessZero()
 
@@ -267,7 +267,7 @@ Returns remaining count.
 
 `number`
 
----
+***
 
 ### dispose()
 
@@ -291,7 +291,7 @@ name to call.
 
 `void`
 
----
+***
 
 ### reset()
 
@@ -310,7 +310,7 @@ immediately if the new count is zero.
 
 `void`
 
----
+***
 
 ### wait()
 
@@ -331,7 +331,7 @@ rejects too, with `code: 'EDISPOSED'` — see [PowerLatch#dispose](#dispose-1).
 
 `Promise`\<`void`\>
 
----
+***
 
 ### one()
 

@@ -38,11 +38,22 @@ export class PowerSemaphore {
     /**
      * Execute a callback while holding a permit.
      * The permit is released after the callback resolves or rejects.
+     *
+     * `options` is forwarded to {@link acquire}, so `{ signal }` cancels the
+     * *wait* for a permit. It used to be accepted and thrown away — this method
+     * took only `fn` — so a caller who mirrored `acquire()` got a promise that
+     * could not be cancelled and, with an already-aborted signal, hung until a
+     * permit happened to be released. `run` is the form people reach for first,
+     * so cancellation matters more here than on `acquire`.
+     *
      * @template T
      * @param {() => Promise<T> | T} fn Callback to run under a permit.
+     * @param {{signal?: AbortSignal}} [options] Forwarded to {@link acquire}.
      * @returns {Promise<T>} The callback result.
      */
-    run<T>(fn: () => Promise<T> | T): Promise<T>;
+    run<T>(fn: () => Promise<T> | T, options?: {
+        signal?: AbortSignal;
+    }): Promise<T>;
     /**
      * Reset the semaphore and reject any queued waiters.
      * @returns {void}

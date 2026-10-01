@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerBulkhead](../README.md) / PowerBulkhead
 
@@ -28,7 +28,7 @@
 
 > **\_activeCount**: `number`
 
----
+***
 
 ### \_buckets
 
@@ -38,55 +38,55 @@
 
 > **gate**: [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md)
 
----
+***
 
 ### \_drainWaiters
 
 > **\_drainWaiters**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
----
+***
 
 ### \_maxConcurrency
 
 > **\_maxConcurrency**: `number`
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_nextPartition
 
 > **\_nextPartition**: `number`
 
----
+***
 
 ### \_onError
 
 > **\_onError**: ((`err`) => `void`) \| `null`
 
----
+***
 
 ### \_outstanding
 
 > **\_outstanding**: `number`
 
----
+***
 
 ### \_partitioner
 
 > **\_partitioner**: ((`key`) => `number`) \| `null`
 
----
+***
 
 ### \_partitions
 
 > **\_partitions**: `number`
 
----
+***
 
 ### \_queueCapacity
 
@@ -106,7 +106,7 @@ Total number of running tasks across all partitions.
 
 `number`
 
----
+***
 
 ### isFull
 
@@ -121,14 +121,14 @@ Under a per-partition budget "is the bulkhead full" cannot be a single
 comparison against a global pending count, because a full partition says
 nothing about the others. `every` is the reading that matches the name: the
 bulkhead can accept no more work. `some` would report `isFull` as soon as
-one partition was busy, which is the _normal_ state of an isolated
+one partition was busy, which is the *normal* state of an isolated
 bulkhead and would make the flag useless for backing off.
 
 ##### Returns
 
 `boolean`
 
----
+***
 
 ### maxConcurrency
 
@@ -142,7 +142,7 @@ Maximum concurrent tasks allowed per partition.
 
 `number`
 
----
+***
 
 ### partitions
 
@@ -156,7 +156,7 @@ Number of partitions used for workload isolation.
 
 `number`
 
----
+***
 
 ### pending
 
@@ -175,7 +175,7 @@ decision came to be made against the wrong one.
 
 `number`
 
----
+***
 
 ### queueCapacity
 
@@ -215,7 +215,7 @@ evenly when there is nothing to hash.
 
 An index in `[0, partitions)`.
 
----
+***
 
 ### \_hashKey()
 
@@ -234,7 +234,7 @@ index.
 
 `number`
 
----
+***
 
 ### \_resolveDrainWaitersIfIdle()
 
@@ -244,7 +244,7 @@ index.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -254,7 +254,7 @@ index.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -281,7 +281,7 @@ Reset options.
 
 `void`
 
----
+***
 
 ### drain()
 
@@ -293,7 +293,66 @@ Wait for all active and queued tasks to complete.
 
 `Promise`\<`void`\>
 
----
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`object`
+
+##### active
+
+> **active**: `number`
+
+##### maxConcurrency
+
+> **maxConcurrency**: `number`
+
+##### partitions
+
+> **partitions**: `number`
+
+##### pending
+
+> **pending**: `number`
+
+##### queueCapacity
+
+> **queueCapacity**: `number`
+
+##### saturated
+
+> **saturated**: `boolean`
+
+***
 
 ### reset()
 
@@ -307,7 +366,7 @@ disposal path, so a bulkhead that saturated (`queueCapacity` reached, all
 permits held by tasks that never settle) could not be recovered: its
 queued waiters were retained forever and `drain()` never resolved.
 
-Tasks that are already _running_ are not cancelled - JavaScript cannot
+Tasks that are already *running* are not cancelled - JavaScript cannot
 interrupt them - but they no longer block a subsequent `drain()` from
 resolving once they settle.
 
@@ -323,7 +382,7 @@ Reset options.
 
 `void`
 
----
+***
 
 ### run()
 
@@ -352,9 +411,9 @@ Optional key used to route the task to a partition.
 `AbortSignal`
 
 Abort while queued: the returned promise
-rejects with an `AbortError` and the task never runs. Cancelling the _wait_
-is not cancelling the _work_ - a task that already holds a permit runs to
-completion.
+  rejects with an `AbortError` and the task never runs. Cancelling the *wait*
+  is not cancelling the *work* - a task that already holds a permit runs to
+  completion.
 
 #### Returns
 
@@ -362,7 +421,7 @@ completion.
 
 Promise resolving or rejecting with task result.
 
----
+***
 
 ### stats()
 
@@ -398,7 +457,7 @@ Snapshot of the bulkhead's counters.
 
 > **saturated**: `boolean`
 
----
+***
 
 ### tryRun()
 

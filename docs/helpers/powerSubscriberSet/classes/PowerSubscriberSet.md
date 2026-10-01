@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerSubscriberSet](../README.md) / PowerSubscriberSet
 
@@ -11,7 +11,7 @@ PowerSubscriberSet
 Shared subscriber set helper used by event buses and observable stores.
 Supports optional weak references, once-listeners, and max listener counts.
 
-PowerSubscriberSet
+ PowerSubscriberSet
 
 ## Constructors
 
@@ -26,7 +26,7 @@ PowerSubscriberSet
 `PowerSubscriberSetOptions` = `{}`
 
 `weak` stores listeners
-behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
+  behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
 
 #### Returns
 
@@ -38,25 +38,25 @@ behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
 
 > **\_finalization**: `FinalizationRegistry`\<\{ `ref`: `WeakRef`\<`SubscriberListener`\>; \}\> \| `null`
 
----
+***
 
 ### \_listeners
 
 > **\_listeners**: `Set`\<`SubscriberEntry`\>
 
----
+***
 
 ### \_maxListeners
 
 > **\_maxListeners**: `number`
 
----
+***
 
 ### \_onceMap
 
 > **\_onceMap**: `WeakMap`\<`SubscriberListener`, `SubscriberListener`\>
 
----
+***
 
 ### \_weak
 
@@ -88,7 +88,7 @@ Remove dead weak refs from the set.
 
 `void`
 
----
+***
 
 ### \_deref()
 
@@ -107,7 +107,7 @@ target has been collected.
 
 `SubscriberListener` \| `undefined`
 
----
+***
 
 ### \_ensureFinalization()
 
@@ -118,7 +118,7 @@ listeners, and return it — or `null` when weak mode is off or the runtime
 has no `FinalizationRegistry`, which is the signal to skip registration.
 
 `clear()` drops the registry (that is the point of BUG-025), so this has to
-be able to build a _new_ one. Skipping the rebuild instead would silently
+be able to build a *new* one. Skipping the rebuild instead would silently
 downgrade a cleared-and-reused set to GC-agnostic behaviour, where a dead
 weak ref survives until some later `size`/iteration happens to sweep it.
 
@@ -126,7 +126,7 @@ weak ref survives until some later `size`/iteration happens to sweep it.
 
 `FinalizationRegistry`\<\{ `ref`: `WeakRef`\<`SubscriberListener`\>; \}\> \| `null`
 
----
+***
 
 ### \_makeEntry()
 
@@ -145,7 +145,7 @@ otherwise. Undefined when weak mode is on but the runtime has no `WeakRef`.
 
 `SubscriberEntry`
 
----
+***
 
 ### \[dispose\]()
 
@@ -158,7 +158,7 @@ releases the listeners at scope exit.
 
 `void`
 
----
+***
 
 ### \[iterator\]()
 
@@ -172,7 +172,7 @@ Iterate live listeners in insertion order.
 
 #### Yields
 
----
+***
 
 ### add()
 
@@ -194,7 +194,7 @@ Unsubscribe function that removes the listener.
 
 () => `boolean`
 
----
+***
 
 ### addOnce()
 
@@ -217,7 +217,7 @@ Unsubscribe function.
 
 () => `boolean`
 
----
+***
 
 ### clear()
 
@@ -227,7 +227,7 @@ Unsubscribe function.
 
 `void`
 
----
+***
 
 ### delete()
 
@@ -249,7 +249,7 @@ Original listener function or its WeakRef wrapper.
 
 `true` if a listener was removed, otherwise `false`.
 
----
+***
 
 ### dispose()
 
@@ -266,7 +266,7 @@ instance works with `using` / `await using`.
 
 `void`
 
----
+***
 
 ### forEach()
 
@@ -286,7 +286,7 @@ Callback invoked for each live listener.
 
 `void`
 
----
+***
 
 ### reset()
 
@@ -297,14 +297,14 @@ Alias for [PowerSubscriberSet#clear](#clear).
 `clear()` here empties the container, and "reset" is a natural second word
 for exactly that - so a caller who reaches for `reset()` on this class gets
 the obvious thing instead of a `TypeError`. No limiter gets this alias: for
-`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+`PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
 would read as the opposite, and the two are deliberately not synonyms.
 
 #### Returns
 
 `void`
 
----
+***
 
 ### values()
 

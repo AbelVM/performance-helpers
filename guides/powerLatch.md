@@ -14,7 +14,7 @@ Counting barrier primitive. Resolves pending waiters when the internal count rea
 
 - `wait()` — Returns a `Promise<void>` that resolves when the internal count reaches zero. If the latch is already at zero the returned promise resolves immediately. `wait()` accepts an optional AbortSignal or numeric timeout when used via the overloads shown in examples.
 
-- `reset(count?)` — Reset the latch to a new value (`count`); if the new count is `0` any pending waiters are resolved synchronously. Use this to reuse a latch instance for repeated coordination rounds.
+- `reset(count?)` — Reset the latch to a new value (`count`); if the new count is `0` any pending waiters are resolved synchronously. Use this to reuse a latch instance for repeated coordination rounds. `count` is validated exactly as the constructor's is — a whole number of `0` or more, and a negative, fractional or non-numeric value throws rather than being clamped. A fraction would make the latch **unable to reach zero** (`reset(2.5)` then one `countDown()` leaves `1.5`, so `wait()` never settles), and the previous coercion turned `NaN` and `-5` into `0`, which *resolved* every pending waiter — a bad argument fabricating completion out of a latch nobody had counted down.
 
 - `remaining` (getter) — Returns the current remaining count as a `number`.
 

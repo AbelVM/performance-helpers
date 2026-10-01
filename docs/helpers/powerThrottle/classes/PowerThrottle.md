@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerThrottle](../README.md) / PowerThrottle
 
@@ -32,7 +32,7 @@ the published type and the destructuring drift apart in the first place.
 
 > **\_lastRefill**: `number`
 
----
+***
 
 ### \_now
 
@@ -46,31 +46,31 @@ must outrank a value threaded in by a composition.
 
 `number`
 
----
+***
 
 ### \_nowExplicit
 
 > **\_nowExplicit**: `boolean`
 
----
+***
 
 ### \_tokenRemainder
 
 > **\_tokenRemainder**: `number`
 
----
+***
 
 ### capacity
 
 > **capacity**: `number`
 
----
+***
 
 ### refillRate
 
 > **refillRate**: `number`
 
----
+***
 
 ### tokens
 
@@ -94,7 +94,7 @@ Add tokens to the bucket (forceful, useful for tests).
 
 `void`
 
----
+***
 
 ### available()
 
@@ -106,11 +106,15 @@ Current available tokens (performs a refill before reporting).
 
 ##### options?
 
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
+
 #### Returns
 
 `number`
 
----
+***
 
 ### release()
 
@@ -137,7 +141,7 @@ if (token) throttle.release(token);
 throttle.release(1); // add one token back directly
 ```
 
----
+***
 
 ### reserve()
 
@@ -157,6 +161,10 @@ Returns `null` when the reservation fails due to insufficient tokens.
 
 ##### options?
 
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
+
 #### Returns
 
 `PowerThrottleToken` \| `null`
@@ -171,7 +179,7 @@ if (token) {
 }
 ```
 
----
+***
 
 ### reset()
 
@@ -189,7 +197,7 @@ Reset the bucket to a given token count (or full when omitted).
 
 `void`
 
----
+***
 
 ### rollback()
 
@@ -207,7 +215,7 @@ Alias of [PowerThrottle#release](#release).
 
 `void`
 
----
+***
 
 ### tryConsume()
 
@@ -222,6 +230,10 @@ Try to consume `n` tokens.
 `number` = `1`
 
 ##### options?
+
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
 
 #### Returns
 

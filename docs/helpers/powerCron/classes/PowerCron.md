@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerCron](../README.md) / PowerCron
 
@@ -9,7 +9,7 @@
 A drift-free cron-like scheduler built on `setTimeout` chaining.
 
 **Why not `setInterval`.** `setInterval` does not mean "every N ms". It means
-"every N ms after the previous callback _returns_", so a run that takes longer
+"every N ms after the previous callback *returns*", so a run that takes longer
 than the interval pushes every subsequent fire later, and the phase error
 accumulates without bound — a job nominally on the minute drifts seconds per
 hour and is no longer "on the minute" by the end of the day. Long callbacks
@@ -17,7 +17,7 @@ also queue up: a 1 s job on a 5 s interval that stalls for 30 s fires six
 times in a row on resume.
 
 This scheduler re-arms from an absolute target instead. Each run records the
-fire time it was _aimed at_, and the next timer is computed from that target
+fire time it was *aimed at*, and the next timer is computed from that target
 rather than from `Date.now()`. Drift therefore cannot accumulate: a run that
 takes 800 ms of a 1 s interval still leaves the next fire 200 ms away, not
 800 ms away.
@@ -27,7 +27,7 @@ a stalled run from immediately re-firing. What happens to the fires that were
 missed in between is a policy decision, not a scheduling detail, so it is an
 option — see [PowerCronOptions.catchUp](../interfaces/PowerCronOptions.md#catchup).
 
-PowerCron
+ PowerCron
 
 ## Example
 
@@ -51,7 +51,7 @@ cron.stop();
 () => `any`
 
 The function to run on each fire. May be async;
-a rejected promise is routed to `onError` and does not stop the schedule.
+  a rejected promise is routed to `onError` and does not stop the schedule.
 
 ##### options?
 
@@ -67,19 +67,19 @@ a rejected promise is routed to `onError` and does not stop the schedule.
 
 > **\_catchUp**: `"skip"` \| `"catch-up"` \| `"run-once"`
 
----
+***
 
 ### \_intervalMs
 
 > **\_intervalMs**: `number`
 
----
+***
 
 ### \_jitter
 
 > **\_jitter**: `number`
 
----
+***
 
 ### \_nextAt
 
@@ -87,31 +87,31 @@ a rejected promise is routed to `onError` and does not stop the schedule.
 
 Absolute timestamp the next fire is aimed at.
 
----
+***
 
 ### \_onError
 
 > **\_onError**: ((`err`) => `void`) \| `null`
 
----
+***
 
 ### \_onFire
 
 > **\_onFire**: ((`info`) => `void`) \| `null`
 
----
+***
 
 ### \_running
 
 > **\_running**: `boolean`
 
----
+***
 
 ### \_runOnStart
 
 > **\_runOnStart**: `boolean`
 
----
+***
 
 ### \_task
 
@@ -121,13 +121,13 @@ Absolute timestamp the next fire is aimed at.
 
 `any`
 
----
+***
 
 ### \_timer
 
 > **\_timer**: `any`
 
----
+***
 
 ### \_unref
 
@@ -149,7 +149,7 @@ interval or shorten the task.
 
 `number`
 
----
+***
 
 ### fireCount
 
@@ -163,7 +163,7 @@ interval or shorten the task.
 
 How many times the task has been invoked.
 
----
+***
 
 ### intervalMs
 
@@ -177,7 +177,7 @@ How many times the task has been invoked.
 
 The configured interval, in ms.
 
----
+***
 
 ### nextRunAt
 
@@ -191,7 +191,7 @@ The configured interval, in ms.
 
 Epoch ms the next fire is aimed at.
 
----
+***
 
 ### running
 
@@ -218,7 +218,7 @@ stops the schedule at scope exit.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -230,7 +230,7 @@ Stop the schedule for good.
 
 `void`
 
----
+***
 
 ### runNow()
 
@@ -242,7 +242,7 @@ Fire immediately, out of band, without disturbing the cadence.
 
 `PowerCron`
 
----
+***
 
 ### start()
 
@@ -261,7 +261,7 @@ in a fleet, and `jitter` exists for callers who want some of that back.
 
 `PowerCron`
 
----
+***
 
 ### stop()
 

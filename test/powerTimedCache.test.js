@@ -66,8 +66,20 @@ describe('simpleArgsKey', () => {
     expect(simpleArgsKey('ab', 3, true, undefined, null)).toBe('s:2:ab|d:3|b:1|u:|n:');
   });
 
-  it('falls back to JSON for non-scalar arguments', () => {
-    expect(simpleArgsKey({ a: 1 })).toBe(JSON.stringify([{ a: 1 }]));
+  it('encodes non-scalar arguments structurally, not as JSON', () => {
+    // **This test asserted the defect.** It required the key to equal
+    // `JSON.stringify([{ a: 1 }])`, which is the wholesale fallback CACHE-009
+    // removed — the fallback that mapped `undefined`, functions and every
+    // `Map`/`Set`/`RegExp` onto the same text, so distinct calls shared a cache
+    // entry. Pinned as a description of intended behaviour, in a file whose name
+    // has nothing to do with the code under test.
+    //
+    // It now asserts the property that matters: structurally equal arguments
+    // share a key, and structurally different ones do not.
+    expect(simpleArgsKey({ a: 1 })).toBe(simpleArgsKey({ a: 1 }));
+    expect(simpleArgsKey({ a: 1 })).not.toBe(simpleArgsKey({ a: 2 }));
+    // And it is no longer the JSON text, which was the whole problem.
+    expect(simpleArgsKey({ a: 1 })).not.toBe(JSON.stringify([{ a: 1 }]));
   });
 
   it('handles bigint arguments instead of throwing', () => {
@@ -80,7 +92,14 @@ describe('simpleArgsKey', () => {
   });
 
   it('normalises -0 to 0 so both share one cache entry', () => {
+    // The normalisation it used to describe was `String(v === 0 ? 0 : v)`, and
+    // `String(-0)` is *already* `'0'` — so that expression could not change the
+    // result, and this test passed whichever way it was written. A mutation
+    // check deleting it reported NOT CAUGHT, which is how the dead code was
+    // found. `String` does the normalising; the guard belongs here because the
+    // behaviour is worth pinning, not because the source needs help.
     expect(simpleArgsKey(-0)).toBe(simpleArgsKey(0));
+    expect(simpleArgsKey(-0)).toBe('d:0');
   });
 
   it('throws on symbol arguments rather than aliasing them all to one key', () => {

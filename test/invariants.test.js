@@ -150,10 +150,12 @@ describe('PowerThrottle operation counts', () => {
 
   it('refills proportionally, with a fractional carry', () => {
     let clock = 0;
+    // No `refillInterval`: removed in 9a1d9d5 because it was inert, and this
+    // file was still passing it. It was ignored, so these assertions were
+    // correct — but a reader would have taken the name as real.
     const throttle = new PowerThrottle({
       capacity: 4,
       refillRate: 2, // per second
-      refillInterval: 1000,
       now: () => clock,
     });
     expect(Array.from({ length: 4 }, () => throttle.tryConsume()).filter(Boolean).length).toBe(4);
@@ -179,11 +181,10 @@ describe('PowerThrottle operation counts', () => {
     const throttle = new PowerThrottle({
       capacity: 2,
       refillRate: 5,
-      refillInterval: 1000,
       now: () => clock,
     });
     throttle.tryConsume();
-    clock += 10_000; // ten intervals of refill, capacity is 2
+    clock += 10_000; // ten seconds of refill, capacity is 2
     let admitted = 0;
     for (let i = 0; i < 10; i += 1) if (throttle.tryConsume()) admitted += 1;
     expect(admitted).toBe(2);

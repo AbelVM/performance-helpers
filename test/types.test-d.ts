@@ -29,6 +29,8 @@ import {
   PowerBulkhead,
   PowerCircuit,
   PowerRetry,
+  PowerEventLoopMonitor,
+  PowerRetryBudget,
   PowerDeadline,
   PowerHistogram,
   PowerRealtimeHub,
@@ -282,6 +284,96 @@ const t0: number = nowMs();
 void [t0, measureSync(() => 1), measureAsync(async () => 1)];
 // `normalizeError` normalises *to a plain object* - that is the point of it -
 // so asserting `Error` here was asserting the opposite of the contract.
-const normalized: { error: true; code: string; message: string | undefined; stack: string | undefined } =
-  normalizeError(new Error('boom'));
+const normalized: {
+  error: true;
+  code: string;
+  message: string | undefined;
+  stack: string | undefined;
+} = normalizeError(new Error('boom'));
 void [normalized, formatErrorObj({ code: 'X', message: 'y' })];
+
+// --- per-call limiter options (QUAL-011, F8) -------------------------------
+//
+// These twelve methods used to publish `options?: {}`, which type-checks
+// literally any value: a caller passing `{ now: 1234 }` got no completion, no
+// error, and no pointer to `LimiterNowOptions`. The runtime has always
+// forwarded and honoured `now` — only the declaration was missing — so this is
+// the declaration being made to match behaviour that already existed.
+//
+// The compile-time consequence worth stating: each of these is now *closed*.
+// `{ now: 1 }` compiles; `{ notAnOption: 1 }` does not. That asymmetry is the
+// whole point, and it is what `@ts-expect-error` below is asserting — an
+// `options?: {}` would have compiled the bad call too, and the directive would
+// then fail as unused.
+const throttled = new PowerThrottle({ capacity: 2 });
+throttled.tryConsume(1, { now: 1000 });
+throttled.reserve(1, { now: 1000 });
+throttled.available({ now: 1000 });
+// @ts-expect-error `now` is a number of ms, not a Date.
+throttled.tryConsume(1, { now: new Date() });
+// @ts-expect-error unknown key on a now-declared options bag.
+throttled.tryConsume(1, { notAnOption: true });
+
+const windowed = new PowerSlidingWindow({ capacity: 2 });
+windowed.tryConsume(1, { now: 1000 });
+windowed.available({ now: 1000 });
+// @ts-expect-error unknown key.
+windowed.available({ nope: 1 });
+
+const gcraPerCall = new PowerGCRA({ rate: 1, per: 1000 });
+gcraPerCall.tryConsume(1, { now: 1000 });
+gcraPerCall.retryAfter(1, { now: 1000 });
+gcraPerCall.available({ now: 1000 });
+// @ts-expect-error unknown key.
+gcraPerCall.retryAfter(1, { nope: 1 });
+
+const gatePerCall = new PowerPermitGate({ capacity: 1 });
+void gatePerCall.acquire({ signal: new AbortController().signal });
+// @ts-expect-error `signal` is the only per-call option on the gate.
+void gatePerCall.acquire({ signal: undefined, nope: 1 });
+
+const timedPerCall = new PowerTimedCache(1000);
+timedPerCall.set('k', 1, { ttl: 500 });
+timedPerCall.set('k', 1, { weight: 2 });
+timedPerCall.has('k');
+// @ts-expect-error unknown key on the per-entry options.
+timedPerCall.set('k', 1, { nope: 1 });
+
+// --- getStats()/stats() are the same type to a consumer (QUAL-011) ---------
+//
+// Asserted by bidirectional assignability rather than by comparing declaration
+// text, because the two spellings legitimately differ in form: where `stats()`
+// says `PowerRetryBudgetStats`, the inferred `getStats()` says
+// `import("./jsdoc-types.js").PowerRetryBudgetStats`. Those are the same type,
+// and a string comparison reported them as different. Assignability is the
+// property a consumer actually relies on, so it is the property asserted.
+//
+// Each of these compiles only if the two methods agree. If a `stats()` return
+// shape changes and `getStats()` stops matching — which is what happened once,
+// when `PowerCache.stats()` gained `staleServes` and `expirations` — one of
+// these lines fails.
+type EqGCRA = [ReturnType<PowerGCRA['getStats']>, ReturnType<PowerGCRA['stats']>];
+const gcraTyped = new PowerGCRA({ rate: 1, per: 1000 });
+const gcraForward: ReturnType<PowerGCRA['stats']> = gcraTyped.getStats();
+const gcraBackward: ReturnType<PowerGCRA['getStats']> = gcraTyped.stats();
+void ([gcraForward, gcraBackward] satisfies EqGCRA);
+
+const cacheTyped = new PowerCache();
+const cacheForward: ReturnType<PowerCache['stats']> = cacheTyped.getStats();
+const cacheBackward: ReturnType<PowerCache['getStats']> = cacheTyped.stats();
+void [cacheForward, cacheBackward];
+
+const bulkheadTyped = new PowerBulkhead({ maxConcurrency: 1 });
+const bulkheadForward: ReturnType<PowerBulkhead['stats']> = bulkheadTyped.getStats();
+const bulkheadBackward: ReturnType<PowerBulkhead['getStats']> = bulkheadTyped.stats();
+void [bulkheadForward, bulkheadBackward];
+
+const elmTyped = new PowerEventLoopMonitor({ intervalMs: 1000 });
+const elmForward: ReturnType<PowerEventLoopMonitor['stats']> = elmTyped.getStats();
+const elmBackward: ReturnType<PowerEventLoopMonitor['getStats']> = elmTyped.stats();
+void [elmForward, elmBackward];
+
+const budgetTyped = new PowerRetryBudget();
+const budgetForward: ReturnType<PowerRetryBudget['stats']> = budgetTyped.getStats();
+const budgetBackward: ReturnType<PowerRetryBudget['getStats']> = budgetTyped.stats();
+void [budgetForward, budgetBackward];

@@ -48,6 +48,12 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Cut a p99 far above your p50                                          | `PowerRetry` with `hedgeDelay`                     | `PowerDeadline`                                            | raising `maxAttempts`, which costs retries, not tail latency |
 | Put a hard time budget on work                                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                             |
 | Broadcast events across components                                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure  |
+
+`PowerEventBus` is **intra-process**. It is not a cross-tab or cross-worker bus,
+and reaching for a platform broadcast primitive to extend it is slower, unbounded,
+and — written the obvious way — an infinite message loop. `guides/powerEventBus.md`
+has the measurements; `guides/troubleshooting.md` has the two platform properties
+that make it counter-intuitive.
 | Expose a single changing value reactively                             | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                             |
 | Coordinate callbacks or multi-step async completion                   | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                    |
 | Batch near-synchronous calls into one flush                           | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                           |
@@ -112,9 +118,75 @@ cell-based limiter (the ATM Forum's algorithm, behind `redis-cell` and Go's
 `x/time/rate`) that keeps all of its state in one number. Reach for it when the wait time is
 handed to a caller, a backoff, or a `Retry-After` header and a guess is not good enough.
 
+One thing to know before you pass a batch: a batch is admitted only if its own span fits
+inside the burst, so `n` must be at most `burst + 1`, and `retryAfter(n)` throws a
+`RangeError` above that ceiling rather than reporting a wait that could never succeed.
+See [PowerGCRA → Batches](powerGCRA.md#batches).
+
 Use `PowerRateLimit` when you need both burst and sustained rules to pass at once. All three
 limiters share the `tryConsume()` / `available()` shape and compose in it; the combined limit
 is the strictest component.
+
+### Every limiter here is per-process, and nothing in the option list says so
+
+`PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` and `PowerRateLimit` all hold their
+state in **this process's heap**. There is no shared store, and there will not be one:
+`REJ-008` records the rejection of a runtime dependency, and a shared limiter needs
+one (Redis, or a rate-limit service).
+
+So **N processes behind a load balancer enforce N × the limit you configured.** Three
+processes with `new PowerGCRA({ rate: 100 })` admit 300 requests per second across the
+service, not 100. Nothing fails, no warning is logged, and each process is individually
+correct — which is what makes it a trap rather than a bug. The moment two instances of
+your service disagree about how much traffic has happened, the ceiling you believe in
+is not the ceiling in force.
+
+If your limit has to be global, you need the state somewhere shared — Redis, a
+rate-limit service, or your gateway — and this library is the wrong tool for that
+half. It is the right tool for the _per-process_ share: size `rate` as the per-instance
+allowance, and put the global ceiling in front of it. Use
+[`PowerPermitGate`](powerPermitGate.md) or [`PowerBulkhead`](powerBulkhead.md) for the
+in-process half, where the same caution does not apply, because a permit gate that
+each process counts separately bounds _its own_ concurrency rather than a global rate.
+
+**Per-key limiting is a `keyFn` on `PowerRateLimit`, and the design choice is
+load-bearing.** One limiter is one limit, so limiting per tenant, per IP or per user
+gives each key its own budget:
+
+```js
+const limiter = new PowerRateLimit([() => new PowerGCRA({ rate: 10, per: 1000 })], {
+  keyFn: (ctx) => ctx.tenant,
+});
+
+limiter.tryConsume(1, { context: { tenant: 'acme' } });
+```
+
+Each entry becomes a **factory** rather than an instance, because a shared instance
+cannot hold per-key budgets. The key arrives as a per-call `context`.
+
+**Keys are hashed into a fixed array of slots, and nothing is ever evicted.** That is
+the whole point, and it was not the obvious implementation. Both obvious ones are wrong
+in _opposite_ directions, and both were measured before this was written: a `Map` of
+per-key limiters grows with client-controlled input (50 000 distinct tenants → 50 000
+resident limiters), while an LRU of them — `PowerCache` being the obvious tool in this
+repo — **turns eviction into a bypass**, because evicting a limiter discards that
+tenant's consumed budget with it. A tenant evicted while quiet returns to a brand-new
+limiter with a full fresh allowance: not a cache miss, a rate-limit bypass, and it
+penalises precisely the tenants that behaved. Hashing bounds memory **without** an
+eviction path, so no request can have its budget reset.
+
+**The cost is real and you are choosing it: two keys that hash to the same slot share
+a budget.** That is nginx's `limit_req` model, and the trade is deliberate — for a
+limiter whose input is untrusted, a bounded approximation beats an exact answer you
+cannot afford to keep — but it is a weakening of "per key". Raise `buckets` to reduce
+collisions, and size it for the key space you expect. A **missing `context` degrades to
+one shared limit, not to no limit**, so forgetting it throttles rather than
+unlimiting.
+
+For the same reason, the generational two-`Map` eviction measured for
+[`PowerCache`](powerCache.md) is **not** the right structure for a map of limiters,
+however good its miss ratio looked — a whole-`Map` drop discards exactly the per-key
+budget history the map exists to keep. See `node bench/claims.js sieve`.
 
 Use `PowerRetry` when retry policy is the main concern. It offers three
 independent mechanisms, and it is worth naming which one you actually want:

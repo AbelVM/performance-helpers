@@ -182,6 +182,12 @@ export class PowerRealtimeHub {
     if (codec !== 'json' && codec !== 'raw') {
       throw new TypeError("PowerRealtimeHub: `codec` must be 'json' or 'raw'");
     }
+    // `codec: 'raw'` is legal here — it works, and `maxBatch: 1` is the one
+    // configuration the hub can honour — but it is incompatible with *batching*,
+    // and the constructor is not where that can be checked: `maxBatch` is a
+    // per-subscriber option and the hub's default is 32, so the only place both
+    // facts are known is `subscribe()`. The check lives there, where it can name
+    // the subscriber that got it wrong.
 
     this._send = send;
     this._close = typeof close === 'function' ? close : null;
@@ -251,6 +257,28 @@ export class PowerRealtimeHub {
     if (!Number.isFinite(Number(maxBatch)) || Number(maxBatch) < 1) {
       throw new TypeError('PowerRealtimeHub: `maxBatch` must be >= 1');
     }
+    // **The `raw` codec check lives here, and this is the only place it can.**
+    // `_flushSubscriber` splices the batch off `sub.queue` *before* `_encodeBatch`
+    // throws "the `raw` codec delivers one message per frame", so the messages
+    // it had taken were gone: discarded, never sent, never re-queued. Two
+    // `publish` calls in one microtask is the default `batch: true` path, and it
+    // lost all of them — measured `published: 2, delivered: 0, dropped: 0`, with
+    // no counter moving because `dropped` only increments in `_enqueue`, which
+    // never saw them. `rg 'codec' test/powerRealtimeHub.test.js` returned
+    // nothing, so the codec had no test on the hub at all.
+    //
+    // Rejecting here rather than at construction because `maxBatch` is
+    // per-subscriber: `raw` is legal, `maxBatch: 1` is the configuration the hub
+    // can honour, and this is the only place both facts are visible. Note that
+    // `batch: false` does **not** rescue it — the splice is unconditional, so a
+    // queue that accumulated two messages while unbatched still yields a
+    // two-message batch.
+    if (this._codec === 'raw' && Math.floor(Number(maxBatch)) > 1) {
+      throw new TypeError(
+        'PowerRealtimeHub: `codec: "raw"` delivers one message per frame, so a ' +
+          'subscriber must use `maxBatch: 1`. Use codec "json" if you need batching.'
+      );
+    }
 
     /** @type {HubSubscriber} */
     const sub = {
@@ -281,6 +309,28 @@ export class PowerRealtimeHub {
       this._topics.set(topic, bucket);
     }
     bucket.set(sub.id, sub);
+
+    // **Replay the retained log.** `publish(topic, msg, { retain: true })` writes
+    // to `this._retained`, and until now nothing read it: the map was consulted
+    // in exactly two places, its own write path and `_detach`. So a subscriber
+    // arriving after a retained publish got `[]`, while the JSDoc said "keep the
+    // message for a subscriber that subscribes later" and `guides/powerRealtimeHub.md`
+    // said it "keeps the message for later subscribers". Neither happened.
+    //
+    // Through `_enqueue`, not a second private delivery path, so a full queue,
+    // a `raw` codec and every slow-consumer policy apply to a replay exactly as
+    // they do to a live message. Deliberately **not** through `publish()`: a
+    // replay is not a publication, and routing it there would inflate the
+    // `published` counter by the length of every retained log on every new
+    // subscriber — a number that is supposed to answer "how much did callers
+    // send". A caller who retained 32 messages would see `published` jump by 32
+    // per subscribe, which is precisely the kind of counter that makes the rest
+    // of `stats()` untrustworthy.
+    const retained = this._retained.get(topic);
+    if (retained && retained.length > 0) {
+      for (const message of retained) this._enqueue(sub, message);
+      this._scheduleFlush();
+    }
 
     return () => this.unsubscribe(sub.id);
   }
@@ -317,6 +367,15 @@ export class PowerRealtimeHub {
     if (this._closed) return 0;
     const bucket = this._topics.get(topic);
     this._counters.published += 1;
+    // **Retain before the early return.** This used to sit below it, so
+    // `publish(topic, msg, { retain: true })` retained nothing whenever the topic
+    // had no live subscriber — which is *the* case retain exists for. "Keep the
+    // message for a subscriber that subscribes later" describes publishing before
+    // anyone is listening, and that is exactly what silently did nothing.
+    // Verified: 50 retained publishes to a topic with no subscribers left
+    // `_retained` empty. The ordering is safe because `_retain` is a private map
+    // write with no dependency on `bucket`.
+    if (options?.retain) this._retain(topic, message);
     if (!bucket || bucket.size === 0) return 0;
 
     let queued = 0;
@@ -325,7 +384,6 @@ export class PowerRealtimeHub {
       this._enqueue(sub, message);
       queued += 1;
     }
-    if (options?.retain) this._retain(topic, message);
     if (queued > 0) this._scheduleFlush();
     return queued;
   }
@@ -339,6 +397,20 @@ export class PowerRealtimeHub {
       clearTimeout(this._flushTimer);
       this._flushTimer = null;
     }
+    // **`_flushScheduled` has to be cleared here, not only in the callbacks.**
+    // It was the other two places — the timer callback and the microtask — and
+    // clearing the timer removed the first, so on a hub with `batchDelayMs > 0`
+    // the flag stayed `true` for the life of the object. Every later `publish`
+    // then short-circuited at `_scheduleFlush`, and the hub stopped flushing
+    // permanently: measured, publish / `flush()` / publish / wait 100 ms sent
+    // **0 frames** with `published: 2, delivered: 1, dropped: 0`.
+    //
+    // The counters are what make that worth writing down. `published` keeps
+    // climbing, so a dashboard shows a live publisher; `delivered` froze; and
+    // `dropped` never moves, because the slow-consumer policy only runs in
+    // `_enqueue` and the message never reached a full queue — it reached a dead
+    // scheduler. Both counters a guide tells you to alert on report nothing.
+    this._flushScheduled = false;
     await this._flushAll();
   }
 
@@ -370,6 +442,36 @@ export class PowerRealtimeHub {
   }
 
   /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` — the one class that has always spelled it this way — is not
+   * handed `TypeError: x.getStats is not a function` here.
+   *
+   * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+   * `getStats()`, with no stated rule and nothing pinning it, which reached the
+   * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+   * spellings work everywhere now. `stats()` is canonical and this delegates to
+   * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+   * library would be a breaking change.
+   *
+   * Written out per class rather than installed on the prototype on purpose: a
+   * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+   * `types/` omitted it and a TypeScript caller got a type error on a method
+   * that worked at runtime. That was the first implementation.
+   *
+   * **No `@returns` tag, and that is load-bearing.** The first version carried a
+   * hand-copied copy of the `stats()` return shape, on the reasoning that an
+   * explicit type was safer. It is not: the copy went stale the moment a
+   * concurrent change added `staleServes` and `expirations` to `PowerCache`
+   * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+   * byte-identical published type and cannot drift, because there is nothing to
+   * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+   * which is the property a consumer relies on.
+   */
+  getStats() {
+    return this.stats();
+  }
+
+  /**
    * Close every subscription and release timers. The hub cannot be reused.
    * @returns {void}
    */
@@ -386,6 +488,11 @@ export class PowerRealtimeHub {
       this._detach(sub, { close: true, reason: 'hub-closed' });
     }
     this._topics.clear();
+    // `_detach` now only empties a topic's retained log when it was the **last**
+    // subscriber on that topic, so a `close()` has to clear the rest itself —
+    // otherwise a topic whose subscribers were all detached in a different order
+    // keeps its retained messages alive after the hub is closed.
+    this._retained.clear();
   }
 
   /**
@@ -564,6 +671,24 @@ export class PowerRealtimeHub {
     try {
       frame = this._encodeBatch(batch);
     } catch (err) {
+      // **Count it, rather than losing it silently.** The batch was spliced off
+      // `sub.queue` above, so returning here discarded every message in it — and
+      // no counter moved, because `dropped` only increments in `_enqueue`, which
+      // never saw these messages, and `delivered` is incremented after the
+      // encode succeeds. Measured under the `raw` codec: `published: 2,
+      // delivered: 0, dropped: 0` for two messages that a caller published and
+      // the transport never saw.
+      //
+      // **Re-queuing was tried first and is wrong.** An encode failure here is
+      // permanent — the same payload will fail the same way on every retry — so
+      // putting the batch back makes `_drainSubscriberFully`'s
+      // `while (queue.length > 0)` loop spin forever and `flush()` never
+      // resolves. Measured: the re-queue version hangs the flush. A message that
+      // cannot be encoded cannot be delivered, so the honest outcome is to
+      // deliver it to neither the transport nor the handler and say so in the
+      // counters.
+      this._counters.dropped += batch.length;
+      sub.dropped += batch.length;
       sub.inFlight -= 1;
       this._notify(err, sub);
       return Promise.resolve();
@@ -624,8 +749,13 @@ export class PowerRealtimeHub {
   _encodeBatch(batch) {
     if (this._codec === 'raw') {
       // A raw frame carries exactly one payload, so it cannot also carry a
-      // batch boundary. Force a one-message send per flush rather than
-      // silently degrading to JSON.
+      // batch boundary. The batch is spliced off `sub.queue` **before** this
+      // runs, so throwing here used to discard every message in it: two
+      // `publish` calls in one microtask is the default `batch: true` path, and
+      // it lost all of them with `published: 2, delivered: 0, dropped: 0` — no
+      // counter moves, because the slow-consumer policy never saw them either.
+      // The constructor now rejects this configuration outright, so reaching the
+      // throw means the subscriber's own `maxBatch` slipped past it.
       if (batch.length !== 1) {
         throw new TypeError(
           'PowerRealtimeHub: the `raw` codec delivers one message per frame; ' +
@@ -658,7 +788,18 @@ export class PowerRealtimeHub {
       if (bucket.size === 0) this._topics.delete(sub.topic);
     }
     const log = this._retained.get(sub.topic);
-    if (log) log.length = 0;
+    // **Only when the topic has no subscribers left.** The log is per *topic*
+    // and this detach is per *subscriber*, so clearing it unconditionally meant
+    // one subscriber leaving destroyed the retained history that every other
+    // live subscriber on that topic still depended on. Measured: with `sub-2`
+    // still subscribed, unsubscribing `sub-1` emptied the log.
+    //
+    // The ordering matters and is not incidental — `this._subs.delete(sub.id)`
+    // and the `_topics` cleanup above have already run, so `bucket.size === 0`
+    // here means "this really was the last subscriber for this topic". That is
+    // also what stops `close()` leaving `_retained` populated for every topic
+    // whose subscribers were never detached.
+    if (log && !this._topics.has(sub.topic)) log.length = 0;
     if (close && this._close) {
       try {
         this._close(sub, reason);

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerWebSocketClient](../README.md) / PowerWebSocketClient
 
@@ -44,31 +44,31 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 > **\_autoReconnect**: `boolean`
 
----
+***
 
 ### \_closedByUser
 
 > **\_closedByUser**: `boolean`
 
----
+***
 
 ### \_codec
 
 > **\_codec**: `"json"` \| `"raw"`
 
----
+***
 
 ### \_connectTimeoutMs
 
 > **\_connectTimeoutMs**: `number`
 
----
+***
 
 ### \_connectTimer
 
 > **\_connectTimer**: `any`
 
----
+***
 
 ### \_counters
 
@@ -102,67 +102,67 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 > **sent**: `number` = `0`
 
----
+***
 
 ### \_heartbeatDeadline
 
 > **\_heartbeatDeadline**: `any`
 
----
+***
 
 ### \_heartbeatIntervalMs
 
 > **\_heartbeatIntervalMs**: `number`
 
----
+***
 
 ### \_heartbeatTimeoutMs
 
 > **\_heartbeatTimeoutMs**: `number`
 
----
+***
 
 ### \_heartbeatTimer
 
 > **\_heartbeatTimer**: `any`
 
----
+***
 
 ### \_highWaterMark
 
 > **\_highWaterMark**: `number`
 
----
+***
 
 ### \_lastPollInterval
 
 > **\_lastPollInterval**: `number`
 
----
+***
 
 ### \_lastPongAt
 
 > **\_lastPongAt**: `number`
 
----
+***
 
 ### \_lowWaterMark
 
 > **\_lowWaterMark**: `number`
 
----
+***
 
 ### \_maxReconnectAttempts
 
 > **\_maxReconnectAttempts**: `number`
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_on
 
@@ -192,49 +192,49 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 > **resume**: `Function` \| `null`
 
----
+***
 
 ### \_paused
 
 > **\_paused**: `boolean`
 
----
+***
 
 ### \_pingSentAt
 
 > **\_pingSentAt**: `number`
 
----
+***
 
 ### \_pollBase
 
 > **\_pollBase**: `number`
 
----
+***
 
 ### \_pollMax
 
 > **\_pollMax**: `number`
 
----
+***
 
 ### \_pollTimer
 
 > **\_pollTimer**: `any`
 
----
+***
 
 ### \_reconnectAttempts
 
 > **\_reconnectAttempts**: `number`
 
----
+***
 
 ### \_reconnectBaseMs
 
 > **\_reconnectBaseMs**: `number`
 
----
+***
 
 ### \_reconnectDelay
 
@@ -242,67 +242,67 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 decorrelated-jitter backoff cursor, in ms
 
----
+***
 
 ### \_reconnectMaxMs
 
 > **\_reconnectMaxMs**: `number`
 
----
+***
 
 ### \_reconnectOnHeartbeatTimeout
 
 > **\_reconnectOnHeartbeatTimeout**: `boolean`
 
----
+***
 
 ### \_reconnectTimer
 
 > **\_reconnectTimer**: `any`
 
----
+***
 
 ### \_socket
 
 > **\_socket**: `any`
 
----
+***
 
 ### \_state
 
 > **\_state**: `0` \| `1` \| `2` \| `3`
 
----
+***
 
 ### \_writer
 
 > **\_writer**: `WritableStreamDefaultWriter`\<`any`\> \| `null`
 
----
+***
 
 ### \_WS
 
 > **\_WS**: `Function`
 
----
+***
 
 ### \_WSStream
 
 > **\_WSStream**: `any`
 
----
+***
 
 ### protocols
 
 > **protocols**: `string` \| `string`[] \| `undefined`
 
----
+***
 
 ### rtt
 
 > **rtt**: [`PowerHistogram`](../../helpers/powerHistogram/classes/PowerHistogram.md)
 
----
+***
 
 ### url
 
@@ -327,7 +327,7 @@ Which back-pressure mechanism is in use.
 
 [`BackpressureMode`](../type-aliases/BackpressureMode.md)
 
----
+***
 
 ### bufferedAmount
 
@@ -341,7 +341,7 @@ Bytes the socket has buffered and not yet handed to the network.
 
 `number`
 
----
+***
 
 ### isOpen
 
@@ -355,7 +355,7 @@ Bytes the socket has buffered and not yet handed to the network.
 
 Whether the socket is open and accepting data.
 
----
+***
 
 ### paused
 
@@ -369,7 +369,7 @@ Whether the producer is currently paused for back-pressure.
 
 `boolean`
 
----
+***
 
 ### readyState
 
@@ -382,13 +382,13 @@ Whether the producer is currently paused for back-pressure.
 `0` \| `1` \| `2` \| `3`
 
 The socket's ready state, mirroring the platform
-`WebSocket.readyState` constants (`READY_STATE` above). Spelled as the
-literal union rather than `WebSocketReadyState`, which is a `lib.dom`
-alias - referencing it made the shipped declaration depend on a DOM lib
-that a Node consumer may not have. Two corrections landed here in one
-pass: an earlier revision claimed this was a state _name_ and declared it
-`string` (producing 11 "no overlap" diagnostics on every
-`_state === READY_STATE.X` comparison), and the next used the DOM alias.
+  `WebSocket.readyState` constants (`READY_STATE` above). Spelled as the
+  literal union rather than `WebSocketReadyState`, which is a `lib.dom`
+  alias - referencing it made the shipped declaration depend on a DOM lib
+  that a Node consumer may not have. Two corrections landed here in one
+  pass: an earlier revision claimed this was a state *name* and declared it
+  `string` (producing 11 "no overlap" diagnostics on every
+  `_state === READY_STATE.X` comparison), and the next used the DOM alias.
 
 ## Methods
 
@@ -400,7 +400,7 @@ pass: an earlier revision claimed this was a state _name_ and declared it
 
 `void`
 
----
+***
 
 ### close()
 
@@ -426,7 +426,7 @@ Human-readable reason.
 
 `void`
 
----
+***
 
 ### connect()
 
@@ -439,9 +439,9 @@ Open the connection. Safe to call again to reconnect deliberately.
 `Promise`\<`void`\>
 
 Resolves once the socket is open, rejects on a
-failed connect or a connect timeout.
+  failed connect or a connect timeout.
 
----
+***
 
 ### dispose()
 
@@ -455,7 +455,42 @@ want to reach for the symbol still have something to call.
 
 `void`
 
----
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`object`
+
+***
 
 ### off()
 
@@ -473,7 +508,7 @@ Remove a registered handler.
 
 `void`
 
----
+***
 
 ### on()
 
@@ -497,7 +532,7 @@ An unsubscribe function.
 
 () => `void`
 
----
+***
 
 ### ping()
 
@@ -510,7 +545,7 @@ otherwise rely on the heartbeat, which uses whatever the transport offers.
 
 `void`
 
----
+***
 
 ### send()
 
@@ -520,7 +555,7 @@ Send a message, applying back-pressure.
 
 With the Streams tier this awaits `writer.ready`, so the returned promise
 resolves only when the socket has room. With the watermark tier it
-resolves as soon as the frame is handed to `send()`, and the _producer_ is
+resolves as soon as the frame is handed to `send()`, and the *producer* is
 expected to honour `onPause`/`onResume` — because at that point the browser
 has already buffered it and there is nothing left to await.
 
@@ -537,8 +572,8 @@ has already buffered it and there is nothing left to await.
 `boolean`
 
 When the socket is
-over its high-water mark, drop the message instead of queueing it. Use for
-telemetry where a gap is better than growing an unbounded buffer.
+  over its high-water mark, drop the message instead of queueing it. Use for
+  telemetry where a gap is better than growing an unbounded buffer.
 
 #### Returns
 
@@ -546,7 +581,7 @@ telemetry where a gap is better than growing an unbounded buffer.
 
 `true` when the frame was handed to the socket.
 
----
+***
 
 ### sendFrame()
 
@@ -567,7 +602,7 @@ for a plain value.
 `Uint8Array`\<`ArrayBufferLike`\>
 
 A payload from `encodeMessage` /
-`frameEncodedJson`.
+  `frameEncodedJson`.
 
 ##### options?
 
@@ -581,7 +616,7 @@ Same shape as [send](#send).
 
 `true` when the frame was handed to the socket.
 
----
+***
 
 ### stats()
 

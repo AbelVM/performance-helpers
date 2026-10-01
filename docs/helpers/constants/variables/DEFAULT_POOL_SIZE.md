@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / DEFAULT\_POOL\_SIZE
 

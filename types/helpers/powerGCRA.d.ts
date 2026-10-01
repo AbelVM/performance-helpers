@@ -1,4 +1,6 @@
 /**
+ */
+/**
  * @typedef {object} PowerGCRAOptions
  * @property {number} rate - Sustained rate in operations per `per` unit. Must be > 0.
  * @property {number} [per=1000] - The unit `rate` is measured against, in milliseconds.
@@ -46,6 +48,8 @@ export class PowerGCRA {
     _now: (() => number);
     /** @type {boolean} */
     _nowExplicit: boolean;
+    /** @type {?number} */
+    _lastNow: number | null;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -69,14 +73,47 @@ export class PowerGCRA {
      * @private
      */
     private _notifyClock;
-    tryConsume(n?: number, options?: {}): boolean;
     /**
-     * Exact milliseconds until `tryConsume()` would succeed.
+     * @param {number} [n=1]
+     * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
+     *   Per-call clock override.
+     * @returns {boolean}
+     */
+    tryConsume(n?: number, options?: import("../utils/limiterClock.js").LimiterNowOptions): boolean;
+    /**
+     * Exact milliseconds until `tryConsume(n)` would succeed.
+     *
+     * Grows with `n`, by `(n - 1) * emissionInterval` beyond the single-operation
+     * wait. That is the batch's own span and it has to: a batch is admitted only
+     * when the whole span fits inside the tolerance window, so waiting the
+     * single-operation wait and then asking for five would be refused. The wait
+     * this returns is the exact boundary — not an estimate, and not a value that
+     * under-waits.
      *
      * @param {number} [n=1] - Number of operations the next call would consume.
+     * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
+     *   Per-call clock override.
      * @returns {number} Milliseconds to wait; `0` when the call would succeed now.
      */
-    retryAfter(n?: number, options?: {}): number;
+    retryAfter(n?: number, options?: import("../utils/limiterClock.js").LimiterNowOptions): number;
+    /**
+     * The largest batch this limiter will admit at any instant, at any wait.
+     *
+     * {@link PowerGCRA#_covers} saturates here, so an ask above it is not merely
+     * refused *now* — no amount of waiting admits it, because the ceiling is set
+     * by `burst` and not by the state of the TAT. Measured over `rate` 1-30 ×
+     * `burst` 0-10, a batch one past the ceiling was admitted at **no** wait out
+     * of 200 000 tried, per configuration.
+     *
+     * `burst` is not asserted integral (a fractional burst is a legitimate
+     * sub-operation tolerance), so the ceiling floors. A fractional `burst` rounds
+     * *down* here and up in `_delayTolerance`, which is the safe direction: it
+     * never claims capacity that the check will not honour.
+     *
+     * @returns {number} A whole number of operations, at least 1.
+     * @private
+     */
+    private _ceiling;
     /**
      * Consume, or return the exact wait needed.
      * @param {number} [n=1]
@@ -99,9 +136,62 @@ export class PowerGCRA {
      * `available()` and refuses immediately when it is below the ask, so
      * reporting `0` on a fresh limiter would make GCRA refuse everything.
      *
+     * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
+     *   Per-call clock override.
      * @returns {number} A non-negative whole number.
      */
-    available(options?: {}): number;
+    available(options?: import("../utils/limiterClock.js").LimiterNowOptions): number;
+    /**
+     * How many operations the budget at `now` covers, given the pre-update TAT.
+     *
+     * The single source of truth for admission. `tryConsume` compares against
+     * `count` and `available()` returns it, so the two cannot disagree — which is
+     * the point, because as separate expressions they did: `floor(remaining /
+     * emission) + 1` and `remaining >= (n - 1) * emission` are equal in exact
+     * arithmetic and *not* in floating point, and the disagreement showed up as a
+     * limiter admitting a batch its own `available()` had just refused.
+     *
+     * The `+ 1` is not slack. The check is made against the *pre-update* TAT, so
+     * at an idle instant the very first operation always fits, and an idle
+     * `burst: b` limiter covers `b + 1` operations back to back. `PowerRateLimit`
+     * depends on that number: it pre-checks `available() < want` and refuses
+     * without calling `tryConsume`, so reporting `0` on a fresh limiter would
+     * make GCRA refuse everything once composed.
+     *
+     * @param {number} tat - Pre-update TAT, from {@link PowerGCRA#_tatAt}.
+     * @param {number} now - Current clock reading in ms.
+     * @returns {number} A non-negative whole number of operations.
+     * @private
+     */
+    private _covers;
+    /**
+     * Milliseconds of tolerance still unspent at `now`, given the pre-update TAT.
+     *
+     * Extracted so admission, availability and {@link PowerGCRA#retryAfter} all
+     * read the same number by the same subtraction. Each of them had its own
+     * spelling before, and the three disagreed in the last bit — see
+     * {@link PowerGCRA#retryAfter}.
+     *
+     * @param {number} tat - Pre-update TAT, from {@link PowerGCRA#_tatAt}.
+     * @param {number} now - Current clock reading in ms.
+     * @returns {number} Milliseconds remaining; negative when the TAT is ahead.
+     * @private
+     */
+    private _remainingAt;
+    /**
+     * The pre-update TAT at `now`, clamped so it never sits in the past.
+     *
+     * Three methods need this exact pair — `tryConsume`, `retryAfter` and
+     * `available` — and the `-Infinity` sentinel is what distinguishes "no
+     * history" from "history that a backwards clock put behind us". Inlining it
+     * three times is how the batch check came to omit its own span: the clamping
+     * was duplicated but the predicate was not.
+     *
+     * @param {number} now - Current clock reading in ms.
+     * @returns {number} The TAT to decide against.
+     * @private
+     */
+    private _tatAt;
     /**
      * Whether the limiter would accept a single operation right now, without
      * consuming it. Same shape as `PowerThrottle.available()` for composition.
@@ -126,6 +216,40 @@ export class PowerGCRA {
      * @returns {{rate:number, per:number, burst:number, emissionInterval:number, delayTolerance:number, tat:number|null}}
      */
     stats(): {
+        rate: number;
+        per: number;
+        burst: number;
+        emissionInterval: number;
+        delayTolerance: number;
+        tat: number | null;
+    };
+    /**
+     * Alias for {@link stats}, so a caller who learned `getStats()` from
+     * `PowerPool` — the one class that has always spelled it this way — is not
+     * handed `TypeError: x.getStats is not a function` here.
+     *
+     * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+     * `getStats()`, with no stated rule and nothing pinning it, which reached the
+     * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+     * spellings work everywhere now. `stats()` is canonical and this delegates to
+     * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+     * library would be a breaking change.
+     *
+     * Written out per class rather than installed on the prototype on purpose: a
+     * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+     * `types/` omitted it and a TypeScript caller got a type error on a method
+     * that worked at runtime. That was the first implementation.
+     *
+     * **No `@returns` tag, and that is load-bearing.** The first version carried a
+     * hand-copied copy of the `stats()` return shape, on the reasoning that an
+     * explicit type was safer. It is not: the copy went stale the moment a
+     * concurrent change added `staleServes` and `expirations` to `PowerCache`
+     * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+     * byte-identical published type and cannot drift, because there is nothing to
+     * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+     * which is the property a consumer relies on.
+     */
+    getStats(): {
         rate: number;
         per: number;
         burst: number;

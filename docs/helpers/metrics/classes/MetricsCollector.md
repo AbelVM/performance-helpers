@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/metrics](../README.md) / MetricsCollector
 
@@ -9,7 +9,7 @@
 Collects point-in-time snapshots from one or more helpers.
 
 A collector does not own the helpers. It is handed their `stats()` — however
-often you choose, and a _reference_ rather than the instance, so a caller can
+often you choose, and a *reference* rather than the instance, so a caller can
 sample a pool every request and a cache every minute through the same
 collector. Sampling is therefore the caller's decision, and the deliberate
 design point is that **draining is explicit** rather than push-based: a
@@ -44,7 +44,7 @@ series['cache.hitRate']; // stable key, whatever cache.stats() is shaped like
 `string`
 
 Prepended to every series key, so two
-collectors in one process do not collide.
+  collectors in one process do not collide.
 
 #### Returns
 
@@ -56,7 +56,7 @@ collectors in one process do not collide.
 
 > **\_prefix**: `string`
 
----
+***
 
 ### \_sources
 
@@ -74,7 +74,7 @@ The registered source names.
 
 `string`[]
 
----
+***
 
 ### register()
 
@@ -105,7 +105,7 @@ Returns the source's current stats.
 
 `MetricsCollector`
 
----
+***
 
 ### snapshot()
 
@@ -142,7 +142,7 @@ everything except the broken thing, so the failure is recorded under
 
 > **version**: `number`
 
----
+***
 
 ### unregister()
 

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / READY\_STATE
 
@@ -11,7 +11,7 @@
 The four states of a socket's lifecycle, as constants.
 
 Defined here, in the one module every helper may import, so that
-`PowerWebSocketClient` and `PowerSocketAdapter` hand back the _same_ frozen
+`PowerWebSocketClient` and `PowerSocketAdapter` hand back the *same* frozen
 object. They are separate helpers for separate directions - one dials out,
 one wraps a socket somebody else accepted - and the adapter deliberately does
 not import the client, because doing so would pull the whole reconnect

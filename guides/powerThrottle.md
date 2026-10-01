@@ -4,13 +4,12 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 
 ## Constructor
 
-| option           |                 type |    default | description                                                                                        |
-| ---------------- | -------------------: | ---------: | -------------------------------------------------------------------------------------------------- |
-| `capacity`       |             `number` |        `1` | Maximum tokens the bucket can hold.                                                                |
-| `tokens`         |             `number` | `capacity` | Initial token count (clamped to `capacity`).                                                       |
-| `refillRate`     |             `number` |        `0` | Tokens added per second (fractional accumulation supported).                                       |
-| `refillInterval` |             `number` |     `1000` | Internal bookkeeping interval (ms) used for refill math.                                           |
-| `now`            | `function(): number` |  `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| option       |                 type |    default | description                                                                                        |
+| ------------ | -------------------: | ---------: | -------------------------------------------------------------------------------------------------- |
+| `capacity`   |             `number` |        `1` | Maximum tokens the bucket can hold.                                                                |
+| `tokens`     |             `number` | `capacity` | Initial token count (clamped to `capacity`).                                                       |
+| `refillRate` |             `number` |        `0` | Tokens added per second (fractional accumulation supported).                                       |
+| `now`        | `function(): number` |  `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
 
 ## API
 

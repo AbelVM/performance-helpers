@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerDefer](../README.md) / PowerDefer
 
@@ -11,7 +11,7 @@ PowerDefer
 Deferred promise utility exposing `promise`, `resolve` and `reject` helpers.
 Useful when needing a promise whose resolution is controlled externally.
 
-PowerDefer
+ PowerDefer
 
 ## Constructors
 
@@ -29,13 +29,13 @@ PowerDefer
 
 > **\_settled**: `boolean`
 
----
+***
 
 ### \_status
 
 > **\_status**: `"pending"` \| `"fulfilled"` \| `"rejected"`
 
----
+***
 
 ### promise
 
@@ -55,7 +55,7 @@ Convenience boolean: true if resolved successfully
 
 `boolean`
 
----
+***
 
 ### rejected
 
@@ -69,7 +69,7 @@ Convenience boolean: true if rejected
 
 `boolean`
 
----
+***
 
 ### settled
 
@@ -83,7 +83,7 @@ Whether the deferred has been settled.
 
 `boolean`
 
----
+***
 
 ### status
 
@@ -115,7 +115,7 @@ Reject the deferred promise. No-op if already settled.
 
 `void`
 
----
+***
 
 ### resolve()
 

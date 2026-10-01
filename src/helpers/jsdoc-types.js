@@ -447,6 +447,18 @@ export {};
  */
 
 /**
+ * Per-call options on `PowerRateLimit.tryConsume(n, options)` and
+ * `PowerRateLimit.reserve(n, options)`.
+ *
+ * `context` is what `keyFn` is called with. It is typed `any` rather than a
+ * caller-chosen shape because the class cannot know what a caller wants to key
+ * on - a tenant id, a request object, a `Request` - and the alternative is a
+ * generic parameter on the class for no benefit. `keyFn` receives it whole.
+ *
+ * @typedef {LimiterNowOptions & { context?: any, atomic?: boolean }} PowerRateLimitCallOptions
+ */
+
+/**
  * A normalised inbound socket message, identical across all three transport
  * models.
  *
@@ -754,7 +766,26 @@ export {};
  *   See `adr/0003-tinylfu-admission-window.md`.
  * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits
  *   the list into probation and protected segments and promotes on access, which
- *   resists a one-off sequential scan. Defaults to `'lru'`.
+ *   resists a one-off sequential scan. Defaults to `'lru'`. * @property {boolean} [allowStale=false] Serve a stale value on
+ *   `getOrSet`/`getOrSetAsync` **by default**, so the flag is not repeated at
+ *   every call site. Requires an explicit `staleTtl` — see below. A per-call
+ *   `staleWhileRevalidate` still wins, and `false` here only stops it being the
+ *   default.
+ * @property {number} [staleTtl=Infinity] How long **past `expiresAt`** a stale
+ *   value may still be served while a refresh runs in the background. `0`
+ *   disables stale serving; `Infinity` leaves it unbounded.
+ *
+ *   `Infinity` is the default for compatibility: the per-call
+ *   `staleWhileRevalidate: true` flag already existed and already served stale
+ *   with **no upper bound**, and changing that silently would break every
+ *   existing caller with no error. The new instance-level surface is the part
+ *   that is safe by construction — `allowStale` without `staleTtl` throws,
+ *   because a window with no bound serves a value expired at any point in the
+ *   past (measured at five years). Pass the window you can tolerate, or
+ *   `Infinity` to opt out of one on purpose.
+ * @property {?(function(): (Promise<*>|*))} [fetchMethod] Default producer for
+ *   {@link PowerCache#getOrFetch}. A per-call factory overrides it.
+
  */
 
 /**
@@ -821,6 +852,16 @@ export {};
  * @property {number} [initialTokens=capacity] Permits available at
  *   construction. `0` is legal and meaningful - "start with nothing and let it
  *   refill" is the point of a token bucket - and is clamped to `capacity`.
+ * @property {string} [className] Class name to use in validation messages.
+ *   `PowerSemaphore` wraps a gate and passes its own name, so an error from
+ *   `new PowerSemaphore(0)` says "PowerSemaphore: `limit`" rather than naming an
+ *   internal class and an option that does not exist on the class the caller
+ *   constructed. That is what `assertLimitRequired`'s `className` is for.
+ * @property {string} [limitName] Option name to use for the permit count in
+ *   validation messages - `limit` for `PowerSemaphore`, `capacity` here. Only
+ *   the permit count borrows the wrapper's vocabulary: `queueCapacity` and
+ *   `initialTokens` keep the gate's own names, because a class exposing neither
+ *   would have to invent them to be told about them.
  */
 
 /**
@@ -956,13 +997,42 @@ export {};
  *   composed limiters. Requires each to expose `available()` or an undo
  *   primitive (`reserve`/`release`, or `addTokens`); when a safe rollback cannot
  *   be guaranteed the call returns `false`.
+ * @property {function(any): string} [keyFn] Enables per-key limiting (Bottleneck
+ *   `Group`-shaped). Called with the per-call `context` and returning the key;
+ *   each distinct key gets its own budget. **Requires every entry of `limiters`
+ *   to be a factory** `(slotIndex) => limiter`, because a shared instance cannot
+ *   hold per-key budgets.
+ * @property {number} [buckets=1024] Number of hash slots for `keyFn`. Keys are
+ *   hashed into a fixed array and **nothing is ever evicted**, so this is a hard
+ *   bound on memory rather than a cache size - which is the point: evicting a
+ *   per-key limiter would discard that key's consumed budget and hand it a fresh
+ *   allowance. The cost is that two keys hashing to the same slot **share a
+ *   budget**.
  *
- * Per-call `tryConsume(n, options)` also accepts a `{ now }` number - read
+ * Per-call `tryConsume(n, options)` also accepts a `{ context }` value, which is
+ * what `keyFn` is called with, and a `{ now }` number - read
  * **once per composed call** and threaded into every leg (PERF-007). There is
  * deliberately no constructor `now` here: on the limiters `now` is a *function*,
  * and having one name mean a function in one place and a number in another on
  * the same class is a trap. The composer needs no injected clock of its own,
  * because the per-call value covers every use the limiters' injection does.
+ */
+
+/**
+ * Per-call options for `PowerCache.getOrFetch(key, factory?, options?)`.
+ *
+ * Declared as its own name rather than reusing the `getOrSetAsync` options
+ * typedef, because that one is declared on the method it belongs to and
+ * importing it from here would be circular. The surface is the same today; if
+ * `getOrSetAsync`'s options grow, this should follow it rather than be widened
+ * speculatively.
+ *
+ * @typedef {Object} PowerCacheGetOrFetchOptions
+ * @property {number} [ttl] - Time-to-live in ms for the stored value.
+ * @property {number} [weight] - Optional explicit weight.
+ * @property {boolean} [staleWhileRevalidate] - Serve a stale value while
+ *   refreshing in the background.
+ * @property {number} [timeout] - Per-call override of `defaultAsyncTimeout`.
  */
 
 /**

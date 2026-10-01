@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerRateLimit](../README.md) / PowerRateLimit
 
@@ -11,7 +11,7 @@ PowerRateLimit
 Compose multiple rate limiters and provide a unified `tryConsume`/`reserve` API.
 Returns success only when all underlying limiters allow consumption.
 
-PowerRateLimit
+ PowerRateLimit
 
 ## Constructors
 
@@ -26,18 +26,18 @@ PowerRateLimit
 `RateLimiterLike`[] = `[]`
 
 Limiter instances to compose. Each
-must provide `tryConsume(n)`; `reserve`, `release`, `addTokens`,
-`rollback` and `available` are used when present.
+  must provide `tryConsume(n)`; `reserve`, `release`, `addTokens`,
+  `rollback` and `available` are used when present.
 
 ##### options?
 
 `PowerRateLimitOptions` = `{}`
 
 `atomic` attempts all-or-nothing
-semantics: either every limiter allows the consumption or none is left
-mutated. That requires each to expose `available()` or an undo primitive
-(`reserve`/`release`, or `addTokens`). When a safe rollback cannot be
-guaranteed the call returns `false`.
+  semantics: either every limiter allows the consumption or none is left
+  mutated. That requires each to expose `available()` or an undo primitive
+  (`reserve`/`release`, or `addTokens`). When a safe rollback cannot be
+  guaranteed the call returns `false`.
 
 #### Returns
 
@@ -45,11 +45,29 @@ guaranteed the call returns `false`.
 
 ## Properties
 
+### \_slots
+
+> **\_slots**: (`RateLimiterLike`[] \| `null`)[]
+
+***
+
 ### atomicDefault
 
 > **atomicDefault**: `boolean`
 
----
+***
+
+### buckets
+
+> **buckets**: `number`
+
+***
+
+### keyFn
+
+> **keyFn**: ((`arg0`) => `string`) \| `null`
+
+***
 
 ### limiters
 
@@ -75,7 +93,7 @@ guaranteed the call returns `false`.
 
 `Promise`\<`any`\>
 
----
+***
 
 ### available()
 
@@ -83,16 +101,41 @@ guaranteed the call returns `false`.
 
 Return the minimum available tokens across all limiters.
 If any limiter does not expose `available()`, this returns `0`.
+With `keyFn`, `options.context` selects the key whose slot is measured —
+without it the result is the shared default slot's.
 
 #### Parameters
 
 ##### options?
 
+`PowerRateLimitCallOptions` = `{}`
+
 #### Returns
 
 `number`
 
----
+***
+
+### limitersFor()
+
+> **limitersFor**(`key`): `RateLimiterLike`[] \| `null`
+
+The per-key limiter set for `key`, for a caller that wants to inspect or
+drive one key directly (a `retryAfter` in a `Retry-After` header, say).
+
+#### Parameters
+
+##### key
+
+`string`
+
+#### Returns
+
+`RateLimiterLike`[] \| `null`
+
+`null` when no `keyFn` is configured.
+
+***
 
 ### release()
 
@@ -101,6 +144,12 @@ If any limiter does not expose `available()`, this returns `0`.
 Release a prior reservation token or numeric count back to the limiters.
 This accepts the same token object produced by `reserve()` or a numeric
 count to return tokens directly.
+
+Deliberately still coercing rather than calling `assertCount`, because this
+is the *return* path and not the admission path. A count that cannot be
+read returns nothing, which is the safe direction: admitting a request you
+cannot price is how a limiter is bypassed, whereas returning nothing merely
+over-charges the caller.
 
 #### Parameters
 
@@ -112,11 +161,11 @@ count to return tokens directly.
 
 `void`
 
----
+***
 
 ### reserve()
 
-> **reserve**(`n?`): \{ `n`: `number`; \} \| `null`
+> **reserve**(`n?`, `options?`): \{ `n`: `number`; \} \| `null`
 
 Reserve `n` tokens across all limiters and return a token to undo later.
 Returns `null` when reservation fails.
@@ -129,11 +178,19 @@ be consumed by `release(token)` or `rollback(token)` to restore the limiters.
 
 `number` = `1`
 
+##### options?
+
+`PowerRateLimitCallOptions` = `{}`
+
+Per-call overrides; `context`
+  selects the `keyFn` slot, so a reservation is made against the same
+  budget the caller's own `tryConsume` will spend.
+
 #### Returns
 
 \{ `n`: `number`; \} \| `null`
 
----
+***
 
 ### reset()
 
@@ -141,11 +198,16 @@ be consumed by `release(token)` or `rollback(token)` to restore the limiters.
 
 Reset all underlying limiters where supported.
 
+With `keyFn`, every **built** slot is reset rather than the factory list:
+the factories are not limiters and resetting them would rebuild nothing.
+Built slots stay built, because discarding them would hand every tenant a
+fresh allowance — the eviction-is-a-reset bypass this design exists to avoid.
+
 #### Returns
 
 `void`
 
----
+***
 
 ### rollback()
 
@@ -161,7 +223,7 @@ Reset all underlying limiters where supported.
 
 `void`
 
----
+***
 
 ### tryConsume()
 
@@ -192,11 +254,11 @@ Tokens to consume.
 
 ##### options?
 
-`PowerRateLimitOptions` & `LimiterNowOptions` = `{}`
+`PowerRateLimitCallOptions` = `{}`
 
-Per-call
-overrides; `atomic` defaults to the instance setting, and `now` supplies
-the single clock reading threaded into every leg.
+Per-call overrides; `atomic`
+  defaults to the instance setting, `now` supplies the single clock reading
+  threaded into every leg, and `context` is what `keyFn` is called with.
 
 #### Returns
 

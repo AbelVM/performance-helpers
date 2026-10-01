@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerMessageCodec](../README.md) / CODECS
 
@@ -20,7 +20,7 @@ Frame payload codecs.
 
 > **JSON**: `0`
 
----
+***
 
 ### RAW
 

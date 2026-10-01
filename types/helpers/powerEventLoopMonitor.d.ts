@@ -164,6 +164,44 @@ export class PowerEventLoopMonitor {
         blockedOver10ms: number;
     };
     /**
+     * Alias for {@link stats}, so a caller who learned `getStats()` from
+     * `PowerPool` — the one class that has always spelled it this way — is not
+     * handed `TypeError: x.getStats is not a function` here.
+     *
+     * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+     * `getStats()`, with no stated rule and nothing pinning it, which reached the
+     * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+     * spellings work everywhere now. `stats()` is canonical and this delegates to
+     * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+     * library would be a breaking change.
+     *
+     * Written out per class rather than installed on the prototype on purpose: a
+     * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+     * `types/` omitted it and a TypeScript caller got a type error on a method
+     * that worked at runtime. That was the first implementation.
+     *
+     * **No `@returns` tag, and that is load-bearing.** The first version carried a
+     * hand-copied copy of the `stats()` return shape, on the reasoning that an
+     * explicit type was safer. It is not: the copy went stale the moment a
+     * concurrent change added `staleServes` and `expirations` to `PowerCache`
+     * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+     * byte-identical published type and cannot drift, because there is nothing to
+     * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+     * which is the property a consumer relies on.
+     */
+    getStats(): {
+        active: boolean;
+        intervalMs: number;
+        samples: number;
+        last: number;
+        max: number;
+        mean: number | null;
+        p50: number | null;
+        p99: number | null;
+        p99_9: number | null;
+        blockedOver10ms: number;
+    };
+    /**
      * Stop sampling and release the timer. Safe to call more than once.
      *
      * This is the only thing that unregisters the metrics receipt, and it is

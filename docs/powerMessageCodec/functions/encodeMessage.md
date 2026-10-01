@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerMessageCodec](../README.md) / encodeMessage
 
@@ -25,7 +25,7 @@ The value to encode.
 `"json"` \| `"raw"`
 
 Force a codec. Defaults to
-[selectCodec](selectCodec.md).
+  [selectCodec](selectCodec.md).
 
 ## Returns
 
@@ -36,4 +36,4 @@ A framed message, ready to `postMessage` or send.
 ## Throws
 
 On an unknown codec, or when `raw` is forced for a
-non-binary value.
+  non-binary value.

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerLogger](../README.md) / PowerLogger
 
@@ -27,9 +27,9 @@ Initial debug level (0..3)
 `PowerLoggerOptions` = `{}`
 
 The `PowerLoggerOptions` typedef
-already existed and already declared `name`/`formatter`/`output`; the
-constructor was taking a bare `{Object}` instead, which is why reading
-any of them was an error and a custom sink needed a cast.
+  already existed and already declared `name`/`formatter`/`output`; the
+  constructor was taking a bare `{Object}` instead, which is why reading
+  any of them was an error and a custom sink needed a cast.
 
 #### Returns
 
@@ -41,31 +41,31 @@ any of them was an error and a custom sink needed a cast.
 
 > **\_counters**: `any`
 
----
+***
 
 ### \_debugLevel
 
 > **\_debugLevel**: `number`
 
----
+***
 
 ### \_format
 
 > **\_format**: `"json"` \| `"text"`
 
----
+***
 
 ### \_formatter
 
 > **\_formatter**: ((`payload`) => `string` \| `PowerLoggerPayload` \| `null`) \| `null`
 
----
+***
 
 ### \_output
 
 > **\_output**: ((`payload`) => `void`) \| `null`
 
----
+***
 
 ### name
 
@@ -96,7 +96,7 @@ The value thrown by the sink.
 
 `void`
 
----
+***
 
 ### debug()
 
@@ -116,7 +116,7 @@ Supports JSON mode similar to other methods.
 
 `void`
 
----
+***
 
 ### error()
 
@@ -138,7 +138,7 @@ so a sink always receives a readable message instead of an `Error` object.
 
 `void`
 
----
+***
 
 ### getDebugCounters()
 
@@ -150,7 +150,7 @@ Read counters as a plain object snapshot.
 
 `Record`\<`string`, `number`\>
 
----
+***
 
 ### getDebugLevel()
 
@@ -164,7 +164,7 @@ Get the current debug level.
 
 The configured debug level (0..3)
 
----
+***
 
 ### incrementCounter()
 
@@ -183,7 +183,7 @@ Useful for lightweight instrumentation in tests.
 
 `void`
 
----
+***
 
 ### info()
 
@@ -201,7 +201,7 @@ Log an info-level message when debug level is >= 3.
 
 `void`
 
----
+***
 
 ### isDebug()
 
@@ -213,7 +213,7 @@ Convenience: whether any debugging is enabled (level > 0).
 
 `boolean`
 
----
+***
 
 ### isDebugLevel()
 
@@ -231,7 +231,7 @@ Determine whether the current debug level is >= `level`.
 
 `boolean`
 
----
+***
 
 ### log()
 
@@ -249,7 +249,7 @@ Log a verbose message when debug level is >= 3.
 
 `void`
 
----
+***
 
 ### resetDebugCounters()
 
@@ -261,7 +261,7 @@ Reset all internal counters (test helper).
 
 `void`
 
----
+***
 
 ### setDebugLevel()
 
@@ -285,7 +285,7 @@ Integer in range 0..3
 
 `void`
 
----
+***
 
 ### table()
 
@@ -304,7 +304,7 @@ In JSON mode emits `{ level: 'table', msg: args, ts }` where `msg` is an array o
 
 `void`
 
----
+***
 
 ### warn()
 

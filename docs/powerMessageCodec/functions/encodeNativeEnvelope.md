@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerMessageCodec](../README.md) / encodeNativeEnvelope
 
@@ -31,7 +31,7 @@ case, a message with no binary in it, pays nothing.
 `string`
 
 Echoed in replies. Top-level, not
-nested, because that is where the pool looks when settling a response.
+  nested, because that is where the pool looks when settling a response.
 
 ## Returns
 

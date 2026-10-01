@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / DEFAULT\_MAX\_DRAIN\_WAITERS
 
@@ -8,7 +8,7 @@
 
 > `const` **DEFAULT\_MAX\_DRAIN\_WAITERS**: `100` = `100`
 
-Ceiling on how many `PowerPool.drain()` calls may be _waiting_ at once.
+Ceiling on how many `PowerPool.drain()` calls may be *waiting* at once.
 
 `drain()` registers an `idle` listener, so N concurrent drains are N
 listeners and N closures retained until the pool next goes idle. A caller

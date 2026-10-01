@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/metrics](../README.md) / attach
 
@@ -30,7 +30,7 @@ The helper being registered.
 `string`
 
 Series prefix. Use a discriminator when more than one
-of the same helper is in one process, e.g. `cache.images`.
+  of the same helper is in one process, e.g. `cache.images`.
 
 ### options?
 
@@ -41,19 +41,19 @@ The helper's own options object.
 `boolean` \| [`MetricsCollector`](../classes/MetricsCollector.md)
 
 `true` for the
-shared collector, or a collector to register with. Anything else — the
-default `false`, a bad value — registers nothing and costs nothing.
+  shared collector, or a collector to register with. Anything else — the
+  default `false`, a bad value — registers nothing and costs nothing.
 
 ## Returns
 
 \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
 The receipt,
-or `null` when the helper is not observable. The receipt carries a bound
-`unregister` rather than the collector, which is what lets every helper's
-`_metrics` field stay a plain object type in the published declarations —
-a bare class name here would be emitted into nine `.d.ts` files with no
-import to resolve it against.
+  or `null` when the helper is not observable. The receipt carries a bound
+  `unregister` rather than the collector, which is what lets every helper's
+  `_metrics` field stay a plain object type in the published declarations —
+  a bare class name here would be emitted into nine `.d.ts` files with no
+  import to resolve it against.
 
 ## Example
 

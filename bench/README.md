@@ -81,6 +81,7 @@ Environment variables (defaults shown)
 
 ```bash
 node bench/claims.js zipf      # cache admission policies under a Zipf + scan workload
+node bench/claims.js sieve     # SIEVE eviction policy, against what ships
 node bench/claims.js latency   # PowerHistogram quantile accuracy across 4 decades of scale
 ```
 
@@ -89,6 +90,22 @@ Both report **ratios over a whole run** — hit rate, and quantile relative erro
 The `zipf` workload drives every policy with a **byte-identical seeded key stream**, so a difference between two rows is attributable to the policy rather than to a different input. It also **refuses to run** when `maxEntries` exceeds the working set: a cache that can hold the whole working set has no admission problem, every policy ties near 100%, and the run would prove nothing. Parameters are overridable — `CLAIM_ZIPF`, `CLAIM_WORKING_SET`, `CLAIM_MAX_ENTRIES`, `CLAIM_SCAN_KEYS`, `CLAIM_SCAN_EVERY`, `CLAIM_REPEATS` — and the seed is shared with `run.js` so a result is reproducible.
 
 **`zipf` currently reports a failure.** `admission: 'tynilfu'` is meant to protect a working set from a scan; on a cold cache it does the opposite, measuring a 2.5% hit rate against plain LRU's 66.4%. The release note's original claim for this feature has been withdrawn accordingly. Run the benchmark rather than trusting either the old note or this paragraph.
+
+**`sieve` reports a negative result, and that is the finding.** SIEVE is implemented _in the bench file_, not in `src/`: the claim under test is whether a policy beats what ships, so the policy was measured before the library gained it. It sits beside a hand-rolled plain-LRU **control** that differs from it in exactly one respect — three pointer writes per hit instead of one bit store — and that control reproduces shipped `PowerCache` exactly on both traces, which is what makes the SIEVE row a difference in policy rather than a difference in structure.
+
+It does not pay here. On zipf + scan, SIEVE measures **26.4 %** against LRU's **27.0 %**; scan-heavy, **51.1 %** against **51.0 %** — a tie. The paper's cost claim does not reproduce either: the hit really is cheaper in principle and it is **slower** in practice here (137 ns/op against the control's 105).
+
+Read the row, not just the verdict: **the benchmark is silent on the paper's headline claim.** "No lock on a hit, 2× a 16-thread LRU" is about _concurrent_ caches, and a single-threaded Node run cannot measure lock contention. This measures the portable half — miss ratio — and says only that it does not transfer to these traces. It is not evidence against SIEVE for a lock-contended multicore cache.
+
+Two trace-design notes worth keeping, because both produced wrong numbers before the right one. The working set must **exceed** capacity: the first scan-heavy run used 300 against 500 and every policy survived 300/300, so the scan fit in the slack and nothing was ever evicted — the comparison was vacuous. And SIEVE's hand is **persistent and one-way**; resetting it per eviction is a CLOCK sweep, a weaker policy that is not SIEVE, and it reported a 5-point loss. Hit rates here are deterministic — same seed, identical survivors across runs — so only the ns/op column moves.
+
+Parameters: `CLAIM_SIEVE_CAPACITY`, `CLAIM_SIEVE_SEED`, `CLAIM_SIEVE_WORKING`, `CLAIM_SIEVE_SCAN_EVERY`, `CLAIM_SIEVE_SCAN_KEYS`, `CLAIM_SIEVE_ZIPF`.
+
+The same mode also benches the **generational two-`Map`** structure (`quick-lru` / `hashlru`), and that row is the more interesting one. At the configured `maxEntries` it shows the largest number in the table — **+13.0 points** over LRU on scan-heavy — and gets there by **peaking at 1003 entries against a configured 500**. That is the row's own "up to 2x over-fill" bound, reproduced exactly. Sized so its peak lands at 502 instead, it scores **35.5 %** against LRU's 51.0 %: **the entire margin was the memory.**
+
+Read the `peak` column before the verdict, always. For `PowerCache` specifically, `maxEntries` is not a memory hint but a contract — `_evictIfNeeded` loops while `_map.size > this.maxEntries` and `stats().size` is public — so a structure holding 2x `maxEntries` breaks a published guarantee rather than exceeding a soft one. `bench: generational @ half cap` exists for exactly this comparison; without it the full-capacity row reads as a win.
+
+What survives is the structural claim, which was the genuinely new part of the proposal: no cursor and no node pool makes CACHE-001 _structurally_ impossible rather than merely unreachable-by-inspection. That is a real property — and CACHE-001 is closed as not reproducible, so it prevents a bug that does not exist.
 
 ## `baseline.js` — a timing gate that knows it is on a machine
 

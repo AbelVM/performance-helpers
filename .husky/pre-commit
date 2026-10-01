@@ -24,6 +24,20 @@
 #      to go stale silently, because nothing about editing `src/` mentions it.
 #      Regenerating and staging it here means a commit that changes a JSDoc type
 #      can no longer leave the published `.d.ts` describing the old one.
+#
+#   3. docs:generate - the same staleness, one file tree further out. `docs/` is
+#      generated AND committed, because the project website links into it, and
+#      `docs:drift` is the one step of `npm run verify` that *rewrites* the
+#      committed tree before asking whether the commit matched. That makes it a
+#      different shape of check from `types:drift`: it cannot be satisfied by
+#      running the command and committing whatever falls out, because a bare
+#      `git diff -- docs` would pass forever once the tree is regenerated in the
+#      working copy. The commit has to contain the regenerated docs.
+#
+#      Leaving this out meant a JSDoc-only commit passed the hook and then failed
+#      step 9 of `verify` in CI - three steps to discover on the machine instead
+#      of one, on the commit that caused it. It failed correctly every time it
+#      fired; the gap was only in *where* it fired.
 npx --no-install lint-staged
 
 # Keep `types/` in step with `src/`. Cheap, and it is the check that is easiest
@@ -33,4 +47,15 @@ npm run --silent types:generate
 if ! git diff --quiet -- types; then
   echo "types/ was out of date; staging the regenerated declarations."
   git add types
+fi
+
+# Keep `docs/` in step too. `typedoc.json` sets `cleanOutputDir: true`, so this
+# regenerates the whole 1.7 MB tree rather than diffing against it - there is no
+# incremental mode. That is a few seconds, against a CI failure that costs a
+# red build and a bisect.
+npm run --silent docs
+
+if ! git diff --quiet -- docs; then
+  echo "docs/ was out of date; staging the regenerated reference."
+  git add docs
 fi

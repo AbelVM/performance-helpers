@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerMessageCodec](../README.md) / decodeMessage
 
@@ -25,22 +25,22 @@ The frame.
 `boolean`
 
 For a `raw` frame, return a
-`Uint8Array` view over the frame instead of copying the payload out.
+  `Uint8Array` view over the frame instead of copying the payload out.
 
 #### strict?
 
 `boolean`
 
 Reject an unknown protocol version
-instead of attempting a best-effort decode. A future version may change the
-layout, so silently mis-parsing is worse than a clear error.
+  instead of attempting a best-effort decode. A future version may change the
+  layout, so silently mis-parsing is worse than a clear error.
 
 ## Returns
 
 `object`
 
 `byteLength` is the total framed length, which lets a stream reader know how
-much to consume.
+  much to consume.
 
 ### byteLength
 

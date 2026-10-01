@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / DEFAULT\_CIRCUIT\_MIN\_JITTER\_RATIO
 
@@ -11,7 +11,7 @@
 Floor on the jittered open window, as a fraction of the computed backoff.
 
 This is **equal jitter** (the window is drawn uniformly from
-`[delay / 2, delay]`), not AWS-style _full_ jitter (`[0, delay]`), and the
+`[delay / 2, delay]`), not AWS-style *full* jitter (`[0, delay]`), and the
 distinction matters for a circuit breaker specifically. Full jitter is right
 for a retry delay, where the goal is to spread attempts. For a breaker's open
 window the goal is different: the window has to be long enough to actually

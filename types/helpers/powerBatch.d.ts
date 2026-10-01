@@ -40,9 +40,15 @@ export class PowerBatch {
      * that resolves or rejects with the handler outcome.
      * If the queue is empty and nothing is scheduled, the returned promise
      * resolves immediately.
+     * @param {{signal?: AbortSignal}} [options] `signal` abandons this caller's
+     *   *wait* for the flush, not the flush itself — queued items still belong to
+     *   the callers who passed them to `add()`, so the shared pending promise is
+     *   deliberately left to settle.
      * @returns {Promise<void>}
      */
-    flush(options?: {}): Promise<void>;
+    flush(options?: {
+        signal?: AbortSignal;
+    }): Promise<void>;
     /**
      * The pending entry for the batch being assembled, created on first use.
      *

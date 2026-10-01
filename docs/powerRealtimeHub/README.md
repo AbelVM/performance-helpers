@@ -1,6 +1,6 @@
 [**performance-helpers**](../README.md)
 
----
+***
 
 [performance-helpers](../README.md) / powerRealtimeHub
 
@@ -19,7 +19,7 @@ ws.send(payload)`. That fails in two ways that only show up in production:
 2. **Nothing tells you it happened.** There is no signal that a client has
    fallen behind, so you cannot shed load deliberately.
 
-This hub gives every subscription its own bounded queue and a _declared_
+This hub gives every subscription its own bounded queue and a *declared*
 policy for when that queue fills. A slow consumer is then a bounded,
 observable, per-subscriber problem instead of a process-wide one.
 

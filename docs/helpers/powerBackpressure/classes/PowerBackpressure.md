@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerBackpressure](../README.md) / PowerBackpressure
 
@@ -23,7 +23,7 @@
 `PowerBackpressureOptions` = `{}`
 
 `capacity` and `queueCapacity`
-are inherited from `PowerPermitGate`; the rest tune the refill schedule.
+  are inherited from `PowerPermitGate`; the rest tune the refill schedule.
 
 #### Returns
 
@@ -59,13 +59,13 @@ are inherited from `PowerPermitGate`; the rest tune the refill schedule.
 
 > **min**: `number`
 
----
+***
 
 ### \_adaptiveHeartbeat
 
 > **\_adaptiveHeartbeat**: `boolean`
 
----
+***
 
 ### \_available
 
@@ -75,13 +75,13 @@ are inherited from `PowerPermitGate`; the rest tune the refill schedule.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_available`](../../powerPermitGate/classes/PowerPermitGate.md#_available)
 
----
+***
 
 ### \_baseRefillAmount
 
 > **\_baseRefillAmount**: `number`
 
----
+***
 
 ### \_capacity
 
@@ -91,13 +91,13 @@ are inherited from `PowerPermitGate`; the rest tune the refill schedule.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_capacity`](../../powerPermitGate/classes/PowerPermitGate.md#_capacity)
 
----
+***
 
 ### \_lowWaterMark
 
 > **\_lowWaterMark**: `number`
 
----
+***
 
 ### \_queueCapacity
 
@@ -107,25 +107,25 @@ are inherited from `PowerPermitGate`; the rest tune the refill schedule.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_queueCapacity`](../../powerPermitGate/classes/PowerPermitGate.md#_queuecapacity)
 
----
+***
 
 ### \_refillAmount
 
 > **\_refillAmount**: `number`
 
----
+***
 
 ### \_refillInterval
 
 > **\_refillInterval**: `number`
 
----
+***
 
 ### \_refillTimer
 
 > **\_refillTimer**: `any`
 
----
+***
 
 ### \_waiters
 
@@ -163,7 +163,7 @@ while the work is piling up. `_held` keeps counting. See ADR 0004.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`active`](../../powerPermitGate/classes/PowerPermitGate.md#active)
 
----
+***
 
 ### available
 
@@ -181,7 +181,7 @@ Available permits for producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`available`](../../powerPermitGate/classes/PowerPermitGate.md#available)
 
----
+***
 
 ### capacity
 
@@ -199,7 +199,7 @@ Maximum concurrent permits.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`capacity`](../../powerPermitGate/classes/PowerPermitGate.md#capacity)
 
----
+***
 
 ### isFull
 
@@ -217,7 +217,7 @@ True when the waiting queue is full.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`isFull`](../../powerPermitGate/classes/PowerPermitGate.md#isfull)
 
----
+***
 
 ### pending
 
@@ -235,7 +235,7 @@ Number of producers currently waiting for permits.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`pending`](../../powerPermitGate/classes/PowerPermitGate.md#pending)
 
----
+***
 
 ### queueCapacity
 
@@ -253,7 +253,7 @@ Maximum number of waiting producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`queueCapacity`](../../powerPermitGate/classes/PowerPermitGate.md#queuecapacity)
 
----
+***
 
 ### refillAmount
 
@@ -286,7 +286,7 @@ equal to the `refillAmount` option.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_makeRelease`](../../powerPermitGate/classes/PowerPermitGate.md#_makerelease)
 
----
+***
 
 ### \_performRefill()
 
@@ -296,7 +296,7 @@ equal to the `refillAmount` option.
 
 `void`
 
----
+***
 
 ### \_scheduleRefill()
 
@@ -306,7 +306,7 @@ equal to the `refillAmount` option.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -323,7 +323,7 @@ deterministically at scope exit.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`[dispose]`](../../powerPermitGate/classes/PowerPermitGate.md#dispose)
 
----
+***
 
 ### acquire()
 
@@ -340,8 +340,8 @@ Otherwise queues the producer until capacity frees.
 `Object` = `{}`
 
 `signal` aborts the wait: the returned promise
-rejects with an `AbortError` and the producer leaves the queue instead of
-holding a slot until a permit is refilled.
+  rejects with an `AbortError` and the producer leaves the queue instead of
+  holding a slot until a permit is refilled.
 
 #### Returns
 
@@ -353,7 +353,7 @@ Promise resolving to a release callback.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`acquire`](../../powerPermitGate/classes/PowerPermitGate.md#acquire)
 
----
+***
 
 ### dispose()
 
@@ -373,7 +373,7 @@ name to call.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`dispose`](../../powerPermitGate/classes/PowerPermitGate.md#dispose-1)
 
----
+***
 
 ### release()
 
@@ -397,7 +397,7 @@ Permits returned to the gate rather than transferred.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`release`](../../powerPermitGate/classes/PowerPermitGate.md#release)
 
----
+***
 
 ### reset()
 
@@ -413,7 +413,7 @@ Reset the controller to its initial capacity and clear waiting producers.
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`reset`](../../powerPermitGate/classes/PowerPermitGate.md#reset)
 
----
+***
 
 ### tryAcquire()
 

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / DEFAULT\_RETRY\_BUDGET\_CAPACITY
 
@@ -10,7 +10,7 @@
 
 Default retry-budget capacity, in retry tokens.
 
-This is a _burst_ allowance, not the steady-state rate - the steady state is
+This is a *burst* allowance, not the steady-state rate - the steady state is
 `ratio` tokens per original request, so a budget of ratio 0.2 that refills
 to 10 permits ten consecutive retries before it throttles to one per five
 requests. Sized so a short blip is absorbed without a budget check, and so

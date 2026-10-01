@@ -45,17 +45,87 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 - `getOrSet(key, factory, { ttl, weight, staleWhileRevalidate })` — Atomically read-or-compute a value. If `factory` is a function its result (or resolved Promise) is stored and returned. When `staleWhileRevalidate` is enabled, an expired value can be returned immediately while refresh happens in the background.
 
 - `getOrSetAsync(key, asyncFactory, { ttl, weight, staleWhileRevalidate })` — Async read-or-compute with inflight deduplication: concurrent callers share the same in-flight Promise and the resolved value is cached when settled. With `staleWhileRevalidate: true`, an expired cached value is returned immediately and the async factory refreshes the cache behind the scenes.
+- `getOrFetch(key, factory?, options?)` — `getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is given. The reason it exists: a `fetchMethod` on the instance removes a function literal from **every** call site, which is most of the cost of the async API in a hot path. A per-call factory still wins, so one cache can serve more than one kind of resource. Rejects with a `TypeError` if there is neither.
 
-  ```javascript
-  const cache = new PowerCache({ defaultTTL: 1000 });
-  cache.set('user:1', { name: 'Alice' }, { ttl: 1000 });
+### Stale-while-revalidate, and bounding it
 
-  // After the entry expires, staleWhileRevalidate returns the old value immediately
-  // and refreshes the cache in the background.
-  const stale = cache.getOrSet('user:1', () => fetchUser(1), {
-    staleWhileRevalidate: true,
-  });
-  ```
+An expired entry is a miss. `staleWhileRevalidate` changes that: it returns the
+expired value immediately and refreshes in the background.
+
+**Set a bound.** `staleTtl` is how long past `expiresAt` a stale value may still be
+served, and the reason it exists is a measured defect: with the flag alone there was
+**no upper bound at all**.
+
+```javascript
+const cache = new PowerCache({
+  allowStale: true, // stale by default, not at every call site
+  staleTtl: 30_000, // ...but never more than 30s past expiry
+});
+
+await cache.getOrFetch('user:42', () => fetchUser(42));
+```
+
+Measured before the bound existed, with the flag on:
+
+```
++500ms    served: old    refreshes: 0
++1 hour   served: old    refreshes: 1
++30 days  served: old    refreshes: 1
++5 years  served: old    refreshes: 1
+```
+
+A value **five years** past its expiry was still returned as "stale", with the
+refresh failing silently each time. That is serve-forever-while-refreshing, and it
+is the one failure mode the feature must not have: a caller asking for
+freshness-while-not-blocking is asking for it for a bounded time.
+
+| configuration                   | behaviour                                         |
+| ------------------------------- | ------------------------------------------------- |
+| `staleTtl: 0`                   | the feature is off — an expired entry is a miss   |
+| `staleTtl: 5000`                | stale within 5s of expiry, then recomputed        |
+| `staleTtl: Infinity`            | unbounded, on purpose                             |
+| per-call `staleWhileRevalidate` | overrides the instance default in both directions |
+| `allowStale` with no `staleTtl` | **throws** — see below                            |
+
+**`Infinity` is the default, deliberately.** The per-call
+`staleWhileRevalidate: true` flag already existed and already served stale
+unbounded, so defaulting to `0` would have silently switched that off for every
+existing caller — the flag would still be passed and nothing would be stale, with
+no error to notice. Instead the **new** surface is the safe one: `allowStale`
+without a `staleTtl` throws, so the unbounded window cannot be deployed by
+omission. `staleTtl: Infinity` stays available for a caller who wants it on purpose.
+
+An unreadable `staleTtl` (`'soon'`, `-1`, `NaN`) also throws rather than being
+coerced — an unparsed duration compares false against every entry and would
+silently disable the feature, which is the opposite of what a typo asks for.
+
+**Watch `stats().staleServes`.** A stale serve counts as a `hit` _and_ as a
+`staleServes`, so the two are distinguishable:
+
+```javascript
+cache.stats().hits; //          every serve that succeeded
+cache.stats().staleServes; //   the subset that was expired
+```
+
+This is the one number worth alerting on. An upstream that starts failing does
+not make requests fail — it makes them serve old data, and the hit rate looks
+_better_, not worse. Without this counter the failure mode is invisible.
+
+**Concurrency is already handled.** Concurrent callers on one expired key share a
+single in-flight fetch: 20 simultaneous `getOrSetAsync` calls run the factory
+**once**. That was true before this row and is pinned by a test, because the stale
+path is exactly where a regression there would go unnoticed.
+
+```javascript
+const cache = new PowerCache({ defaultTTL: 1000 });
+cache.set('user:1', { name: 'Alice' }, { ttl: 1000 });
+
+// After the entry expires, staleWhileRevalidate returns the old value immediately
+// and refreshes the cache in the background.
+const stale = cache.getOrSet('user:1', () => fetchUser(1), {
+  staleWhileRevalidate: true,
+});
+```
 
 - `resize({ maxEntries, maxWeight })` — Change cache caps and trigger eviction as needed.
 
@@ -256,13 +326,13 @@ The constructor always returns a `PowerMemoizer` instance. Use the instance meth
 
 #### Memoizer constructor params
 
-| param                  |                       type |         default | description                                                                                                                                                                                                                                                                  |
-| ---------------------- | -------------------------: | --------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fn`                   |                `Function?` |               — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied).                       |
-| `options.keyResolver`  | `function(...args):string` | `simpleArgsKey` | Function mapping call args to a stable cache key. **Changed in 2.0**: the default was `(...args) => JSON.stringify(args)`, which is ~35% slower for the scalar arguments memoizers are actually called with. The key _format_ differs, so a caller reading keys will see it. |
-| `options.cacheOptions` |                   `Object` |            `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                                                  |
-| `options.ttl`          |                  `number?` |     `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                           |
-| `options.weight`       |                  `number?` |     `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                             |
+| param                  |                       type |         default | description                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------------- | -------------------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `fn`                   |                `Function?` |               — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied).                                                                                                                                                 |
+| `options.keyResolver`  | `function(...args):string` | `simpleArgsKey` | Function mapping call args to a stable cache key. **Changed in 2.0**: the default was `(...args) => JSON.stringify(args)`, which is ~35% slower for scalar arguments but **aliased distinct arguments onto one key** — `undefined`, functions, and every `Map`/`Set`/`RegExp` all collapsed to `null` or `{}`. See [below](#memoizer). The key _format_ differs, so a caller reading keys will see it. |
+| `options.cacheOptions` |                   `Object` |            `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                                                                                                                                                                            |
+| `options.ttl`          |                  `number?` |     `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                                                                                                                                                     |
+| `options.weight`       |                  `number?` |     `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                                                                                                                                                       |
 
 You can create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
 
@@ -544,10 +614,43 @@ const pm = new PowerMemoizer(fetchUserFn, { keyResolver: simpleArgsKey });
 await pm.run(1);
 ```
 
-`simpleArgsKey` performs a cheap, deterministic encoding for primitive args
-and falls back to `JSON.stringify` only when it encounters non-scalar values.
-**It is the default** as of 2.0; passing it explicitly is still fine and makes
-the intent obvious at the call site.
+`simpleArgsKey` performs a cheap, deterministic, **type-tagged** encoding. Each
+argument is encoded on its own — scalars, arrays, plain objects, `Date`,
+`RegExp`, `Error`, `Map`, `Set`, `BigInt` and cycles all get a distinct prefix,
+so two different arguments can never produce the same key. **It is the default**
+as of 2.0; passing it explicitly is still fine and makes the intent obvious at
+the call site.
+
+It previously handed the **whole argument list** to `JSON.stringify` as soon as it
+met a non-scalar, and that one decision caused four defects, all measured:
+
+| Input                                        | Old key                     | Problem                                                        |
+| -------------------------------------------- | --------------------------- | -------------------------------------------------------------- |
+| `({a:1}, undefined)` vs `({a:1}, null)`      | `'[{"a":1},null]'` for both | a memoizer served one call's value to the other                |
+| `({a:1}, fn)`                                | `'[{"a":1},null]'`          | aliased onto `null`                                            |
+| `new Map([[1,2]])` vs `new Map([['a','b']])` | `'[{}]'` for **both**       | every `Map`, `Set`, `RegExp` and `Error` was indistinguishable |
+| `{n: 1n}`                                    | threw                       | while a top-level `1n` was supported — one value, two answers  |
+| a circular object                            | threw                       | `Converting circular structure to JSON`                        |
+
+The `Map`/`Set`/`RegExp`/`Error` collision was the worst of these: nothing about
+those inputs suggests they are unencodable, and a memoizer keyed on one returned
+the first one's value for every subsequent one.
+
+**A function argument throws.** Two closures have no comparable identity, and
+`String(fn)` is identical text for both, so any encoding would either collide or
+be useless. Refusing is the only answer that cannot be wrong — and the throw says
+what to do instead: pass a key, or supply a `keyResolver`.
+
+Structurally equal arguments still share an entry, which is the point:
+
+```javascript
+simpleArgsKey({ v: 1 }); // === simpleArgsKey({ v: 1 })
+simpleArgsKey({ v: 1 }); // !== simpleArgsKey({ v: 2 })
+```
+
+The key format for **scalar-only** calls is byte-identical to before, so the
+table below still describes the common case; only calls that previously hit the
+broken fallback changed.
 
 A memoized call is also down to a single cache lookup rather than `has()` then
 `get()`. That pair existed only to tell "absent" from "cached `undefined`", and

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerMessageCodec](../README.md) / decodeInbound
 
@@ -21,12 +21,12 @@ Order matters and is not arbitrary:
    see it, but checking it first costs one property read.
 2. Then a **framed message**, and only when its version byte claims version
    1. That is not sniffing either — it is the version check the frame format
-      exists for. It is also what makes the fallback below safe to attempt on
-      every message: no JSON document can start with `0x01`, so a legacy body
-      can never be mistaken for a frame, and a version-2 frame still reports the
-      version error it actually is.
+   exists for. It is also what makes the fallback below safe to attempt on
+   every message: no JSON document can start with `0x01`, so a legacy body
+   can never be mistaken for a frame, and a version-2 frame still reports the
+   version error it actually is.
 3. Then a **legacy bare-JSON body**, for a pool still on `messageCodec:
-'legacy'`.
+   'legacy'`.
 
 ## Parameters
 
@@ -55,4 +55,4 @@ Order matters and is not arbitrary:
 ## Throws
 
 When the input is a byte stream that is neither a valid
-frame nor valid JSON.
+  frame nor valid JSON.

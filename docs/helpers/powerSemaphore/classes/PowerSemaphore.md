@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerSemaphore](../README.md) / PowerSemaphore
 
@@ -46,7 +46,7 @@ Currently acquired permits.
 
 `number`
 
----
+***
 
 ### available
 
@@ -60,7 +60,7 @@ Number of permits still available.
 
 `number`
 
----
+***
 
 ### isLocked
 
@@ -74,7 +74,7 @@ True when the semaphore is fully acquired.
 
 `boolean`
 
----
+***
 
 ### limit
 
@@ -88,7 +88,7 @@ Maximum concurrent holders.
 
 `number`
 
----
+***
 
 ### pending
 
@@ -115,7 +115,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### acquire()
 
@@ -129,8 +129,8 @@ Resolves immediately when one is available; otherwise waits in FIFO order.
 ##### options?
 
 Pass `options.signal` to stop
-waiting: the returned promise rejects with an `AbortError` and the caller
-leaves the queue instead of holding a slot until a permit arrives.
+  waiting: the returned promise rejects with an `AbortError` and the caller
+  leaves the queue instead of holding a slot until a permit arrives.
 
 ###### signal?
 
@@ -141,12 +141,12 @@ leaves the queue instead of holding a slot until a permit arrives.
 `Promise`\<() => `void`\>
 
 Promise resolving to the release
-callback. Spelled as a call signature rather than `Function` because
-`Function` is not assignable to `() => void`, so `.then((release) =>
+  callback. Spelled as a call signature rather than `Function` because
+  `Function` is not assignable to `() => void`, so `.then((release) =>
   release())` - the documented way to use it - failed to type-check for
-consumers.
+  consumers.
 
----
+***
 
 ### dispose()
 
@@ -162,7 +162,7 @@ name to call.
 
 `void`
 
----
+***
 
 ### reset()
 
@@ -174,14 +174,21 @@ Reset the semaphore and reject any queued waiters.
 
 `void`
 
----
+***
 
 ### run()
 
-> **run**\<`T`\>(`fn`): `Promise`\<`T`\>
+> **run**\<`T`\>(`fn`, `options?`): `Promise`\<`T`\>
 
 Execute a callback while holding a permit.
 The permit is released after the callback resolves or rejects.
+
+`options` is forwarded to [acquire](#acquire), so `{ signal }` cancels the
+*wait* for a permit. It used to be accepted and thrown away — this method
+took only `fn` — so a caller who mirrored `acquire()` got a promise that
+could not be cancelled and, with an already-aborted signal, hung until a
+permit happened to be released. `run` is the form people reach for first,
+so cancellation matters more here than on `acquire`.
 
 #### Type Parameters
 
@@ -197,13 +204,21 @@ The permit is released after the callback resolves or rejects.
 
 Callback to run under a permit.
 
+##### options?
+
+Forwarded to [acquire](#acquire).
+
+###### signal?
+
+`AbortSignal`
+
 #### Returns
 
 `Promise`\<`T`\>
 
 The callback result.
 
----
+***
 
 ### tryAcquire()
 

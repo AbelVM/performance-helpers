@@ -98,6 +98,44 @@ thenable — anything with a callable `.then` — is handled the same way, since
 
 - `listeners(evt)` returns a shallow copy of the listener list and may be used for debugging or metrics.
 
+### This bus is intra-process, and that is the fast part
+
+`PowerEventBus` coordinates **within one process**. Measured on this build:
+
+| operation                          | ns/op (min / median / max) |
+| ---------------------------------- | -------------------------: |
+| `emit`, 1 listener                  |  34 / **49** / 136         |
+| `emit`, 10 listeners                |  56 / **61** / 124         |
+| `emit`, 100 listeners               | 453 / **482** / 618        |
+| in-process relay (bus → bus)        |  80 / **107** / 284        |
+| a full `BroadcastChannel` relay     | 706 / **856** / 1025       |
+
+About 4.8 ns per subscriber, one synchronous call, no copies and no serialization
+— a bus was never doing the thing a broadcast channel is good at, which is
+replacing *N posts with 1*. The relay row is the honest comparison: bridging
+across a `BroadcastChannel` costs **1.5× the entire 100-listener emit it would be
+replacing**.
+
+Two further costs if you bridge anyway:
+
+- **The obvious bridge is an infinite loop.** `BroadcastChannel` excludes only
+  the *posting* context, not a relay *listener*, so A posts → B's relay fires → B
+  posts → A's relay fires, forever. One injected message produced **89 142 posts
+  in 300 ms** with two contexts. Damping it needs a per-message origin id and a
+  seen-set — a protocol, not an adapter.
+- **`maxListeners` never fires for a remote listener.** The cap is checked when a
+  listener is *added*; a remote one is synthesised inside `emit`. 10 remote emits
+  against a `maxListeners: 2` bus produced **zero warnings**, so the leak the cap
+  exists to surface is invisible across a boundary.
+
+**Recommendation: do not cross context boundaries with this class.** If you need
+cross-tab eventing, an origin-tagged protocol in the application that needs it
+can answer the membership and loop questions from its own requirements; and for
+cross-*context* fan-out with bounded queues,
+[PowerRealtimeHub](powerRealtimeHub.md) is the class whose guarantees are about
+that. See [troubleshooting](troubleshooting.md#a-broadcastchannel-hangs-the-process-or-a-slow-receiver-eats-all-your-memory)
+for the two platform properties that make this counter-intuitive.
+
 ## Real-world: async listeners with bounded concurrency
 
 ```javascript

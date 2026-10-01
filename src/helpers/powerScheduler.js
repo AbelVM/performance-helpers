@@ -37,6 +37,28 @@
 let _macrotaskChannel = null;
 
 /**
+ * Posts currently in flight on {@link _macrotaskChannel}.
+ *
+ * This is what makes `dispose()` safe, and it is the whole of the fix for a bug
+ * that the previous fix created. `closeMacrotaskChannel()` closes a
+ * **module-level** channel, so disposing one scheduler tore the listener off
+ * every *other* scheduler's pending flush: the port was closed, the queued
+ * message could never be delivered, `_run()` never ran, and `_scheduled` stayed
+ * `true` — which makes `schedule()` a permanent no-op for that peer. Verified
+ * with two macrotask schedulers and a `b.dispose()` between their posts: `a`
+ * flushed 0 times and stayed wedged.
+ *
+ * So the channel is only closed when nothing is in flight on it. Otherwise the
+ * module reference is dropped — the next scheduler builds a fresh pair — and the
+ * old pair is left open so the pending post can still be delivered. It is
+ * already `unref()`ed, so leaving it open cannot hold the process alive, which
+ * was the original reason `dispose()` closes it at all.
+ *
+ * @type {number}
+ */
+let _macrotaskPending = 0;
+
+/**
  * @returns {{port1: MessagePort, port2: MessagePort}|null}
  */
 function getMacrotaskChannel() {
@@ -87,12 +109,20 @@ function getMacrotaskChannel() {
  * leave a started channel behind for the next one in the same process. Clearing
  * the module reference lets the next `getMacrotaskChannel()` build a fresh pair.
  *
+ * **Only when nothing is in flight.** Closing a channel with a post on it would
+ * discard that post, and because the channel is module-level that post might
+ * belong to a *different* scheduler — see {@link _macrotaskPending}. With
+ * something pending this drops the reference and leaves the pair open: the
+ * pending message still gets delivered, and the pair cannot hold the process
+ * alive because it was `unref()`ed when it was built.
+ *
  * @returns {void}
  */
 function closeMacrotaskChannel() {
   const channel = _macrotaskChannel;
   if (!channel) return;
   _macrotaskChannel = null;
+  if (_macrotaskPending > 0) return;
   try {
     channel.port1.onmessage = null;
     channel.port1.close();
@@ -142,14 +172,21 @@ function scheduleMacrotask(fn) {
   if (channel) {
     // A fresh listener per post, removed as soon as it fires, so the port
     // carries exactly one pending task and `cancel` has something to detach.
+    // The counter is what lets `dispose()` know this post is still in flight and
+    // must survive a teardown of the shared channel — see `_macrotaskPending`.
     const onMessage = () => {
       channel.port1.removeEventListener('message', onMessage);
+      if (_macrotaskPending > 0) _macrotaskPending -= 1;
       fn();
     };
     channel.port1.addEventListener('message', onMessage);
     channel.port2.postMessage(null);
+    _macrotaskPending += 1;
     return {
-      cancel: () => channel.port1.removeEventListener('message', onMessage),
+      cancel: () => {
+        channel.port1.removeEventListener('message', onMessage);
+        if (_macrotaskPending > 0) _macrotaskPending -= 1;
+      },
     };
   }
   // Node without MessageChannel: `setImmediate` has no clamp either. The guard is

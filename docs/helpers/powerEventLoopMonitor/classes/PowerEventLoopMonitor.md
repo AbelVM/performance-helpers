@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerEventLoopMonitor](../README.md) / PowerEventLoopMonitor
 
@@ -9,7 +9,7 @@
 Measure how long the event loop is unavailable.
 
 Latency has a floor, and nothing in this library can tell you why latency
-rose. A `PowerHistogram` of your own operation timings shows _that_ it rose;
+rose. A `PowerHistogram` of your own operation timings shows *that* it rose;
 this shows whether the host was busy. A p99 that tracks your database's p99
 is a different problem from a p99 that only degrades once a minute, and the
 two look identical from inside the operation.
@@ -64,79 +64,79 @@ setInterval(() => {
 
 > **\_blocked**: `number`
 
----
+***
 
 ### \_delay
 
 > **\_delay**: [`PowerHistogram`](../../powerHistogram/classes/PowerHistogram.md)
 
----
+***
 
 ### \_handle
 
 > **\_handle**: `any`
 
----
+***
 
 ### \_keepProcessAlive
 
 > **\_keepProcessAlive**: `boolean`
 
----
+***
 
 ### \_lastDelay
 
 > **\_lastDelay**: `number`
 
----
+***
 
 ### \_max
 
 > **\_max**: `number`
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_onDrift
 
 > **\_onDrift**: ((`arg0`) => `void`) \| `null`
 
----
+***
 
 ### \_running
 
 > **\_running**: `boolean`
 
----
+***
 
 ### \_samples
 
 > **\_samples**: `number`
 
----
+***
 
 ### \_sum
 
 > **\_sum**: `number`
 
----
+***
 
 ### \_utilizationSource
 
 > **\_utilizationSource**: (() => `any`) \| `null`
 
----
+***
 
 ### intervalMs
 
 > **intervalMs**: `number`
 
----
+***
 
 ### ready
 
@@ -156,7 +156,7 @@ attempted. Never rejects: a runtime without it simply leaves
 
 `void`
 
----
+***
 
 ### clear()
 
@@ -164,7 +164,7 @@ attempted. Never rejects: a runtime without it simply leaves
 
 Alias for [PowerEventLoopMonitor#reset](#reset).
 
-`reset()` here _is_ a clear — it discards every accumulated sample, so both
+`reset()` here *is* a clear — it discards every accumulated sample, so both
 words describe the same act. Contrast the limiters, where `reset()` restores
 a usable state and `clear()` would read as the opposite.
 
@@ -172,7 +172,7 @@ a usable state and `clear()` would read as the opposite.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -188,7 +188,82 @@ nothing, because the collector no longer calls it.
 
 `void`
 
----
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`object`
+
+##### active
+
+> **active**: `boolean`
+
+##### blockedOver10ms
+
+> **blockedOver10ms**: `number`
+
+##### intervalMs
+
+> **intervalMs**: `number`
+
+##### last
+
+> **last**: `number`
+
+##### max
+
+> **max**: `number`
+
+##### mean
+
+> **mean**: `number` \| `null`
+
+##### p50
+
+> **p50**: `number` \| `null`
+
+##### p99
+
+> **p99**: `number` \| `null`
+
+##### p99\_9
+
+> **p99\_9**: `number` \| `null`
+
+##### samples
+
+> **samples**: `number`
+
+***
 
 ### histogram()
 
@@ -201,7 +276,7 @@ directly, use [PowerEventLoopMonitor#reset](#reset) so the counters agree.
 
 [`PowerHistogram`](../../powerHistogram/classes/PowerHistogram.md)
 
----
+***
 
 ### lastDelay()
 
@@ -213,7 +288,7 @@ The last recorded drift, in milliseconds. `0` before the first sample.
 
 `number`
 
----
+***
 
 ### reset()
 
@@ -226,7 +301,7 @@ sampling.
 
 `void`
 
----
+***
 
 ### start()
 
@@ -238,7 +313,7 @@ Begin sampling. Idempotent: a second call while running is a no-op.
 
 `PowerEventLoopMonitor`
 
----
+***
 
 ### stats()
 
@@ -248,7 +323,7 @@ Serializable snapshot of the configuration and the recorded samples.
 
 `mean`, `p50`, `p99` and `p99_9` are `null` before the first sample rather
 than `0`, so a consumer cannot mistake "not measured yet" for "no delay".
-They are _estimates_ - `PowerHistogram` is a DDSketch with a
+They are *estimates* - `PowerHistogram` is a DDSketch with a
 `relativeAccuracy` bound - not exact quantiles.
 
 #### Returns
@@ -295,7 +370,7 @@ They are _estimates_ - `PowerHistogram` is a DDSketch with a
 
 > **samples**: `number`
 
----
+***
 
 ### stop()
 
@@ -317,7 +392,7 @@ detached in a method documented as reversible. Use [PowerEventLoopMonitor#dispos
 
 `PowerEventLoopMonitor`
 
----
+***
 
 ### utilization()
 

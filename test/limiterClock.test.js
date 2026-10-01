@@ -122,6 +122,47 @@ describe('limiter clock injection', () => {
     expect(gcra.tryConsume(1)).toBe(true);
   });
 
+  it('honours a per-call `now` on a limiter used directly, with no injected clock', () => {
+    // QUAL-011 (F8). Every path above goes through an injected `now` or through
+    // the composition. This is the case a caller actually writes — construct a
+    // limiter with no clock at all, then stamp individual calls — and it is the
+    // one the published types now promise via `options?: LimiterNowOptions`
+    // (previously `options?: {}`, which type-checked anything and told the caller
+    // nothing). Declaring an option is a promise that it works, so it is pinned
+    // here rather than inferred from the composed cases above.
+    const throttle = new PowerThrottle({ capacity: 2, refillRate: 1 });
+    const window = new PowerSlidingWindow({ capacity: 2, windowMs: 1000 });
+
+    expect(throttle.tryConsume(2)).toBe(true);
+    expect(window.tryConsume(2)).toBe(true);
+
+    // One window's worth of expiry on the window — derived purely from the
+    // per-call stamp, with no injected clock involved.
+    const later = Date.now() + 2_000;
+    expect(window.available({ now: later })).toBe(2);
+
+    // The throttle pins a subtlety that is easy to get wrong in either
+    // direction. `_lastRefill` is seeded from the real clock at construction
+    // (`powerThrottle.js:_refill` clamps `elapsedMs` to `Math.max(0, …)`), so a
+    // per-call stamp refills only when it is *ahead* of that seed. One second
+    // past it refills one token at `refillRate: 1`; a stamp behind it is inert
+    // rather than an error, because a negative delta cannot un-refill.
+    //
+    // Asserted because this reads as "the option is being ignored" otherwise —
+    // which is exactly the wrong conclusion to draw, and the one that cost time
+    // while writing the declaration this test accompanies.
+    //
+    // The window is wide deliberately: `tryConsume` above seeded `_lastRefill`
+    // from the real clock, so a stamp 1 s ahead yields a fraction of a token
+    // at `refillRate: 1` (one token *per second*) and floors to zero. 10 s
+    // ahead is unambiguous and not sensitive to scheduling jitter.
+    expect(throttle.available({ now: Date.now() + 10_000 })).toBe(2);
+    expect(throttle.available({ now: 0 })).toBe(2);
+    expect(throttle.available({ now: -5_000 })).toBe(2);
+    // Nothing is taken from the bucket by an impossible timestamp.
+    expect(throttle.tokens).toBe(2);
+  });
+
   it('lets an injected clock win over a threaded one, observably', () => {
     // The precedence rule, and the reason it is not "per-call value first". A
     // limiter built with a fake clock is a limiter under test; if the composer

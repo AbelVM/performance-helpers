@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerCache
 
@@ -11,7 +11,7 @@ PowerCache
 In-memory cache with weight-aware eviction, TTLs and optional cleanup.
 Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
 
-PowerCache
+ PowerCache
 
 ## Constructors
 
@@ -53,97 +53,97 @@ When a non-object is provided as the options argument.
 
 > **\_cleanupCursor**: `any`
 
----
+***
 
 ### \_cleanupCursorValid
 
 > **\_cleanupCursorValid**: `boolean`
 
----
+***
 
 ### \_cleanupParams
 
 > **\_cleanupParams**: \{ `interval`: `number`; `maxCleanupPerTick`: `number`; \} \| `null`
 
----
+***
 
 ### \_cleanupRunning
 
 > **\_cleanupRunning**: `boolean`
 
----
+***
 
 ### \_cleanupTimer
 
 > **\_cleanupTimer**: `any`
 
----
+***
 
 ### \_currentWeight
 
 > **\_currentWeight**: `number`
 
----
+***
 
 ### \_defaultAsyncTimeout
 
 > **\_defaultAsyncTimeout**: `number`
 
----
+***
 
 ### \_evictionCandidate
 
 > **\_evictionCandidate**: `any`
 
----
+***
 
 ### \_evictions
 
 > **\_evictions**: `number`
 
----
+***
 
 ### \_expirations
 
 > **\_expirations**: `number`
 
----
+***
 
 ### \_head
 
 > **\_head**: `CacheNode` \| `null`
 
----
+***
 
 ### \_hits
 
 > **\_hits**: `number`
 
----
+***
 
 ### \_inflightPromises
 
 > **\_inflightPromises**: `Map`\<`any`, `any`\>
 
----
+***
 
 ### \_map
 
 > **\_map**: `Map`\<`any`, `any`\>
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_misses
 
 > **\_misses**: `number`
 
----
+***
 
 ### \_now
 
@@ -164,7 +164,7 @@ test harnesses).
 
 Milliseconds since epoch (floating point for higher resolution).
 
----
+***
 
 ### \_policy
 
@@ -175,7 +175,7 @@ behaviour. `'slru'` splits the list into a probation segment and a
 protected segment and promotes on access, which makes the cache far more
 resistant to a one-off sequential scan evicting the working set.
 
----
+***
 
 ### \_pool
 
@@ -184,12 +184,12 @@ resistant to a one-off sequential scan evicting the working set.
 Recycled nodes, kept to avoid allocating one per insert.
 
 Annotated because an empty `[]` takes its element type from whatever is
-first pushed into it, and the prefill literal below is a _narrower_ type
+first pushed into it, and the prefill literal below is a *narrower* type
 than `CacheNode` — which then made every other push into this pool a type
 error. The annotation is the fix; the two prefill fields are the rest of
 it.
 
----
+***
 
 ### \_probationEnd
 
@@ -198,94 +198,134 @@ it.
 MRU end of the probation segment. With `policy: 'slru'` the list is
 ordered:
 
-head (probation LRU) ... _probationEnd (probation MRU)
--> protected LRU ... tail (protected MRU)
+  head (probation LRU) ... _probationEnd (probation MRU)
+       -> protected LRU ... tail (protected MRU)
 
 New entries are spliced in at the probation/protected boundary and a hit
 promotes a node to the tail. `null` when the list is empty.
 
----
+***
 
 ### \_rejected
 
 > **\_rejected**: `number`
 
----
+***
 
 ### \_rejectedAdmission
 
 > **\_rejectedAdmission**: `number`
 
----
+***
+
+### \_staleServes
+
+> **\_staleServes**: `number`
+
+Serves of an **expired** value, from the stale-while-revalidate path.
+
+Separate from `_hits` because a stale serve is the one case where the cache
+answered without having fresh data, and a caller cannot otherwise tell
+it apart from a real hit. Operating stale-while-revalidate blind to that
+rate is how a broken upstream turns into a silently wrong service: every
+request is "successful" and the numbers look like a warm cache.
+
+A subset of `_hits` — a stale serve still counts as a hit, because from the
+caller's side it was served.
+
+***
 
 ### \_tail
 
 > **\_tail**: `any`
 
----
+***
 
 ### \_weightErrors
 
 > **\_weightErrors**: `number`
 
 number of times `weightFn` threw; a non-zero value means `maxWeight`
-could not be enforced and should be surfaced by the caller.
+ could not be enforced and should be surfaced by the caller.
 
----
+***
+
+### allowStale
+
+> **allowStale**: `boolean`
+
+Serve a stale value on `getOrSet`/`getOrSetAsync` by default, so a caller
+does not have to pass `staleWhileRevalidate` at every call site. The
+per-call flag still wins, and `false` here does not remove the per-call
+option - it only stops it being the default.
+
+***
 
 ### defaultTTL
 
 > **defaultTTL**: `number`
 
----
+***
+
+### fetchMethod
+
+> **fetchMethod**: `Function` \| `null`
+
+***
 
 ### maxCleanupPerTick
 
 > **maxCleanupPerTick**: `number`
 
----
+***
 
 ### maxEntries
 
 > **maxEntries**: `number`
 
----
+***
 
 ### maxPoolSize
 
 > **maxPoolSize**: `number`
 
----
+***
 
 ### maxWeight
 
 > **maxWeight**: `number`
 
----
+***
 
 ### onError
 
 > **onError**: ((`arg0`, `arg1`) => `void`) \| `null`
 
----
+***
 
 ### onEvict
 
 > **onEvict**: ((`arg0`, `arg1`, `arg2`) => `void`) \| `null`
 
----
+***
 
 ### onExpire
 
 > **onExpire**: ((`arg0`, `arg1`) => `void`) \| `null`
 
----
+***
 
 ### rejectOversized
 
 > **rejectOversized**: `boolean`
 
----
+***
+
+### staleTtl
+
+> **staleTtl**: `number`
+
+***
 
 ### weightFn
 
@@ -305,7 +345,7 @@ Hit rate as a fraction (hits / (hits + misses)).
 
 `number`
 
----
+***
 
 ### size
 
@@ -333,7 +373,7 @@ returns a resolved Promise for await compatibility.
 
 `Promise`\<`void`\>
 
----
+***
 
 ### \[dispose\]()
 
@@ -343,7 +383,7 @@ returns a resolved Promise for await compatibility.
 
 `void`
 
----
+***
 
 ### \[iterator\]()
 
@@ -353,7 +393,7 @@ returns a resolved Promise for await compatibility.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
----
+***
 
 ### cleanupExpired()
 
@@ -365,7 +405,7 @@ Remove expired entries by scanning from least-recently used to most.
 
 `void`
 
----
+***
 
 ### cleanupExpiredUpTo()
 
@@ -390,7 +430,7 @@ Maximum nodes to scan in this pass.
 
 Number of nodes scanned
 
----
+***
 
 ### clear()
 
@@ -402,7 +442,7 @@ Clear the cache and return nodes to the pool.
 
 `void`
 
----
+***
 
 ### delete()
 
@@ -422,7 +462,7 @@ Delete an entry from the cache.
 
 true if the key was removed.
 
----
+***
 
 ### dispose()
 
@@ -435,7 +475,7 @@ want to reach for the symbol still have something to call.
 
 `void`
 
----
+***
 
 ### entries()
 
@@ -453,7 +493,7 @@ Iterate entries in LRU or MRU order.
 
 `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
----
+***
 
 ### get()
 
@@ -473,7 +513,7 @@ Retrieve a value and mark it as recently used.
 
 The stored value or `undefined` if missing/expired.
 
----
+***
 
 ### getMany()
 
@@ -499,7 +539,44 @@ Bulk get multiple keys. Returns a Map of found entries.
 
 One entry per resolved key, in input order.
 
----
+***
+
+### getOrFetch()
+
+> **getOrFetch**(`key`, `factory?`, `options?`): `Promise`\<`any`\>
+
+`getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is
+given.
+
+The reason this exists rather than as a required argument: the row's shape
+(`fetchMethod` on the instance) removes a function literal from **every**
+call site, which is most of the cost of the async cache API in a hot path.
+The per-call factory still wins, so one caller can override a cache-wide
+default — a cache is often keyed by more than one kind of resource.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### factory?
+
+`Function`
+
+Overrides the cache's `fetchMethod`.
+
+##### options?
+
+`PowerCacheGetOrFetchOptions` = `{}`
+
+Passed through to `getOrSetAsync`.
+
+#### Returns
+
+`Promise`\<`any`\>
+
+***
 
 ### getOrSet()
 
@@ -532,7 +609,7 @@ Function that produces the value or a direct value.
 
 ###### staleWhileRevalidate?
 
-`boolean` = `false`
+`boolean` = `...`
 
 If true, return an expired value immediately and refresh the cache in the background.
 
@@ -548,7 +625,7 @@ If true, return an expired value immediately and refresh the cache in the backgr
 
 `any`
 
----
+***
 
 ### getOrSetAsync()
 
@@ -574,7 +651,7 @@ Function returning a Promise or value.
 
 ###### staleWhileRevalidate?
 
-`boolean` = `false`
+`boolean` = `...`
 
 If true, return an expired value immediately and refresh the cache in the background.
 
@@ -596,7 +673,78 @@ Per-call override of the cache's `defaultAsyncTimeout`, in ms.
 
 `Promise`\<`any`\>
 
----
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`object`
+
+##### evictions
+
+> **evictions**: `number`
+
+##### expirations
+
+> **expirations**: `number`
+
+##### hits
+
+> **hits**: `number`
+
+##### misses
+
+> **misses**: `number`
+
+##### poolSize
+
+> **poolSize**: `number`
+
+##### rejected
+
+> **rejected**: `number`
+
+##### size
+
+> **size**: `number`
+
+##### staleServes
+
+> **staleServes**: `number`
+
+##### weight
+
+> **weight**: `number`
+
+***
 
 ### has()
 
@@ -622,7 +770,7 @@ If true, consider expired entries as present.
 
 `boolean`
 
----
+***
 
 ### hasEqual()
 
@@ -632,7 +780,6 @@ Check membership without affecting recency and verify the stored value is deep-e
 to the provided `value`.
 
 Optimizations:
-
 - Fast reference equality short-circuit
 - Fast primitive checks
 - Special-cases for Arrays, TypedArrays/ArrayBuffer, Date, RegExp, Map and Set
@@ -660,7 +807,7 @@ If true, consider expired entries as present.
 
 `boolean`
 
----
+***
 
 ### keys()
 
@@ -678,7 +825,7 @@ Iterate keys in LRU or MRU order.
 
 `Generator`\<`any`, `void`, `unknown`\>
 
----
+***
 
 ### peek()
 
@@ -697,7 +844,7 @@ Returns `undefined` for missing or expired entries.
 
 `any`
 
----
+***
 
 ### resize()
 
@@ -721,7 +868,7 @@ Resize the cache limits and evict if necessary.
 
 `void`
 
----
+***
 
 ### set()
 
@@ -766,7 +913,7 @@ Optional explicit weight for the entry. If omitted, `weightFn` is used.
 
 `this` on success, or `false` when insertion was rejected due to oversize.
 
----
+***
 
 ### setMany()
 
@@ -807,7 +954,7 @@ change for a batch of a thousand entries. The signal is `onEvict` with
 
 `PowerCache`
 
----
+***
 
 ### startCleanup()
 
@@ -827,15 +974,15 @@ to ensure the internal timer is cleared and resources can be reclaimed.
 `number` \| `Object`
 
 Cleanup interval in ms, or an
-options object `{ interval, maxCleanupPerTick }`. The nested tags were
-removed because a qualified `@param` is only valid when the parent is a
-bare `{Object}`; against `number|Object` it is rejected with TS8032.
+  options object `{ interval, maxCleanupPerTick }`. The nested tags were
+  removed because a qualified `@param` is only valid when the parent is a
+  bare `{Object}`; against `number|Object` it is rejected with TS8032.
 
 #### Returns
 
 `void`
 
----
+***
 
 ### stats()
 
@@ -850,6 +997,10 @@ Return runtime statistics for the cache.
 ##### evictions
 
 > **evictions**: `number`
+
+##### expirations
+
+> **expirations**: `number`
 
 ##### hits
 
@@ -871,11 +1022,15 @@ Return runtime statistics for the cache.
 
 > **size**: `number`
 
+##### staleServes
+
+> **staleServes**: `number`
+
 ##### weight
 
 > **weight**: `number`
 
----
+***
 
 ### stopCleanup()
 
@@ -887,7 +1042,7 @@ Stop periodic cleanup.
 
 `void`
 
----
+***
 
 ### touch()
 
@@ -914,7 +1069,7 @@ Optional per-call TTL in ms. Use `null`/`Infinity` to disable expiry.
 
 True if the entry existed (and was not expired), false otherwise.
 
----
+***
 
 ### values()
 

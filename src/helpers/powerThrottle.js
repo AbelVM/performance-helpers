@@ -18,10 +18,11 @@
 /**
  * @typedef {import('./jsdoc-types.js').PowerThrottleOptions} PowerThrottleOptions
  * @typedef {import('./jsdoc-types.js').PowerThrottleToken} PowerThrottleToken
+ * @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions
  */
 import { nowMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertCount, assertLimitRequired } from '../utils/options.js';
 import { MS_PER_SEC } from './constants.js';
 
 export class PowerThrottle {
@@ -101,10 +102,11 @@ export class PowerThrottle {
   /**
    * Try to consume `n` tokens.
    * @param {number} [n=1]
+   * @param {LimiterNowOptions} [options] Per-call clock override.
    * @returns {boolean} `true` when tokens were consumed; `false` otherwise.
    */
   tryConsume(n = 1, options = {}) {
-    const want = Math.max(0, Math.floor(+n) || 0);
+    const want = assertCount(n, { name: 'n', className: 'PowerThrottle', method: 'tryConsume' });
     if (want === 0) return true;
     this._refill(resolveLimiterNow(this._now, this._nowExplicit, options));
     if (this.tokens >= want) {
@@ -120,7 +122,7 @@ export class PowerThrottle {
    * @returns {void}
    */
   addTokens(n) {
-    const add = Math.max(0, Math.floor(+n) || 0);
+    const add = assertCount(n, { name: 'n', className: 'PowerThrottle', method: 'addTokens' });
     if (add === 0) return;
     this.tokens = Math.min(this.capacity, this.tokens + add);
   }
@@ -132,6 +134,7 @@ export class PowerThrottle {
    *
    * Returns `null` when the reservation fails due to insufficient tokens.
    * @param {number} [n=1]
+   * @param {LimiterNowOptions} [options] Per-call clock override.
    * @returns {PowerThrottleToken|null}
    * @example
    * const token = throttle.reserve(1);
@@ -141,7 +144,7 @@ export class PowerThrottle {
    * }
    */
   reserve(n = 1, options = {}) {
-    const want = Math.max(0, Math.floor(+n) || 0);
+    const want = assertCount(n, { name: 'n', className: 'PowerThrottle', method: 'reserve' });
     if (want === 0) return { n: 0 };
     this._refill(resolveLimiterNow(this._now, this._nowExplicit, options));
     if (this.tokens >= want) {
@@ -182,6 +185,7 @@ export class PowerThrottle {
 
   /**
    * Current available tokens (performs a refill before reporting).
+   * @param {LimiterNowOptions} [options] Per-call clock override.
    * @returns {number}
    */
   available(options = {}) {

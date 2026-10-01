@@ -112,12 +112,28 @@ describe('lifecycle aliases (QUAL-004)', () => {
     });
 
     it('PowerGCRA.clear() forgets the TAT like reset()', () => {
-      const g = new PowerGCRA({ rate: 10, per: 1000, burst: 2, emission: 1 });
-      // A denied attempt stores a TAT, which is exactly the state to forget.
-      g.tryConsume(1000);
+      const g = new PowerGCRA({ rate: 10, per: 1000, burst: 2 });
+      // An *admitted* batch stores a TAT, which is exactly the state to forget.
+      // This asked for 1000, which the limiter used to admit because a batch's
+      // own span was nowhere in the admission condition — the bug RES-012 fixed.
+      // `burst: 2` covers 3 operations at one instant, so 3 is the ceiling and
+      // is what leaves a TAT behind. (`emission: 1` was also not an option.)
+      g.tryConsume(3);
       expect(g.stats().tat).not.toBeNull();
       g.clear();
       expect(g.stats().tat).toBeNull();
+    });
+
+    it('PowerGCRA refuses an oversize batch without storing a TAT', () => {
+      // The other half of the same fix, and the reason the test above moved:
+      // a refused attempt must not leave state behind, or it would push the
+      // next allowed time out and the limiter would charge for a request it
+      // never admitted.
+      const g = new PowerGCRA({ rate: 10, per: 1000, burst: 2 });
+      expect(g.tryConsume(1000)).toBe(false);
+      expect(g.stats().tat).toBeNull();
+      // Still fully usable.
+      expect(g.tryConsume(3)).toBe(true);
     });
   });
 
@@ -134,7 +150,12 @@ describe('lifecycle aliases (QUAL-004)', () => {
 
   describe('limiters: reset() and clear() are NOT synonyms, so no alias', () => {
     it('PowerThrottle.reset() refills - a clear() alias would invert it', () => {
-      const t = new PowerThrottle({ capacity: 2, ratePerSec: 0.0001 });
+      // `refillRate`, not `ratePerSec`. This file was passing a name the
+      // constructor does not accept, which it ignored because unknown options
+      // are ignored (RES-017). So the test passed either way and was teaching
+      // an option name the API does not have. A near-zero refill rate is what
+      // keeps the drain observable before `reset()`.
+      const t = new PowerThrottle({ capacity: 2, refillRate: 0.0001 });
       t.tryConsume();
       t.tryConsume();
       expect(t.tokens).toBe(0);

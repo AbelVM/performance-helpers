@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/constants](../README.md) / MAX\_DEEP\_EQUAL\_NODES
 
@@ -8,7 +8,7 @@
 
 > `const` **MAX\_DEEP\_EQUAL\_NODES**: `10000` = `10_000`
 
-Ceiling on how many _nodes_ one `hasEqual` deep comparison will visit.
+Ceiling on how many *nodes* one `hasEqual` deep comparison will visit.
 
 `MAX_DEEP_EQUAL_DEPTH` bounds depth and says nothing about width, so a wide
 flat value - an array of a million scalars, say - recurses at depth 2, never

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerPool](../README.md) / PowerPoolShutdownError
 
@@ -20,7 +20,7 @@ shutting down is exactly when pending promises are still outstanding.
 `name` is unchanged, so `err.name === 'PowerPoolShutdownError'` keeps
 working.
 
-PowerPoolShutdownError
+ PowerPoolShutdownError
 
 ## Extends
 
@@ -56,13 +56,13 @@ PowerPoolShutdownError
 
 `Error.cause`
 
----
+***
 
 ### code
 
 > **code**: `string`
 
----
+***
 
 ### message
 
@@ -72,7 +72,7 @@ PowerPoolShutdownError
 
 `Error.message`
 
----
+***
 
 ### name
 
@@ -82,7 +82,7 @@ PowerPoolShutdownError
 
 `Error.name`
 
----
+***
 
 ### stack?
 

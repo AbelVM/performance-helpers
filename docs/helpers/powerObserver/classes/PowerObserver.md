@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerObserver](../README.md) / PowerObserver
 
@@ -36,61 +36,61 @@ Initial value
 
 > **\_distinct**: `boolean`
 
----
+***
 
 ### \_map
 
 > **\_map**: `Function` \| `null`
 
----
+***
 
 ### \_mapped
 
 > **\_mapped**: `any`
 
----
+***
 
 ### \_mappedValid
 
 > **\_mappedValid**: `boolean`
 
----
+***
 
 ### \_pending
 
 > **\_pending**: `boolean`
 
----
+***
 
 ### \_pendingNext
 
 > **\_pendingNext**: `any`
 
----
+***
 
 ### \_pendingPrev
 
 > **\_pendingPrev**: `any`
 
----
+***
 
 ### \_scheduleMode
 
 > **\_scheduleMode**: `string`
 
----
+***
 
 ### \_scheduler
 
 > **\_scheduler**: [`PowerScheduler`](../../powerScheduler/classes/PowerScheduler.md)
 
----
+***
 
 ### \_subs
 
 > **\_subs**: [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md)
 
----
+***
 
 ### \_value
 
@@ -110,7 +110,7 @@ Number of subscribers
 
 `number`
 
----
+***
 
 ### value
 
@@ -152,7 +152,7 @@ Internal flush implementation
 
 `void`
 
----
+***
 
 ### clear()
 
@@ -164,7 +164,7 @@ Remove all subscribers
 
 `void`
 
----
+***
 
 ### derive()
 
@@ -173,7 +173,7 @@ Remove all subscribers
 Create a **derived** observer: a new observer whose value is recomputed from
 this one, and which only exists as long as something subscribes to it.
 
-`map()` _mutates_ this observer's mapping and returns nothing; this is the
+`map()` *mutates* this observer's mapping and returns nothing; this is the
 pure counterpart, so chains can be built without disturbing the source.
 
 ```js
@@ -207,7 +207,7 @@ Derive the next value.
 
 A new observer, already holding `fn(this.value)`.
 
----
+***
 
 ### distinct()
 
@@ -221,7 +221,7 @@ does not change the source, unlike the `distinct` constructor option.
 
 `PowerObserver`
 
----
+***
 
 ### drain()
 
@@ -233,14 +233,14 @@ Alias for flush()
 
 `void`
 
----
+***
 
 ### filter()
 
 > **filter**(`predicate`): `PowerObserver`
 
 Only notify subscribers when `predicate` passes. The derived value is the
-last value that _passed_, so a filtered stream cannot be read as "the latest
+last value that *passed*, so a filtered stream cannot be read as "the latest
 upstream value".
 
 #### Parameters
@@ -253,7 +253,7 @@ upstream value".
 
 `PowerObserver`
 
----
+***
 
 ### flush()
 
@@ -265,7 +265,7 @@ Flush any pending notification immediately. Useful for tests or shutdown.
 
 `void`
 
----
+***
 
 ### map()
 
@@ -280,14 +280,14 @@ Set or replace the mapping function used for notifications.
 ((`value`) => `any`) \| `null`
 
 `null` clears the mapping. Anything
-that is not a function and not `null` throws rather than silently
-disabling mapping, because a typo'd option is otherwise invisible.
+  that is not a function and not `null` throws rather than silently
+  disabling mapping, because a typo'd option is otherwise invisible.
 
 #### Returns
 
 `void`
 
----
+***
 
 ### subscribe()
 
@@ -305,7 +305,7 @@ Subscribe to changes. Returns an unsubscribe function.
 
 () => `boolean`
 
----
+***
 
 ### combineLatest()
 

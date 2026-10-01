@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [index](../README.md) / WorkerAgnostic
 
@@ -22,16 +22,16 @@ given source.
 `string` \| `Function`
 
 A Worker constructor, a worker
-factory function, or a path/URL string. When a function is provided it is
-invoked (or constructed with `new`) to obtain the underlying worker-like
-object. When a string is provided it is used to construct the appropriate
-native Worker for the current environment.
+  factory function, or a path/URL string. When a function is provided it is
+  invoked (or constructed with `new`) to obtain the underlying worker-like
+  object. When a string is provided it is used to construct the appropriate
+  native Worker for the current environment.
 
 ##### options?
 
 Options forwarded to the native
-Worker constructor (e.g. `{ type: 'module' }` for Node, or worker options
-for the browser).
+  Worker constructor (e.g. `{ type: 'module' }` for Node, or worker options
+  for the browser).
 
 #### Returns
 
@@ -43,25 +43,25 @@ for the browser).
 
 > **\_listeners**: `Map`\<`any`, `any`\>
 
----
+***
 
 ### \_nativeModel
 
 > **\_nativeModel**: `string` \| `undefined`
 
----
+***
 
 ### env
 
 > **env**: `string`
 
----
+***
 
 ### options
 
 > **options**: `object`
 
----
+***
 
 ### worker
 
@@ -87,7 +87,7 @@ for the browser).
 
 `WorkerAgnostic`
 
----
+***
 
 ### off()
 
@@ -109,7 +109,7 @@ Node-style alias for [removeEventListener](#removeeventlistener).
 
 `WorkerAgnostic`
 
----
+***
 
 ### on()
 
@@ -131,7 +131,7 @@ Node-style alias for [addEventListener](#addeventlistener).
 
 `WorkerAgnostic`
 
----
+***
 
 ### postMessage()
 
@@ -151,7 +151,7 @@ Node-style alias for [addEventListener](#addeventlistener).
 
 `any`
 
----
+***
 
 ### removeEventListener()
 
@@ -171,7 +171,7 @@ Node-style alias for [addEventListener](#addeventlistener).
 
 `WorkerAgnostic`
 
----
+***
 
 ### terminate()
 
@@ -181,7 +181,7 @@ Node-style alias for [addEventListener](#addeventlistener).
 
 `void` \| `Promise`\<`void`\>
 
----
+***
 
 ### create()
 

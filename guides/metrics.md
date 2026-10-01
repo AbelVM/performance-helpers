@@ -3,7 +3,13 @@
 A stable shape over the numbers the helpers already report.
 
 Every helper that reports anything does it through its own `stats()`, and those
-shapes are not merely different — they are different _kinds_ of thing:
+shapes are not merely different — they are different _kinds_ of thing. Every
+one of them also answers to `getStats()`, an alias that delegates to `stats()`;
+`PowerPool` spells its own reporting method `getStats()` and never had a
+`stats()`. Use whichever you prefer, or use the same one everywhere so a
+`MetricsCollector` registration reads consistently — but note that a class with
+no `stats()` at all (`PowerTTLMap`, `PowerLogger`) gets no alias either, because
+there is nothing to delegate to:
 
 | Helper                  | What `stats()` is                                                                 |
 | ----------------------- | --------------------------------------------------------------------------------- |
@@ -89,7 +95,7 @@ if (errors.cache) console.warn('cache stats failed:', errors.cache);
 
 ## `observability: true`
 
-Since 2.1.0 the helpers wire themselves in, so the example above becomes:
+Since 2.0.0 the helpers wire themselves in, so the example above becomes:
 
 ```js
 const cache = new PowerCache({ observability: true });

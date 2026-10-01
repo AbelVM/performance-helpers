@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerRealtimeHub](../README.md) / HubStats
 
@@ -14,7 +14,7 @@
 
 Approximate bytes handed to the adapter.
 
----
+***
 
 ### delivered
 
@@ -22,7 +22,7 @@ Approximate bytes handed to the adapter.
 
 Total messages handed to a `send` adapter.
 
----
+***
 
 ### disconnected
 
@@ -30,7 +30,7 @@ Total messages handed to a `send` adapter.
 
 Subscribers closed for falling behind.
 
----
+***
 
 ### dropped
 
@@ -38,7 +38,7 @@ Subscribers closed for falling behind.
 
 Total messages discarded by a policy.
 
----
+***
 
 ### published
 
@@ -46,7 +46,7 @@ Total messages discarded by a policy.
 
 Total messages accepted by `publish`.
 
----
+***
 
 ### subscribers
 
@@ -54,7 +54,7 @@ Total messages accepted by `publish`.
 
 Current live subscription count.
 
----
+***
 
 ### topics
 

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerSocketAdapter](../README.md) / PowerSocketAdapter
 
@@ -8,7 +8,7 @@
 
 PowerSocketAdapter
 
-PowerSocketAdapter
+ PowerSocketAdapter
 
 ## Example
 
@@ -35,7 +35,7 @@ server.on('connection', (ws) => new PowerSocketAdapter(ws, handlers));
 `any`
 
 A Node `ws` socket, a browser `WebSocket`, or a
-`WebSocketStream`.
+  `WebSocketStream`.
 
 ##### options?
 
@@ -51,7 +51,7 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 > **\_closedByUser**: `boolean`
 
----
+***
 
 ### \_counters
 
@@ -101,43 +101,43 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 > **sent**: `number` = `0`
 
----
+***
 
 ### \_detached
 
 > **\_detached**: (() => `void`) \| (() => `void`) \| `null`
 
----
+***
 
 ### \_disposed
 
 > **\_disposed**: `boolean`
 
----
+***
 
 ### \_draining
 
 > **\_draining**: `boolean`
 
----
+***
 
 ### \_drainPromise
 
 > **\_drainPromise**: `Promise`\<`boolean`\> \| `null`
 
----
+***
 
 ### \_drainTimeoutMs
 
 > **\_drainTimeoutMs**: `number`
 
----
+***
 
 ### \_drainTimer
 
 > **\_drainTimer**: `number` \| `null`
 
----
+***
 
 ### \_drainWaiters
 
@@ -153,151 +153,151 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 `void`
 
----
+***
 
 ### \_heartbeatDeadline
 
 > **\_heartbeatDeadline**: `number` \| `null`
 
----
+***
 
 ### \_heartbeatIntervalMs
 
 > **\_heartbeatIntervalMs**: `number`
 
----
+***
 
 ### \_heartbeatTimeoutMs
 
 > **\_heartbeatTimeoutMs**: `number`
 
----
+***
 
 ### \_heartbeatTimer
 
 > **\_heartbeatTimer**: `number` \| `null`
 
----
+***
 
 ### \_idleTimeoutMs
 
 > **\_idleTimeoutMs**: `number`
 
----
+***
 
 ### \_idleTimer
 
 > **\_idleTimer**: `number` \| `null`
 
----
+***
 
 ### \_lastActivityAt
 
 > **\_lastActivityAt**: `number`
 
----
+***
 
 ### \_limiter
 
 > **\_limiter**: [`PowerSlidingWindow`](../../powerSlidingWindow/classes/PowerSlidingWindow.md) \| `null`
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_onClose
 
 > **\_onClose**: ((`arg0`) => `void`) \| `null`
 
----
+***
 
 ### \_onError
 
 > **\_onError**: ((`arg0`, `arg1`) => `void`) \| `null`
 
----
+***
 
 ### \_onMessage
 
 > **\_onMessage**: ((`arg0`) => `void` \| `Promise`\<`void`\>) \| `null`
 
----
+***
 
 ### \_onOpen
 
 > **\_onOpen**: ((`arg0`) => `void`) \| `null`
 
----
+***
 
 ### \_onRateLimited
 
 > **\_onRateLimited**: `PowerSocketAdapterRateLimited` \| `null`
 
----
+***
 
 ### \_pending
 
 > **\_pending**: `number`
 
----
+***
 
 ### \_pingSentAt
 
 > **\_pingSentAt**: `number`
 
----
+***
 
 ### \_pumpStream
 
 > **\_pumpStream**: (() => `Promise`\<`void`\>) \| `undefined`
 
----
+***
 
 ### \_rateLimitAction
 
 > **\_rateLimitAction**: `string`
 
----
+***
 
 ### \_state
 
 > **\_state**: `any`
 
----
+***
 
 ### \_streamPromise
 
 > **\_streamPromise**: `Promise`\<`void`\> \| `undefined`
 
----
+***
 
 ### \_streamReader
 
 > **\_streamReader**: `any`
 
----
+***
 
 ### \_streamRetryDelay
 
 > **\_streamRetryDelay**: `number`
 
----
+***
 
 ### \_streamRetryTimer
 
 > **\_streamRetryTimer**: `any`
 
----
+***
 
 ### \_streamWritePending
 
 > **\_streamWritePending**: `number`
 
----
+***
 
 ### \_streamWriter
 
@@ -306,13 +306,13 @@ A Node `ws` socket, a browser `WebSocket`, or a
 The single `WebSocketStream` writer, acquired on first send and held
 until dispose. See `_writeStream` for why it cannot be per-call.
 
----
+***
 
 ### kind
 
 > **kind**: [`SocketKind`](../type-aliases/SocketKind.md)
 
----
+***
 
 ### socket
 
@@ -337,7 +337,7 @@ would treat those as "never backed up" and never pause.
 
 `number`
 
----
+***
 
 ### canPing
 
@@ -357,7 +357,7 @@ it falls back to is message activity — see
 
 `boolean`
 
----
+***
 
 ### isDraining
 
@@ -371,7 +371,7 @@ Whether [PowerSocketAdapter#drain](#drain) has been called.
 
 `boolean`
 
----
+***
 
 ### isOpen
 
@@ -385,7 +385,7 @@ Whether the socket is open and not draining.
 
 `boolean`
 
----
+***
 
 ### readyState
 
@@ -416,7 +416,7 @@ Alias for [PowerSocketAdapter#dispose](#dispose-1), so `using` works.
 
 `void`
 
----
+***
 
 ### close()
 
@@ -446,7 +446,7 @@ Close reason.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -462,7 +462,7 @@ leaks one adapter per connection for the life of the process.
 
 `void`
 
----
+***
 
 ### drain()
 
@@ -502,9 +502,44 @@ Close reason.
 `Promise`\<`boolean`\>
 
 `true` when everything settled in time, `false`
-on timeout.
+  on timeout.
 
----
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`object`
+
+***
 
 ### send()
 
@@ -523,11 +558,11 @@ Send data over the socket.
 `boolean`
 
 `false` when the socket is not open, is draining, or is
-disposed. Never throws for an ordinary "cannot send right now" — a send
-loop that has to try/catch every call is a send loop that will eventually
-swallow a real error.
+  disposed. Never throws for an ordinary "cannot send right now" — a send
+  loop that has to try/catch every call is a send loop that will eventually
+  swallow a real error.
 
----
+***
 
 ### stats()
 

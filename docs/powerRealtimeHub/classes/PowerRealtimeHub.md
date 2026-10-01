@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerRealtimeHub](../README.md) / PowerRealtimeHub
 
@@ -19,7 +19,7 @@
 [`HubOptions`](../interfaces/HubOptions.md)
 
 `send` is required; the constructor throws
-without it, so the parameter is not defaulted.
+  without it, so the parameter is not defaulted.
 
 #### Returns
 
@@ -31,31 +31,31 @@ without it, so the parameter is not defaulted.
 
 > **\_batch**: `boolean`
 
----
+***
 
 ### \_batchDelayMs
 
 > **\_batchDelayMs**: `number`
 
----
+***
 
 ### \_close
 
 > **\_close**: ((`arg0`, `arg1`) => `void` \| `Promise`\<`void`\>) \| `null`
 
----
+***
 
 ### \_closed
 
 > **\_closed**: `boolean`
 
----
+***
 
 ### \_codec
 
 > **\_codec**: `"json"` \| `"raw"`
 
----
+***
 
 ### \_counters
 
@@ -81,25 +81,25 @@ without it, so the parameter is not defaulted.
 
 > **published**: `number` = `0`
 
----
+***
 
 ### \_flushScheduled
 
 > **\_flushScheduled**: `boolean`
 
----
+***
 
 ### \_flushTimer
 
 > **\_flushTimer**: `any`
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_now
 
@@ -120,19 +120,19 @@ test harnesses).
 
 Milliseconds since epoch (floating point for higher resolution).
 
----
+***
 
 ### \_onError
 
 > **\_onError**: ((`arg0`, `arg1`) => `void`) \| `null`
 
----
+***
 
 ### \_retained
 
 > **\_retained**: `Map`\<`string`, `any`[]\>
 
----
+***
 
 ### \_send
 
@@ -152,13 +152,13 @@ Milliseconds since epoch (floating point for higher resolution).
 
 `void` \| `Promise`\<`void`\>
 
----
+***
 
 ### \_subs
 
 > **\_subs**: `Map`\<`string`, [`HubSubscriber`](../interfaces/HubSubscriber.md)\>
 
----
+***
 
 ### \_topics
 
@@ -174,7 +174,7 @@ Milliseconds since epoch (floating point for higher resolution).
 
 `void`
 
----
+***
 
 ### close()
 
@@ -186,7 +186,7 @@ Close every subscription and release timers. The hub cannot be reused.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -200,7 +200,7 @@ want to reach for the symbol still have something to call.
 
 `void`
 
----
+***
 
 ### flush()
 
@@ -214,7 +214,42 @@ Flush every pending message immediately, bypassing batching.
 
 Resolves once all subscribers have been drained.
 
----
+***
+
+### getStats()
+
+> **getStats**(): [`HubStats`](../interfaces/HubStats.md) & `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+[`HubStats`](../interfaces/HubStats.md) & `object`
+
+***
 
 ### publish()
 
@@ -243,9 +278,9 @@ through `onError` and does not affect other subscribers.
 `boolean`
 
 Keep the message for a subscriber
-that subscribes later. Intended for a small, fixed set of topics such as
-config changes; the retained log is not bounded per subscriber, so do not
-use it for an unbounded feed.
+  that subscribes later. Intended for a small, fixed set of topics such as
+  config changes; the retained log is not bounded per subscriber, so do not
+  use it for an unbounded feed.
 
 #### Returns
 
@@ -253,7 +288,7 @@ use it for an unbounded feed.
 
 The number of subscribers the message was queued for.
 
----
+***
 
 ### stats()
 
@@ -261,7 +296,7 @@ The number of subscribers the message was queued for.
 
 Snapshot of counters and per-subscriber state.
 
-`subscribers` is the live _count_, and the per-subscriber array is `list`.
+`subscribers` is the live *count*, and the per-subscriber array is `list`.
 The declared return previously intersected `subscribers: Array<object>`
 onto `HubStats`, which is how the hub ended up publishing a type saying
 `subscribers` was an array of records - a number at runtime.
@@ -270,7 +305,7 @@ onto `HubStats`, which is how the hub ended up publishing a type saying
 
 [`HubStats`](../interfaces/HubStats.md) & `object`
 
----
+***
 
 ### subscribe()
 
@@ -291,7 +326,7 @@ Topic name.
 (`arg0`, `arg1`) => `void`
 
 Invoked with each delivered
-message. Throwing is isolated and reported through `onError`.
+  message. Throwing is isolated and reported through `onError`.
 
 ##### options?
 
@@ -300,11 +335,11 @@ message. Throwing is isolated and reported through `onError`.
 #### Returns
 
 An unsubscribe function. Returns `false` if
-the subscription was already gone.
+  the subscription was already gone.
 
 () => `boolean`
 
----
+***
 
 ### unsubscribe()
 

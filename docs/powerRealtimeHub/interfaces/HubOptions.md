@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerRealtimeHub](../README.md) / HubOptions
 
@@ -13,30 +13,30 @@
 > `optional` **batch?**: `boolean`
 
 Coalesce messages published within the
-same microtask into a single `send`. Turn off for tests or transports that
-cannot handle several frames at once.
+  same microtask into a single `send`. Turn off for tests or transports that
+  cannot handle several frames at once.
 
----
+***
 
 ### batchDelayMs?
 
 > `optional` **batchDelayMs?**: `number`
 
 Optional macrotask delay before
-flushing, to widen the coalescing window beyond a single microtask.
+  flushing, to widen the coalescing window beyond a single microtask.
 
----
+***
 
 ### close?
 
 > `optional` **close?**: (`arg0`, `arg1`) => `void` \| `Promise`\<`void`\>
 
 Optional
-adapter called when the hub closes a subscriber for falling behind or on
-`close()`. Takes the same `(subscriber, reason)` pair as `send` plus why
-it happened - `'unsubscribe'`, `'slow-consumer'` or `'hub-closed'`. The
-published type previously declared one parameter, while the guide, the
-runtime and every test all pass and read two.
+  adapter called when the hub closes a subscriber for falling behind or on
+  `close()`. Takes the same `(subscriber, reason)` pair as `send` plus why
+  it happened - `'unsubscribe'`, `'slow-consumer'` or `'hub-closed'`. The
+  published type previously declared one parameter, while the guide, the
+  runtime and every test all pass and read two.
 
 #### Parameters
 
@@ -52,7 +52,7 @@ runtime and every test all pass and read two.
 
 `void` \| `Promise`\<`void`\>
 
----
+***
 
 ### codec?
 
@@ -60,7 +60,7 @@ runtime and every test all pass and read two.
 
 Payload codec for outgoing frames.
 
----
+***
 
 ### now?
 
@@ -72,27 +72,27 @@ Clock override, for tests.
 
 `number`
 
----
+***
 
 ### observability?
 
 > `optional` **observability?**: `boolean` \| [`MetricsCollector`](../../helpers/metrics/classes/MetricsCollector.md)
 
 Opt in to
-metrics: `true` registers this helper in the shared collector, or pass a
-collector of your own. Off by default, so the common case allocates nothing.
-See `guides/metrics.md`.
-transport adapter, called as `send(subscriber, frame)`. Return a promise if
-the transport is async; the hub tracks in-flight sends per subscriber.
+  metrics: `true` registers this helper in the shared collector, or pass a
+  collector of your own. Off by default, so the common case allocates nothing.
+  See `guides/metrics.md`.
+  transport adapter, called as `send(subscriber, frame)`. Return a promise if
+  the transport is async; the hub tracks in-flight sends per subscriber.
 
----
+***
 
 ### onError?
 
 > `optional` **onError?**: (`arg0`, `arg1`) => `void`
 
 Called when the `send`
-adapter rejects or throws, instead of leaving an unhandled rejection.
+  adapter rejects or throws, instead of leaving an unhandled rejection.
 
 #### Parameters
 
@@ -108,7 +108,7 @@ adapter rejects or throws, instead of leaving an unhandled rejection.
 
 `void`
 
----
+***
 
 ### send
 

@@ -180,6 +180,48 @@ immediately re-sends the same task into the same full queue.
 
 ---
 
+## A `BroadcastChannel` hangs the process, or a slow receiver eats all your memory
+
+Two properties of the platform that bite in Node, both measured here.
+
+**An open channel keeps the event loop alive.** A `Worker` `MessagePort` and
+`BroadcastChannel` are both started handles, and Node does not exit while either
+is open. A three-line script with one `new BroadcastChannel` and one `postMessage`
+runs until you kill it:
+
+```js
+const bc = new BroadcastChannel('x');
+bc.postMessage('hello');
+// the process does NOT exit
+bc.unref(); // now it does
+```
+
+This is the same shape as the pool's own `MessageChannel` bug and the reason
+[PowerScheduler](powerScheduler.md) `unref()`s its module-level channel. In a
+browser there is no event loop to hold open, so it is Node-only.
+
+**There is no backpressure.** `BroadcastChannel` has no `bufferedAmount`, no
+`readyState`, no `desiredSize`, and `postMessage` returns `undefined`. The queue
+is invisible and unbounded: posting 400 000 × 1 kB messages at a receiver doing
+1 ms of work per message drove RSS to **203 MB** with no signal and no throw. The
+**only** transports in this library that can report pressure are the WebSocket
+family (`bufferedAmount`) — a `MessagePort` does not report it either.
+
+**Transfer lists are silently ignored.** `postMessage(msg, [arrayBuffer])` is
+accepted and does nothing: the buffer is copied rather than transferred, and no
+error is raised. `MessagePort.postMessage` genuinely transfers (the sender's
+`byteLength` drops to `0`). So an adapter written against
+`frameTransferList()` from `PowerMessageCodec` will look like it transfers, will
+not throw, and will pay a full copy.
+
+**If you need this, you do not want this class.** `PowerRealtimeHub`'s
+per-subscriber queues and slow-consumer policies are what bound a fan-out, and a
+`BroadcastChannel` cannot carry them — its `send` adapter must return a promise
+and `postMessage` returns `undefined`. `guides/powerEventBus.md` has the same
+conclusion for cross-context eventing.
+
+---
+
 ## A scheduled job drifts, or fires several times at once
 
 If you reached for `setInterval` — that is the usual cause, not this library.

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerCircuit](../README.md) / PowerCircuit
 
@@ -11,7 +11,7 @@ PowerCircuit
 Circuit-breaker primitive that short-circuits calls after repeated failures.
 Use for isolating flaky downstream dependencies and to avoid cascading failures.
 
-PowerCircuit
+ PowerCircuit
 
 ## Constructors
 
@@ -26,9 +26,9 @@ PowerCircuit
 `PowerCircuitOptions` = `{}`
 
 `threshold` and `timeout` default
-to 5 and 30s; `onStateChange` and `eventBus` are optional sinks. `timeout`
-is the _base_ open window: consecutive trips grow it exponentially up to
-`maxTimeout` and jitter the result.
+  to 5 and 30s; `onStateChange` and `eventBus` are optional sinks. `timeout`
+  is the *base* open window: consecutive trips grow it exponentially up to
+  `maxTimeout` and jitter the result.
 
 #### Returns
 
@@ -40,7 +40,7 @@ is the _base_ open window: consecutive trips grow it exponentially up to
 
 > **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md) \| `null`
 
----
+***
 
 ### \_consecutiveOpens
 
@@ -49,72 +49,72 @@ is the _base_ open window: consecutive trips grow it exponentially up to
 Consecutive entries into `open`, which drive the exponential growth.
 Reset to 0 whenever the circuit proves the dependency is healthy again.
 
----
+***
 
 ### \_failures
 
 > **\_failures**: `number`
 
----
+***
 
 ### \_halfOpenAnnounced
 
 > **\_halfOpenAnnounced**: `boolean`
 
----
+***
 
 ### \_maxTimeout
 
 > **\_maxTimeout**: `number`
 
----
+***
 
 ### \_openedAt
 
 > **\_openedAt**: `number` \| `null`
 
----
+***
 
 ### \_openWindowMs
 
 > **\_openWindowMs**: `number`
 
-The jittered window for the _current_ `open` period, drawn once when the
+The jittered window for the *current* `open` period, drawn once when the
 circuit opened. It must be stored rather than re-drawn: the open check
 runs on every `call()` and every `state` read, and a per-call draw would
 make the window fluctuate, so the breaker would flap instead of holding.
 
----
+***
 
 ### \_state
 
 > **\_state**: `CircuitState`
 
----
+***
 
 ### \_threshold
 
 > **\_threshold**: `number`
 
----
+***
 
 ### \_timeout
 
 > **\_timeout**: `number`
 
----
+***
 
 ### \_trialInFlight
 
 > **\_trialInFlight**: `boolean`
 
----
+***
 
 ### lastError
 
 > **lastError**: `any`
 
----
+***
 
 ### onStateChange
 
@@ -132,7 +132,7 @@ make the window fluctuate, so the breaker would flap instead of holding.
 
 `number`
 
----
+***
 
 ### state
 
@@ -154,7 +154,7 @@ Draw the open window for a trip: exponential backoff on the base timeout,
 capped, then equal jitter.
 
 The exponential part is what stops a genuinely-down dependency from being
-probed at a fixed rate forever; the jitter is what stops a _fleet_ of
+probed at a fixed rate forever; the jitter is what stops a *fleet* of
 clients from probing it in lockstep. With a fixed window, every circuit
 guarding the same dependency opened on the same tick and retried on the
 same tick, so the first post-timeout request arrived as an N-wide burst
@@ -166,10 +166,10 @@ thundering herd, and the exact failure the breaker exists to prevent.
 `number`
 
 The window in ms, always at least half the computed
-backoff. See `DEFAULT_CIRCUIT_MIN_JITTER_RATIO` for why this is not full
-jitter.
+  backoff. See `DEFAULT_CIRCUIT_MIN_JITTER_RATIO` for why this is not full
+  jitter.
 
----
+***
 
 ### \_setState()
 
@@ -192,7 +192,7 @@ emitting on the bus. A no-op when the state is unchanged.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -205,7 +205,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### call()
 
@@ -234,7 +234,7 @@ Resolves with the function's result.
 
 If the circuit is open or if `fn` throws/rejects.
 
----
+***
 
 ### dispose()
 
@@ -250,7 +250,7 @@ name to call.
 
 `void`
 
----
+***
 
 ### reset()
 

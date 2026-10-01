@@ -1,4 +1,11 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The completeness guard below reads the helpers to count who attaches, so it
+// needs the directory rather than a fixed list of nine.
+const HELPERS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'helpers');
 import {
   MetricsCollector,
   toSeries,
@@ -10,6 +17,10 @@ import { PowerGCRA } from '../src/helpers/powerGCRA.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { PowerBulkhead } from '../src/helpers/powerBulkhead.js';
 import { PowerRetry, PowerRetryBudget } from '../src/helpers/powerRetry.js';
+import { PowerEventLoopMonitor } from '../src/helpers/powerEventLoopMonitor.js';
+import { PowerSocketAdapter } from '../src/helpers/powerSocketAdapter.js';
+import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
+import { PowerWebSocketClient } from '../src/helpers/powerWebSocketClient.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -212,6 +223,14 @@ describe('observability: true on the helpers', () => {
   // `observability: true` means the same thing everywhere, so this is a test
   // over the whole set rather than per helper: a helper that drifts out of the
   // agreement fails here rather than in a dashboard.
+  //
+  // **All nine, and the nine are counted from the source rather than from this
+  // list** — `rg "attach\(this, '" src/helpers/*.js` is what the rule means, and
+  // the assertion below re-checks that count so the list cannot quietly fall
+  // behind a tenth helper. The previous version of this file was titled "all
+  // nine or none" and tested four; five were untested, and three of the five
+  // needed a real constructor argument rather than an empty options bag, which
+  // is a good part of why they were skipped.
   const HELPERS = [
     ['PowerCache', () => new PowerCache({ observability: true }), 'cache'],
     ['PowerBulkhead', () => new PowerBulkhead({ observability: true }), 'bulkhead'],
@@ -221,7 +240,60 @@ describe('observability: true on the helpers', () => {
       () => new PowerRetryBudget({ ratio: 0.2, observability: true }),
       'retryBudget',
     ],
+    ['PowerEventLoopMonitor', () => new PowerEventLoopMonitor({ observability: true }), 'loop'],
+    // A socket the adapter can identify. `{}` throws by design — the adapter
+    // refuses a socket it cannot classify rather than guessing.
+    [
+      'PowerSocketAdapter',
+      () =>
+        new PowerSocketAdapter(
+          /** @type {any} */ ({ on: () => {}, off: () => {}, send: () => {}, close: () => {} }),
+          { observability: true }
+        ),
+      'socket',
+    ],
+    [
+      'PowerRealtimeHub',
+      () => new PowerRealtimeHub({ send: () => {}, observability: true }),
+      'hub',
+    ],
+    [
+      'PowerWebSocketClient',
+      () => new PowerWebSocketClient({ url: 'ws://test/', observability: true }),
+      'ws',
+    ],
+    // A factory source needs no preload, which is what makes a pool testable
+    // without a real worker file.
+    [
+      'PowerPool',
+      () =>
+        new PowerPool('data:text/javascript,export default function(){}', {
+          observability: true,
+        }),
+      'pool',
+    ],
   ];
+
+  // Every prefix this describe block mutates, torn down after each test.
+  //
+  // The row claimed this "removes a latent order dependency" because the
+  // singleton is mutated with no teardown, leaving `bulkhead` and
+  // `retryBudget` registered for the rest of the file. **That claim was wrong,
+  // and it is worth recording why**: every helper in the list already detaches
+  // on `dispose()`, which each case calls, so the singleton was clean between
+  // tests before this hook existed. Removing the hook and restoring the
+  // `before`-count assertion both leave the suite green — verified, not
+  // assumed.
+  //
+  // So this is defensive isolation, not a fix: it means a case that fails
+  // *before* its own `dispose()` cannot leave a registration behind for the
+  // cases after it. That is worth having in a file whose whole subject is a
+  // shared mutable singleton, and it is claimed as nothing more than that.
+  const PREFIXES = HELPERS.map((h) => h[2]);
+
+  afterEach(() => {
+    for (const prefix of PREFIXES) defaultMetrics.unregister(prefix);
+  });
 
   it.each(HELPERS)('%s registers into the shared collector', (_name, make, prefix) => {
     defaultMetrics.unregister(prefix);
@@ -232,12 +304,59 @@ describe('observability: true on the helpers', () => {
     helper.dispose?.();
   });
 
+  it.each(HELPERS)('%s stops being sampled once torn down', (_name, make, prefix) => {
+    // The other half of the contract, and the half that is silent when wrong:
+    // a registration that outlives its helper is a series that looks live and
+    // is not. `terminate()` on a pool still answers `getStats()`, so nothing
+    // fails visibly.
+    const helper = make();
+    expect(defaultMetrics.names()).toContain(prefix);
+    // `terminate()` before `dispose()` on purpose, because the pool's real
+    // teardown is `terminate()` and it must detach on its own.
+    helper.terminate?.();
+    helper.dispose?.();
+    expect(defaultMetrics.names()).not.toContain(prefix);
+  });
+
+  it('covers every helper that attaches, and no others', () => {
+    // **This is the guard the "all nine or none" rule actually needed**, and the
+    // first version of it did not work: it asserted `prefixes.size ===
+    // HELPERS.length` and that nothing was left registered, which is trivially
+    // true and stays true when five entries are deleted from the list. Removing
+    // five helpers from this `it.each` runs five fewer cases and nothing else,
+    // so the test passed. That is the exact failure mode of the file it was
+    // written to fix — titled "all nine or none", testing four — reproduced
+    // inside the test meant to prevent it.
+    //
+    // So the count is taken from the source. `attach(this, '<prefix>'` in
+    // `src/helpers/` is what makes a helper register, which is the thing the
+    // guide's guarantee is about, and reading it here means a tenth helper
+    // added tomorrow fails this test rather than being silently left untested.
+    const source = readdirSync(HELPERS_DIR)
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => readFileSync(join(HELPERS_DIR, f), 'utf8'))
+      .join('\n');
+
+    const attached = [...source.matchAll(/attach\(this,\s*'([A-Za-z0-9_]+)'/g)].map((m) => m[1]);
+    expect(attached.length).toBeGreaterThan(0); // the regex must still find something
+    expect([...attached].sort()).toEqual([...PREFIXES].sort());
+    // And no duplicates: two helpers sharing a prefix would make the second
+    // silently replace the first's series, and `unregister(prefix)` in the
+    // teardown would then remove whichever registered last.
+    expect(new Set(PREFIXES).size).toBe(PREFIXES.length);
+  });
+
   it('registers nothing by default', () => {
     // The cost of the feature when nobody asks for it has to be zero, and
     // "zero" means no series appears — not merely that the numbers are small.
-    const before = defaultMetrics.names().length;
+    //
+    // The assertion is against an exact 0 rather than a `before` count. That
+    // was changed deliberately: with a `before` count this test passes whether
+    // or not earlier tests leaked registrations, which is the "before" the
+    // previous version compared against.
+    expect(defaultMetrics.names().length).toBe(0);
     new PowerCache();
-    expect(defaultMetrics.names().length).toBe(before);
+    expect(defaultMetrics.names().length).toBe(0);
   });
 
   it('ignores a value that is not a collector', () => {

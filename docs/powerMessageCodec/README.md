@@ -1,6 +1,6 @@
 [**performance-helpers**](../README.md)
 
----
+***
 
 [performance-helpers](../README.md) / powerMessageCodec
 
@@ -9,7 +9,7 @@
 Versioned binary framing for helper-to-helper messages.
 
 `PowerPool` and any WebSocket transport both need to move structured values
-across a boundary, and both currently have to _guess_ what they received. The
+across a boundary, and both currently have to *guess* what they received. The
 pool sniffs — "if it looks like an ArrayBuffer, `JSON.parse` it" — which
 silently corrupts a genuinely binary worker message. This module replaces
 sniffing with an explicit, self-describing envelope.

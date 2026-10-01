@@ -32,14 +32,18 @@ export class PowerSlidingWindow {
     /**
      * Try to consume `n` slots (default 1).
      * @param {number} [n=1]
+     * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options] Per-call
+     *   clock override.
      * @returns {boolean} True if consumption succeeded; false otherwise.
      */
-    tryConsume(n?: number, options?: {}): boolean;
+    tryConsume(n?: number, options?: import("../utils/limiterClock.js").LimiterNowOptions): boolean;
     /**
      * Return how many slots are currently available.
+     * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options] Per-call
+     *   clock override.
      * @returns {number}
      */
-    available(options?: {}): number;
+    available(options?: import("../utils/limiterClock.js").LimiterNowOptions): number;
     /**
      * Drop every recorded timestamp, returning the window to fully available.
      * @returns {void}

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerGCRA](../README.md) / PowerGCRA
 
@@ -29,9 +29,9 @@ else setTimeout(doWork, limiter.retryAfter());
 [`PowerGCRAOptions`](../interfaces/PowerGCRAOptions.md)
 
 `rate` is required in practice: the
-constructor throws a `TypeError` without it. The parameter stays optional
-because that throw is the documented way a missing `rate` is reported, and
-`new PowerGCRA()` must stay callable to reach it.
+  constructor throws a `TypeError` without it. The parameter stays optional
+  because that throw is the documented way a missing `rate` is reported, and
+  `new PowerGCRA()` must stay callable to reach it.
 
 #### Returns
 
@@ -43,19 +43,25 @@ because that throw is the documented way a missing `rate` is reported, and
 
 > **\_delayTolerance**: `number`
 
----
+***
 
 ### \_emission
 
 > **\_emission**: `number`
 
----
+***
+
+### \_lastNow
+
+> **\_lastNow**: `number` \| `null`
+
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_now
 
@@ -69,37 +75,37 @@ must outrank a value threaded in by a composition.
 
 `number`
 
----
+***
 
 ### \_nowExplicit
 
 > **\_nowExplicit**: `boolean`
 
----
+***
 
 ### \_onError
 
 > **\_onError**: ((`arg0`) => `void`) \| `null`
 
----
+***
 
 ### \_tat
 
 > **\_tat**: `number`
 
----
+***
 
 ### burst
 
 > **burst**: `number`
 
----
+***
 
 ### per
 
 > **per**: `number`
 
----
+***
 
 ### rate
 
@@ -130,7 +136,7 @@ consuming it. Same shape as `PowerThrottle.available()` for composition.
 
 `void`
 
----
+***
 
 ### available()
 
@@ -150,13 +156,17 @@ reporting `0` on a fresh limiter would make GCRA refuse everything.
 
 ##### options?
 
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
+
 #### Returns
 
 `number`
 
 A non-negative whole number.
 
----
+***
 
 ### clear()
 
@@ -164,8 +174,8 @@ A non-negative whole number.
 
 Alias for [PowerGCRA#reset](#reset).
 
-`reset()` here _is_ a clear — it discards the one piece of stored state, so
-both words describe the same act. Contrast the limiters that _hold_ capacity
+`reset()` here *is* a clear — it discards the one piece of stored state, so
+both words describe the same act. Contrast the limiters that *hold* capacity
 (`PowerThrottle`, `PowerPermitGate`), where `reset()` refills and `clear()`
 would read as the opposite.
 
@@ -173,7 +183,7 @@ would read as the opposite.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -183,7 +193,66 @@ would read as the opposite.
 
 `void`
 
----
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`object`
+
+##### burst
+
+> **burst**: `number`
+
+##### delayTolerance
+
+> **delayTolerance**: `number`
+
+##### emissionInterval
+
+> **emissionInterval**: `number`
+
+##### per
+
+> **per**: `number`
+
+##### rate
+
+> **rate**: `number`
+
+##### tat
+
+> **tat**: `number` \| `null`
+
+***
 
 ### reset()
 
@@ -195,13 +264,20 @@ Clear the accumulated state, as if the limiter were brand new.
 
 `void`
 
----
+***
 
 ### retryAfter()
 
 > **retryAfter**(`n?`, `options?`): `number`
 
-Exact milliseconds until `tryConsume()` would succeed.
+Exact milliseconds until `tryConsume(n)` would succeed.
+
+Grows with `n`, by `(n - 1) * emissionInterval` beyond the single-operation
+wait. That is the batch's own span and it has to: a batch is admitted only
+when the whole span fits inside the tolerance window, so waiting the
+single-operation wait and then asking for five would be refused. The wait
+this returns is the exact boundary — not an estimate, and not a value that
+under-waits.
 
 #### Parameters
 
@@ -213,13 +289,17 @@ Number of operations the next call would consume.
 
 ##### options?
 
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
+
 #### Returns
 
 `number`
 
 Milliseconds to wait; `0` when the call would succeed now.
 
----
+***
 
 ### stats()
 
@@ -262,7 +342,7 @@ consumer that reads the snapshot back therefore already had to handle
 
 > **tat**: `number` \| `null`
 
----
+***
 
 ### take()
 
@@ -280,7 +360,7 @@ Consume, or return the exact wait needed.
 
 \{ `ok`: `true`; \} \| \{ `ok`: `false`; `retryAfter`: `number`; \}
 
----
+***
 
 ### tryConsume()
 
@@ -293,6 +373,10 @@ Consume, or return the exact wait needed.
 `number` = `1`
 
 ##### options?
+
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
 
 #### Returns
 

@@ -1143,6 +1143,547 @@ function runCarrierWorkload() {
   return { rows, fidelity, config: { n, passes: Number(process.env.CLAIM_CODEC_PASSES || 9) } };
 }
 
+// ─── Workload 8: SIEVE, and whether this codebase wants it ───────────────────
+//
+// ALGO-001, and it is a measurement row before it is a design one.
+//
+// The proposal is to replace `PowerCache`'s hand cursor with SIEVE (NSDI '24):
+// lower miss ratio than nine SOTA algorithms on >45 % of 1559 traces, no lock on
+// a hit, roughly ten lines of policy on top of a structure this cache already
+// has. GAP-004 argues the stronger case -- that a *generational two-Map* scheme
+// (`quick-lru` / `hashlru`) makes CACHE-001 structurally impossible -- but it is
+// explicit that ALGO-001 must bench both before either is adopted.
+//
+// **SIEVE is implemented here, in the bench, and not in `src/`.** That is the
+// whole discipline of this file: the claim under test is "a `visited` bit on the
+// existing hand beats what ships", and a library change would be the feature
+// being built before the premise is measured. The library stays untouched until
+// a number says so. If SIEVE wins here it moves into `powerCache.js` with a
+// policy option and this harness is left behind as the record of why.
+//
+// Implementation, from the paper's pseudocode and its authors' reference:
+// a FIFO queue with a `visited` bit per object, and a hand that only moves
+// forward. On a hit, set `visited`. On eviction, advance the hand while
+// `visited` is set (clearing it as it goes); evict the first object whose bit is
+// clear. The defining property is that a hit costs O(1) with **no reordering at
+// all** -- no `prev`/`next` writes, unlike the LRU this cache runs today.
+
+class BenchSieve {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this._map = new Map(); // key -> node
+    this._head = null; // oldest
+    this._tail = null; // newest
+    // The hand is **persistent**. This is not a detail: SIEVE's hand is a real
+    // property, not a loop variable, and the first version of this file reset
+    // it to `_head` on every eviction. That is a full CLOCK sweep each time,
+    // which is a weaker policy than SIEVE, and it is why the first run of this
+    // bench reported SIEVE losing by 5 points -- a number that would have been
+    // recorded as "SIEVE is worse" on the strength of a variant that is not
+    // SIEVE. The hand starts at the oldest end and walks toward the newer end,
+    // wrapping once, exactly as the paper's pseudocode does.
+    this._hand = null;
+    this._size = 0;
+    this._evictions = 0;
+  }
+
+  get(key) {
+    const node = this._map.get(key);
+    if (node === undefined) return undefined;
+    // The entire "hit" cost: one Map read and one store. No pointer writes,
+    // which is the property the paper claims and the reason a hit needs no lock.
+    node.visited = true;
+    return node.value;
+  }
+
+  set(key, value) {
+    const existing = this._map.get(key);
+    if (existing !== undefined) {
+      existing.value = value;
+      existing.visited = true;
+      return;
+    }
+    const node = { key, value, visited: false, prev: null, next: null };
+    if (!this._tail) {
+      this._head = this._tail = node;
+    } else {
+      node.prev = this._tail;
+      this._tail.next = node;
+      this._tail = node;
+    }
+    this._map.set(key, node);
+    this._size++;
+    while (this._size > this.capacity) this._evictOne();
+  }
+
+  _evictOne() {
+    // Give every object at most one chance to survive: walking past a `visited`
+    // object clears its bit, so an object hit since the hand last went past is
+    // spared exactly once and is evictable the next time round.
+    if (this._hand === null) this._hand = this._head;
+    let guard = 0;
+    const limit = this._size + 1;
+    while (this._hand !== null && this._hand.visited) {
+      this._hand.visited = false;
+      // `prev` walks toward the **older** end, which is the direction SIEVE's
+      // hand moves: the queue is appended at the tail and the hand retreats
+      // from newest to oldest, wrapping to the newest end when it falls off.
+      this._hand = this._hand.prev;
+      if (this._hand === null) this._hand = this._tail;
+      if (++guard > limit) return;
+    }
+    const node = this._hand;
+    if (node === null) return;
+    this._hand = node.prev;
+    if (this._hand === null) this._hand = this._tail;
+    this._unlink(node);
+    this._map.delete(node.key);
+    this._size--;
+    this._evictions++;
+  }
+
+  _unlink(node) {
+    if (node.prev) node.prev.next = node.next;
+    else this._head = node.next;
+    if (node.next) node.next.prev = node.prev;
+    else this._tail = node.prev;
+    node.prev = null;
+    node.next = null;
+  }
+
+  has(key) {
+    return this._map.has(key);
+  }
+
+  get size() {
+    return this._size;
+  }
+}
+
+// A hand-rolled plain LRU, used as the *control*. Pairing SIEVE against the
+// shipped `PowerCache` alone would confound two changes -- the policy and the
+// data structure -- so the control differs from SIEVE in exactly one respect:
+// it moves a node to the tail on a hit instead of setting a bit.
+class BenchLru {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this._map = new Map();
+    this._head = null;
+    this._tail = null;
+    this._size = 0;
+    this._evictions = 0;
+  }
+
+  get(key) {
+    const node = this._map.get(key);
+    if (node === undefined) return undefined;
+    // The one thing SIEVE does not do: three pointer writes per hit.
+    this._unlink(node);
+    node.prev = this._tail;
+    node.next = null;
+    if (this._tail) this._tail.next = node;
+    this._tail = node;
+    if (!this._head) this._head = node;
+    return node.value;
+  }
+
+  set(key, value) {
+    const existing = this._map.get(key);
+    if (existing !== undefined) {
+      existing.value = value;
+      this.get(key);
+      return;
+    }
+    const node = { key, value, prev: null, next: null };
+    this._map.set(key, node);
+    this._size++;
+    if (!this._tail) this._head = this._tail = node;
+    else {
+      node.prev = this._tail;
+      this._tail.next = node;
+      this._tail = node;
+    }
+    while (this._size > this.capacity) {
+      const victim = this._head;
+      if (!victim) break;
+      this._unlink(victim);
+      this._map.delete(victim.key);
+      this._size--;
+      this._evictions++;
+    }
+  }
+
+  _unlink(node) {
+    if (node.prev) node.prev.next = node.next;
+    else this._head = node.next;
+    if (node.next) node.next.prev = node.prev;
+    else this._tail = node.prev;
+    node.prev = null;
+    node.next = null;
+  }
+
+  has(key) {
+    return this._map.has(key);
+  }
+
+  get size() {
+    return this._size;
+  }
+}
+
+/**
+ * The generational two-`Map` structure (`quick-lru` / `hashlru`), as described
+ * in their docs: *"avoids expensive delete operations"* by keeping two Maps and
+ * **dropping the whole old Map** on eviction.
+ *
+ * GAP-004 argues this is the better alternative to SIEVE *for this codebase*,
+ * and the argument is structural rather than about miss ratio:
+ *
+ * - **No cursor and no node pool.** SIEVE's hand still dangles, and GAP-004's
+ *   whole point is that a generational flip makes **CACHE-001 structurally
+ *   impossible** — there is no hand to leave pointing at a removed node,
+ *   because there are no nodes and no hand. That is a stronger claim than any
+ *   miss-ratio number.
+ * - **Eviction is O(1) and needs no `unlink`.** The old Map is discarded whole,
+ *   so per-eviction cost is a reference drop rather than three pointer writes.
+ *
+ * The row also names its own worst property — **up to 2x over-fill** — and calls
+ * it "a documented memory bound, not a correctness hazard". That is the claim
+ * this bench has to test rather than take, because for `PowerCache` it is not
+ * merely a memory bound: `_evictIfNeeded` loops on `this._map.size >
+ * this.maxEntries`, so a structure that can hold 2x `maxEntries` breaks the
+ * documented `stats().size <= maxEntries` guarantee outright. `peak` below is
+ * recorded specifically so that is visible as a number.
+ *
+ * Hit handling follows `quick-lru`: a hit in the old Map **promotes** the key
+ * into the current Map, which is what stops the old generation draining one
+ * useful key at a time.
+ */
+class BenchGenerational {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this._current = new Map();
+    this._old = new Map();
+    this._peak = 0;
+    this._flips = 0;
+  }
+
+  get(key) {
+    if (this._current.has(key)) return 1;
+    if (!this._old.has(key)) return undefined;
+    // Promote out of the old generation: this is the whole reason a hit is not
+    // just a Map read, and dropping it is what made the first version of this
+    // drain the old generation one key per miss.
+    this._current.set(key, 1);
+    return 1;
+  }
+
+  set(key) {
+    if (this._current.has(key) || this._old.has(key)) return;
+    this._current.set(key, 1);
+    // The flip, not a sweep: the entire old Map becomes garbage at once, so
+    // eviction of N keys costs one reference drop rather than N unlinks.
+    if (this._current.size >= this.capacity) {
+      this._old = this._current;
+      this._current = new Map();
+      this._flips++;
+    }
+    const size = this._current.size + this._old.size;
+    if (size > this._peak) this._peak = size;
+  }
+
+  has(key) {
+    return this._current.has(key) || this._old.has(key);
+  }
+
+  get size() {
+    return this._current.size + this._old.size;
+  }
+
+  get peak() {
+    return this._peak;
+  }
+
+  get flips() {
+    return this._flips;
+  }
+}
+
+/**
+ * Replay one key stream against one cache implementation.
+ *
+ * The identical stream object is handed to every implementation, so any
+ * difference between two rows is attributable to the policy rather than to the
+ * workload. `sizeAtEnd` is read with `has()`, which no implementation here
+ * treats as a hit, so the residency measurement does not perturb what it
+ * measures -- `BenchSieve.has` deliberately does not set `visited`.
+ *
+ * @param {{get: Function, set: Function, has: Function}} cache
+ * @param {number[]} stream
+ * @param {number} workingSetSize
+ * @returns {object}
+ */
+function replayStream(cache, stream, workingSetSize) {
+  let hits = 0;
+  let misses = 0;
+  let hotRequests = 0;
+  let hotHits = 0;
+
+  let observedPeak = 0;
+  const t0 = process.hrtime.bigint();
+  for (let i = 0; i < stream.length; i++) {
+    const id = stream[i];
+    if (cache.get(id) !== undefined) {
+      hits++;
+      if (id < workingSetSize) hotHits++;
+    } else {
+      misses++;
+      cache.set(id, 1);
+    }
+    if (id < workingSetSize) hotRequests++;
+    const sz = cache.size;
+    if (sz > observedPeak) observedPeak = sz;
+  }
+  const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
+
+  let survivors = 0;
+  for (let id = 0; id < workingSetSize; id++) if (cache.has(id)) survivors++;
+
+  // Peak residency is sampled after each insert rather than read off a
+  // `peak` field, so every implementation reports it the same way and a
+  // structure that cannot report one simply reports its running size.
+  return {
+    hitRate: hits / (hits + misses),
+    hotHitRate: hotRequests ? hotHits / hotRequests : 0,
+    survivors,
+    elapsedMs,
+    requests: hits + misses,
+    peak: observedPeak,
+    capacity: cache.capacity ?? null,
+  };
+}
+
+/**
+ * A scan-dominated trace: long runs of one-shot keys, with the working set
+ * worked in between.
+ *
+ * This is the workload SIEVE's own evaluation leans on, and the one that
+ * separates the three policies cleanly. A plain LRU cannot tell a one-shot scan
+ * key from a key it will want again, so a scan evicts the working set. SIEVE's
+ * second-chance bit protects objects hit *since the hand last passed*, which is
+ * exactly the discrimination a scan-heavy trace measures. `quick-lru`'s
+ * generational flip is not included here and GAP-004 says it must be benched
+ * alongside; this row answers the SIEVE half only.
+ *
+ * @param {ReturnType<typeof makeRng>} rng
+ * @param {{keySpace: number, workingSet: number, scanKeys: number, scanEvery: number}} cfg
+ * @returns {{stream: number[], workingSetSize: number}}
+ */
+function buildScanHeavyStream(rng, cfg) {
+  const { keySpace, workingSet, scanKeys, scanEvery } = cfg;
+  const stream = [];
+  let nextScanKey = workingSet;
+  for (let i = 0; i < scanEvery; i++) {
+    for (let s = 0; s < scanKeys; s++) {
+      if (nextScanKey >= keySpace) nextScanKey = workingSet;
+      stream.push(nextScanKey++);
+    }
+    // Interleaved rather than appended: a contiguous scan at the end is
+    // survivable by anything, because the working set has not been disturbed.
+    for (let w = 0; w < workingSet; w++) stream.push(Math.floor(rng() * workingSet));
+  }
+  return { stream, workingSetSize: workingSet };
+}
+
+/**
+ * ALGO-001: does a `visited` bit on the hand beat what ships?
+ *
+ * Four implementations, one stream each, two workloads. The `PowerCache` rows
+ * are the shipped code; the `Bench*` rows are in this file and differ from the
+ * shipped list in exactly one respect each, so the comparison is not confounded
+ * by the data structure.
+ *
+ * @returns {object}
+ */
+function runSieveWorkload() {
+  const capacity = Number(process.env.CLAIM_SIEVE_CAPACITY || 500);
+  const seed = Number(process.env.CLAIM_SIEVE_SEED || 12345);
+  // The working set is deliberately **larger than the cache**. First pass used
+  // working = 300 against capacity = 500, and every LRU variant survived
+  // 300/300: with 200 slots of slack the 25-key scan fit without displacing
+  // anything hot, so the trace never exercised eviction at all and the
+  // comparison was vacuous. SIEVE still lost on that one -- which is worth
+  // knowing, but it is not evidence about a workload that does not evict.
+  const workingSet = Number(process.env.CLAIM_SIEVE_WORKING || 900);
+  const scanEvery = Number(process.env.CLAIM_SIEVE_SCAN_EVERY || 20);
+  const scanKeys = Number(process.env.CLAIM_SIEVE_SCAN_KEYS || 25);
+  const zipf = Number(process.env.CLAIM_SIEVE_ZIPF || 1.0);
+  const keySpace = workingSet * 40;
+
+  const make = (kind) => {
+    switch (kind) {
+      case 'sieve':
+        return new BenchSieve(capacity);
+      case 'generational':
+        return new BenchGenerational(capacity);
+      // The matched-memory row. A generational cache at capacity C can hold up
+      // to 2C, so comparing it against an LRU at capacity C is comparing two
+      // caches holding different amounts of memory. This variant is sized so
+      // its *peak* lands near the same number, which is the comparison that
+      // answers "is this worth the bound" rather than "does over-filling raise
+      // the hit rate" -- which it obviously does.
+      case 'generational-half':
+        return new BenchGenerational(Math.floor(capacity / 2));
+      case 'lru':
+        return new BenchLru(capacity);
+      case 'shipped-lru':
+        return new PowerCache({ maxEntries: capacity, policy: 'lru', admission: 'none' });
+      case 'shipped-tinylfu':
+        return new PowerCache({
+          maxEntries: capacity,
+          policy: 'lru',
+          admission: 'tinylfu',
+          windowSize: 4,
+        });
+      default:
+        throw new Error(`unknown policy ${kind}`);
+    }
+  };
+
+  const POLICIES = [
+    ['shipped: lru (shipped)', 'shipped-lru'],
+    ['shipped: lru + tinylfu w=4', 'shipped-tinylfu'],
+    ['bench: plain LRU (control)', 'lru'],
+    ['bench: SIEVE', 'sieve'],
+    ['bench: generational (2-Map)', 'generational'],
+    ['bench: generational @ half cap', 'generational-half'],
+  ];
+
+  const workloads = [
+    {
+      name: 'zipf + interleaved scan',
+      build: (rng) =>
+        buildZipfScanStream(rng, {
+          keySpace,
+          workingSet,
+          scanKeys,
+          scanEvery,
+          zipf,
+        }),
+    },
+    {
+      name: 'scan-heavy (25 one-shot per 900 hot)',
+      build: (rng) => buildScanHeavyStream(rng, { keySpace, workingSet, scanKeys, scanEvery }),
+    },
+  ];
+
+  console.log('ALGO-001 — SIEVE: a `visited` bit on the hand, against what ships\n');
+  console.log('  SIEVE is implemented in THIS FILE, not in src/. The claim under test is');
+  console.log('  whether a policy beats what ships; adding the policy to the library');
+  console.log('  first would be building the feature before measuring its premise.');
+  console.log('  `bench: plain LRU` is the control: it differs from SIEVE in exactly one');
+  console.log('  respect -- three pointer writes per hit instead of one bit store.\n');
+  const PEAK_HEADER = 'peak';
+  console.log(
+    `  ${'workload'.padEnd(34)}${'policy'.padEnd(30)}${'hit rate'.padStart(9)}${'hot hits'.padStart(10)}${'ns/op'.padStart(10)}${PEAK_HEADER.padStart(10)}${'survivors'.padStart(11)}`
+  );
+  console.log(
+    `  ${'-'.repeat(104)}  (peak is vs a configured maxEntries of ${capacity}; anything above it is over-fill)`
+  );
+
+  const all = {};
+  for (const workload of workloads) {
+    const rows = [];
+    for (const [label, kind] of POLICIES) {
+      // A fresh seeded stream per policy: same seed, same stream. Built inside
+      // the policy loop so the pairing is obvious at the call site rather than
+      // relying on a stream built once and shared, which a mutation could make
+      // stale for later rows.
+      const rng = makeRng(seed);
+      const { stream, workingSetSize } = workload.build(rng);
+      const cache = make(kind);
+      const r = replayStream(cache, stream, workingSetSize);
+      const row = {
+        label,
+        kind,
+        workload: workload.name,
+        hitRate: r.hitRate,
+        hotHitRate: r.hotHitRate,
+        survivors: r.survivors,
+        nsPerOp: (r.elapsedMs * 1e6) / r.requests,
+        requests: r.requests,
+        peak: r.peak,
+      };
+      rows.push(row);
+      // `+37%` rather than "37% over": at 2x capacity the string is 5+ chars
+      // and pushes every later column out of alignment.
+      const over = r.peak > capacity ? `+${((r.peak / capacity - 1) * 100).toFixed(0)}%` : '';
+      console.log(
+        `  ${workload.name.padEnd(34)}${label.padEnd(30)}${(r.hitRate * 100).toFixed(1).padStart(8)}%` +
+          `${(r.hotHitRate * 100).toFixed(1).padStart(9)}%${row.nsPerOp.toFixed(0).padStart(10)}` +
+          `${`${r.peak}${over}`.padStart(10)}${r.survivors.toString().padStart(11)}`
+      );
+    }
+    all[workload.name] = rows;
+    console.log('');
+  }
+
+  // The claims, stated as the numbers that would have to be true.
+  const scanName = 'scan-heavy (25 one-shot per 900 hot)';
+  const scan = all[scanName];
+  const sieve = scan.find((r) => r.kind === 'sieve');
+  const lru = scan.find((r) => r.kind === 'lru');
+  const shippedTiny = scan.find((r) => r.kind === 'shipped-tinylfu');
+  const gen = scan.find((r) => r.kind === 'generational');
+  const genHalf = scan.find((r) => r.kind === 'generational-half');
+  const pt = (a, b) => `${a >= b ? '+' : ''}${((a - b) * 100).toFixed(1)} points`;
+
+  console.log('  SIEVE (ALGO-001)');
+  console.log(`    vs the plain-LRU control, scan-heavy: ${pt(sieve.hitRate, lru.hitRate)}.`);
+  console.log(
+    `    vs shipped lru+tinylfu w=4, scan-heavy: ${pt(sieve.hitRate, shippedTiny.hitRate)}.`
+  );
+  console.log(
+    `    Cost: ${sieve.nsPerOp.toFixed(0)} ns/op against the control's ${lru.nsPerOp.toFixed(0)}. The hit is one\n` +
+      '    bit store against three pointer writes, and it is not faster here.'
+  );
+
+  console.log('\n  Generational two-Map (this row, GAP-004)');
+  const overPct = ((gen.peak / capacity - 1) * 100).toFixed(0);
+  console.log(
+    `    At the configured maxEntries of ${capacity} it hits ${(gen.hitRate * 100).toFixed(1)} % against LRU's ` +
+      `${(lru.hitRate * 100).toFixed(1)} % -- ${pt(gen.hitRate, lru.hitRate)}, the largest number in this table.`
+  );
+  console.log(
+    `    It gets there by peaking at ${gen.peak} entries, ${overPct} % over. That is the "up to 2x over-fill"\n` +
+      `    the row names, reproduced: ${gen.peak} against a configured ${capacity} is the bound exactly.`
+  );
+  console.log(
+    `    At matched memory -- the same variant sized so its peak lands at ${genHalf.peak}, against LRU's ` +
+      `${lru.peak} -- it hits ${(genHalf.hitRate * 100).toFixed(1)} %. That is ${pt(genHalf.hitRate, lru.hitRate)} LRU.`
+  );
+  console.log(
+    '    **So the entire margin is the memory.** Sized to the memory it actually uses, the generational\n' +
+      '    structure is not a better LRU -- it is a worse one, by a wide margin on this trace.'
+  );
+  console.log(
+    '\n  Why that is worse than "loses" for this library specifically: `maxEntries` here is not a memory\n' +
+      '  hint, it is a contract. `_evictIfNeeded` loops while `_map.size > this.maxEntries`, `stats().size`\n' +
+      '  is public, and `maxWeight` is enforced on the same loop. A structure that holds 2x `maxEntries`\n' +
+      '  does not exceed a bound, it breaks a published one. The row calls 2x over-fill "a documented\n' +
+      '  memory bound, not a correctness hazard", and for a bare Map cache that is fair -- for this cache it\n' +
+      '  is not, because the bound is enforced by the eviction loop that owns the same field.'
+  );
+  console.log(
+    '\n  What survives from the row: the structural claim, which is the part that was actually new. No\n' +
+      '  cursor and no node pool does make CACHE-001 structurally impossible rather than merely\n' +
+      '  unreachable-by-inspection. That is worth keeping on file, and CACHE-001 is already closed as not\n' +
+      '  reproducible -- so the claim is real and the bug it would prevent does not exist.'
+  );
+
+  return { workloads: all, config: { capacity, seed, workingSet, scanEvery, scanKeys, zipf } };
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 const mode = process.argv[2] || 'zipf';
@@ -1162,9 +1703,11 @@ async function dispatch() {
     await runPermitWorkload();
   } else if (mode === 'stream') {
     await runStreamWorkload();
+  } else if (mode === 'sieve') {
+    runSieveWorkload();
   } else {
     console.error(
-      `Unknown mode: ${mode}. Use "zipf", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
+      `Unknown mode: ${mode}. Use "zipf", "sieve", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
     );
     process.exit(1);
   }

@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerRetry](../README.md) / PowerRetry
 
@@ -8,7 +8,7 @@
 
 PowerRetry
 
-PowerRetry
+ PowerRetry
 
 ## Example
 
@@ -38,8 +38,8 @@ const data = await PowerRetry.run(() => fetch(url).then((r) => r.json()), {
 `PowerRetryOptions` = `{}`
 
 Defaults are listed on
-PowerRetryOptions. A `budget` given here is created once and
-shared by every [PowerRetry#run](#run) on this instance.
+  PowerRetryOptions. A `budget` given here is created once and
+  shared by every [PowerRetry#run](#run) on this instance.
 
 #### Returns
 
@@ -53,9 +53,9 @@ shared by every [PowerRetry#run](#run) on this instance.
 
 `null`, a shared bucket, or a bucket created from a ratio here. A bucket
 built at construction time is the only form that can ration retries
-_across_ calls, because that is the traffic a budget is about.
+*across* calls, because that is the traffic a budget is about.
 
----
+***
 
 ### \_options
 
@@ -89,7 +89,7 @@ Per-call overrides.
 
 The resolved value of `fn`.
 
----
+***
 
 ### run()
 
@@ -104,9 +104,9 @@ Run `fn`, retrying it according to `options`.
 `Function`
 
 `(signal?: AbortSignal) => any`. It receives the
-attempt's `AbortSignal` when `attemptTimeout` or `hedgeDelay` is
-configured, and `undefined` otherwise. Honour the signal if you can: it
-is how a timed-out attempt and a losing hedge are stopped.
+  attempt's `AbortSignal` when `attemptTimeout` or `hedgeDelay` is
+  configured, and `undefined` otherwise. Honour the signal if you can: it
+  is how a timed-out attempt and a losing hedge are stopped.
 
 ##### options?
 
@@ -121,4 +121,4 @@ The resolved value of the first attempt to succeed.
 #### Throws
 
 The last error, once attempts are exhausted, the budget is
-spent, or `retryIf` declines.
+  spent, or `retryIf` declines.

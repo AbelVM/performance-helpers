@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerMessageCodec](../README.md) / announceCapabilities
 
@@ -23,9 +23,9 @@ next message on; every other worker keeps receiving the framed JSON.
 `string`[]
 
 Carriers this worker
-can decode. `json` is always safe to claim: it is what the pool sends
-until the announcement arrives, so a worker that decodes frames must not
-claim anything else instead.
+  can decode. `json` is always safe to claim: it is what the pool sends
+  until the announcement arrives, so a worker that decodes frames must not
+  claim anything else instead.
 
 ## Returns
 

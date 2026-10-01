@@ -10,3 +10,4 @@
 
 - [formatErrorObj](functions/formatErrorObj.md)
 - [normalizeError](functions/normalizeError.md)
+- [queueFullError](functions/queueFullError.md)

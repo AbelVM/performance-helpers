@@ -119,6 +119,26 @@ and the reference is kept so it cannot be collected out from under us. Each post
 adds a listener that removes itself when it fires, which is what lets `flush()` and
 `cancel()` detach a pending post instead of leaving it queued.
 
+### Sharing that module-level channel has a cost, and it is handled
+
+`dispose()` releases the channel, because a started `MessagePort` keeps a Node
+process alive and `unref()` alone is not enough once the ports are open. But the
+channel is **module-level**, so "release it" means "release it for every
+scheduler in the process". Closing it while another scheduler had a flush in
+flight discarded that flush, left its `scheduled` flag stuck at `true`, and made
+every later `schedule()` a silent no-op — a scheduler that never ran again for the
+life of the object. Only `cancel()` recovered it.
+
+So the channel is tracked: posts in flight are counted, and `dispose()` **drops
+the module reference but only closes the ports when nothing is pending**. The next
+scheduler to schedule builds a fresh pair; the pending post is still delivered on
+the old, already-`unref()`ed one, so nothing holds the process open. Disposing
+during your own idle path closes the ports as before.
+
+The practical rule: **a `dispose()` on one macrotask scheduler is not a
+process-wide event any more**, so it is safe inside `using` blocks with other
+schedulers alive — which it was not.
+
 If you need a _deadline_ rather than a macrotask, reach for
 [PowerDeadline](powerDeadline.md). And if you want a recurring schedule rather
 than a per-turn flush, see [PowerCron](powerCron.md).

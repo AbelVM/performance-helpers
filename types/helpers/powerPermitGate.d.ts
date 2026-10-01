@@ -1,6 +1,8 @@
 export class PowerPermitGate {
     /**
-     * @param {PowerPermitGateOptions} [options]
+     * @param {PowerPermitGateOptions} [options] `className` and `limitName` let a
+     *   wrapping class report its own vocabulary in validation messages; see
+     *   {@link PowerPermitGateOptions}.
      */
     constructor(options?: PowerPermitGateOptions);
     _capacity: number;
@@ -64,9 +66,15 @@ export class PowerPermitGate {
     /**
      * Acquire a permit asynchronously.
      * Resolves immediately when a permit is available; otherwise waits in FIFO order.
+     * @param {{signal?: AbortSignal}} [options] `signal` aborts the *wait* for a
+     *   permit, not any work started once one is held — see `src/utils/abort.js`.
+     *   Checked before the fast path, so an already-aborted signal rejects rather
+     *   than resolving because a permit happened to be free.
      * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
      */
-    acquire(options?: {}): Promise<PowerReleaseFn>;
+    acquire(options?: {
+        signal?: AbortSignal;
+    }): Promise<PowerReleaseFn>;
     /**
      * Try to acquire a permit without waiting.
      * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.

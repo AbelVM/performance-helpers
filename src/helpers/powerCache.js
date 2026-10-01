@@ -65,6 +65,7 @@ function sketchWidthFor(maxEntries) {
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerCacheOptions} PowerCacheOptions
+ * @typedef {import('./jsdoc-types.js').PowerCacheGetOrFetchOptions} PowerCacheGetOrFetchOptions
  */
 
 /**
@@ -106,7 +107,7 @@ function sketchWidthFor(maxEntries) {
  */
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
-import { assertFunction, assertLimitRequired } from '../utils/options.js';
+import { assertFunction, assertLimitRequired, normalizeTtl } from '../utils/options.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import {
   DEFAULT_MAX_CLEANUP_PER_TICK,
@@ -140,26 +141,6 @@ const ALIASED_FIELDS = Object.freeze([
 ]);
 
 /**
- * The message for a `ttl` that is not a duration.
- *
- * Extracted because `PowerCache._expiresAt` raises it from two branches — a
- * wrong *type* and a non-finite *value* — and two copies of a paragraph
- * explaining that string concatenation is not addition is how the original
- * defect stayed invisible in three places at once.
- *
- * @param {*} ttl - The rejected value.
- * @returns {string}
- */
-function ttlTypeMessage(ttl) {
-  return (
-    'PowerCache: `ttl` must be a finite number of milliseconds or Infinity ' +
-    `(received ${JSON.stringify(ttl) ?? String(ttl)}). A value that is not a number ` +
-    'concatenates rather than adds, and every expiry comparison against it is ' +
-    'false — so the entry would never expire.'
-  );
-}
-
-/**
  * PowerCache
  *
  * In-memory cache with weight-aware eviction, TTLs and optional cleanup.
@@ -188,6 +169,21 @@ export class PowerCache {
     maxWeight = Infinity,
     weightFn = () => 1,
     defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
+    // ── Stale-while-revalidate ──────────────────────────────────────────────
+    // `staleWhileRevalidate` already existed as a **per-call** flag, and that is
+    // where the defect lived: with no upper bound on the stale window, it
+    // served a value expired at *any* point in the past. Measured — a value
+    // **5 years** past `expiresAt` was still returned as "stale", with the
+    // refresh running in the background and failing silently every time. That is
+    // not stale-while-revalidate, it is serve-forever-while-refreshing, and it
+    // is the one failure mode SWR must not have: a caller asking for
+    // freshness-while-not-blocking is asking for it for a bounded time.
+    allowStale = false,
+    staleTtl = Infinity,
+    // A default producer for `getOrFetch`. Declared here rather than required at
+    // each call site because the per-call form still wins, so a cache can have a
+    // general default that one caller overrides.
+    fetchMethod = null,
     maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
     rejectOversized = false,
     onEvict = null,
@@ -245,6 +241,67 @@ export class PowerCache {
       ? weightFn
       : () => 1;
     this.defaultTTL = defaultTTL;
+    /**
+     * Serve a stale value on `getOrSet`/`getOrSetAsync` by default, so a caller
+     * does not have to pass `staleWhileRevalidate` at every call site. The
+     * per-call flag still wins, and `false` here does not remove the per-call
+     * option - it only stops it being the default.
+     */
+    this.allowStale = Boolean(allowStale);
+    // `staleTtl` is a validated *duration*, not a boolean, and the validation is
+    // the feature: an unvalidated one let `staleTtl: 'soon'` read as `NaN` and
+    // compare false, so stale was silently disabled by a typo rather than
+    // rejected. `Infinity` is accepted explicitly, as "no bound", because that
+    // is a real (if unwise) choice a caller may make on purpose.
+    if (staleTtl !== Infinity && !(Number.isFinite(staleTtl) && staleTtl >= 0)) {
+      throw new TypeError(
+        'PowerCache: `staleTtl` must be a non-negative finite number or Infinity ' +
+          `(received ${String(staleTtl)}). An unparseable stale window would compare ` +
+          'false against every entry and silently disable stale serving.'
+      );
+    }
+    // `allowStale` without a `staleTtl` is the one combination refused, and the
+    // refusal is the point.
+    //
+    // `staleTtl` defaults to `Infinity` rather than `0` because the per-call
+    // `staleWhileRevalidate: true` flag **already existed and already served
+    // stale without an upper bound**. Defaulting to `0` would have silently
+    // switched that off for every existing caller — the flag would still be
+    // passed and nothing would be stale, which is a behaviour change with no
+    // error and no way to notice. Two existing tests caught exactly that.
+    //
+    // So the *new* surface is the one that is safe by construction: reaching
+    // `allowStale` means opting into per-key stale on every call, and that has
+    // to be paired with a chosen bound. `staleTtl: Infinity` is still available
+    // for a caller who wants unbounded deliberately — they just have to say so.
+    // `arguments[0]` is the caller's original options object — the constructor
+    // destructures anonymously, so there is no named `options` to ask, and
+    // `staleTtl === Infinity` cannot distinguish "defaulted" from "explicitly
+    // passed Infinity", which are opposite intentions here. A `Symbol` sentinel
+    // would distinguish them and cost two type errors against the declared
+    // `number` option, so this asks the object directly.
+    if (this.allowStale && !('staleTtl' in arguments[0])) {
+      throw new TypeError(
+        'PowerCache: `allowStale` requires an explicit `staleTtl`. A stale window with ' +
+          'no bound serves a value expired at any point in the past — measured at five ' +
+          'years — so the bound is required. Pass the window you can tolerate, or ' +
+          '`staleTtl: Infinity` to opt out of it on purpose.'
+      );
+    }
+    this.staleTtl = staleTtl;
+    if (fetchMethod != null && typeof fetchMethod !== 'function') {
+      throw new TypeError('fetchMethod must be a function when supplied');
+    }
+    // Annotated rather than defaulted to a function.
+    //
+    // `fetchMethod = () => null` silenced a `Type 'null' is not assignable to
+    // type '() => any'` error, and in doing so **broke `getOrFetch`**: its
+    // `factory ?? this.fetchMethod` then always resolved to a function, so the
+    // "no factory anywhere" path stopped rejecting and returned `null` instead
+    // of a `TypeError`. The error was in the *type*, not the value, and the
+    // annotation is where it belonged.
+    /** @type {Function|null} */
+    this.fetchMethod = fetchMethod;
     // Injected clock, matching the limiters (PERF-007) and `PowerTTLMap`. It
     // is read through `this._now()` at seven sites, all of which are "what time
     // is it" reads with no other argument, so this is the whole change.
@@ -300,6 +357,19 @@ export class PowerCache {
 
     this._currentWeight = 0;
     this._hits = 0;
+    /**
+     * Serves of an **expired** value, from the stale-while-revalidate path.
+     *
+     * Separate from `_hits` because a stale serve is the one case where the cache
+     * answered without having fresh data, and a caller cannot otherwise tell
+     * it apart from a real hit. Operating stale-while-revalidate blind to that
+     * rate is how a broken upstream turns into a silently wrong service: every
+     * request is "successful" and the numbers look like a warm cache.
+     *
+     * A subset of `_hits` — a stale serve still counts as a hit, because from the
+     * caller's side it was served.
+     */
+    this._staleServes = 0;
     this._misses = 0;
     this._evictions = 0;
     this._rejected = 0; // rejected oversized insert attempts
@@ -647,6 +717,35 @@ export class PowerCache {
       return null;
     }
     return node;
+  }
+
+  /**
+   * Whether an expired node may still be served at `now`.
+   *
+   * The whole point of the row, and the predicate that makes
+   * `staleWhileRevalidate` safe: a stale value is servable only **within
+   * `staleTtl` of its `expiresAt`**. Before this, the flag had no upper bound at
+   * all and a value five years past expiry was still returned as "stale".
+   *
+   * `staleTtl === 0` means the feature is off, which is the default and the
+   * pre-existing behaviour, so nothing changes for a caller who never asked for
+   * it. `Infinity` means explicitly unbounded.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @param {number} now
+   * @returns {boolean}
+   */
+  _staleServable(node, now) {
+    // `Infinity` is the one value arithmetic cannot answer for, so it is
+    // short-circuited; everything else reduces to the comparison, **including
+    // `0`**. There was an `if (!(this.staleTtl > 0)) return false` guard here and
+    // a mutation check proved it dead: with `staleTtl: 0` the comparison alone is
+    // already false for every expired entry, since `now > expiresAt` always. The
+    // guard restated the arithmetic, and a restatement that cannot change the
+    // answer is a second thing to keep correct.
+    if (this.staleTtl === Infinity) return true;
+    return now <= node.expiresAt + this.staleTtl;
   }
 
   /**
@@ -1123,20 +1222,16 @@ export class PowerCache {
     // short-circuits here so the two are told apart while the caller's intent is
     // still visible, rather than being conflated in a sentinel and reconstructed
     // at each call site.
+    //
+    // The *validation* now lives in `utils/options.js` as `normalizeTtl`,
+    // because `PowerTTLMap` needs the identical rules and could not reach the
+    // copy that lived here — `powerCache.js` exports nothing, so CACHE-003's fix
+    // fixed one class of two. `PowerTTLMap.set(k, 1, 'abc')` stored an immortal
+    // entry while this method throws for the same value. The nullish test stays
+    // here because `normalizeTtl` reports "no expiry" as `0`, which is also what
+    // a real `{ ttl: 0 }` resolves to, and the two mean opposite things.
     if (ttl == null || ttl === Infinity) return 0;
-    // The type check, not just the value check, and the reason is
-    // `Number([]) === 0` and `Number(true) === 1`. Coercing first would accept
-    // `{ ttl: [] }` as "expire now" and `{ ttl: true }` as "one millisecond",
-    // which is the same silent-misconfiguration failure as the string case below
-    // — a value that looks accepted and means something the caller did not write.
-    if (typeof ttl !== 'number' && typeof ttl !== 'string') {
-      throw new TypeError(ttlTypeMessage(ttl));
-    }
-    const ms = Number(ttl);
-    if (!Number.isFinite(ms)) {
-      throw new TypeError(ttlTypeMessage(ttl));
-    }
-    return now + ms;
+    return now + normalizeTtl(ttl, 'PowerCache');
   }
 
   /**
@@ -1379,6 +1474,31 @@ export class PowerCache {
   }
 
   /**
+   * `getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is
+   * given.
+   *
+   * The reason this exists rather than as a required argument: the row's shape
+   * (`fetchMethod` on the instance) removes a function literal from **every**
+   * call site, which is most of the cost of the async cache API in a hot path.
+   * The per-call factory still wins, so one caller can override a cache-wide
+   * default — a cache is often keyed by more than one kind of resource.
+   *
+   * @param {*} key
+   * @param {Function} [factory] Overrides the cache's `fetchMethod`.
+   * @param {PowerCacheGetOrFetchOptions} [options] Passed through to `getOrSetAsync`.
+   * @returns {Promise<*>}
+   */
+  getOrFetch(key, factory, options = {}) {
+    const fn = factory ?? this.fetchMethod;
+    if (typeof fn !== 'function') {
+      return Promise.reject(
+        new TypeError('PowerCache.getOrFetch: no factory given and no `fetchMethod` configured')
+      );
+    }
+    return this.getOrSetAsync(key, fn, options);
+  }
+
+  /**
    * Atomically read-or-compute a value for `key`.
    * If the key is present and not expired the stored value is returned.
    * Otherwise `factory` is invoked to produce the value which is stored
@@ -1398,10 +1518,11 @@ export class PowerCache {
    * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
    * @returns {*|Promise<*>}
    */
+
   getOrSet(
     key,
     factory,
-    { ttl = undefined, weight = undefined, staleWhileRevalidate = false } = {}
+    { ttl = undefined, weight = undefined, staleWhileRevalidate = this.allowStale } = {}
   ) {
     const now = this._now();
     const node = this._fetchValidNode(key, {
@@ -1411,9 +1532,12 @@ export class PowerCache {
 
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
-        if (typeof factory === 'function') {
+        // Expired. Servable only inside the stale window — this is the branch
+        // that used to return the value unconditionally.
+        if (typeof factory === 'function' && this._staleServable(node, now)) {
           this._moveToTail(node);
           this._hits++;
+          this._staleServes++;
           this._refreshStaleEntry(key, factory, { ttl, weight });
           return node.value;
         }
@@ -1548,7 +1672,12 @@ export class PowerCache {
   getOrSetAsync(
     key,
     asyncFactory,
-    { ttl = undefined, weight = undefined, staleWhileRevalidate = false, timeout = undefined } = {}
+    {
+      ttl = undefined,
+      weight = undefined,
+      staleWhileRevalidate = this.allowStale,
+      timeout = undefined,
+    } = {}
   ) {
     if (typeof asyncFactory !== 'function') {
       // treat non-function as direct value
@@ -1559,9 +1688,13 @@ export class PowerCache {
     const node = this._map.get(key);
     if (node) {
       if (node.expiresAt && node.expiresAt <= now) {
-        if (staleWhileRevalidate) {
+        // Bounded, for the same reason and with the same predicate as
+        // `getOrSet`. Before it, this branch returned the value with no upper
+        // bound on how long "stale" could mean — measured at five years.
+        if (staleWhileRevalidate && this._staleServable(node, now)) {
           this._moveToTail(node);
           this._hits++;
+          this._staleServes++;
           this._refreshStaleEntry(key, asyncFactory, { ttl, weight });
           return Promise.resolve(node.value);
         }
@@ -1951,7 +2084,8 @@ export class PowerCache {
 
   /**
    * Return runtime statistics for the cache.
-   * @returns {{size:number, weight:number, hits:number, misses:number, evictions:number, rejected:number, poolSize:number}}
+   * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
+   *   evictions:number, expirations:number, rejected:number, poolSize:number}}
    */
   stats() {
     return {
@@ -1959,11 +2093,43 @@ export class PowerCache {
       weight: this._currentWeight,
       hits: this._hits,
       misses: this._misses,
+      // A subset of `hits`, not an addition to it.
+      staleServes: this._staleServes,
       evictions: this._evictions,
       expirations: this._expirations,
       rejected: this._rejected,
       poolSize: this._pool.length,
     };
+  }
+
+  /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` — the one class that has always spelled it this way — is not
+   * handed `TypeError: x.getStats is not a function` here.
+   *
+   * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+   * `getStats()`, with no stated rule and nothing pinning it, which reached the
+   * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+   * spellings work everywhere now. `stats()` is canonical and this delegates to
+   * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+   * library would be a breaking change.
+   *
+   * Written out per class rather than installed on the prototype on purpose: a
+   * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+   * `types/` omitted it and a TypeScript caller got a type error on a method
+   * that worked at runtime. That was the first implementation.
+   *
+   * **No `@returns` tag, and that is load-bearing.** The first version carried a
+   * hand-copied copy of the `stats()` return shape, on the reasoning that an
+   * explicit type was safer. It is not: the copy went stale the moment a
+   * concurrent change added `staleServes` and `expirations` to `PowerCache`
+   * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+   * byte-identical published type and cannot drift, because there is nothing to
+   * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+   * which is the property a consumer relies on.
+   */
+  getStats() {
+    return this.stats();
   }
 
   /**
@@ -2665,6 +2831,36 @@ export class PowerMemoizer {
   stats() {
     return this.cache.stats();
   }
+
+  /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` — the one class that has always spelled it this way — is not
+   * handed `TypeError: x.getStats is not a function` here.
+   *
+   * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+   * `getStats()`, with no stated rule and nothing pinning it, which reached the
+   * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+   * spellings work everywhere now. `stats()` is canonical and this delegates to
+   * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+   * library would be a breaking change.
+   *
+   * Written out per class rather than installed on the prototype on purpose: a
+   * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+   * `types/` omitted it and a TypeScript caller got a type error on a method
+   * that worked at runtime. That was the first implementation.
+   *
+   * **No `@returns` tag, and that is load-bearing.** The first version carried a
+   * hand-copied copy of the `stats()` return shape, on the reasoning that an
+   * explicit type was safer. It is not: the copy went stale the moment a
+   * concurrent change added `staleServes` and `expirations` to `PowerCache`
+   * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+   * byte-identical published type and cannot drift, because there is nothing to
+   * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+   * which is the property a consumer relies on.
+   */
+  getStats() {
+    return this.stats();
+  }
   /**
    * Release the underlying cache.
    *
@@ -2733,9 +2929,29 @@ export class PowerTimedCache {
   // These forward to the inner `PowerCache` and were declared with required
   // parameters, so `timed.set(k, v)` - two arguments, which is all the method
   // needs - failed to type-check with "Expected 3 arguments, but got 2".
+  //
+  // The `options` parameter is declared for the same reason: the inner methods
+  // take `{ttl, weight}`, and an undeclared third parameter is published as
+  // `options?: {}`, which type-checks anything and tells the caller nothing.
+  /**
+   * @param {any} key
+   * @param {any} value
+   * @param {{ttl?: number, weight?: number}} [options] Per-entry TTL in ms and
+   *   weight. Both are ignored when this instance was constructed with a
+   *   non-null TTL — the constructor's TTL wins.
+   * @returns {false|PowerTimedCache}
+   */
   set(key, value, options = {}) {
     return this.cache.set(key, value, options);
   }
+  /**
+   * @param {any} key
+   * @param {{allowStale?: boolean, staleTtl?: number}} [options] `allowStale`
+   *   returns an expired entry and refreshes in the background, bounded by
+   *   `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
+   *   serves a value of any age.
+   * @returns {boolean}
+   */
   has(key, options = {}) {
     return this.cache.has(key, options);
   }
@@ -2747,6 +2963,36 @@ export class PowerTimedCache {
   }
   stats() {
     return this.cache.stats();
+  }
+
+  /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` — the one class that has always spelled it this way — is not
+   * handed `TypeError: x.getStats is not a function` here.
+   *
+   * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+   * `getStats()`, with no stated rule and nothing pinning it, which reached the
+   * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+   * spellings work everywhere now. `stats()` is canonical and this delegates to
+   * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+   * library would be a breaking change.
+   *
+   * Written out per class rather than installed on the prototype on purpose: a
+   * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+   * `types/` omitted it and a TypeScript caller got a type error on a method
+   * that worked at runtime. That was the first implementation.
+   *
+   * **No `@returns` tag, and that is load-bearing.** The first version carried a
+   * hand-copied copy of the `stats()` return shape, on the reasoning that an
+   * explicit type was safer. It is not: the copy went stale the moment a
+   * concurrent change added `staleServes` and `expirations` to `PowerCache`
+   * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+   * byte-identical published type and cannot drift, because there is nothing to
+   * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+   * which is the property a consumer relies on.
+   */
+  getStats() {
+    return this.stats();
   }
   startCleanup(intervalOrOptions = undefined) {
     return this.cache.startCleanup(intervalOrOptions);
@@ -2789,6 +3035,117 @@ export class PowerTimedCache {
 }
 
 /**
+ * Structural, type-tagged encoding of one memoizer argument.
+ *
+ * `simpleArgsKey` used to hand the **whole argument list** to `JSON.stringify`
+ * the moment it met anything non-scalar, and that single decision caused four
+ * distinct defects, all measured:
+ *
+ * - `({a:1}, undefined)`, `({a:1}, fn)` and `({a:1}, null)` all produced
+ *   `'[{"a":1},null]'` — `JSON.stringify` maps `undefined` and functions to
+ *   `null`. A memoizer served the *first* call's value to the other two. That is
+ *   the row's report, confirmed with a live `PowerMemoizer`: two distinct calls,
+ *   one underlying invocation.
+ * - **Every `Map`, `Set`, `RegExp` and `Error` serialised to `'[{}]'`**, so two
+ *   unrelated `Map`s were indistinguishable. Worse than the reported case,
+ *   because nothing about the inputs suggests they are unencodable.
+ * - A `BigInt` *inside* an object threw, while a top-level `BigInt` was
+ *   explicitly supported on the fast path — the same value, two answers.
+ * - A circular structure threw `Converting circular structure to JSON`.
+ *
+ * Encoding per argument, with a type tag on each, removes all four: an
+ * unencodable value can no longer alias a *different* value, because the
+ * alternatives are a distinct tag or a throw.
+ *
+ * @param {*} v
+ * @param {Set<object>} seen - Objects already on the current path, for cycles.
+ * @returns {string}
+ */
+function encodeArg(v, seen) {
+  const t = typeof v;
+  if (v === null) return 'n:';
+  if (t === 'string') return 's:' + v.length + ':' + v;
+  // No `-0` normalisation, because it is not needed: `String(-0)` is already
+  // `'0'`, so the original `String(v === 0 ? 0 : v)` could not change the result.
+  // A test asserted the two were equal and passed whichever way it was written —
+  // a guard that cannot fail. Removed when a mutation check proved it.
+  if (t === 'number') return 'd:' + String(v);
+  if (t === 'boolean') return 'b:' + (v ? '1' : '0');
+  if (t === 'undefined') return 'u:';
+  if (t === 'bigint') return 'g:' + v.toString();
+  if (t === 'symbol') {
+    // `JSON.stringify` maps every Symbol to `null`, so falling through would
+    // alias *all* Symbol arguments onto one key. Symbols are not serialisable
+    // by design, and a `Symbol.keyFor` registry would only be stable within a
+    // registry.
+    throw new TypeError('simpleArgsKey() does not support symbol arguments');
+  }
+  if (t === 'function') {
+    // A closure has no stable identity: two structurally identical arrows are
+    // different functions, and `String(fn)` is the same text for both, so any
+    // encoding would either collide or be useless. Refusing is the only answer
+    // that cannot be wrong.
+    throw new TypeError(
+      'simpleArgsKey() does not support function arguments - two closures cannot be told apart. ' +
+        'Pass a key explicitly, or supply a `keyResolver`.'
+    );
+  }
+
+  // A value already on this path is a cycle. Its *depth* is enough to
+  // distinguish the structures, and it terminates.
+  if (seen.has(v)) return 'c:';
+  seen.add(v);
+  try {
+    if (Array.isArray(v)) {
+      let out = 'A:[';
+      for (let i = 0; i < v.length; i++) {
+        if (i) out += ',';
+        out += encodeArg(v[i], seen);
+      }
+      return out + ']';
+    }
+    if (v instanceof Date) return 'D:' + v.getTime();
+    if (v instanceof RegExp) return 'R:' + v.source + '/' + v.flags;
+    if (v instanceof Error) return 'E:' + v.name + ':' + v.message;
+    if (v instanceof Map) {
+      // Order is significant for a Map, so it is preserved rather than sorted.
+      let out = 'Mp:[';
+      let first = true;
+      for (const [k, val] of v) {
+        if (!first) out += ',';
+        first = false;
+        out += encodeArg(k, seen) + '=' + encodeArg(val, seen);
+      }
+      return out + ']';
+    }
+    if (v instanceof Set) {
+      let out = 'St:[';
+      let first = true;
+      for (const val of v) {
+        if (!first) out += ',';
+        first = false;
+        out += encodeArg(val, seen);
+      }
+      return out + ']';
+    }
+    // Plain object. Key order follows insertion order, as `JSON.stringify` did,
+    // so an object built the same way twice still matches.
+    let out = 'O:{';
+    let first = true;
+    for (const k of Object.keys(v)) {
+      if (!first) out += ',';
+      first = false;
+      out += 's:' + k.length + ':' + k + '=' + encodeArg(v[k], seen);
+    }
+    return out + '}';
+  } finally {
+    // Pop, so a value reached twice on sibling paths is not mistaken for a
+    // cycle. `seen` is a path, not a visited-set.
+    seen.delete(v);
+  }
+}
+
+/**
  * A small, fast key resolver for common cases where arguments are simple scalars.
  * - Fast path for primitive scalar args (string, number, boolean, null, undefined).
  * - Joins scalar args with `|` and prefixes type codes to avoid collisions.
@@ -2805,50 +3162,21 @@ export class PowerTimedCache {
  */
 export function simpleArgsKey(...args) {
   if (args.length === 0) return '';
-  let sawNonScalar = false;
-  const parts = new Array(args.length);
+  // One encoder for every argument, including the scalars. The previous shape
+  // had a fast path for scalars and a wholesale `JSON.stringify` fallback for
+  // anything else, and the fallback is where every defect in this row lived:
+  // it mapped `undefined`, functions and every `Map`/`Set`/`RegExp` onto the
+  // same text, so distinct calls shared a cache entry.
+  //
+  // The scalar codes are unchanged, so the key format for scalar-only calls —
+  // the overwhelmingly common case, and the one PERF-005 measured — is
+  // byte-identical to before. Only calls that previously hit the fallback
+  // change, which is precisely the set that was broken.
+  const seen = new Set();
+  let out = '';
   for (let i = 0; i < args.length; i++) {
-    const v = args[i];
-    const t = typeof v;
-    if (v === null) {
-      parts[i] = 'n:'; // null
-      continue;
-    }
-    if (t === 'string') {
-      // prefix with length to reduce collisions like ['12','3'] vs ['1','23']
-      parts[i] = 's:' + v.length + ':' + v;
-      continue;
-    }
-    if (t === 'number') {
-      // Normalise -0 to 0 so the two do not produce distinct cache entries.
-      parts[i] = 'd:' + String(v === 0 ? 0 : v);
-      continue;
-    }
-    if (t === 'boolean') {
-      parts[i] = 'b:' + (v ? '1' : '0');
-      continue;
-    }
-    if (t === 'undefined') {
-      parts[i] = 'u:';
-      continue;
-    }
-    if (t === 'bigint') {
-      // `JSON.stringify` throws on BigInt, which made this "fast scalar path"
-      // throw for a perfectly ordinary argument type.
-      parts[i] = 'g:' + v.toString();
-      continue;
-    }
-    if (t === 'symbol') {
-      // `JSON.stringify` maps every Symbol to `null`, so falling through
-      // would alias *all* Symbol arguments onto the single key `'[null]'` -
-      // silent cache poisoning. Symbols are not serialisable by design.
-      throw new TypeError('simpleArgsKey() does not support symbol arguments');
-    }
-    // non-scalar (object, function) — fall back to JSON stringify
-    sawNonScalar = true;
-    break;
+    if (i) out += '|';
+    out += encodeArg(args[i], seen);
   }
-
-  if (sawNonScalar) return JSON.stringify(args);
-  return parts.join('|');
+  return out;
 }

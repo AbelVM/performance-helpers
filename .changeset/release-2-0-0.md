@@ -282,6 +282,49 @@ pipeline.
 
 The ones that could bite an existing user:
 
+- **`PowerGCRA` admitted a batch larger than its burst, and
+  `available()` under-reported its own headroom.** A batch is now admitted only
+  if its own span fits inside the delay tolerance (`n <= burst + 1`, the same
+  requirement `golang.org/x/time/rate` states as `n <= burst`). Before this,
+  `rate: 1, burst: 0` and `tryConsume(5)` returned `true` — a batch of five at
+  one operation per second, admitted instantly and leaving the limiter 5 s in
+  debt on a configuration whose steady state is one operation per second. The
+  deeper half is separate from batching and pre-existing:
+  `available()` computed `Math.floor(delayTolerance / emissionInterval) + 1`,
+  and that division does not round-trip — at `rate: 3, burst: 7` it reads
+  `6.999999999999999`, so a limiter covering 8 operations reported 7. Swept over
+  `rate` 1-40 × `burst` 0-12 × `n` 1-16 with varied history, 255 configurations
+  had `tryConsume(n)` admitting a batch that `available()` had just refused. The
+  two now share one computation and cannot disagree, and a saturated limiter
+  reports its true `burst + 1`.
+- **`PowerGCRA.retryAfter(n)` grows with `n`**, by `(n - 1) * emissionInterval`.
+  It previously reported the single-operation wait for every `n`, which
+  under-waited: the caller woke early and was refused. Separately, it reported
+  `0` while the next `tryConsume` refused in 69 swept cases, which turns a retry
+  loop into a spin at full speed.
+- **`PowerGCRA.retryAfter(n)` now throws a `RangeError`** when `n` is above the
+  burst ceiling. A batch past `burst + 1` can never be admitted at _any_ wait,
+  because the ceiling comes from `burst` and not from the TAT — 200 000 tries
+  across four configurations, one past the ceiling, zero admissions. The old
+  behaviour reported a finite wait for it, so a retry loop would wait, be
+  refused, and wait again forever. **This is a new throw on a previously
+  returning path**; `take(n)` propagates it rather than inventing a wait. Split
+  the batch or raise `burst`.
+- **A non-finite request count now throws instead of admitting.**
+  `PowerGCRA.tryConsume`, `PowerGCRA.retryAfter`, `PowerThrottle.tryConsume`,
+  `PowerThrottle.reserve`, `PowerThrottle.addTokens`,
+  `PowerSlidingWindow.tryConsume`, `PowerRateLimit.tryConsume` and
+  `PowerRateLimit.reserve` all coerce their count through
+  `Math.max(0, Math.floor(n) || 0)`, which turns `NaN` into `0` — and `0` is
+  the _admit_ case. So `throttle.tryConsume(NaN)` returned `true` having
+  consumed nothing, and `PowerRateLimit.tryConsume(NaN)` returned `true` while
+  **no limiter in the composition was consulted at all**. Non-finite and
+  non-numeric counts now throw a `TypeError` naming the class and method. This
+  is a second new throw, from `assertCount` in `utils/options.js`, and it is
+  deliberately _not_ `assertLimit`: a fractional **limit** has to throw
+  (RES-010, `capacity: 2.5` over-issues because each consumer rounds up),
+  whereas a fractional **count** floors safely because rounding down can only
+  under-charge. `0` and negative counts remain the documented no-op.
 - `PowerPool` resurrected itself after `shutdown()` and after
   `stopThePress({ recreateWorkers: false })`, orphaning worker threads that
   pinned the process forever. `recreateWorkers: false` was a no-op.
@@ -1686,6 +1729,13 @@ already rejects its waiters and `PowerSemaphore.dispose()` inherits that, so
 did not settle waiters. `EDISPOSED` joins `EABORT`, `ETIMEOUT` and
 `ECIRCUITOPEN` as a rejection code, so `catch (err) { switch (err.code) }` can
 tell a teardown from an abort.
+
+`PowerGCRA.retryAfter(n)` joins the throwing surfaces as a `RangeError` rather
+than a code, because it is a caller mistake about the configured burst rather
+than a state transition — see "A batch the limiter could admit, and one it could
+never admit" below. The request-count `TypeError` from `assertCount` is in the
+same category: both are a caller passing something the limiter cannot honour,
+and both are documented per-helper rather than as codes.
 
 `abort()` is now idempotent, and keeps the **first** reason. A second call used
 to re-fire `onAbort`, which is reachable from ordinary code — every finally
@@ -3683,3 +3733,548 @@ still runs, since a guard that skipped every continuation would pass both the
 no-early-flush and the no-clobber tests and break the scheduler.
 
 Closes RES-006.
+
+#### A batch the limiter could admit, and one it could never admit
+
+`PowerGCRA` admitted a batch whose own span did not fit inside the delay
+tolerance. `rate: 1, burst: 0`, `tryConsume(5)`:
+
+```
+before:  tryConsume(5)  ->  true    // 5 ops at 1/s, admitted at one instant
+          retryAfter(1)  ->  5000   // ... and 5 s of debt
+after:   tryConsume(5)  ->  false
+          available()    ->  1      // the first op is free, burst 0 beyond it
+          tryConsume()   ->  true
+```
+
+A batch of `n` spans `(n - 1)` emission intervals — the first operation is free,
+each subsequent one is spaced a full interval — so the requirement is
+`n <= burst + 1`, which is what `golang.org/x/time/rate` states as `n <= burst`.
+It was nowhere in the condition.
+
+**The sharper half is not about batches, and the row's premise was wrong in my
+favour.** The plan said `available()` "already has the correct predicate". It did
+not. Composed, the same batch was _already_ refused, because `PowerRateLimit`
+pre-checks `available() < want` — so the direct call and the composition disagreed
+about the same limiter, which is a better description of the defect than "a batch
+bypasses burst". Chasing that down found the actual cause:
+
+```js
+Math.floor(delayTolerance / emissionInterval) + 1;
+```
+
+**That division does not round-trip.** At `rate: 3, burst: 7` the quotient reads
+`6.999999999999999`, so a limiter covering 8 operations reported **7**. It is
+pre-existing and has nothing to do with `n > 1`. Swept over `rate` 1-40 ×
+`burst` 0-12 × `n` 1-16 with varied history: **255 configurations** where
+`tryConsume(n)` admitted a batch that `available()` had just refused, because
+`floor(remaining / emission) + 1` and `remaining >= (n - 1) * emission` are equal
+in exact arithmetic and not in floating point. A composition holding a saturated
+GCRA limiter turned down batches the limiter itself accepted.
+
+So there is one computation now — `_covers` — reached by both `tryConsume` and
+`available`, because as separate expressions the two cannot be kept bit-identical.
+And the saturated case is answered from `burst` directly rather than by dividing
+the tolerance back by the emission interval. Post-fix: 0, 0, 0.
+
+**`retryAfter` was inexact from the same cause**, being a third spelling of "how
+much tolerance is left". Swept, it reported `0` while the next `tryConsume` was
+refused in **69** cases — which turns a retry loop into a spin at full speed,
+because the caller reads `0` as "no wait needed" and is refused immediately — and
+under-waited by ~1e-11 ms in others. It derives from the same `_remainingAt` now.
+
+**And a claim of mine that measurement killed.** I assumed waiting always
+eventually admits a batch, so `retryAfter` had only to be accurate. It does not.
+A batch above `burst + 1` can _never_ be admitted at any wait, because the ceiling
+comes from `burst` and not from the state of the TAT: **200 000 tries across four
+configurations, one past the ceiling, zero admissions**. `retryAfter(5)` on
+`burst: 3` was reporting a finite `100`, so a retry loop would wait, be refused,
+and wait again forever.
+
+Settled deliberately as a `RangeError`, against the two alternatives. Returning
+the finite wait is the existing bug. Returning `Infinity` is honest about the
+arithmetic and useless in practice — `setTimeout(retry, Infinity)` fires
+immediately, so the loop spins instead of stalling, and a caller that clamps
+`Infinity` to its own maximum wait turns a permanent refusal into a slow poll.
+Throwing names the ceiling in the message and lands on the line the caller has to
+edit. It is the advisory half of the pair, and advising a wait that cannot succeed
+is a bug in the advice rather than a rate-limit decision to report; `take(n)`
+propagates rather than inventing a wait.
+
+**This is a new throw on a previously-returning path**, in the same release as
+the `assertCount` `TypeError` below and the `EDISPOSED` rejection code. Callers
+who pass a batch larger than `burst + 1` need to split it or raise `burst`; that
+is the migration, and it is one line.
+
+The `Math.max(now, this._tat)` clamp is de-duplicated to `_tatAt` as the row
+asked, because inlining it three times is exactly how the batch check came to omit
+its span: the clamping was shared and the predicate was not.
+
+Six new tests plus two fast-check properties — admission ⟺ `available() >= n`, and
+`retryAfter` exactness — 16 mutants, all caught. **One is caught by a single test
+and is not claimed as well covered**: deleting the saturation branch fails 1,
+which is a thin pin for a 255-configuration defect. The property test carries the
+weight; the two together are the honest description.
+
+Closes RES-012.
+
+#### A request count the limiter could not price was admitted as zero work
+
+Eight call sites across all four limiters coerced their count through
+`Math.max(0, Math.floor(n) || 0)`. `Math.floor(NaN)` is `NaN`, `NaN || 0` is `0`,
+and **`0` is the admit case** — so `throttle.tryConsume(NaN)` returned `true`
+having consumed nothing, and `throttle.tokens` never moved.
+
+Worse in the composition: `PowerRateLimit.tryConsume` ran its coercion _after_ a
+`want === 0` early return, so `tryConsume(NaN)` returned `true` while **no
+limiter in the composition was consulted at all**. A caller with three limiters
+behind one composition would have believed it had admitted a request nothing saw.
+The assertion now runs before the early return, and that ordering is the
+load-bearing part rather than a detail.
+
+`assertCount(value, { name, className, method })` in `utils/options.js`, used by
+`PowerGCRA.tryConsume`/`retryAfter`, `PowerThrottle.tryConsume`/`reserve`/
+`addTokens`, `PowerSlidingWindow.tryConsume` and
+`PowerRateLimit.tryConsume`/`reserve`.
+
+**It is deliberately not `assertLimit`, and the reason is the whole design.** The
+two take opposite positions on a fractional value, because a fractional _limit_
+and a fractional _count_ fail in opposite directions:
+
+|                 | a fractional **limit**                    | a fractional **count**            |
+| --------------- | ----------------------------------------- | --------------------------------- |
+| `capacity: 2.5` | each consumer rounds **up** → over-issues | rounding **down** → under-charges |
+| so              | must throw (RES-010)                      | floors safely, no throw           |
+
+`capacity: 2.5` granted **three** concurrent permit holders and reported
+`available: -0.5`; that is why `assertLimit` has an `integer` flag rather than a
+blanket floor. A request count has no such hazard, so throwing there would be
+strictness with no defect behind it. `0` and negative counts likewise stay the
+documented no-op — refusing to admit nothing would be a behaviour change with no
+defect behind it either.
+
+**`addTokens` is in, `release()` is deliberately out**, and that asymmetry is the
+one judgement call here. `addTokens(NaN)` was a silently empty refill — the same
+defect on the capacity-_return_ path, and a caller using it to hand capacity back
+gets a bucket that stayed empty. `release()` returns nothing for a count it cannot
+read, and that is the **safe** direction: over-charging the caller costs one wait,
+whereas admitting a request you cannot price removes the limit. Both are
+documented at the helper and in each guide.
+
+The `method` tag exists because a failure inside a composition otherwise reports
+only "invalid", which is no more use than not having validated.
+
+`test/limiterCounts.test.js`, 14 tests. They pin the **accepted** half as
+deliberately as the throwing half — zero, negatives, `3.9`, `'3'` — because a
+suite that only checked that `NaN` throws would pass against an implementation
+rejecting everything it did not already understand. Mutation-checked: dropping
+`assertCount` from `retryAfter` fails 1, from `tryConsume` 2, from
+`PowerThrottle` 2, from `PowerSlidingWindow` 2, reverting it to the old coercion
+8, and returning a constant `0` 19.
+
+One existing test had to change with the fix, and it is the third this project
+has found that **pinned a defect while explaining it**: `retryAfter reflects the
+full cost of a multi-operation ask` asserted the old single-operation wait for
+every `n`, with a comment justifying it — "a batch is admitted behind a _single_
+admission check, so the wait is driven by the current TAT and does not grow with
+`n`". That sentence was the bug, written down. The guide repeated it twice.
+
+Closes RES-011.
+
+#### The generated reference: a suspected 404 that was not, and a half-covered hook
+
+Two carry-overs from the 2.0 sweep, one of which dissolved when it was measured.
+
+**The suspected 404 was not a defect.** `typedoc.json` excludes
+`src/helpers/jsdoc-types.js`, so no `docs/helpers/jsdoc-types/` page is generated,
+and the concern was that external links into it would 404. Checked rather than
+assumed: **179 generated markdown files, 878 relative links, zero dangling, and
+zero mentions of `jsdoc-types` anywhere in `docs/`.** Typedoc omits the excluded
+types rather than linking to a page that is not there, which is the correct
+behaviour. No change made, because there is nothing to change. The 62 typedoc
+warnings that mention those types are a different thing and are pre-existing: they
+report that a _referenced_ type is not _included_, not that a link is broken.
+
+**The hook gap was real.** `.husky/pre-commit` regenerated `types/` but not
+`docs/`, so a JSDoc-only commit passed the hook and then failed step 9 of
+`npm run verify` in CI — three steps to discover on the machine instead of one, on
+the commit that caused it. `docs:drift` is the one gate that **rewrites the
+committed tree before asking whether the commit matched** (`typedoc.json` sets
+`cleanOutputDir: true`, so there is no incremental mode to diff against, and a
+bare `git diff -- docs` would pass forever once regenerated in the working copy).
+That is why `docs/` has to be _committed_, not merely generated. The hook now runs
+`npm run docs` and stages the result, matching what it already did for `types/`.
+
+Verified by probe rather than by reading: a JSDoc-only comment change was detected
+by **both** steps, and the probe was reverted with `verify` green afterwards. The
+hook still does not run the test suite, for the reason its header gives — a
+minutes-long hook gets `--no-verify`'d, and a bypassed hook protects nothing while
+looking like a safeguard.
+
+#### The metrics test titled "all nine or none" that tested four
+
+`test/metrics.test.js` ran its helper-registration check over a four-entry list
+of the nine helpers that attach. Five were untested: `PowerEventLoopMonitor`,
+`PowerSocketAdapter`, `PowerRealtimeHub`, `PowerWebSocketClient`, `PowerPool`.
+Three of the five need a real constructor argument rather than an empty options
+bag — `PowerSocketAdapter({})` throws because it refuses a socket it cannot
+classify, `PowerRealtimeHub` requires a `send(subscriber, frame)` adapter, and
+`PowerWebSocketClient` requires a `url` — which is most of why they were
+skipped. All nine probed before being written down: each registers, each
+produces prefixed series, each detaches on teardown.
+
+**Nothing was broken.** That is the finding, and it is worth saying plainly:
+extending the list was coverage for its own sake. The bugs the row hoped this
+would catch (OBS-001, OBS-002) were found and fixed without it. The latent
+order dependency it claimed to remove was not there either — every helper in the
+list already detaches on `dispose()`, which each case calls, so the singleton
+was clean between tests. Removing the new `afterEach` leaves the suite green.
+
+**What was real is that the list could drift again silently, and the obvious
+guard for that is decoration.** An `it.each` over a list cannot detect its own
+list being wrong: deleting five entries runs five fewer cases and nothing else
+fails. My first attempt asserted `prefixes.size === HELPERS.length` plus that
+nothing was left registered — trivially true, and still true with five entries
+deleted, so removing five helpers _and_ removing just the pool both left the
+suite green. The test reproduced the exact defect it was written to fix, inside
+itself. That is a shape worth naming: the previous version of this file was
+titled "all nine or none" and tested four, and a test guarding that fact was
+just as unchecked.
+
+The working guard reads `src/helpers/*.js` and compares the extracted
+`attach(this, '<prefix>')` sites against the list, so it fails in both
+directions — dropping five helpers fails 1, and adding a tenth attaching helper
+to the source without listing it fails 1. A second test pins the teardown
+direction per helper, which is the half that is silent when wrong: a
+registration that outliving its helper is a series that looks live and is not,
+and `terminate()` on a pool still answers `getStats()`. Caught 9 ways.
+
+Also corrected `guides/metrics.md`, which claimed the feature landed "Since
+2.1.0" while 2.0 is unreleased and FEAT-007 ships in it. The only other `2.1.0`
+in the repo is a dependency version in `package-lock.json`.
+
+Closes TEST-002.
+
+#### A cache eviction policy that was measured and not adopted
+
+`PowerCache`'s eviction cursor is already a SIEVE "hand" — it needs only a
+`visited` bit to become the policy SIEVE describes, which claims a lower miss
+ratio than nine state-of-the-art algorithms on more than 45 % of 1559 traces,
+no lock on a hit, and roughly ten lines on top of a structure this cache already
+has. `node bench/claims.js sieve` measures it against what ships, and the answer
+is that **it does not pay here**, so the library is unchanged.
+
+SIEVE is implemented _in the bench file_, beside a hand-rolled plain-LRU control
+that differs from it in exactly one respect — three pointer writes per hit
+instead of one bit store. The control reproduces shipped `PowerCache` exactly on
+both traces (27.0 % / 51.0 %, identical survivor counts), so the SIEVE row is a
+difference in policy rather than a difference in data structure.
+
+| workload    | shipped LRU | LRU + tinylfu | control LRU | SIEVE      |
+| ----------- | ----------- | ------------- | ----------- | ---------- |
+| zipf + scan | 27.0 %      | 26.8 %        | 27.0 %      | **26.4 %** |
+| scan-heavy  | 51.0 %      | 49.2 %        | 51.0 %      | **51.1 %** |
+
+A tie where it matters, a loss where it does not. The paper's cost claim does not
+reproduce in JS either: the hit genuinely is cheaper in principle and it is
+**slower** here — 137 ns/op against the control's 105 on scan-heavy. The only
+margin anywhere in the table is +1.9 points over the shipped `lru + tinylfu
+w=4`, which is smaller than the gap between two shipped configurations.
+
+**Read the row, not the verdict: the benchmark is silent on the paper's headline
+claim.** "No lock on a hit, 2× a 16-thread LRU" is about _concurrent_ caches, and
+a single-threaded Node run cannot measure lock contention. What this measures is
+the portable half — miss ratio — and the finding is narrow: that half does not
+transfer to these traces. It is not evidence against SIEVE for a lock-contended
+multicore cache, and adopting it on this number would be the wrong inference in
+either direction.
+
+Two trace-design notes are kept in `bench/README.md` because both produced wrong
+numbers before the right one. The working set must **exceed** capacity: the first
+scan-heavy run used 300 against 500, every policy survived 300/300, the scan fit
+in the slack, and nothing was ever evicted — the comparison proved nothing. And
+SIEVE's hand is **persistent and one-way**; resetting it per eviction is a CLOCK
+sweep, a weaker policy that is not SIEVE, and it reported a five-point loss. Hit
+rates are deterministic here — same seed, identical survivors across runs — so
+only the ns/op column moves between runs.
+
+Closes ALGO-001.
+
+#### A cache structure whose win turned out to be memory
+
+`node bench/claims.js sieve` also benches the **generational two-`Map`** structure (`quick-lru` / `hashlru`), proposed as the better eviction structure for this codebase: _"avoids expensive delete operations"_ by dropping the whole old Map on eviction, with no cursor and no node pool. Measured, and **not adopted**.
+
+At the configured `maxEntries` of 500 it posts the largest number in the table — **64.0 % against plain LRU's 51.0 %, +13.0 points** on a scan-heavy trace — and it gets there by **peaking at 1003 entries, 101 % over**. That is the proposal's own "up to 2× over-fill" bound, reproduced exactly. Sized so its peak lands at 502 instead, the same variant scores **35.5 %**: **−15.4 points against LRU at matched memory.** The entire margin was the memory.
+
+For this library the bound is not only a memory bound. `PowerCache`'s `maxEntries` is a contract, not a hint — `_evictIfNeeded` loops while `_map.size > this.maxEntries`, `stats().size` is public, and `maxWeight` is enforced by the same loop — so holding 2× `maxEntries` breaks a published guarantee rather than exceeding a soft one, and the remedy would be an API change rather than a policy tuning.
+
+The bench therefore carries a `peak` column and a deliberately-sized `generational @ half cap` row. The first version of the mode had neither, and the full-capacity number read as a straightforward 13-point win; recording the bound as a measured number instead of accepting the proposal's characterisation of it is the entire difference between "adopt" and "reject".
+
+What survives is the structural claim, and it is the genuinely new part: no cursor and no node pool makes a stale-eviction-cursor bug _structurally_ impossible rather than merely unreachable by inspection — a stronger guarantee than SIEVE's design could give, since its hand still dangles. It is also a guarantee against a bug that does not exist, because that cursor defect is closed as not reproducible across 2.4 M operations.
+
+Honest limit on the conclusion: a single synthetic trace family, with `PowerCache`'s **weight** accounting not modelled at all. A weight-aware variant could plausibly reorder this, because discarding a whole Map is far coarser than a weight-driven `unlink` — so closing the question properly needs a weight-aware trace, not this one.
+
+Closes GAP-004.
+
+#### Documenting a trap the API does not warn about
+
+Every rate limiter in this library holds its state in **this process's heap**.
+There is no shared store, and there will not be one — a shared limiter needs a
+runtime dependency, which `REJ-008` rejects. So **N processes behind a load
+balancer enforce N × the configured limit**: three instances of
+`new PowerGCRA({ rate: 100 })` admit 300 requests per second across the service,
+not 100.
+
+What makes it a trap rather than a bug is that nothing fails and no instance is
+individually wrong. The moment two instances of a service disagree about how much
+traffic has happened, the ceiling you believe in is not the ceiling in force.
+`guides/metaGuide.md` now says so in those terms, points at the two in-process
+families where the caution does _not_ apply — a permit gate each process counts
+separately bounds its own concurrency, not a global rate — and says how to size
+around it: `rate` is the per-instance share, and the global ceiling goes in front
+of it.
+
+**There is no per-key limiting here either, and the obvious way to add it is a
+bypass.** The premise was confirmed (`src/` has no `keyFn`, `perKey` or `Group`
+surface), then reproduced. The row proposed bounding a map of per-key limiters
+with "an LRU or weak map". A `WeakMap` is unavailable — keys are strings, not
+objects — and the LRU is **worse than no bound at all**, because evicting a
+limiter discards the tenant's consumed budget with it. A `PowerCache` of
+limiters, the obvious tool in this repo, evicts a tenant that has been quiet and
+the tenant returns to a **brand-new limiter with a full fresh allowance**. That is
+a rate-limit bypass, not a cache miss, and it penalises precisely the tenants
+that behaved.
+
+So the two obvious implementations are wrong in opposite directions, and both are
+reachable with attacker-controlled input: an unbounded `Map` measured 50 000
+resident limiters for 50 000 distinct tenants, and the bounded one resets
+budgets. No `keyFn` ships until that trade is settled, because an API that looks
+supported makes the bypass easier to reach, not harder.
+
+Closes ALGO-004. The per-key row stays open with the reproduction recorded, and
+its next step is a decision — exact per key with unbounded memory, or bounded and
+approximate per key — rather than an implementation.
+
+#### Per-key rate limiting, and why the map of limiters is not a map
+
+Limiting per tenant, per IP or per user is how real services limit, and this
+library had none — `bottleneck`'s equivalent is a `Group`, and the advice there is
+to "create one limiter for each origin IP". One limiter was one limit, and every
+caller had to keep a map of limiters themselves.
+
+`PowerRateLimit` now takes a `keyFn`:
+
+```js
+const limiter = new PowerRateLimit([() => new PowerGCRA({ rate: 10, per: 1000 })], {
+  keyFn: (ctx) => ctx.tenant,
+  buckets: 1024,
+});
+
+limiter.tryConsume(1, { context: { tenant: 'acme' } });
+```
+
+Two shape changes come with it. Each entry becomes a **factory**
+`(slotIndex) => limiter`, because a shared instance cannot hold per-key budgets —
+one limiter with an unbounded key space is the thing being fixed. And the key
+arrives as a per-call `context` that `keyFn` reads.
+
+**The design decision is the interesting part, and it was not the obvious one.**
+Keys are hashed into a **fixed array of slots** and **nothing is ever evicted**.
+Both obvious alternatives were measured first, and they are wrong in _opposite_
+directions, both reachable with attacker-controlled input:
+
+- A `Map` of per-key limiters grows with the key space — 50 000 distinct tenants
+  produced 50 000 resident limiters, a memory-exhaustion surface reachable from a
+  header.
+- **An LRU of per-key limiters is worse than no bound at all**, because evicting a
+  limiter discards that key's consumed budget with it. A tenant evicted while quiet
+  returns to a brand-new limiter with a full fresh allowance. That is a rate-limit
+  **bypass**, not a cache miss, and it penalises precisely the tenants that
+  behaved. `PowerCache` is the obvious tool in this repo, which is precisely why it
+  is the wrong one — and it is the same finding as GAP-004, where the generational
+  two-`Map` flip won the miss-ratio comparison and would still be wrong here,
+  because a whole-`Map` drop discards exactly the per-key history the map exists to
+  keep.
+
+Hashing bounds memory **without an eviction path**, so no request can have its
+budget reset: the bypass is structurally impossible rather than unlikely. Measured,
+1 000 000 distinct keys allocate exactly 1024 limiter sets.
+
+**The cost is real and the caller is choosing it: two keys that hash to the same
+slot share a budget.** That is nginx's `limit_req` model, and the trade is
+deliberate — for a limiter whose input is untrusted, a bounded approximation beats
+an exact answer you cannot afford to keep — but it is a weakening of "per key", so
+`buckets` is configurable and the guide says so plainly. Over 100 000 keys into
+1024 slots every slot was used, max/mean 1.39x, no hot spot. A **missing `context`
+degrades to one shared limit rather than no limit**, so forgetting it throttles
+instead of unlimiting.
+
+**Three new throws**, all `TypeError` and all caught by the validation tests: a
+`keyFn` that is not a function (which would otherwise fall back to the _unkeyed_
+path, silently turning a per-key limit into a global one), a non-positive or
+fractional `buckets`, and an instance where `keyFn` requires a factory.
+
+`reset()` clears the budgets of every built slot but **keeps the slots** —
+discarding them would hand every key a fresh allowance, which is the same bypass
+reached deliberately.
+
+`test/powerRateLimit.keyed.test.js`, 18 tests, nine mutations all caught. The
+consume path is split into `_consumeIn(legs, …)` so keyed and unkeyed calls share
+**one** implementation — duplicating the atomic pre-check, commit loop and rollback
+bookkeeping is the likeliest way to end up with per-key consumption that does not
+roll back when a leg fails, which is the exact defect the unkeyed path was fixed
+for.
+
+Closes GAP-005.
+
+#### Stale-while-revalidate gained a bound, because it had none
+
+`PowerCache` already had `staleWhileRevalidate` on `getOrSet` and
+`getOrSetAsync`, so the review's premise — "`PowerCache` has `getOrSetAsync`
+and **no notion of stale**" — was wrong. The feature was not absent, it was
+**unbounded**, which is worse.
+
+Measured with the flag on, before any code changed:
+
+```
++500ms    served: old    refreshes: 0
++1 hour   served: old    refreshes: 1
++30 days  served: old    refreshes: 1
++5 years  served: old    refreshes: 1
+```
+
+A value **five years** past `expiresAt` was returned as "stale", with the
+background refresh failing silently each time. That is
+serve-forever-while-refreshing, and it is the one failure mode
+stale-while-revalidate must not have — a caller asking for
+freshness-while-not-blocking is asking for it for a bounded time.
+
+`staleTtl` is the bound: how long past `expiresAt` a stale value may still be
+served. `0` turns the feature off, `Infinity` leaves it unbounded, and one
+predicate serves both the sync and async paths so they cannot drift.
+
+**`Infinity` is the default, and that is a compatibility decision with a
+reasoning worth stating.** The per-call `staleWhileRevalidate: true` flag
+already existed and already served stale with no upper bound, so defaulting to
+`0` would have silently switched that off for every existing caller — the flag
+would still be passed, nothing would be stale, and nothing would say so. Two
+existing tests caught exactly that before it shipped.
+
+So the **new** surface is the part that is safe by construction: `allowStale`
+without a `staleTtl` **throws**, so the unbounded window cannot be deployed by
+omission. `staleTtl: Infinity` remains available for a caller who wants it on
+purpose — the difference between a decision and an oversight. An unreadable
+`staleTtl` (`'soon'`, `-1`, `NaN`) also throws rather than being coerced: an
+unparsed duration compares false against every entry and would silently
+disable the feature, the opposite of what a typo asks for.
+
+`allowStale` moves the flag off every call site, and `getOrFetch(key, factory?)`
+uses a new instance-level `fetchMethod` for the same reason — a function literal
+at every call site is most of the cost of the async API in a hot path. A
+per-call factory still overrides it.
+
+**Two corrections to the row's framing, both measured.** The implied _stampede
+risk does not exist_: 20 concurrent `getOrSetAsync` callers on one expired key
+run the factory **once**, now pinned by a test because the stale path is where
+such a regression would hide. And `allowStale`/`staleTtl` were **silently
+ignored** options — accepted without complaint, readable back as `undefined`.
+
+`test/powerCache.stale.test.js`, 14 tests, seven mutants all caught. One mutant
+earned its keep: reverting an `if (!(this.staleTtl > 0)) return false` guard
+changed nothing, which proved the guard **dead** — with `staleTtl: 0` the
+comparison alone is already false for any expired entry. It restated the
+arithmetic, so it was deleted rather than kept as reassurance. Two more mutants
+found errors in my own tests: the second call joined the in-flight refresh
+instead of making a fresh decision (dedup working, masking the assertion), and a
+preceding `get()` had removed the expired entry the second half was measuring.
+
+Closes GAP-002.
+
+#### `stats().staleServes` — because a stale serve looked like a fresh hit
+
+A stale-while-revalidate serve counted only `hits`, so `stats()` could not tell
+"served fresh" from "served expired". For a feature whose entire purpose is
+silently returning old data, that is the one number worth having: an upstream
+that starts failing does not make requests _fail_, it makes them serve old
+data, and the hit rate goes **up**, not down.
+
+```js
+cache.stats().hits; //         every serve that succeeded
+cache.stats().staleServes; //  the subset that was expired
+```
+
+`staleServes` is a subset of `hits`, not an addition to it — from the caller's
+side a stale serve was a hit — so `hits - staleServes` is the count of genuine
+fresh hits. Neither is a miss.
+
+Found by reading rather than by any failing test, which is the part worth
+recording: nothing was broken, and no test failed. Four surfaces landed on
+`powerCache.js` in one release cycle (`staleTtl`, `allowStale`, `getOrFetch`,
+`fetchMethod`) and the observability of the feature they added was never
+revisited. It now reports zero on a cache that never serves stale, is pinned on
+both the sync and async paths — separate implementations sharing one predicate,
+so a counter checked on only one of them would be the same one-sided bound that
+started this — and does not count a serve past the stale window, which would
+make the number meaningless.
+
+While there, `stats()`'s declared return type was missing `expirations`, which
+the implementation has always returned. That was a standing type error in the
+generated declarations; the type now lists it.
+
+#### `simpleArgsKey` aliased distinct arguments onto one cache entry
+
+The memoizer's default key resolver handed the **whole argument list** to
+`JSON.stringify` the moment it met a non-scalar. That one decision caused four
+defects, all measured before any code changed:
+
+| Input                                        | Old key                     | Problem                                                        |
+| -------------------------------------------- | --------------------------- | -------------------------------------------------------------- |
+| `({a:1}, undefined)` vs `({a:1}, null)`      | `'[{"a":1},null]'` for both | a memoizer served one call's value to the other                |
+| `({a:1}, fn)`                                | `'[{"a":1},null]'`          | aliased onto `null`                                            |
+| `new Map([[1,2]])` vs `new Map([['a','b']])` | `'[{}]'` for **both**       | every `Map`, `Set`, `RegExp` and `Error` was indistinguishable |
+| `{n: 1n}`                                    | threw                       | while a top-level `1n` was supported — one value, two answers  |
+| a circular object                            | threw                       | `Converting circular structure to JSON`                        |
+
+The `Map`/`Set`/`RegExp`/`Error` collision was the worst: nothing about those
+inputs suggests they are unencodable, and a memoizer keyed on one returned the
+first one's value for every subsequent one. Confirmed end to end — two distinct
+calls, **one** underlying invocation.
+
+Each argument is now encoded on its own, type-tagged by prefix: scalars, arrays,
+plain objects, `Date`, `RegExp`, `Error`, `Map`, `Set`, `BigInt` and cycles all
+get a distinct encoding, so two different arguments cannot produce one key.
+`Map` order is preserved (it is significant) and a repeated sibling value is
+shared rather than mistaken for a cycle.
+
+**A function argument now throws a `TypeError`.** Two closures have no comparable
+identity and `String(fn)` is identical text for both, so any encoding would
+either collide or be useless; refusing is the only answer that cannot be wrong,
+and the message says what to do instead.
+
+**Behaviour change worth stating:** memoizing a function _argument_ previously
+"worked" by colliding with `null`. It now throws. Pass a key, or supply a
+`keyResolver`.
+
+The key format for **scalar-only** calls is byte-identical to before, so the
+35 % scalar-path measurement the original optimisation was built on still
+describes the common case.
+
+`test/powerCache.memoKey.test.js`, 18 tests, 10 of 12 mutants caught. The two
+that were not are recorded rather than papered over:
+
+- The old `String(v === 0 ? 0 : v)` **`-0` normalisation is dead code** —
+  `String(-0)` is already `'0'`, so it could not change the result, and a test
+  asserted the two were equal and passed whichever way it was written. Re-adding
+  it is not caught, which is the proof. Deleted, and the test now says why the
+  behaviour is still worth pinning.
+- The cycle marker cannot be made to collide by mutation, and that is a
+  structural argument rather than a test: every encoding is non-empty and
+  type-tagged, so no marker can be confused with a value's encoding. Recorded as
+  an argument, not dressed up as coverage.
+
+One existing test **asserted the defect** — it required the key to equal
+`JSON.stringify([{ a: 1 }])`, i.e. it pinned the broken fallback, in a file whose
+name has nothing to do with the code under test. Re-pinned to the property that
+matters: structurally equal arguments share a key, different ones do not.
+
+Closes CACHE-009.

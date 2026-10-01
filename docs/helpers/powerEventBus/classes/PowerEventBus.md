@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerEventBus](../README.md) / PowerEventBus
 
@@ -19,8 +19,8 @@
 `PowerEventBusOptions` = `{}`
 
 `maxListeners` caps listeners per
-event (`0`, the default, is unlimited); `weak` stores them behind
-`WeakRef`.
+  event (`0`, the default, is unlimited); `weak` stores them behind
+  `WeakRef`.
 
 #### Returns
 
@@ -32,31 +32,31 @@ event (`0`, the default, is unlimited); `weak` stores them behind
 
 > **\_eventFinalizationRefs**: `Map`\<`string`, `Set`\<`WeakRef`\<`SubscriberListener`\>\>\>
 
----
+***
 
 ### \_finalizationRefs
 
 > **\_finalizationRefs**: `WeakMap`\<`SubscriberListener`, `Map`\<`string`, `Set`\<`WeakRef`\<`SubscriberListener`\>\>\>\>
 
----
+***
 
 ### \_fr
 
 > **\_fr**: `FinalizationRegistry`\<`EventBusWeakToken`\> \| `null`
 
----
+***
 
 ### \_listeners
 
 > **\_listeners**: `Map`\<`string`, [`EventBusBucket`](../type-aliases/EventBusBucket.md)\>
 
----
+***
 
 ### \_maxListeners
 
 > **\_maxListeners**: `number`
 
----
+***
 
 ### \_weak
 
@@ -80,7 +80,7 @@ Unregister every weak ref held for one event, and forget the event.
 
 `void`
 
----
+***
 
 ### \_ensureFinalizationRegistry()
 
@@ -94,7 +94,7 @@ listeners. Returns `null` when weak mode is off or the runtime has no
 
 `FinalizationRegistry`\<`EventBusWeakToken`\> \| `null`
 
----
+***
 
 ### \_getBucket()
 
@@ -118,7 +118,7 @@ replaced externally, so it stays.
 
 [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
 
----
+***
 
 ### \_registerWeakListener()
 
@@ -142,9 +142,9 @@ bookkeeping sets can drop it when it is collected.
 `WeakRef`\<`SubscriberListener`\> \| `null`
 
 The registered ref, or `null` when
-weak mode is off or registration failed.
+  weak mode is off or registration failed.
 
----
+***
 
 ### \_unregisterWeakListener()
 
@@ -167,7 +167,7 @@ registered against is cleared.
 
 `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -180,7 +180,7 @@ releases the listeners and the finalization registry at scope exit.
 
 `void`
 
----
+***
 
 ### cleanup()
 
@@ -193,7 +193,7 @@ Useful in tests or environments where FinalizationRegistry/GC is unavailable.
 
 `void`
 
----
+***
 
 ### clear()
 
@@ -211,7 +211,7 @@ Clear listeners for an event or all events when called without args.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -228,7 +228,7 @@ and gives callers an explicit name to call.
 
 `void`
 
----
+***
 
 ### emit()
 
@@ -255,7 +255,7 @@ observed.
 
 `boolean`
 
----
+***
 
 ### emitAsync()
 
@@ -279,7 +279,7 @@ Errors thrown or rejected by listeners are swallowed.
 ##### options?
 
 `concurrency` caps how many
-listeners are awaited at once (`Infinity`, the default, is unbounded).
+  listeners are awaited at once (`Infinity`, the default, is unbounded).
 
 ###### concurrency?
 
@@ -289,7 +289,7 @@ listeners are awaited at once (`Infinity`, the default, is unbounded).
 
 `Promise`\<`boolean`\>
 
----
+***
 
 ### listeners()
 
@@ -307,7 +307,7 @@ Return array of listeners for an event (copy).
 
 `SubscriberListener`[]
 
----
+***
 
 ### off()
 
@@ -329,7 +329,7 @@ Remove a specific listener for an event.
 
 `void`
 
----
+***
 
 ### on()
 
@@ -361,7 +361,7 @@ unsubscribe
 
 When `fn` is not a function.
 
----
+***
 
 ### once()
 
@@ -389,7 +389,7 @@ unsubscribe
 
 When `fn` is not a function.
 
----
+***
 
 ### reset()
 
@@ -400,7 +400,7 @@ Alias for [PowerEventBus#clear](#clear).
 `clear()` here empties the container, and "reset" is a natural second word
 for exactly that - so a caller who reaches for `reset()` on this class gets
 the obvious thing instead of a `TypeError`. No limiter gets this alias: for
-`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+`PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
 would read as the opposite, and the two are deliberately not synonyms.
 
 #### Parameters
@@ -410,7 +410,7 @@ would read as the opposite, and the two are deliberately not synonyms.
 `string`
 
 Passed through to `clear()`; clears just that
-event's listeners when given, and every listener when omitted.
+  event's listeners when given, and every listener when omitted.
 
 #### Returns
 

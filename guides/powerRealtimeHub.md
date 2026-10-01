@@ -71,7 +71,17 @@ JSON.parse(new TextDecoder().decode(frames[0].slice(6))); // [0,1,2,3,4]
 
 `batchDelayMs` widens the coalescing window beyond a single microtask. `batch: false` disables automatic flushing entirely, so the caller drives it with `flush()` — useful in tests and for transports that cannot take several frames at once.
 
-The `raw` codec carries exactly one payload per frame, so it cannot also carry a batch boundary. Using `codec: 'raw'` with more than one queued message throws rather than silently degrading to JSON.
+The `raw` codec carries exactly one payload per frame, so it cannot also carry a batch boundary. A subscriber that could coalesce more than one is rejected at `subscribe()`, naming the option to change:
+
+```js
+new PowerRealtimeHub({ send, codec: 'raw' }).subscribe('t', handler);
+// TypeError: `codec: "raw"` delivers one message per frame, so a subscriber
+//            must use `maxBatch: 1`.
+```
+
+**`maxBatch: 1` is the only configuration that works**, and `batch: false` does *not* rescue the default: the batch is taken off the queue before it is encoded, so a queue that accumulated two messages while unbatched still produces a two-message batch. That check lives in `subscribe()` rather than the constructor because `maxBatch` is a per-subscriber option — `raw` is perfectly legal, `maxBatch: 1` is the case the hub can honour, and `subscribe()` is the only place both facts are visible.
+
+Beyond that, a payload `encodeMessage` cannot frame at all (a plain object under `raw`, say) is **counted in `dropped` and reported through `onError`**, not silently discarded. Re-queuing it was the obvious fix and is wrong: an encode failure is permanent, so the retry loop would spin and `flush()` would never resolve.
 
 ## Back-pressure, honestly
 
@@ -83,6 +93,8 @@ What this does **not** do is know your socket's high-water mark. For a `WebSocke
 
 - `subscribe(topic, handler, options)` → `unsubscribe()`. Options: `maxQueue` (default 64), `slowConsumer`, `maxBatch` (default 32), `id`, `transport`.
 - `publish(topic, message, { retain })` → number of subscribers queued for. `retain: true` keeps the message for later subscribers, in a log bounded to 32 per topic.
+
+  The replay is real and works whether or not anyone was listening when you published — publishing into a topic with no subscribers is the case this option exists for. A new subscriber receives the retained log in publish order, **through the same queue and the same slow-consumer policy as any live delivery**, so a subscriber whose `maxQueue` cannot hold the log drops it by the rules it chose rather than by a second, quieter mechanism. A replay does **not** increment `published`: it is not a publication, and counting it would make that counter jump by the length of every retained log on every `subscribe`. The log is released when the **last** subscriber on that topic leaves — one subscriber unsubscribing does not destroy the history the others still depend on — and `close()` releases the rest.
 - `flush()` → `Promise<void>`, drains every subscriber immediately, bypassing batching. Resolves once every subscriber's queue has reached the transport — including a subscriber that already had a send in flight, which is **waited for** rather than skipped.
 - **One frame at a time per subscriber.** A second frame is not handed to the transport while the previous one is still outstanding, so frames for one subscription reach it in the order they were published. Work that arrives meanwhile waits for the outstanding send and is then drained; it is never dropped and never reordered.
 - `unsubscribe(id)` → `boolean`.

@@ -1,6 +1,6 @@
 [**performance-helpers**](../README.md)
 
----
+***
 
 [performance-helpers](../README.md) / powerWebSocketClient
 
@@ -58,7 +58,7 @@ watermark stops the producer here, the bounded queue handles it there.
 
 Renames and re-exports [PowerWebSocketClient](classes/PowerWebSocketClient.md)
 
----
+***
 
 ### READY\_STATE
 

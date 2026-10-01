@@ -180,6 +180,121 @@ export function assertLimitRequired(value, spec) {
 }
 
 /**
+ * Validate a **request count** - how many operations a caller is asking a
+ * limiter to admit - and coerce it to a non-negative integer.
+ *
+ * This is deliberately *not* {@link assertLimit}, and the distinction is the
+ * whole point of this function. A **limit** is a configuration value the
+ * library enforces on its own, so `NaN` means "the guard silently stopped
+ * guarding" and must throw. A **request count** is caller-supplied input to a
+ * single call, and every limiter in this library coerced it with
+ * `Math.max(0, Math.floor(+n) || 0)` - which turns `NaN` into `0`, and `0` is
+ * the *admit* case: `tryConsume(NaN)` returned `true` having consumed
+ * nothing. So the arithmetic that "safely" degraded a nonsense count into an
+ * unlimited-by-default free pass, and `throttle.tokens` never moved.
+ *
+ * The line this draws, and the reason the coercion is kept at all:
+ *
+ * - **non-finite throws** - `NaN`, `±Infinity`, and anything `Number()` cannot
+ *   read (`'many'`, `Symbol`, `undefined` where no default applies). There is
+ *   no sensible reading of "how many?" for those, and the old behaviour
+ *   answered "zero", which is the one answer a rate limiter must never give.
+ *   Note the error surfaces from `Number(value)` itself for a `Symbol` or an
+ *   object whose `valueOf` throws, so the message is the native `TypeError`
+ *   rather than this one - still a throw, which is the contract.
+ * - **a fractional count floors** - `tryConsume(2.9)` costs 2 operations.
+ *   Unlike `assertLimit`'s `integer` flag this is not a hazard: a count is
+ *   consumed as a whole number either way, so rounding down cannot over-issue
+ *   the way `capacity: 2.5` over-issued permits (RES-010).
+ * - **a negative count is a no-op, not an error** - `0` means "consume
+ *   nothing", and refusing to admit nothing would be a behaviour change with
+ *   no defect behind it. A `TypeError` here would be *more* correct in the
+ *   abstract and worse in practice, so the documented no-op stands.
+ *
+ * @param {any} value - The count as supplied by the caller.
+ * @param {object} spec - Validation spec.
+ * @param {string} spec.name - Parameter name, used in the error message.
+ * @param {string} spec.className - Owning class name.
+ * @param {string} [spec.method] - Calling method, included in the message so
+ *   a failure deep inside a composition says which leg refused.
+ * @returns {number} A non-negative integer.
+ * @private
+ */
+export function assertCount(value, { name, className, method }) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    const where = method ? `${className}.${method}()` : className;
+    throw new TypeError(
+      `${where}: \`${name}\` must be a finite number (received ${String(value)}). ` +
+        'A non-finite request count is not zero work - it is a request whose ' +
+        'cost cannot be computed, and a limiter that cannot price a request ' +
+        'must not admit it.'
+    );
+  }
+  return Math.max(0, Math.floor(n));
+}
+
+/**
+ * The message for a `ttl` that is not a duration.
+ *
+ * Lives here rather than in `powerCache.js` because **two** classes need it and
+ * one of them could not reach the original: `PowerCache` fixed this (CACHE-003)
+ * by extracting `_expiresAt`/`ttlTypeMessage` into its own module, where
+ * `PowerTTLMap` has no access — `powerCache.js` exports nothing. So
+ * `PowerTTLMap.set(k, 1, 'abc')` still stored `expiresAt === 0` while
+ * `PowerCache.set(k, 1, { ttl: 'abc' })` throws, and an immortal entry is the
+ * worst failure direction a TTL container has. Same lesson as
+ * `assertLimitRequired` (QUAL-001): a validator that lives in a leaf module is
+ * a validator the rest of the library cannot use.
+ *
+ * @param {*} ttl - The rejected value.
+ * @param {string} className - For the message prefix.
+ * @returns {string}
+ * @private
+ */
+function ttlTypeMessage(ttl, className) {
+  return (
+    `${className}: \`ttl\` must be a finite number of milliseconds or Infinity ` +
+    `(received ${JSON.stringify(ttl) ?? String(ttl)}). A value that is not a number ` +
+    'concatenates rather than adds, and every expiry comparison against it is ' +
+    'false — so the entry would never expire.'
+  );
+}
+
+/**
+ * Normalise a TTL to a duration in milliseconds, rejecting anything that would
+ * make an entry immortal by accident.
+ *
+ * Accepts a number or a numeric string — `'1000'` from an environment variable
+ * is a reasonable thing to pass, and rejecting it would be pedantry. Rejects
+ * everything else, including the two coercions that make this a *type* check
+ * rather than a value check: `Number([]) === 0` would turn `{ ttl: [] }` into
+ * "expire now", and `Number(true) === 1` would turn `{ ttl: true }` into one
+ * millisecond.
+ *
+ * `null`, `undefined` and `Infinity` all mean **no expiry**, and are returned as
+ * `0`. That is the caller's stored sentinel, and the distinction between "no
+ * expiry" and "expire now" is `0` itself — a real TTL of `0` means *expire now*
+ * and is returned unchanged.
+ *
+ * @param {*} ttl
+ * @param {string} className - For the error message.
+ * @returns {number} Milliseconds; `0` for "no expiry".
+ * @private
+ */
+export function normalizeTtl(ttl, className) {
+  if (ttl == null || ttl === Infinity) return 0;
+  if (typeof ttl !== 'number' && typeof ttl !== 'string') {
+    throw new TypeError(ttlTypeMessage(ttl, className));
+  }
+  const ms = Number(ttl);
+  if (!Number.isFinite(ms)) {
+    throw new TypeError(ttlTypeMessage(ttl, className));
+  }
+  return ms;
+}
+
+/**
  * Validate an option that must be a function (or explicitly null/undefined).
  * @param {any} value
  * @param {object} spec

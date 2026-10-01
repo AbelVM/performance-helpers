@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/metrics](../README.md) / METRICS\_VERSION
 
@@ -10,6 +10,6 @@
 
 The snapshot format version.
 
-Bumped when the _shape_ changes, not when a helper adds a field: adding a
+Bumped when the *shape* changes, not when a helper adds a field: adding a
 key is additive and does not break a consumer that reads named series. A
 consumer pins this to detect a shape change it was not written for.

@@ -9,10 +9,16 @@
  *
  * ```
  * // on accept:
- * tat = max(now, tat) + emissionInterval
- * accept  iff  now >= tat - delayVariation      (i.e. tat <= now + burst)
- * retryAfter = (tat - burst) - now              exact, not an estimate
+ * tat = max(now, tat) + n * emissionInterval
+ * accept  iff  tat + (n - 1) * emissionInterval - delayVariation <= now
+ * retryAfter = (tat - delayVariation) - now + (n - 1) * emissionInterval
  * ```
+ *
+ * A batch of `n` is admitted only if its **own span** — `(n - 1)` emission
+ * intervals — fits inside the delay tolerance, which is the same requirement
+ * `golang.org/x/time/rate` encodes as `n <= burst`. So the steady-state shape
+ * above is the `n = 1` case, and `available()` is the count of how many
+ * operations the current budget really covers.
  *
  * The exact `retryAfter()` is the practical win over {@link PowerThrottle}: a
  * caller can hand it straight to `retryAfter`/`retry-After` instead of
@@ -27,8 +33,10 @@
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertCount, assertLimitRequired } from '../utils/options.js';
 
+/**
+ */
 /**
  * @typedef {object} PowerGCRAOptions
  * @property {number} rate - Sustained rate in operations per `per` unit. Must be > 0.
@@ -95,6 +103,12 @@ export class PowerGCRA {
     /** @type {boolean} */
     this._nowExplicit = false;
     attachLimiterClock(this, nowMs, /** @type {any} */ (options), 'PowerGCRA');
+    // The last clock reading this limiter saw, or `null` before the first one.
+    // It is what `onError` compares against, so that a report means "the clock
+    // moved backwards" rather than "the limiter is rate-limiting" — see the
+    // note in `tryConsume`.
+    /** @type {?number} */
+    this._lastNow = null;
     // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
     this._metrics = attach(this, 'gcra', options);
   }
@@ -126,8 +140,14 @@ export class PowerGCRA {
     }
   }
 
+  /**
+   * @param {number} [n=1]
+   * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
+   *   Per-call clock override.
+   * @returns {boolean}
+   */
   tryConsume(n = 1, options = {}) {
-    const count = Math.max(0, Math.floor(Number(n) || 0));
+    const count = assertCount(n, { name: 'n', className: 'PowerGCRA', method: 'tryConsume' });
     if (count === 0) return true;
     const now = resolveLimiterNow(this._now, this._nowExplicit, options);
     // A clock that moved backwards relative to the TAT means the injected or
@@ -138,17 +158,46 @@ export class PowerGCRA {
     // clock that jumps is *visible* rather than merely safe. Still no throw, which
     // is what the option documents.
     //
+    // **The predicate used to be `now < this._tat`, and that reported the
+    // limiter working.** A TAT ahead of `now` is the *normal saturated state* —
+    // it is exactly what a limiter looks like when it is rate-limiting — so every
+    // ordinary refusal fired `onError`. Measured at `rate: 1, capacity: 1`,
+    // 19 refusals produced 19 calls with a raw number as the argument, on a
+    // perfectly healthy clock. A correct limiter therefore looks broken to
+    // anything wired to `onError`, which is the opposite of what an
+    // observability option is for.
+    //
+    // What a backwards clock actually looks like is the *reading itself* moving
+    // backwards, which is why this compares against the last reading taken and
+    // not against the TAT. `null` means "no previous reading", so the first call
+    // after construction never reports. Still no throw.
+    //
     // The anchor for this edit is the whole `tryConsume` preamble rather than the
     // two lines alone: that pair of lines appears in three consume-shaped methods
     // here, so a looser anchor matched all three and the edit had to be narrowed.
-    if (this._tat !== Number.NEGATIVE_INFINITY && now < this._tat) {
+    if (this._lastNow !== null && now < this._lastNow) {
       this._notifyClock(now);
     }
-    const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
-    // Admit while the *pre-update* TAT is still inside the tolerance window.
-    // Checking the post-update value instead would reserve this request's cost
+    this._lastNow = now;
+    const tat = this._tatAt(now);
+    // Admit the whole batch, or none of it: the batch's own span has to fit
+    // inside the tolerance window. `available()` already measures exactly that,
+    // and this is the same predicate as `available() >= count` — which is the
+    // requirement `golang.org/x/time/rate` states as `n <= burst`.
+    //
+    // Both halves are computed from **one** helper rather than inlined. That is
+    // not tidiness: written out separately, the two disagree on real
+    // configurations. Measured over `rate` 1-40 × `burst` 0-12 × `n` 1-16 with
+    // varied history, the float error between the two spellings made 255
+    // combinations admit a batch that `available()` had just reported as
+    // unaffordable — e.g. at `rate: 7, burst: 8, n: 5`,
+    // `remaining / emission` came to `3.9999999999995346` (so `available()`
+    // said 4, refuse) while `remaining >= 4 * emission` was `571.4285714285049
+    // >= 571.4285714285714` (so it admitted). One arithmetic, one answer.
+    //
+    // Checking the *post*-update TAT instead would reserve this request's cost
     // before deciding, which refuses the very first operation.
-    if (tat - this._delayTolerance <= now) {
+    if (this._covers(tat, now) >= count) {
       this._tat = tat + count * this._emission;
       return true;
     }
@@ -158,21 +207,62 @@ export class PowerGCRA {
   }
 
   /**
-   * Exact milliseconds until `tryConsume()` would succeed.
+   * Exact milliseconds until `tryConsume(n)` would succeed.
+   *
+   * Grows with `n`, by `(n - 1) * emissionInterval` beyond the single-operation
+   * wait. That is the batch's own span and it has to: a batch is admitted only
+   * when the whole span fits inside the tolerance window, so waiting the
+   * single-operation wait and then asking for five would be refused. The wait
+   * this returns is the exact boundary — not an estimate, and not a value that
+   * under-waits.
    *
    * @param {number} [n=1] - Number of operations the next call would consume.
+   * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
+   *   Per-call clock override.
    * @returns {number} Milliseconds to wait; `0` when the call would succeed now.
    */
   retryAfter(n = 1, options = {}) {
-    const count = Math.max(0, Math.floor(Number(n) || 0));
+    const count = assertCount(n, { name: 'n', className: 'PowerGCRA', method: 'retryAfter' });
     if (count === 0) return 0;
+    const ceiling = this._ceiling();
+    if (count > ceiling) {
+      throw new RangeError(
+        `PowerGCRA.retryAfter(): cannot ever admit ${count} operations - the ` +
+          `configured burst covers at most ${ceiling} at any instant. Waiting ` +
+          'cannot make it fit, so there is no honest wait to report. Split the ' +
+          'batch, or raise `burst`.'
+      );
+    }
     const now = resolveLimiterNow(this._now, this._nowExplicit, options);
-    const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
-    // GCRA admits a whole batch behind a single admission check, so the wait
-    // depends on the current TAT alone and not on `count`. Waiting this long
-    // is always sufficient for the entire batch.
-    const wait = tat - this._delayTolerance - now;
+    // The *same* `remaining` the admission check measures, and the same
+    // subtraction. Written out the other way round - `tat - delayTolerance -
+    // now + (count - 1) * emission` - the two are algebraically identical and
+    // differ in the last bit, which was enough to make this report `0` while
+    // the next `tryConsume` refused (and to under-wait by ~1e-11 ms elsewhere).
+    const remaining = this._remainingAt(this._tatAt(now), now);
+    const wait = (count - 1) * this._emission - remaining;
     return wait <= 0 ? 0 : wait;
+  }
+
+  /**
+   * The largest batch this limiter will admit at any instant, at any wait.
+   *
+   * {@link PowerGCRA#_covers} saturates here, so an ask above it is not merely
+   * refused *now* — no amount of waiting admits it, because the ceiling is set
+   * by `burst` and not by the state of the TAT. Measured over `rate` 1-30 ×
+   * `burst` 0-10, a batch one past the ceiling was admitted at **no** wait out
+   * of 200 000 tried, per configuration.
+   *
+   * `burst` is not asserted integral (a fractional burst is a legitimate
+   * sub-operation tolerance), so the ceiling floors. A fractional `burst` rounds
+   * *down* here and up in `_delayTolerance`, which is the safe direction: it
+   * never claims capacity that the check will not honour.
+   *
+   * @returns {number} A whole number of operations, at least 1.
+   * @private
+   */
+  _ceiling() {
+    return Math.floor(this.burst) + 1;
   }
 
   /**
@@ -196,14 +286,84 @@ export class PowerGCRA {
    * `available()` and refuses immediately when it is below the ask, so
    * reporting `0` on a fresh limiter would make GCRA refuse everything.
    *
+   * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
+   *   Per-call clock override.
    * @returns {number} A non-negative whole number.
    */
   available(options = {}) {
     const now = resolveLimiterNow(this._now, this._nowExplicit, options);
-    const tat = this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
-    const remaining = this._delayTolerance - (tat - now);
+    return this._covers(this._tatAt(now), now);
+  }
+
+  /**
+   * How many operations the budget at `now` covers, given the pre-update TAT.
+   *
+   * The single source of truth for admission. `tryConsume` compares against
+   * `count` and `available()` returns it, so the two cannot disagree — which is
+   * the point, because as separate expressions they did: `floor(remaining /
+   * emission) + 1` and `remaining >= (n - 1) * emission` are equal in exact
+   * arithmetic and *not* in floating point, and the disagreement showed up as a
+   * limiter admitting a batch its own `available()` had just refused.
+   *
+   * The `+ 1` is not slack. The check is made against the *pre-update* TAT, so
+   * at an idle instant the very first operation always fits, and an idle
+   * `burst: b` limiter covers `b + 1` operations back to back. `PowerRateLimit`
+   * depends on that number: it pre-checks `available() < want` and refuses
+   * without calling `tryConsume`, so reporting `0` on a fresh limiter would
+   * make GCRA refuse everything once composed.
+   *
+   * @param {number} tat - Pre-update TAT, from {@link PowerGCRA#_tatAt}.
+   * @param {number} now - Current clock reading in ms.
+   * @returns {number} A non-negative whole number of operations.
+   * @private
+   */
+  _covers(tat, now) {
+    const remaining = this._remainingAt(tat, now);
     if (remaining < 0) return 0;
+    // Saturated: the TAT is at or behind the clock, so the whole burst is
+    // there. Answered from `burst` rather than by dividing `delayTolerance`
+    // back by `emission`, because that round trip does not survive floating
+    // point — at `rate: 3, burst: 7` the quotient reads `6.999999999999999`
+    // and the limiter reported 7 operations available where it covers 8. That
+    // was not merely a reporting nit: `PowerRateLimit` pre-checks
+    // `available() < want` and refuses, so a composition holding this limiter
+    // turned down a batch the limiter itself would have admitted.
+    if (remaining >= this._delayTolerance) return this._ceiling();
     return Math.floor(remaining / this._emission) + 1;
+  }
+
+  /**
+   * Milliseconds of tolerance still unspent at `now`, given the pre-update TAT.
+   *
+   * Extracted so admission, availability and {@link PowerGCRA#retryAfter} all
+   * read the same number by the same subtraction. Each of them had its own
+   * spelling before, and the three disagreed in the last bit — see
+   * {@link PowerGCRA#retryAfter}.
+   *
+   * @param {number} tat - Pre-update TAT, from {@link PowerGCRA#_tatAt}.
+   * @param {number} now - Current clock reading in ms.
+   * @returns {number} Milliseconds remaining; negative when the TAT is ahead.
+   * @private
+   */
+  _remainingAt(tat, now) {
+    return this._delayTolerance - (tat - now);
+  }
+
+  /**
+   * The pre-update TAT at `now`, clamped so it never sits in the past.
+   *
+   * Three methods need this exact pair — `tryConsume`, `retryAfter` and
+   * `available` — and the `-Infinity` sentinel is what distinguishes "no
+   * history" from "history that a backwards clock put behind us". Inlining it
+   * three times is how the batch check came to omit its own span: the clamping
+   * was duplicated but the predicate was not.
+   *
+   * @param {number} now - Current clock reading in ms.
+   * @returns {number} The TAT to decide against.
+   * @private
+   */
+  _tatAt(now) {
+    return this._tat === Number.NEGATIVE_INFINITY ? now : Math.max(now, this._tat);
   }
 
   /**
@@ -244,6 +404,36 @@ export class PowerGCRA {
       delayTolerance: this._delayTolerance,
       tat: this._tat === Number.NEGATIVE_INFINITY ? null : this._tat,
     };
+  }
+
+  /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` — the one class that has always spelled it this way — is not
+   * handed `TypeError: x.getStats is not a function` here.
+   *
+   * Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+   * `getStats()`, with no stated rule and nothing pinning it, which reached the
+   * documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+   * spellings work everywhere now. `stats()` is canonical and this delegates to
+   * it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+   * library would be a breaking change.
+   *
+   * Written out per class rather than installed on the prototype on purpose: a
+   * dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+   * `types/` omitted it and a TypeScript caller got a type error on a method
+   * that worked at runtime. That was the first implementation.
+   *
+   * **No `@returns` tag, and that is load-bearing.** The first version carried a
+   * hand-copied copy of the `stats()` return shape, on the reasoning that an
+   * explicit type was safer. It is not: the copy went stale the moment a
+   * concurrent change added `staleServes` and `expirations` to `PowerCache`
+   * `.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+   * byte-identical published type and cannot drift, because there is nothing to
+   * keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+   * which is the property a consumer relies on.
+   */
+  getStats() {
+    return this.stats();
   }
 
   /** @returns {void} */

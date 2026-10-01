@@ -1,6 +1,6 @@
 [**performance-helpers**](../../README.md)
 
----
+***
 
 [performance-helpers](../../README.md) / [powerRetry](../README.md) / PowerRetryBudget
 
@@ -8,9 +8,9 @@
 
 A token bucket that bounds how much retry traffic a dependency may receive.
 
-The rule is the one from the Google SRE Workbook's _Handling Overload_
+The rule is the one from the Google SRE Workbook's *Handling Overload*
 chapter: the budget is refilled in proportion to the traffic you are
-_already_ sending, and each retry spends a token. During a partial outage
+*already* sending, and each retry spends a token. During a partial outage
 the bucket drains, so retries throttle exactly when the dependency can least
 afford them.
 
@@ -19,7 +19,7 @@ the first retry of a fresh budget, because one request funds 0.2 of a token
 and a retry costs a whole one — so the protection would engage on a healthy
 dependency and disengage on the sick one, which is backwards.
 
-PowerRetryBudget
+ PowerRetryBudget
 
 ## Example
 
@@ -41,8 +41,8 @@ await PowerRetry.run(call, { budget, maxAttempts: 5 });
 `PowerRetryBudgetOptions` = `{}`
 
 `ratio` defaults to 0.2 (the
-top of the SRE-recommended 10-20 % band) and `capacity` to 10 retry
-tokens. See PowerRetryBudgetOptions.
+  top of the SRE-recommended 10-20 % band) and `capacity` to 10 retry
+  tokens. See PowerRetryBudgetOptions.
 
 #### Returns
 
@@ -54,37 +54,37 @@ tokens. See PowerRetryBudgetOptions.
 
 > **\_capacity**: `number`
 
----
+***
 
 ### \_funded
 
 > **\_funded**: `number`
 
----
+***
 
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
 
----
+***
 
 ### \_ratio
 
 > **\_ratio**: `number`
 
----
+***
 
 ### \_refused
 
 > **\_refused**: `number`
 
----
+***
 
 ### \_retries
 
 > **\_retries**: `number`
 
----
+***
 
 ### \_tokens
 
@@ -106,7 +106,7 @@ The most retry tokens the bucket will hold.
 
 `number`
 
----
+***
 
 ### ratio
 
@@ -130,7 +130,7 @@ The ratio of requests to retries this budget permits, in `(0, 1]`.
 
 `void`
 
----
+***
 
 ### available()
 
@@ -142,7 +142,7 @@ Current retry tokens available.
 
 `number`
 
----
+***
 
 ### dispose()
 
@@ -160,7 +160,42 @@ forever, and its `stats()` still answers, so nothing fails visibly.
 
 `void`
 
----
+***
+
+### getStats()
+
+> **getStats**(): `PowerRetryBudgetStats`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` — the one class that has always spelled it this way — is not
+handed `TypeError: x.getStats is not a function` here.
+
+Nine helpers spell the reporting method `stats()` and `PowerPool` spelled it
+`getStats()`, with no stated rule and nothing pinning it, which reached the
+documentation as a false claim (`guides/metrics.md`, `llm.txt`). Both
+spellings work everywhere now. `stats()` is canonical and this delegates to
+it; `PowerPool` keeps `getStats` because renaming the largest surface in the
+library would be a breaking change.
+
+Written out per class rather than installed on the prototype on purpose: a
+dynamic `Object.defineProperty` is invisible to `tsc`, so the generated
+`types/` omitted it and a TypeScript caller got a type error on a method
+that worked at runtime. That was the first implementation.
+
+**No `@returns` tag, and that is load-bearing.** The first version carried a
+hand-copied copy of the `stats()` return shape, on the reasoning that an
+explicit type was safer. It is not: the copy went stale the moment a
+concurrent change added `staleServes` and `expirations` to `PowerCache`
+`.stats()`, and `test/statsNaming.test.js` failed. Inference gives a
+byte-identical published type and cannot drift, because there is nothing to
+keep in sync. `test/types.test-d.ts` asserts the two are mutually assignable,
+which is the property a consumer relies on.
+
+#### Returns
+
+`PowerRetryBudgetStats`
+
+***
 
 ### recordRequest()
 
@@ -178,7 +213,7 @@ let a retry storm pay for itself.
 
 The token count after funding.
 
----
+***
 
 ### reset()
 
@@ -190,7 +225,7 @@ Refill the bucket to capacity and zero the counters.
 
 `void`
 
----
+***
 
 ### stats()
 
@@ -203,7 +238,7 @@ was routine or a sign the dependency is genuinely sick.
 
 `PowerRetryBudgetStats`
 
----
+***
 
 ### tryConsumeRetry()
 
@@ -216,4 +251,4 @@ Try to spend one retry token.
 `boolean`
 
 `false` when the budget is exhausted and the retry must
-not be sent.
+  not be sent.

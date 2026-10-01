@@ -95,3 +95,51 @@ try {
 Two of these codes are worth calling out as _good news_: `ERR_POOL_DUPLICATE_CORRELATION_ID` from a batch is thrown **before anything is dispatched**, so a collision cannot leave half the batch on the wire and the other half orphaned. And `ERR_POOL_DRAIN_TIMEOUT` / `ERR_POOL_DRAIN_TOO_MANY_WAITERS` abandon only the _wait_ — the pool keeps dispatching and keeps serving every other caller, so treating them as fatal to the pool is a mistake.
 
 See [Bounding the queue](powerPool.md#bounding-the-queue) for how to produce the first one deliberately, and the `drain()` entry in [PowerPool's API](powerPool.md#api) for the second and third.
+
+## Codes outside the pool
+
+The table above is deliberately exhaustive about the pool, because a refusal you
+retry is a queue that fills faster. The codes below are the rest of the library's
+branchable errors — and unlike the pool's, they had **no index at all** until now,
+even though the per-helper guides already told you to branch on them. If you had
+gone to `guides/powerCircuit.md` and been told to check `err.code === 'ECIRCUITOPEN'`,
+nothing collected that fact.
+
+| `err.code`               | Raised by                                            | What it means                                                                                                | What to do                                                                                                                             |
+| ------------------------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `EABORT`                 | `PowerLatch.wait`                                    | The latch was aborted via `abort()`, or the `signal` passed to `wait()` was aborted.                         | Do not retry — a barrier that was aborted will not re-count. Rebuild the latch if you need a fresh barrier.                            |
+| `EDISPOSED`              | `PowerLatch.wait`                                    | The latch was disposed before this waiter resolved.                                                          | Do not retry. The latch is unusable; construct another.                                                                                |
+| `ETIMEOUT`               | `PowerLatch.wait({ timeout })`, `PowerRetry` attempt | A wait or a single retry attempt exceeded its `timeout`.                                                     | **Retry or give up** — the work may or may not have completed; only the wait is bounded.                                               |
+| `EDEADLINE`              | `PowerDeadline.run`                                  | The overall deadline elapsed. Carries `attempts` and `elapsedMs` alongside the code.                         | **Give up on the operation.** Do not retry; a whole-operation budget that ran out will run out again.                                  |
+| `ECIRCUITOPEN`           | `PowerCircuit.call`                                  | The circuit is open, so the call was short-circuited **without being attempted**.                            | **Do not retry immediately** — that is what reopening suppresses. Fall back, or wait for the `closed` transition.                      |
+| `ERR_BULKHEAD_RESET`     | `PowerBulkhead.reset({ reason })`                    | Queued work was released by `reset()` rather than completing. A caller-supplied `reason` keeps its own code. | Treat as a cancellation. Anything that assumed the work ran needs to know it did not.                                                  |
+| `ECHUNKDISPATCH`         | `PowerChunker`                                       | One or more chunks could not be dispatched to the pool. Carries `failedChunks`, `mode` and `cause`.          | **Retry the failed chunks only.** `failedChunks` names which; the rest were dispatched and must not be resent.                         |
+| `ERR_WS_CONNECT_TIMEOUT` | `PowerWebSocketClient`                               | The socket did not reach `OPEN` within `connectTimeoutMs`.                                                   | **Retry the connect**, optionally with backoff. The client is left `CLOSED`, not half-open.                                            |
+| `ERR_QUEUE_FULL`         | `PowerPermitGate.acquire`, `PowerBulkhead.run`       | A bounded queue is full, so the call was refused rather than queued. Carries `queueCapacity`.                | **Shed load.** Same response as `ERR_POOL_QUEUE_FULL` — 429, drop, or back off. Retrying into a full queue is the load that filled it. |
+| `ERR_ITEM`               | `normalizeError(err)`                                | A **fallback**, not a real code: applied when the error being normalised carried none.                       | Do not branch on it. It means "this error was anonymous", not "this specific thing went wrong".                                        |
+
+Three of these are genuinely indistinguishable from each other if you only look at
+`err.name`, which is why they exist as codes:
+
+- `ETIMEOUT` bounds **one attempt** or **one wait**; `EDEADLINE` bounds the
+  **whole operation**. Both are "time ran out", and retrying under `ETIMEOUT` is
+  reasonable while retrying under `EDEADLINE` is usually not.
+- `EABORT` is the _caller's_ decision to stop; `EDISPOSED` is the _object's_ — a
+  latch disposed underneath a waiter. Both reject a pending `wait()`, and the
+  second is a bug in your teardown order if you did not expect it.
+- `ECIRCUITOPEN` means the call was **never attempted**. A failure count of zero
+  for that request, which is why it must not be counted as a failure upstream.
+
+`ERR_QUEUE_FULL` deliberately reuses the pool's `ERR_POOL_QUEUE_FULL` _condition_
+rather than introducing a new spelling of it. Three classes refusing the same
+capacity for the same reason is one branch for a caller to write, not three; a
+caller who already handles the pool's code gets the right response here for free.
+
+`ERR_ITEM` is the odd one out and is listed only so it is not mistaken for a real
+condition: `normalizeError` assigns it when the error it is given carried no code,
+so it means "unattributed". Branching on it is a category error.
+
+`ERR_BULKHEAD_RESET` and `ECHUNKDISPATCH` carry structured fields
+(`reason`, and `failedChunks` / `mode` / `cause` respectively). Prefer those over
+parsing the message — the message text is not part of the contract, the code and
+its fields are.

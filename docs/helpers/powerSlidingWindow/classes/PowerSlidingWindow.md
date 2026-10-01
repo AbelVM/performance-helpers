@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerSlidingWindow](../README.md) / PowerSlidingWindow
 
@@ -19,7 +19,7 @@
 `PowerSlidingWindowOptions` = `{}`
 
 `capacity` defaults to 1
-and `windowMs` to one second.
+  and `windowMs` to one second.
 
 #### Returns
 
@@ -39,25 +39,25 @@ must outrank a value threaded in by a composition.
 
 `number`
 
----
+***
 
 ### \_nowExplicit
 
 > **\_nowExplicit**: `boolean`
 
----
+***
 
 ### \_timestamps
 
 > **\_timestamps**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
----
+***
 
 ### capacity
 
 > **capacity**: `number`
 
----
+***
 
 ### windowMs
 
@@ -75,11 +75,16 @@ Return how many slots are currently available.
 
 ##### options?
 
+`LimiterNowOptions` = `{}`
+
+Per-call
+  clock override.
+
 #### Returns
 
 `number`
 
----
+***
 
 ### clear()
 
@@ -88,7 +93,7 @@ Return how many slots are currently available.
 Alias for [PowerSlidingWindow#reset](#reset).
 
 This one is a true synonym and not a uniformity gesture: `reset()` here
-_is_ a clear - it empties the timestamp queue. Contrast the limiters, where
+*is* a clear - it empties the timestamp queue. Contrast the limiters, where
 `reset()` restores a usable state (refilled tokens, re-closed circuit) and
 `clear()` would read as the exact opposite.
 
@@ -96,7 +101,7 @@ _is_ a clear - it empties the timestamp queue. Contrast the limiters, where
 
 `void`
 
----
+***
 
 ### reset()
 
@@ -108,7 +113,7 @@ Drop every recorded timestamp, returning the window to fully available.
 
 `void`
 
----
+***
 
 ### tryConsume()
 
@@ -123,6 +128,11 @@ Try to consume `n` slots (default 1).
 `number` = `1`
 
 ##### options?
+
+`LimiterNowOptions` = `{}`
+
+Per-call
+  clock override.
 
 #### Returns
 

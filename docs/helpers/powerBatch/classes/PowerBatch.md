@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerBatch](../README.md) / PowerBatch
 
@@ -11,7 +11,7 @@ PowerBatch
 Scheduler-driven batching helper that collects items and dispatches them
 to a provided handler on a microtask/macrotask boundary.
 
-PowerBatch
+ PowerBatch
 
 ## Constructors
 
@@ -26,15 +26,15 @@ PowerBatch
 (`items`) => `void` \| `Promise`\<`void`\>
 
 Called with the whole
-collected array each time the batch flushes. A rejection rejects every
-promise handed out by `add()`/`flush()` in that batch.
+  collected array each time the batch flushes. A rejection rejects every
+  promise handed out by `add()`/`flush()` in that batch.
 
 ##### options?
 
 `PowerBatchOptions` = `{}`
 
 `maxSize` defaults to unbounded and
-`scheduling` to `'microtask'`.
+  `scheduling` to `'microtask'`.
 
 #### Returns
 
@@ -56,25 +56,25 @@ promise handed out by `add()`/`flush()` in that batch.
 
 `void` \| `Promise`\<`void`\>
 
----
+***
 
 ### \_maxSize
 
 > **\_maxSize**: `number`
 
----
+***
 
 ### \_pending
 
 > **\_pending**: `BatchPending` \| `null`
 
----
+***
 
 ### \_queue
 
 > **\_queue**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
 
----
+***
 
 ### \_scheduler
 
@@ -110,7 +110,7 @@ assignable to the handles at one site and not the other.
 
 `BatchPending`
 
----
+***
 
 ### \[dispose\]()
 
@@ -123,7 +123,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### add()
 
@@ -144,7 +144,7 @@ item hits `maxSize` the returned promise resolves when the handler completes.
 
 `Promise`\<`void`\>
 
----
+***
 
 ### clear()
 
@@ -154,7 +154,7 @@ item hits `maxSize` the returned promise resolves when the handler completes.
 
 `void`
 
----
+***
 
 ### dispose()
 
@@ -170,7 +170,7 @@ name to call.
 
 `void`
 
----
+***
 
 ### flush()
 
@@ -185,11 +185,20 @@ resolves immediately.
 
 ##### options?
 
+`signal` abandons this caller's
+  *wait* for the flush, not the flush itself — queued items still belong to
+  the callers who passed them to `add()`, so the shared pending promise is
+  deliberately left to settle.
+
+###### signal?
+
+`AbortSignal`
+
 #### Returns
 
 `Promise`\<`void`\>
 
----
+***
 
 ### reset()
 
@@ -200,7 +209,7 @@ Alias for [PowerBatch#clear](#clear).
 `clear()` here empties the container, and "reset" is a natural second word
 for exactly that - so a caller who reaches for `reset()` on this class gets
 the obvious thing instead of a `TypeError`. No limiter gets this alias: for
-`PowerThrottle` and `PowerPermitGate`, `reset()` _refills_ and `clear()`
+`PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
 would read as the opposite, and the two are deliberately not synonyms.
 
 #### Returns

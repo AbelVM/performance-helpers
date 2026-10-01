@@ -12,6 +12,7 @@ import { PowerQueue } from './powerQueue.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { assertLimitRequired } from '../utils/options.js';
 import { abortReason } from '../utils/abort.js';
+import { queueFullError } from '../utils/errors.js';
 
 /**
  * PowerPermitGate
@@ -37,18 +38,28 @@ function detach(entry) {
 
 export class PowerPermitGate {
   /**
-   * @param {PowerPermitGateOptions} [options]
+   * @param {PowerPermitGateOptions} [options] `className` and `limitName` let a
+   *   wrapping class report its own vocabulary in validation messages; see
+   *   {@link PowerPermitGateOptions}.
    */
   constructor(options = {}) {
     const { capacity, queueCapacity, initialTokens } = options || {};
+    // Only `capacity` borrows the wrapper's vocabulary. `queueCapacity` and
+    // `initialTokens` keep the gate's own names: a class that exposes neither
+    // (`PowerSemaphore`) should still say `queueCapacity` when the gate is the
+    // thing rejecting, because that is where the caller would fix it.
+    const className =
+      typeof options?.className === 'string' ? options.className : 'PowerPermitGate';
+    const capacityName =
+      typeof options?.limitName === 'string' && options.limitName ? options.limitName : 'capacity';
     // `Math.max(1, Math.floor(Number(capacity) || 1))` read `0` as absent, so
     // `capacity: 0` produced a gate holding *one* permit rather than none. A
     // permit gate configured to allow nothing is a real configuration - it is
     // how a dependency is switched off - and silently becoming open is the worst
     // direction for it to fail in. Validated instead.
     this._capacity = assertLimitRequired(capacity, {
-      name: 'capacity',
-      className: 'PowerPermitGate',
+      name: capacityName,
+      className,
       min: 1,
       integer: true,
       fallback: 1,
@@ -58,7 +69,7 @@ export class PowerPermitGate {
         ? Infinity
         : assertLimitRequired(queueCapacity, {
             name: 'queueCapacity',
-            className: 'PowerPermitGate',
+            className,
             min: 0,
             integer: true,
             allowInfinity: true,
@@ -73,7 +84,7 @@ export class PowerPermitGate {
             this._capacity,
             assertLimitRequired(initialTokens, {
               name: 'initialTokens',
-              className: 'PowerPermitGate',
+              className,
               min: 0,
               integer: true,
             })
@@ -164,6 +175,10 @@ export class PowerPermitGate {
   /**
    * Acquire a permit asynchronously.
    * Resolves immediately when a permit is available; otherwise waits in FIFO order.
+   * @param {{signal?: AbortSignal}} [options] `signal` aborts the *wait* for a
+   *   permit, not any work started once one is held — see `src/utils/abort.js`.
+   *   Checked before the fast path, so an already-aborted signal rejects rather
+   *   than resolving because a permit happened to be free.
    * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
    */
   acquire(options = {}) {
@@ -179,7 +194,7 @@ export class PowerPermitGate {
       return Promise.resolve(this._grant());
     }
     if (this.isFull) {
-      return Promise.reject(new Error('PowerPermitGate queue is full'));
+      return Promise.reject(queueFullError('PowerPermitGate', this._queueCapacity));
     }
     return new Promise((resolve, reject) => {
       const entry = {

@@ -35,9 +35,10 @@ export class PowerThrottle {
     /**
      * Try to consume `n` tokens.
      * @param {number} [n=1]
+     * @param {LimiterNowOptions} [options] Per-call clock override.
      * @returns {boolean} `true` when tokens were consumed; `false` otherwise.
      */
-    tryConsume(n?: number, options?: {}): boolean;
+    tryConsume(n?: number, options?: LimiterNowOptions): boolean;
     /**
      * Add tokens to the bucket (forceful, useful for tests).
      * @param {number} n
@@ -51,6 +52,7 @@ export class PowerThrottle {
      *
      * Returns `null` when the reservation fails due to insufficient tokens.
      * @param {number} [n=1]
+     * @param {LimiterNowOptions} [options] Per-call clock override.
      * @returns {PowerThrottleToken|null}
      * @example
      * const token = throttle.reserve(1);
@@ -59,7 +61,7 @@ export class PowerThrottle {
      *   throttle.release(token);
      * }
      */
-    reserve(n?: number, options?: {}): PowerThrottleToken | null;
+    reserve(n?: number, options?: LimiterNowOptions): PowerThrottleToken | null;
     /**
      * Release a prior reservation token or add tokens back.
      * Accepts either a token returned from `reserve()` or a numeric count.
@@ -79,9 +81,10 @@ export class PowerThrottle {
     rollback(nOrToken: PowerThrottleToken | number): void;
     /**
      * Current available tokens (performs a refill before reporting).
+     * @param {LimiterNowOptions} [options] Per-call clock override.
      * @returns {number}
      */
-    available(options?: {}): number;
+    available(options?: LimiterNowOptions): number;
     /**
      * Reset the bucket to a given token count (or full when omitted).
      * @param {number} [count]
@@ -91,3 +94,4 @@ export class PowerThrottle {
 }
 export type PowerThrottleOptions = import("./jsdoc-types.js").PowerThrottleOptions;
 export type PowerThrottleToken = import("./jsdoc-types.js").PowerThrottleToken;
+export type LimiterNowOptions = import("../utils/limiterClock.js").LimiterNowOptions;

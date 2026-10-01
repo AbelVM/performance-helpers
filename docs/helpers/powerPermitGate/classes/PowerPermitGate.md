@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerPermitGate](../README.md) / PowerPermitGate
 
@@ -22,6 +22,10 @@
 
 `PowerPermitGateOptions` = `{}`
 
+`className` and `limitName` let a
+  wrapping class report its own vocabulary in validation messages; see
+  PowerPermitGateOptions.
+
 #### Returns
 
 `PowerPermitGate`
@@ -32,19 +36,19 @@
 
 > **\_available**: `number`
 
----
+***
 
 ### \_capacity
 
 > **\_capacity**: `number`
 
----
+***
 
 ### \_queueCapacity
 
 > **\_queueCapacity**: `number`
 
----
+***
 
 ### \_waiters
 
@@ -74,7 +78,7 @@ while the work is piling up. `_held` keeps counting. See ADR 0004.
 
 `number`
 
----
+***
 
 ### available
 
@@ -88,7 +92,7 @@ Currently available permits.
 
 `number`
 
----
+***
 
 ### capacity
 
@@ -102,7 +106,7 @@ Maximum number of permits.
 
 `number`
 
----
+***
 
 ### isFull
 
@@ -116,7 +120,7 @@ True when the waiting queue is saturated.
 
 `boolean`
 
----
+***
 
 ### pending
 
@@ -130,7 +134,7 @@ Number of queued waiters, excluding any that have been aborted.
 
 `number`
 
----
+***
 
 ### queueCapacity
 
@@ -154,7 +158,7 @@ Maximum number of waiters allowed in the queue.
 
 () => `void`
 
----
+***
 
 ### \[dispose\]()
 
@@ -167,7 +171,7 @@ deterministically at scope exit.
 
 `void`
 
----
+***
 
 ### acquire()
 
@@ -180,13 +184,22 @@ Resolves immediately when a permit is available; otherwise waits in FIFO order.
 
 ##### options?
 
+`signal` aborts the *wait* for a
+  permit, not any work started once one is held — see `src/utils/abort.js`.
+  Checked before the fast path, so an already-aborted signal rejects rather
+  than resolving because a permit happened to be free.
+
+###### signal?
+
+`AbortSignal`
+
 #### Returns
 
 `Promise`\<`PowerReleaseFn`\>
 
 Promise resolving to a release callback.
 
----
+***
 
 ### dispose()
 
@@ -202,7 +215,7 @@ instance works with `using` / `await using`.
 
 `void`
 
----
+***
 
 ### release()
 
@@ -211,7 +224,7 @@ instance works with `using` / `await using`.
 Release one or more permits back to the gate.
 
 Released permits are handed straight to queued waiters where possible, so
-a release that serves a waiter is a _transfer_: the permit is never
+a release that serves a waiter is a *transfer*: the permit is never
 available in between, and the waiter is a holder from that instant. The
 return value is the number of permits that actually came back to the gate
 rather than being transferred, which is what a caller tracking outstanding
@@ -230,7 +243,7 @@ that are still out.
 
 Permits returned to the gate rather than transferred.
 
----
+***
 
 ### reset()
 
@@ -238,14 +251,14 @@ Permits returned to the gate rather than transferred.
 
 Reset the gate and reject any waiting callers.
 
-Outstanding holders are _not_ settled: the promise that produced a release
+Outstanding holders are *not* settled: the promise that produced a release
 callback has already resolved, so there is nothing left to reject. What a
 reset can do is stop pretending those permits are free - `_available` is
 capped at `capacity - _held`, so a holder that is still running keeps
 occupying its permit and a second `acquire()` cannot be granted alongside
 it. When the holder does release, the permit returns normally. The previous
 behaviour set `_available` unconditionally, so `reset()` on a gate of 1
-with one holder running produced a _second_ concurrent holder against a
+with one holder running produced a *second* concurrent holder against a
 limit of 1, permanently, and the first holder's release was then absorbed
 by the capacity clamp.
 
@@ -269,7 +282,7 @@ Optional rejection reason for queued waiters.
 
 `void`
 
----
+***
 
 ### tryAcquire()
 

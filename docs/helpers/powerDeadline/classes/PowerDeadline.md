@@ -1,6 +1,6 @@
 [**performance-helpers**](../../../README.md)
 
----
+***
 
 [performance-helpers](../../../README.md) / [helpers/powerDeadline](../README.md) / PowerDeadline
 
@@ -11,7 +11,7 @@ Deadline-aware async helper for timeout, retry budget, and abort metadata.
 Use `PowerDeadline` to wrap async work with per-attempt timeouts, a total
 deadline for the whole operation, and optional retry/backoff behavior.
 
-PowerDeadline
+ PowerDeadline
 
 ## Constructors
 
@@ -63,7 +63,7 @@ Async function to execute.
 
 `Promise`\<`any`\>
 
----
+***
 
 ### run()
 

@@ -14,6 +14,8 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 
 - `set(key, value, ttl?)` — Set a value for `key`. Optionally provide `ttl` in milliseconds to override the map's `defaultTTL`. Returns the map instance to allow chaining.
 
+  `ttl` accepts a number or a numeric string, or the options object `{ ttl }` for parity with `PowerCache.set`. `Infinity`, `null`/`undefined` and `0` all mean **no expiry**. Anything else throws a `TypeError` — a value that is not a number made every expiry comparison false, so the entry silently **never expired**, which is the worst failure direction a TTL container has. A **negative** `ttl` throws a `RangeError` rather than being treated as no expiry. The rules are the same ones `PowerCache` uses, from one shared validator, so the two classes cannot drift apart again.
+
 - `get(key)` — Retrieve the value for `key` or `undefined` if it is missing or expired. Access will lazily purge expired entries.
 
 - `has(key)` — Boolean indicating whether the key exists and is not expired.

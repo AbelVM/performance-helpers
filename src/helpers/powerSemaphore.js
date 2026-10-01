@@ -24,7 +24,19 @@ export class PowerSemaphore {
    * @param {number} [limit=1] Maximum number of concurrent permits.
    */
   constructor(limit = 1) {
-    this._gate = new PowerPermitGate({ capacity: limit, initialTokens: limit });
+    // The gate reports validation failures with the class name and option name
+    // it was built with, so pass this class's own vocabulary: a caller who
+    // wrote `new PowerSemaphore(0)` has to be told about `PowerSemaphore` and
+    // `limit`. Without this every error said "PowerPermitGate: `capacity`",
+    // naming an internal building block and an option that does not exist on
+    // this class — which is what `assertLimitRequired`'s `className` exists to
+    // prevent.
+    this._gate = new PowerPermitGate({
+      capacity: limit,
+      initialTokens: limit,
+      className: 'PowerSemaphore',
+      limitName: 'limit',
+    });
   }
 
   /** Maximum concurrent holders. */
@@ -79,12 +91,21 @@ export class PowerSemaphore {
   /**
    * Execute a callback while holding a permit.
    * The permit is released after the callback resolves or rejects.
+   *
+   * `options` is forwarded to {@link acquire}, so `{ signal }` cancels the
+   * *wait* for a permit. It used to be accepted and thrown away — this method
+   * took only `fn` — so a caller who mirrored `acquire()` got a promise that
+   * could not be cancelled and, with an already-aborted signal, hung until a
+   * permit happened to be released. `run` is the form people reach for first,
+   * so cancellation matters more here than on `acquire`.
+   *
    * @template T
    * @param {() => Promise<T> | T} fn Callback to run under a permit.
+   * @param {{signal?: AbortSignal}} [options] Forwarded to {@link acquire}.
    * @returns {Promise<T>} The callback result.
    */
-  async run(fn) {
-    const release = await this.acquire();
+  async run(fn, options = {}) {
+    const release = await this.acquire(options);
     try {
       return await fn();
     } finally {

@@ -12,11 +12,25 @@ A sliding-window rate limiter that allows up to `capacity` events per `windowMs`
 
 ## API
 
-- `tryConsume(n = 1)` — Attempt to consume `n` slots (default `1`) in the current rolling window. Returns `true` when the requested slots are available and the call consumes them; otherwise returns `false`.
+- `tryConsume(n = 1)` — Attempt to consume `n` slots (default `1`) in the current rolling window. Returns `true` when the requested slots are available and the call consumes them; otherwise returns `false`. A `n` that is not a finite number throws a `TypeError`; see [Request counts](#request-counts).
 
 - `available()` — Return the current number of available slots in the window. This performs a prune of stale timestamps before reporting.
 
 - `reset()` — Clear internal state and timestamp queue, effectively refilling the window.
+
+## Request counts
+
+`tryConsume` **validates** its count argument rather than coercing it. It used to run it through `Math.max(0, Math.floor(n) || 0)`, which turns `NaN` into `0` — and `0` is the *admit* case, so `tryConsume(NaN)` returned `true` having recorded nothing at all.
+
+| Input                           | Behaviour      |
+| ------------------------------- | -------------- |
+| non-finite (`NaN`, `±Infinity`) | throws `TypeError` |
+| not a number (`'many'`)         | throws `TypeError` |
+| fractional (`3.9`)              | floors to `3`   |
+| numeric string (`'3'`)          | read as `3`     |
+| `0` or negative                 | no-op, returns `true` |
+
+A fractional count floors rather than throwing, unlike a fractional **option**: a fractional `capacity` would be rounded up by its first consumer and over-admit, while a request count rounds down and can only under-charge.
 
 ## Example
 

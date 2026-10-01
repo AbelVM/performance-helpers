@@ -2,6 +2,7 @@
  * Sliding-window rate limiter: allow up to `capacity` events per `windowMs`.
  * Uses a timestamp queue to track event occurrences.
  */
+
 /**
  * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
  */
@@ -9,7 +10,7 @@ import { nowMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { MS_PER_SEC, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
-import { assertLimitRequired } from '../utils/options.js';
+import { assertCount, assertLimitRequired } from '../utils/options.js';
 
 export class PowerSlidingWindow {
   /**
@@ -72,10 +73,16 @@ export class PowerSlidingWindow {
   /**
    * Try to consume `n` slots (default 1).
    * @param {number} [n=1]
+   * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options] Per-call
+   *   clock override.
    * @returns {boolean} True if consumption succeeded; false otherwise.
    */
   tryConsume(n = 1, options = {}) {
-    const want = Math.max(0, Math.floor(n) || 0);
+    const want = assertCount(n, {
+      name: 'n',
+      className: 'PowerSlidingWindow',
+      method: 'tryConsume',
+    });
     if (want === 0) return true;
     // Read once and reuse: the prune and the push must agree on the timestamp,
     // or a message is recorded at a time older than the window it was pruned
@@ -96,6 +103,8 @@ export class PowerSlidingWindow {
 
   /**
    * Return how many slots are currently available.
+   * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options] Per-call
+   *   clock override.
    * @returns {number}
    */
   available(options = {}) {
