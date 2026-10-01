@@ -344,4 +344,67 @@ describe('TEST-003: _windowOldest() call counter', () => {
     expect(counter.calls).toBeGreaterThanOrEqual(INSERTS);
     cache.dispose();
   });
+
+  it('a main-space get() walks once at every window size, not just the small one', () => {
+    // CACHE-006 asks for this counter at **several window sizes**, and the two
+    // tests above use 20. That single size is the gap: the cost is *linear in the
+    // window*, and `windowSize: null` — the documented recommended default at
+    // `ceil(maxEntries * 0.01)` — resolves to 40 on a 4000-entry cache, so a
+    // pointer fix that only held for a small window would pass everything above
+    // and still hand back the slow corner the row is about.
+    //
+    // The assertion is `1` at every non-zero size, not `0`, because the fix is not
+    // written; this is the flip the characterisation exists to make visible. It
+    // is discriminating: a fix that removes the walk fails it at 0 — verified by
+    // applying one, which is what caught the fact that the first draft of this
+    // test asserted `1` for `windowSize: 0` as well. There the walk branch is
+    // skipped entirely, so the count is genuinely 0 and the assertion was wrong
+    // rather than strict.
+    for (const windowSize of [0, 1, 10, 100, 1000]) {
+      const cache = new PowerCache({
+        maxEntries: 4000,
+        windowSize,
+        admission: 'tinylfu',
+      });
+      for (let i = 0; i < 3000; i += 1) cache.set(`k${i}`, i);
+
+      const mainKey = [...cache._map.entries()].find(([, node]) => !node.inWindow)?.[0];
+      cache.get(mainKey); // settle, uncounted
+      const counter = countWalks(cache);
+      cache.get(mainKey);
+      expect(counter.calls, `window ${windowSize} walks`).toBe(windowSize > 0 ? 1 : 0);
+      cache.dispose();
+    }
+  });
+
+  it('the walk is absent when the feature is disabled, which is why a bare measurement reads zero', () => {
+    // The trap, pinned so it cannot be re-entered. `_windowSize` is forced to 0
+    // unless `this._sketch && this._policy === 'lru'`, so a cache built without
+    // `admission: 'tinylfu'` has **no window to walk** and the counter reads 0 —
+    // which is how this row was recorded stale for the sixth time. Same option,
+    // same walk, one fewer configuration flag, opposite conclusion.
+    const withFilter = new PowerCache({ maxEntries: 1000, windowSize: 100, admission: 'tinylfu' });
+    const without = new PowerCache({ maxEntries: 1000, windowSize: 100 });
+
+    for (const cache of [withFilter, without])
+      for (let i = 0; i < 800; i += 1) cache.set(`k${i}`, i);
+
+    expect(withFilter._windowSize, 'filter on: window is real').toBe(100);
+    expect(without._windowSize, 'filter off: window silently disabled').toBe(0);
+
+    const mainKey = [...withFilter._map.entries()].find(([, node]) => !node.inWindow)?.[0];
+    withFilter.get(mainKey);
+    without.get(mainKey);
+
+    const enabled = countWalks(withFilter);
+    const disabled = countWalks(without);
+    withFilter.get(mainKey);
+    without.get(mainKey);
+
+    expect(enabled.calls).toBe(1);
+    expect(disabled.calls, 'a measurement without the filter measures nothing').toBe(0);
+
+    withFilter.dispose();
+    without.dispose();
+  });
 });
