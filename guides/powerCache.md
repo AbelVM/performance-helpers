@@ -158,6 +158,49 @@ for (const [k, v] of c) {
 console.log('hit rate', c.hitRate);
 ```
 
+#### Mutating the cache while iterating
+
+**Deleting during a walk is safe**, and this is the documented contract rather than
+an accident worth discovering:
+
+```javascript
+// Empties the cache. Every key is visited, not just the first.
+for (const [k] of c.entries()) c.delete(k);
+```
+
+- Removing the entry currently being visited continues at the next one.
+- Removing an entry **not yet visited** skips it (it is gone) and the walk
+  completes.
+- Entries **added** during the walk are not visited.
+
+`cleanupExpired()` called from inside a loop is covered by the same rules, which
+matters because it is a public maintenance method rather than a mutation you chose
+— a bulk export that swept each turn used to yield nothing at all:
+
+```javascript
+for (const [key, value] of c.entries()) {
+  c.cleanupExpired();
+  yield_(key, value);
+}
+```
+
+**Two adjacent removals in a single iteration step may end the walk early.** That
+is the one residual loss, and it is deliberate: closing it means snapshotting the
+walk into an array, an allocation on every call to what is a bulk-export API.
+
+**Recency mutation is a different hazard and is not supported.** `get()`, `set()`
+on a key already present, and `touch()` relink a node to the MRU end, which the
+positional walk then arrives back at:
+
+```javascript
+// Never returns — the walk re-visits each key after `get()` moves it.
+for (const [k] of c.entries()) c.get(k);
+```
+
+If you need to refresh recency for everything you iterated, collect the keys
+first (`Array.from(c.keys())`) and then act on them. `review.md`'s **CACHE-019**
+records this, with the candidates for fixing it.
+
 ### Opt-in: eager cleanup on read
 
 **Expiry is eager, and always has been.** Any read that observes an expired

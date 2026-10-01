@@ -2257,14 +2257,56 @@ export class PowerCache {
 
   /**
    * Iterate entries in LRU or MRU order.
+   *
+   * **Mutating the cache from inside the loop is supported, and the walk reads
+   * the next link *before* each `yield` rather than after.** A walk that advanced
+   * after the resume was silently cut short by any mutation of the node the
+   * iterator was standing on, because `_remove` nulls both links on the node it
+   * removes — so `for (const [k] of cache.entries()) cache.delete(k)`, the most
+   * natural way to write "empty this cache", removed exactly one entry and left
+   * the rest, while `size` reported the truth afterwards so nothing raised.
+   * `cleanupExpired()` called from inside the loop was worse, because a caller
+   * has no reason to know that calling a public maintenance method is a
+   * mutation: a bulk export that swept each turn silently exported nothing.
+   *
+   * The contract, since a live iterator that can skip is only a legitimate
+   * choice when it is a stated one:
+   *
+   * - Removing the entry currently being visited continues at the next one.
+   * - Removing an entry not yet visited skips it (it is gone), and the walk
+   *   completes.
+   * - Entries *added* during the walk are not visited: the walk started at the
+   *   then-tail, and inserting an entry moves the tail out from under it.
+   * - Removing two *adjacent* entries in one iteration step may end the walk
+   *   early. That is the one residual loss, it needs two removals before a
+   *   single resume, and closing it would mean snapshotting the walk into an
+   *   array — an allocation on every call to a bulk-export API.
+   *
    * @param {'LRU'|'MRU'} [order='MRU']
    * @returns {IterableIterator<[*,*]>}
    */
   *entries(order = 'MRU') {
-    if (order === 'MRU') {
-      for (let node = this._tail; node; node = node.prev) yield [node.key, node.value];
-    } else {
-      for (let node = this._head; node; node = node.next) yield [node.key, node.value];
+    const link = order === 'MRU' ? 'prev' : 'next';
+    let node = order === 'MRU' ? this._tail : this._head;
+    while (node) {
+      // Read the continuation before handing control to the caller: the node we
+      // are standing on may be removed while the loop body runs, and `_remove`
+      // nulls both of its links on the way out.
+      const next = node[link];
+      yield [node.key, node.value];
+      if (!isLinked(node, this._head, this._tail)) {
+        // The node just yielded was removed. Its captured successor was not
+        // touched by that removal, so it is still the right place to resume — or
+        // the walk is genuinely over if the end of the list was reached.
+        node = isLinked(next, this._head, this._tail) ? next : null;
+      } else if (isLinked(next, this._head, this._tail)) {
+        node = next;
+      } else {
+        // The successor was removed before we reached it, so it is skipped. The
+        // removal repaired *our* link past it, so re-reading it is how the walk
+        // steps over the hole rather than stopping on it.
+        node = node[link];
+      }
     }
   }
 
@@ -2287,6 +2329,30 @@ export class PowerCache {
   *values(order = 'MRU') {
     for (const [, v] of this.entries(order)) yield v;
   }
+}
+
+/**
+ * Whether `node` is still a member of the cache's linked list.
+ *
+ * Liveness cannot be read off the links alone. A lone entry has `prev` and
+ * `next` both `null` and is still in the list, and a removed entry has both
+ * `null` and is not — the same shape. The tie is broken by the ends: `_remove`
+ * moves `_head` and `_tail` past the node it removes, so a removed node is
+ * never either, while a lone entry is both.
+ *
+ * Module scope rather than a method because it needs no instance state beyond
+ * the two ends it is handed, and because `PowerCache` is on the hot path of
+ * every helper in the library that caches anything.
+ *
+ * @private
+ * @param {CacheNode|null} node
+ * @param {CacheNode|null} head
+ * @param {CacheNode|null} tail
+ * @returns {boolean}
+ */
+function isLinked(node, head, tail) {
+  if (!node) return false;
+  return node.prev !== null || node.next !== null || node === head || node === tail;
 }
 
 /**

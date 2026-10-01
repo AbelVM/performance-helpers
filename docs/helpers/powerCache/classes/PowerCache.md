@@ -489,6 +489,30 @@ want to reach for the symbol still have something to call.
 
 Iterate entries in LRU or MRU order.
 
+**Mutating the cache from inside the loop is supported, and the walk reads
+the next link *before* each `yield` rather than after.** A walk that advanced
+after the resume was silently cut short by any mutation of the node the
+iterator was standing on, because `_remove` nulls both links on the node it
+removes — so `for (const [k] of cache.entries()) cache.delete(k)`, the most
+natural way to write "empty this cache", removed exactly one entry and left
+the rest, while `size` reported the truth afterwards so nothing raised.
+`cleanupExpired()` called from inside the loop was worse, because a caller
+has no reason to know that calling a public maintenance method is a
+mutation: a bulk export that swept each turn silently exported nothing.
+
+The contract, since a live iterator that can skip is only a legitimate
+choice when it is a stated one:
+
+- Removing the entry currently being visited continues at the next one.
+- Removing an entry not yet visited skips it (it is gone), and the walk
+  completes.
+- Entries *added* during the walk are not visited: the walk started at the
+  then-tail, and inserting an entry moves the tail out from under it.
+- Removing two *adjacent* entries in one iteration step may end the walk
+  early. That is the one residual loss, it needs two removals before a
+  single resume, and closing it would mean snapshotting the walk into an
+  array — an allocation on every call to a bulk-export API.
+
 #### Parameters
 
 ##### order?
