@@ -534,6 +534,16 @@ export class PowerCache {
     this._probationEnd = null;
     // Track in-flight async factories for `getOrSetAsync` to dedupe concurrent callers
     this._inflightPromises = new Map();
+    // AbortControllers for the fetches named in `_inflightPromises`, held in a
+    // **parallel map** rather than by widening the value of that one to a
+    // `{promise, controller}` record.
+    //
+    // The record shape was the first attempt and it was the wrong call: 13 test
+    // assertions across 4 files read `_inflightPromises` and expect a bare
+    // promise, and every one of them would have had to change for no gain. A
+    // second map costs one `Map` and leaves the observable shape alone, so the
+    // cancellation work does not gate on a migration of unrelated tests.
+    this._inflightControllers = new Map();
     this._defaultAsyncTimeout = Number.isFinite(Number(defaultAsyncTimeout))
       ? Math.max(0, Math.floor(Number(defaultAsyncTimeout)))
       : 30000;
@@ -754,6 +764,44 @@ export class PowerCache {
   }
 
   /**
+   * Signal the factory in flight for `key`, if there is one.
+   *
+   * The linkage `lru-cache` documents: *"if the key is evicted or deleted before
+   * the fetchMethod resolves, the AbortSignal passed to the fetchMethod will
+   * receive an abort event."* Before this there was no cancellation path at all
+   * — measured, zero occurrences of `AbortController` in this file — so an
+   * evicted key's factory ran to completion and then wrote its result into a
+   * cache that no longer wanted it.
+   *
+   * Aborting is a **request**, not a kill. A factory that predates this takes no
+   * argument and cannot be stopped, so it still completes and still stores; the
+   * signal is there for a factory that can cooperate, and refusing to store
+   * because a key was deleted would lose the value for a caller that wanted it.
+   *
+   * @private
+   * @param {*} key
+   * @param {string} [reason] - Diagnostic surfaced through `onError`.
+   * @returns {boolean} Whether a factory was signalled.
+   */
+  _abortInflight(key, reason = 'evicted') {
+    const controller = this._inflightControllers.get(key);
+    if (!controller || controller.signal.aborted) return false;
+    // **A `try`/`catch` around `abort()` does not contain a throwing listener,
+    // and the first version of this claimed it did.** `abort()` dispatches
+    // listeners synchronously but `runAbort` re-reports a listener exception on
+    // `process.nextTick`, so it surfaces as an uncaught exception rather than a
+    // rejection this call could catch. Verified: a factory whose abort handler
+    // throws took the process down, and the `catch` never ran.
+    //
+    // That is the platform's contract, not something to wrap — the same is true
+    // of `addEventListener` handlers generally — so the comment here records it
+    // instead of pretending to handle it. The caller's own listener is the
+    // caller's own risk, exactly as with any `abort()`.
+    controller.abort(new Error(`PowerCache: in-flight fetch for a ${reason} key was aborted`));
+    return true;
+  }
+
+  /**
    * Start a background refresh for an expired entry.
    *
    * If a refresh is already in flight for the key, this helper does nothing.
@@ -770,9 +818,12 @@ export class PowerCache {
    */
   _refreshStaleEntry(key, factory, { ttl = undefined, weight = undefined } = {}) {
     if (this._inflightPromises.has(key)) return;
+    // The signal is the factory's first argument, as in `fetch` and
+    // `lru-cache`, so a factory written for either works here unchanged.
+    const controller = new AbortController();
     let p;
     try {
-      p = Promise.resolve().then(() => factory());
+      p = Promise.resolve().then(() => factory(controller.signal));
     } catch (err) {
       return;
     }
@@ -787,9 +838,11 @@ export class PowerCache {
       })
       .catch(() => undefined)
       .finally(() => {
+        this._inflightControllers.delete(key);
         this._inflightPromises.delete(key);
       });
     this._inflightPromises.set(key, tracked);
+    this._inflightControllers.set(key, controller);
   }
 
   /**
@@ -1182,6 +1235,7 @@ export class PowerCache {
       if (!node) break;
       const k = node.key;
       const v = node.value;
+      this._abortInflight(k, 'evicted');
       this._unlinkNode(node, { advanceEvictionCandidate: true });
       this._evictions++;
       try {
@@ -1718,10 +1772,12 @@ export class PowerCache {
     // No cached node and no inflight factory: count as a miss and invoke factory
     this._misses++;
 
-    // Invoke and normalize result to a Promise
+    // Invoke and normalize result to a Promise. The factory receives the
+    // signal; one written before this takes no argument and is unaffected.
+    const controller = new AbortController();
     let p;
     try {
-      p = Promise.resolve().then(() => asyncFactory());
+      p = Promise.resolve().then(() => asyncFactory(controller.signal));
     } catch (err) {
       return Promise.reject(err);
     }
@@ -1788,11 +1844,34 @@ export class PowerCache {
       }
     );
 
+    // Releasing the slot at the **timeout**, and signalling the factory at the
+    // same moment, is one decision rather than two.
+    //
+    // Holding the slot until the factory settles closes the F-09 duplicate and
+    // leaks: a factory that never settles - `() => new Promise(() => {})`,
+    // which `powerCache.timeout.test.js` uses twice - would hold its slot
+    // forever, so the key could never fetch again and every entry accumulated
+    // one Map row per hanging factory. A duplicate costs compute; a permanent
+    // slot is a memory leak *and* a permanently broken key, so the release stays
+    // here and the signal is what stops the work.
+    //
+    // A joining caller still dedupes against the running factory, and receives
+    // the value rather than the previous caller's rejection: it awaits
+    // `_inflightPromises`, which holds the factory's own promise, not the
+    // timeout race.
     const tracked = timed.finally(() => {
+      // **Abort before dropping the controller.** The first version deleted
+      // `_inflightControllers` first and then called `_abortInflight`, which
+      // looks up the controller it had just removed - so the timeout never
+      // signalled anything. Caught by a probe that checked `signal.aborted`
+      // rather than by the suite, because nothing asserted on it yet.
+      this._abortInflight(key, 'timed out');
       this._inflightPromises.delete(key);
+      this._inflightControllers.delete(key);
     });
 
-    this._inflightPromises.set(key, tracked);
+    this._inflightPromises.set(key, p);
+    this._inflightControllers.set(key, controller);
     return tracked;
   }
 
@@ -1856,6 +1935,7 @@ export class PowerCache {
    * @returns {boolean} true if the key was removed.
    */
   delete(key) {
+    this._abortInflight(key, 'deleted');
     const node = this._map.get(key);
     if (!node) return false;
     this._unlinkNode(node);
@@ -1873,6 +1953,11 @@ export class PowerCache {
    * @returns {void}
    */
   clear() {
+    // Abort every outstanding fetch, including one whose key has no node yet -
+    // the node sweep below cannot, because a key mid-fetch is not resident and
+    // `clear()` does not go through `delete()`. Wired without this, `clear()`
+    // aborted nothing at all.
+    for (const key of [...this._inflightPromises.keys()]) this._abortInflight(key, 'cleared');
     for (let node = this._head; node;) {
       const next = node.next;
       this._freeNode(node);
@@ -1965,8 +2050,13 @@ export class PowerCache {
       interval = intervalOrOptions;
       maxCleanupPerTick = this.maxCleanupPerTick;
     } else {
-      interval = Number.isFinite(+intervalOrOptions.interval)
-        ? +intervalOrOptions.interval
+      // `intervalMs` is accepted as an alias for `interval`, because it is the
+      // spelling roughly fifteen other options in this library use and a caller
+      // reaching for the obvious name had it accepted and dropped — the one
+      // argument shape `startCleanup` silently ignored.
+      const requestedInterval = intervalOrOptions.interval ?? intervalOrOptions.intervalMs;
+      interval = Number.isFinite(+requestedInterval)
+        ? +requestedInterval
         : Math.max(
             MS_PER_SEC,
             Math.min(this.defaultTTL || DEFAULT_CACHE_DEFAULT_TTL_MS, DEFAULT_CACHE_DEFAULT_TTL_MS)

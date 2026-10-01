@@ -45,6 +45,7 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 - `getOrSet(key, factory, { ttl, weight, staleWhileRevalidate })` — Atomically read-or-compute a value. If `factory` is a function its result (or resolved Promise) is stored and returned. When `staleWhileRevalidate` is enabled, an expired value can be returned immediately while refresh happens in the background.
 
 - `getOrSetAsync(key, asyncFactory, { ttl, weight, staleWhileRevalidate })` — Async read-or-compute with inflight deduplication: concurrent callers share the same in-flight Promise and the resolved value is cached when settled. With `staleWhileRevalidate: true`, an expired cached value is returned immediately and the async factory refreshes the cache behind the scenes.
+- `getOrSetAsync(key, asyncFactory, { ttl, weight, staleWhileRevalidate })` — the factory is called as `asyncFactory(signal)` and receives an **`AbortSignal`**, as `fetch` does. It is signalled when the key is **evicted** or **deleted**, when the cache is **cleared**, and when the caller's **timeout** elapses. A factory that ignores the signal is unaffected — aborting is a request, not a kill, and its value is still cached. See [Cancelling an in-flight fetch](#cancelling-an-in-flight-fetch).
 - `getOrFetch(key, factory?, options?)` — `getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is given. The reason it exists: a `fetchMethod` on the instance removes a function literal from **every** call site, which is most of the cost of the async API in a hot path. A per-call factory still wins, so one cache can serve more than one kind of resource. Rejects with a `TypeError` if there is neither.
 
 ### Stale-while-revalidate, and bounding it
@@ -665,6 +666,51 @@ Measured A/B in one process, 400k calls against a 64-key working set:
 
 **2.1x.** The double lookup was the larger half and is the change the audit did
 not ask for; arity specialisation measured at ~0.1% and was not done.
+
+## Cancelling an in-flight fetch
+
+`getOrSetAsync` calls its factory with an `AbortSignal` as the first argument, and
+signals it when the work stops being wanted:
+
+```js
+const cache = new PowerCache({ maxEntries: 100 });
+
+const user = await cache.getOrSetAsync(`user:${id}`, async (signal) => {
+  const res = await fetch(url, { signal }); // the fetch is actually cancelled
+  return res.json();
+});
+```
+
+The signal fires when the key is **evicted** by a later write, when it is
+**deleted** or **cleared**, and when the caller's **timeout** elapses. Before this
+there was no cancellation path at all: `AbortController` appeared nowhere in
+`powerCache.js`, so an evicted key's factory ran to completion and then wrote its
+result into a cache that no longer wanted it.
+
+**Aborting is a request, not a kill.** A factory written before this takes no
+argument and cannot be stopped; it still completes and its value is still cached.
+Refusing to store it would lose work a caller wanted. The signal is there for a
+factory that _can_ cooperate.
+
+**The in-flight slot is released at the timeout, and that is deliberate.** An
+earlier version held the slot until the factory settled, which stopped a
+duplicate factory from starting — and leaked. A factory that never settles
+(`() => new Promise(() => {})`) would hold its slot forever, so that key could
+never fetch again and every entry accumulated one Map row per hanging factory. A
+duplicate costs compute; a permanent slot is a memory leak _and_ a permanently
+broken key.
+
+The consequence, stated plainly: **a caller arriving before the timeout joins the
+running factory and receives its value; one arriving after it starts a new fetch.**
+For the common case — a slow upstream, a long timeout, a retry that wants the value
+— the first is what happens. For a factory that ignores the signal, the second
+means the work is done twice. That is the residual F-09 named, reduced to
+factories that can cooperate.
+
+**A throwing abort listener is the caller's own risk**, exactly as with any
+`abort()`. It is worth knowing that a `try`/`catch` around the aborting call does
+**not** contain it: `runAbort` re-reports a listener exception on `process.nextTick`,
+so it surfaces as an uncaught exception rather than something the cache can catch.
 
 ## PowerTimedCache
 
