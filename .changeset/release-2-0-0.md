@@ -4474,3 +4474,153 @@ failed once**, and the walk counts the mode prints are the check that would say 
 the retry worked.
 
 The row stays open.
+
+#### A cross-realm `Error` was silently replaced by an `AbortError`
+
+`abortReason()` — the rejection value every `signal`-taking helper in this
+library produces — tested `signal.reason instanceof Error`. `instanceof` compares
+against _this realm's_ `Error.prototype`, so it is `false` for an `Error`
+constructed in another `vm` context, another realm or an iframe. A caller who
+aborted with their own error therefore got a **different object** back: a
+generic `AbortError` reading `The operation was aborted`, discarding both the
+message they wrote and the `name`/`code` that identified the condition.
+
+```javascript
+// in a separate vm context
+controller.abort(new TypeError('shutting down the tenant'));
+// before: rejects with AbortError / "The operation was aborted"
+// after:  rejects with that exact TypeError
+```
+
+The check is now `isError()` from `src/utils/errors.js` — `Error.isError()`
+where the runtime has it, and the previous `instanceof` behaviour where it does
+not. Two differences are worth knowing because both change an answer, and both
+are the correct one: an error from another realm now matches, and
+`Object.create(Error.prototype)` now does not.
+
+**`Error.isError()` does not exist on this library's floor, and the premise was
+checked before the change rather than after.** `engines.node` is `>=22.12.0`
+(V8 12.4) and CI runs 22.12; installed and run against 22.12.0, where
+`typeof Error.isError === 'function'` is `false` and the call throws
+`TypeError: Error.isError is not a function`. It arrived in V8 13.6 / Node 24.
+So the capability is probed once at module load rather than assumed, and the
+`instanceof` fallback preserves today's behaviour exactly where the platform
+cannot answer — a strict improvement, not a raised floor. **The cross-realm fix
+is therefore available on Node 24+ and browsers shipping ES2026, and the old
+blind spot remains on 22.12.**
+
+Two of the row's supporting claims did not survive checking, and the code
+follows what survived:
+
+- **A `Worker` is not a separate realm for this purpose.** A `worker_threads`
+  error reaches the parent through the structured clone algorithm, which
+  reconstructs it against the parent's intrinsics. Measured: `m instanceof Error`
+  is `true` for an error posted from a worker. There was nothing to fix there,
+  and the row's framing — that this library "routes errors across a worker
+  boundary", so cross-realm matters most here — does not hold for workers.
+- **`powerLogger.error()` was never realm-fragile.** Its clause read
+  `a instanceof Error || (a && typeof a === 'object')`, and the second half
+  already caught a cross-realm error, after which `normalizeError` reads only
+  `.code`/`.message`/`.stack` — all of which it has. Logging a `vm`-created
+  `TypeError` and a local one produced byte-identical payloads _before_ any
+  edit. It now uses `isError()` anyway, because one `instanceof` left behind
+  invites the reading that the logger is realm-fragile when it never was, and
+  `guides/powerLogger.md` now documents the formatting rules the test pins.
+
+Four `instanceof Error` sites remain, and each is a **degradation rather than a
+substitution**, so none of them loses a caller-supplied object: `powerCron._report`
+and `metrics`/`powerPool` wrap or stringify (the message gains an `Error: ` prefix),
+and `powerBulkhead.reset` wraps — which drops the caller's `code` before stamping
+`ERR_BULKHEAD_RESET`. They are the same one-line change and should be taken
+together. `powerCache`'s `encodeArg` is deliberately left alone: it turns an
+`Error` into a cache key, so the encoding has to agree with itself across the
+key-building and key-reading paths, and that is a change to a shipped key format
+rather than an error-narrowing fix.
+
+`test/powerLogger.isError.test.js`, 14 tests, **mutation-checked**: reverting the
+feature detect fails 5, reverting `abortReason` fails 2, removing the logger's
+`typeof a === 'object'` fallback fails 1, a duck-typed `isError` fails 1, an
+`isError` that always returns `true` fails 4, and reverting the whole change
+fails 9.
+
+Closes GAP-012.
+
+## `createFrameDecoder()` — an incremental frame decoder (`PowerMessageCodec`)
+
+`decodeMessage` reads **one whole frame** and throws on anything less, so it
+cannot be pointed at a socket, a `ReadableStream` or a `node:stream` chunk. Its
+JSDoc has always said that `byteLength` "lets a stream reader know how much to
+consume", and no such reader existed anywhere in the repository. `guides/
+powerMessageCodec.md` documented one you had to write yourself.
+
+```javascript
+const decoder = createFrameDecoder({ maxFrameBytes: 1 << 20 });
+for await (const chunk of stream) {
+  for (const { value } of decoder.push(chunk)) handle(value);
+}
+const tail = decoder.flush(); // zero-length if the stream ended on a boundary
+```
+
+**The gap, reproduced before the change.** A frame split across two reads throws
+`RangeError: … truncated frame` — and `decodeInbound` throws the same, so there
+is no second entry point to use instead. That is the _normal_ state of a stream
+roughly once per frame, so the error arrives at a rate that trains a caller to
+swallow `RangeError`s, including the one that means the peer is genuinely
+corrupt. The second failure is quieter: two frames in one chunk return the first
+and stop, reporting a `byteLength` smaller than the input. Nothing throws and
+the remaining bytes are never looked at.
+
+**`maxFrameBytes` is required, and that is the design.** A frame declares its
+own payload length, so a peer that sends a 6-byte header and then nothing holds
+the buffer open at whatever size it named — no bound, no counter, no error. A
+default would be RT-009's defect in new form: a limit that sounds like one and
+is not. The ceiling is checked **when the header arrives**, so an oversized
+frame is refused before its payload is buffered rather than after; `Infinity` is
+the documented opt-out, and it is greppable where a default is not.
+
+**The row's 1.6× did not reproduce, and the guide says so.** The row recorded
+offset-based decoding against a naive re-concatenate-per-chunk decoder as
+0.306 ms against 0.503 ms per 500-frame stream, 1.6×. Re-measured at that exact
+shape — 500 frames of ~422 bytes in 157 chunks of 1400, arms interleaved so JIT
+warm-up hits both equally — the two are **1.00× and 1.19× on two runs, with a
+55–60 % min/max spread against this repository's 28 % noise floor**. At 422 bytes
+a frame the copy is L1-resident and free. They separate only when a frame is
+large enough for the copy to matter (1.9× at 32 KB frames), which is an
+asymptotic property rather than a number. The design is still right, for the two
+failures above and because re-concatenating per `push` is O(n²) in the chunk
+count — but it is adopted for correctness and bounded memory, and no performance
+claim is made.
+
+**Mutation is what settled that, in both directions.** `test/
+powerMessageCodec.frameDecoder.test.js`, 34 tests. Of 21 mutants, **16 caught**:
+the ceiling removed (2), the ceiling checked only on a complete frame (2), the
+ceiling measured against the chunk rather than the frame (2), the multi-frame
+loop stopping after one frame (14), throwing on a short chunk (8), the drained
+cursor rewind removed (1), `maxFrameBytes` not required (1), and each of the
+three validation flags (1 each), `pendingBytes` not excluding consumed frames
+(2), `flush()` returning a view instead of a copy (1), `flush({ strict: true })`
+not reporting (2), `reset()` rewinding only the write cursor (1), and the
+`_readLength` offset ignored (9).
+
+**Three of those tests did not exist until the mutants said so.** The first pass
+had no case where a chunk carries whole frames _and_ the start of the next —
+which is the ordinary socket shape, and the only state in which the read cursor
+is non-zero while bytes are still buffered. `pendingBytes` counting the write
+cursor, `flush()` handing back a window onto the live buffer, and `reset()`
+leaving the read cursor ahead of the write one all passed 31 of 31 until that
+case was added; the last of the three makes the decoder silently decode nothing
+forever, with no error. The fourth survivor is a real redundancy rather than a
+gap: dropping the `end` from the `subarray(start, end)` frame view is caught by
+nothing, because the `end - start` completeness check runs first and
+`decodeMessage` is never reached with an incomplete frame. Both the source and
+the test now say which of the two is the guard.
+
+The five surviving mutants are all allocation or memory policy with no effect on
+a decoded byte — the compaction, the growth factor, the buffer release in
+`dispose()`, and that redundant bound. `dispose()` is a state reset, not a
+cancellation: the decoder owns no timer, no listener and no handle, only bytes,
+so it stays usable afterwards and a `using` block that disposes early does not
+leave a dead object behind.
+
+The hand-rolled reader is removed from `guides/powerMessageCodec.md` — it named
+an undefined `concat()` and had no ceiling. Closes CODEC-001.

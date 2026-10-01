@@ -1,3 +1,5 @@
+import { isError } from './errors.js';
+
 /**
  * Stop waiting for a promise when a signal aborts.
  *
@@ -64,12 +66,19 @@ export function raceWithAbort(promise, signal) {
  * 'AbortError'` checks expect - and what a stripped runtime without
  * `DOMException` gets as a plain named Error.
  *
+ * The "is it an Error" test is `isError()` rather than `instanceof`, because
+ * this is the one place in the library where getting it wrong *replaces* the
+ * caller's value. A caller in another realm who aborts with their own
+ * `TypeError` had it discarded and replaced by the generic `AbortError` below,
+ * and the caller-visible symptom was a rejection carrying the wrong `name` and a
+ * message they never wrote.
+ *
  * @param {AbortSignal} signal
  * @returns {Error}
  */
 export function abortReason(signal) {
   const reason = signal?.reason;
-  if (reason instanceof Error) return reason;
+  if (isError(reason)) return reason;
   try {
     return new DOMException('The operation was aborted', 'AbortError');
   } catch {

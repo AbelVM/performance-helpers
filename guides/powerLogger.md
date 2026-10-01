@@ -4,13 +4,13 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 
 ## Constructor
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `level` | `number` | `0` | Initial debug level (0..3). 0 disables logging. |
-| `format` | `'text'|'json'` | `'text'` | When `'json'`, the logger emits structured payloads (stringified by default) suitable for log pipelines. |
-| `name` | `string` | `null` | Optional instance name included in JSON payloads as `name`. |
-| `formatter` | `(payload) => any` | `null` | Optional function to transform the structured payload before emission. May return an object (serialized) or a string (emitted directly). |
-| `output` | `(payload) => any` | `null` | Optional transport function; when provided the logger will call this instead of writing to `console.*`. Receives the structured payload or the formatter's returned value. |
+| option      |               type | default | description                                                                                                                                                                |
+| ----------- | -----------------: | ------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `level`     |           `number` |     `0` | Initial debug level (0..3). 0 disables logging.                                                                                                                            |
+| `format`    |            `'text' | 'json'` | `'text'`                                                                                                                                                                   | When `'json'`, the logger emits structured payloads (stringified by default) suitable for log pipelines. |
+| `name`      |           `string` |  `null` | Optional instance name included in JSON payloads as `name`.                                                                                                                |
+| `formatter` | `(payload) => any` |  `null` | Optional function to transform the structured payload before emission. May return an object (serialized) or a string (emitted directly).                                   |
+| `output`    | `(payload) => any` |  `null` | Optional transport function; when provided the logger will call this instead of writing to `console.*`. Receives the structured payload or the formatter's returned value. |
 
 ## Logging levels
 
@@ -30,6 +30,31 @@ Simple runtime debug gate and in-memory counters useful for lightweight instrume
 - `isDebug()` — Convenience shorthand for `isDebugLevel(1)`.
 
 - `error(...args)` / `warn(...args)` / `info(...args)` / `log(...args)` / `debug(...args)` — Logging methods that behave according to the configured level. Each accepts variadic arguments or lazy functions (functions that will be invoked only when the message will actually be emitted) to avoid unnecessary work when logging is disabled.
+
+### How `error()` formats its arguments
+
+`error()` is the only level that rewrites what you pass it, so the rules are worth
+stating. Per argument, in order:
+
+1. A normalized error object (anything with a truthy `.error`) is rendered as
+   `CODE: message`.
+2. An `Error` **or any plain object** is rendered the same way, as
+   `ERR_ITEM: message`.
+3. Everything else — strings, numbers, `null`, `undefined` — is passed through
+   untouched.
+
+Two consequences that surprise people:
+
+- **A plain object is not logged as an object.** `logger.error({ id: 7 })`
+  emits the string `ERR_ITEM: `, because `normalizeError` reads only `.code`,
+  `.message` and `.stack` and an object has none of them. Use `logger.info()` if
+  you want the object itself, or an `output` transport in `json` format.
+- **Errors from another realm are formatted correctly.** An `Error` created in a
+  different `vm` context, worker or iframe fails `instanceof Error` in this one.
+  The check here is realm-independent, so it does not matter — and it did not
+  matter before either, because the clause that formats plain objects already
+  caught them. `test/powerLogger.isError.test.js` pins that a `vm`-created
+  `TypeError` and a local one produce byte-identical payloads.
 
 - `table(...args)` — When available calls `console.table` for tabular display; in JSON `format` mode it will instead emit a structured payload that can be consumed by log pipelines.
 
@@ -94,24 +119,24 @@ You can customize the JSON payload shape by passing a `formatter` function in `o
 import { PowerLogger as PowerLoggerJSON } from '../src/helpers/powerLogger.js';
 
 const logger = new PowerLoggerJSON(3, {
-	format: 'json',
-	name: 'my-app',
-	formatter(payload) {
-		// return a custom object
-		return {
-			t: payload.ts,
-			lvl: payload.level,
-			app: payload.name || 'unknown',
-			msg: payload.msg
-		}
-	}
-})
-logger.info('started')
+  format: 'json',
+  name: 'my-app',
+  formatter(payload) {
+    // return a custom object
+    return {
+      t: payload.ts,
+      lvl: payload.level,
+      app: payload.name || 'unknown',
+      msg: payload.msg,
+    };
+  },
+});
+logger.info('started');
 
 // string-returning formatter example:
 const sLogger = new PowerLoggerJSON(3, {
-	format: 'json',
-	formatter: p => `${p.ts}|${p.level}|${String(p.msg)}`
+  format: 'json',
+  formatter: (p) => `${p.ts}|${p.level}|${String(p.msg)}`,
 });
 sLogger.log('boot');
 ```

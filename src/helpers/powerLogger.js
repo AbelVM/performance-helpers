@@ -1,4 +1,4 @@
-import { formatErrorObj, normalizeError } from '../utils/errors.js';
+import { formatErrorObj, isError, normalizeError } from '../utils/errors.js';
 import { nowMs } from '../utils/now.js';
 import { assertKnownOptions } from '../utils/options.js';
 
@@ -356,6 +356,23 @@ export class PowerLogger {
    * Errors are formatted on the way through rather than left to the transport,
    * so a sink always receives a readable message instead of an `Error` object.
    *
+   * The narrowing is `isError()`, and the second clause is **not** redundant -
+   * it is what decides plain objects, which are formatted by `normalizeError`
+   * like errors are.
+   *
+   * It was previously `a instanceof Error || (a && typeof a === 'object')`, and
+   * that object clause is why this method was **already** realm-safe: a
+   * cross-realm `Error` fails `instanceof` but is `typeof 'object'`, and
+   * `normalizeError` reads only `.code` / `.message` / `.stack`, all of which a
+   * cross-realm error has. So the row's premise - that `powerLogger` was
+   * realm-fragile - is false, and was verified by logging a `vm`-created
+   * `TypeError` and a local one and diffing the emitted payloads (identical
+   * once `ts` is stripped) *before* any edit.
+   *
+   * The `instanceof` half is changed anyway because `isError()` is the honest
+   * test, it is what the other sites use, and leaving one `instanceof` behind
+   * invites the reading that this method is realm-fragile when it never was.
+   *
    * @param {...any} args
    * @returns {void}
    */
@@ -363,8 +380,7 @@ export class PowerLogger {
     const formatted = args.map((a) => {
       try {
         if (a?.error) return formatErrorObj(a);
-        if (a instanceof Error || (a && typeof a === 'object'))
-          return formatErrorObj(normalizeError(a));
+        if (isError(a) || (a && typeof a === 'object')) return formatErrorObj(normalizeError(a));
       } catch (e) {
         /* ignore formatting failures */
       }

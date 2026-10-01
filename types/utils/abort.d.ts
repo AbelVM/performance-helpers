@@ -29,6 +29,13 @@ export function raceWithAbort(promise: Promise<any>, signal: AbortSignal | null 
  * 'AbortError'` checks expect - and what a stripped runtime without
  * `DOMException` gets as a plain named Error.
  *
+ * The "is it an Error" test is `isError()` rather than `instanceof`, because
+ * this is the one place in the library where getting it wrong *replaces* the
+ * caller's value. A caller in another realm who aborts with their own
+ * `TypeError` had it discarded and replaced by the generic `AbortError` below,
+ * and the caller-visible symptom was a rejection carrying the wrong `name` and a
+ * message they never wrote.
+ *
  * @param {AbortSignal} signal
  * @returns {Error}
  */

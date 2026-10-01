@@ -9,5 +9,6 @@
 ## Functions
 
 - [formatErrorObj](functions/formatErrorObj.md)
+- [isError](functions/isError.md)
 - [normalizeError](functions/normalizeError.md)
 - [queueFullError](functions/queueFullError.md)
