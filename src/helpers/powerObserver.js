@@ -111,8 +111,26 @@ export class PowerObserver {
    * @param {PowerObserverOptions} options
    */
   constructor(initial, options = {}) {
-    assertKnownOptions(options, ['map', 'distinct', 'async'], 'PowerObserver');
-    this._value = initial;
+    // Same normalisation as `PowerTTLMap` and `PowerLogger`: an options object as
+    // the sole argument used to be *stored as the value*, so
+    // `new PowerObserver({ value: 5 })` appeared to work while observing an
+    // object rather than 5.
+    // An options object is recognised only when it carries at least one known
+    // option key. A bare `{}` still falls through to the numeric path and is
+    // rejected as before — which `test/powerLatch.reset.test.js` pins as a
+    // property: whatever the constructor rejects, `reset()` must reject too.
+    if (
+      initial &&
+      typeof initial === 'object' &&
+      !Array.isArray(initial) &&
+      ['value', 'initial', 'map', 'distinct', 'async'].some((k) => k in initial)
+    ) {
+      const carried = /** @type {*} */ (initial);
+      options = /** @type {PowerObserverOptions} */ (carried);
+      initial = undefined;
+    }
+    assertKnownOptions(options, ['value', 'initial', 'map', 'distinct', 'async'], 'PowerObserver');
+    this._value = 'value' in options ? options.value : initial;
     this._subs = new PowerSubscriberSet();
     this._map = typeof options.map === 'function' ? options.map : null;
     this._distinct = !!options.distinct;

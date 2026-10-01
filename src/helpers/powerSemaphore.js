@@ -17,6 +17,7 @@
  * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
  */
 import { PowerPermitGate } from './powerPermitGate.js';
+import { assertKnownOptions } from '../utils/options.js';
 
 export class PowerSemaphore {
   /**
@@ -24,6 +25,23 @@ export class PowerSemaphore {
    * @param {number} [limit=1] Maximum number of concurrent permits.
    */
   constructor(limit = 1) {
+    // An options object as the sole argument means the caller reached for the
+    // obvious shape, and it used to be rejected outright with a message naming a
+    // number they had just passed an object for. `PowerTTLMap` already normalises
+    // both forms; so now do these.
+    // An options object is recognised only when it carries at least one known
+    // option key. A bare `{}` still falls through to the numeric path and is
+    // rejected as before — which `test/powerLatch.reset.test.js` pins as a
+    // property: whatever the constructor rejects, `reset()` must reject too.
+    if (limit && typeof limit === 'object' && 'limit' in limit) {
+      // Validate the object rather than reading one key out of it — otherwise
+      // `{ limit: 3, nonsense: 1 }` would pass, and arriving in the
+      // options-object form would be a way to *bypass* 8f83c07 rather than a
+      // second way to satisfy it.
+      const opts = /** @type {{limit?: number}} */ (limit);
+      assertKnownOptions(opts, ['limit'], 'PowerSemaphore');
+      limit = opts.limit;
+    }
     // The gate reports validation failures with the class name and option name
     // it was built with, so pass this class's own vocabulary: a caller who
     // wrote `new PowerSemaphore(0)` has to be told about `PowerSemaphore` and

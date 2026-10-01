@@ -162,14 +162,31 @@ export class PowerLogger {
    *   any of them was an error and a custom sink needed a cast.
    */
   constructor(level = 0, options = {}) {
-    assertKnownOptions(options, ['format', 'name', 'formatter', 'output'], 'PowerLogger');
+    // An options object as the sole argument means the caller reached for the
+    // obvious shape, and it used to be accepted *silently*: `{ level: 2 }` has no
+    // `format`/`name`/... key, so every option defaulted and the logger came up
+    // at level 0. `PowerTTLMap` already normalises both forms; this does the same.
+    // An options object is recognised only when it carries at least one known
+    // option key. A bare `{}` still falls through to the numeric path and is
+    // rejected as before — which `test/powerLatch.reset.test.js` pins as a
+    // property: whatever the constructor rejects, `reset()` must reject too.
+    if (
+      level &&
+      typeof level === 'object' &&
+      ['level', 'format', 'name', 'formatter', 'output'].some((k) => k in level)
+    ) {
+      const carried = /** @type {*} */ (level);
+      options = /** @type {PowerLoggerOptions} */ (carried);
+      level = undefined;
+    }
+    assertKnownOptions(options, ['level', 'format', 'name', 'formatter', 'output'], 'PowerLogger');
     this._debugLevel = 0;
     this._counters = Object.create(null);
     this._format = options?.format || 'text';
     this.name = options?.name || null;
     this._formatter = typeof options?.formatter === 'function' ? options.formatter : null;
     this._output = typeof options?.output === 'function' ? options.output : null;
-    this.setDebugLevel(level);
+    this.setDebugLevel(level ?? options.level ?? 0);
   }
 
   /**

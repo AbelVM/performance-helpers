@@ -1,4 +1,4 @@
-import { assertLimitRequired } from '../utils/options.js';
+import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 /**
  * PowerQueue
@@ -23,6 +23,23 @@ export class PowerQueue {
    * @param {number} [initialCapacity=16] Initial capacity (rounded up to power-of-two).
    */
   constructor(initialCapacity = POWER_QUEUE_INITIAL_CAPACITY) {
+    // An options object as the sole argument means the caller reached for the
+    // obvious shape, and it used to be rejected outright with a message naming a
+    // number they had just passed an object for. `PowerTTLMap` already normalises
+    // both forms; so now do these.
+    // An options object is recognised only when it carries at least one known
+    // option key. A bare `{}` still falls through to the numeric path and is
+    // rejected as before — which `test/powerLatch.reset.test.js` pins as a
+    // property: whatever the constructor rejects, `reset()` must reject too.
+    if (
+      initialCapacity &&
+      typeof initialCapacity === 'object' &&
+      'initialCapacity' in initialCapacity
+    ) {
+      const opts = /** @type {{initialCapacity?: number}} */ (initialCapacity);
+      assertKnownOptions(opts, ['initialCapacity'], 'PowerQueue');
+      initialCapacity = opts.initialCapacity;
+    }
     // A power-of-two buffer length is required for the bitmask indexing, so a
     // small request is rounded *up* rather than rejected - 1 and 2 are
     // legitimate hints. A non-finite or negative request is a configuration

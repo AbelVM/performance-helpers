@@ -28,7 +28,22 @@ export class PowerLatch {
    *   rejection reason by {@link PowerLatch#abort}.
    */
   constructor(count = 1, options = {}) {
-    assertKnownOptions(options, ['onAbort'], 'PowerLatch');
+    // An options object as the sole argument means the caller reached for the
+    // obvious shape, and it used to be rejected outright with a message naming a
+    // number they had just passed an object for. `PowerTTLMap` already normalises
+    // both forms; so now do these.
+    // An options object is recognised only when it carries at least one known
+    // option key. A bare `{}` still falls through to the numeric path and is
+    // rejected as before — which `test/powerLatch.reset.test.js` pins as a
+    // property: whatever the constructor rejects, `reset()` must reject too.
+    if (count && typeof count === 'object' && 'count' in count) {
+      const carried = /** @type {*} */ (count);
+      options = /** @type {PowerLatchOptions} */ (carried);
+      count = /** @type {{count?: number}} */ (carried).count;
+    }
+    // `options` now carries the whole object, so `assertKnownOptions` below
+    // validates every key in it — not just the `count` this branch read.
+    assertKnownOptions(options, ['count', 'onAbort'], 'PowerLatch');
     // `0` is a real state - a latch that is already complete - and is kept. A
     // negative count, or a `NaN` that `|| 0` turned into zero, is not a latch
     // that finishes early; it is one nobody can reason about, because `wait()`
