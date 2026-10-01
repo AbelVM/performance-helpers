@@ -1843,6 +1843,127 @@ function runSketchWorkload() {
   return { incrementNs: inc, estimateNs: est, distributionSum: good.total };
 }
 
+// ─── Workload 10: what the admission window costs on the read path ───────────
+//
+// CACHE-006. `_windowOldest()` walks back from the tail while nodes are
+// `inWindow`, and the window is the contiguous suffix of the list — so the walk
+// is O(windowSize) and it runs on **every main-space `get()`**, because
+// `_moveToTail` on a main-space node has to re-establish where the window starts.
+//
+// **The window is only active under `admission: 'tinylfu'`.** `_windowSize` is
+// forced to 0 unless `this._sketch && this._policy === 'lru'`, so a measurement
+// taken with the default admission measures nothing at all — the first version
+// of this mode reported zero window walks and a flat ~200 ns per `get()`, and
+// concluded the row was stale. It was the measurement.
+//
+// Read the "calls per get" column before the timings. The claim is structural —
+// a main-space `get()` must not walk the window at all — and the timing is only
+// the consequence.
+
+/**
+ * Count `_windowOldest()` calls and the walk steps it performs.
+ *
+ * Instrumenting rather than timing alone, because the row's own criterion is a
+ * counter and a wall clock cannot distinguish "fast" from "not called".
+ *
+ * @param {import('../src/helpers/powerCache.js').PowerCache} cache
+ */
+function instrumentWindow(cache) {
+  const real = cache._windowOldest.bind(cache);
+  cache._probe = { calls: 0, steps: 0 };
+  cache._windowOldest = function () {
+    this._probe.calls++;
+    let node = this._tail;
+    let steps = 0;
+    if (node && node.inWindow) {
+      while (node.prev && node.prev.inWindow) {
+        node = node.prev;
+        steps++;
+      }
+    }
+    this._probe.steps += steps;
+    return real();
+  };
+  return cache;
+}
+
+/**
+ * CACHE-006: the window walk on the read path.
+ *
+ * @returns {object}
+ */
+function runWindowWorkload() {
+  const maxEntries = Number(process.env.CLAIM_WINDOW_ENTRIES || 4000);
+  const resident = Number(process.env.CLAIM_WINDOW_RESIDENT || 3000);
+  const reads = Number(process.env.CLAIM_WINDOW_READS || 100_000);
+  const sizes = (process.env.CLAIM_WINDOW_SIZES || '0,10,100,1000').split(',').map(Number);
+
+  console.log('CACHE-006 — the admission window on the read path\n');
+  console.log(`  maxEntries ${maxEntries}, ${resident} entries resident, ${reads} gets per row.`);
+  console.log('  The window is active only under `admission: "tinylfu"`.\n');
+  console.log(
+    `  ${'windowSize'.padStart(10)}${'calls/get'.padStart(12)}${'steps/get'.padStart(13)}${'ns/get'.padStart(12)}`
+  );
+  console.log(`  ${'-'.repeat(47)}`);
+
+  const results = [];
+  for (const windowSize of sizes) {
+    const clock = 1_000_000;
+    const cache = instrumentWindow(
+      new PowerCache({
+        maxEntries,
+        windowSize,
+        admission: 'tinylfu',
+        window: 4,
+        now: () => clock,
+      })
+    );
+    for (let i = 0; i < resident; i++) cache.set(`k${i}`, i);
+    // Reads below `resident` are main-space hits; a main-space `get()` is where
+    // the row says the walk happens.
+    const probes = 5_000;
+    cache._probe.calls = 0;
+    cache._probe.steps = 0;
+    for (let i = 0; i < probes; i++) cache.get(`k${i % resident}`);
+    const callsPerGet = cache._probe.calls / probes;
+    const stepsPerGet = cache._probe.steps / probes;
+
+    for (let i = 0; i < 20_000; i++) cache.get(`k${i % resident}`);
+    const ns = timePerCall((i) => cache.get(`k${i % resident}`), reads);
+
+    console.log(
+      `  ${String(windowSize).padStart(10)}${callsPerGet.toFixed(2).padStart(12)}` +
+        `${stepsPerGet.toFixed(1).padStart(13)}${ns.toFixed(0).padStart(12)}`
+    );
+    results.push({ windowSize, callsPerGet, stepsPerGet, ns });
+  }
+
+  const zero = results.find((r) => r.windowSize === 0);
+  const worst = results[results.length - 1];
+  console.log('\n  What this says');
+  if (zero && worst && worst.windowSize > 0) {
+    const ratio = worst.ns / zero.ns;
+    console.log(
+      `    windowSize ${zero.windowSize} -> ${worst.windowSize}: ${ratio.toFixed(1)}x per get(), and` +
+        ` ${worst.callsPerGet.toFixed(2)} window walks per get.`
+    );
+    console.log(
+      '    The row asks for **zero** walks on a main-space get(). It measures' +
+        ` ${worst.callsPerGet.toFixed(2)}.\n` +
+        '    The fix is a maintained window pointer, and `powerCache.js:514` records that a'
+    );
+    console.log(
+      '    previous attempt at exactly that "got it wrong" and was reverted. The field it left'
+    );
+    console.log(
+      '    behind, `_windowStart`, is assigned null in two places and never read — so this is'
+    );
+    console.log('    not a new design, it is a second attempt at one that already failed once.');
+  }
+
+  return { results };
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 const mode = process.argv[2] || 'zipf';
@@ -1866,9 +1987,11 @@ async function dispatch() {
     runSieveWorkload();
   } else if (mode === 'sketch') {
     runSketchWorkload();
+  } else if (mode === 'window') {
+    runWindowWorkload();
   } else {
     console.error(
-      `Unknown mode: ${mode}. Use "zipf", "sieve", "sketch", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
+      `Unknown mode: ${mode}. Use "zipf", "sieve", "sketch", "window", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
     );
     process.exit(1);
   }

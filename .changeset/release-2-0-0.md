@@ -4438,3 +4438,39 @@ reasoned about the wrong statistic, and would have shipped an unprotected
 invariant on the strength of an assertion that could not fail.
 
 Closes CACHE-007.
+
+#### Measured: the admission window walks the list on every main-space `get()`
+
+Not a fix — a measurement, added because the gap is real and the number was not
+recorded anywhere durable.
+
+`PowerCache`'s TinyLFU admission window is the contiguous suffix of the list, so
+`_windowOldest()` walks back from the tail. That is O(windowSize), and it runs on
+**every main-space `get()`**, because moving a main-space node to the tail has to
+re-establish where the window starts.
+
+`node bench/claims.js window`, maxEntries 4000, 3000 entries resident:
+
+| `windowSize` | window walks per `get()` | walk steps |    ns/get |
+| -----------: | -----------------------: | ---------: | --------: |
+|            0 |                     0.00 |          0 |       133 |
+|           10 |                     1.00 |          9 |       279 |
+|          100 |                     0.98 |         97 |       670 |
+|         1000 |                     0.80 |        799 | **2 236** |
+
+**16.8× per `get()`**, and `windowSize: null` — the documented recommended default — is
+`ceil(maxEntries * 0.01)`, so the cost scales with the cache. The walks-per-get ratio is
+the fraction of reads landing in main space rather than the window, which is why it
+falls below 1 as the window grows.
+
+**Two things worth knowing before anyone tries to close this.** The window only exists
+under `admission: 'tinylfu'`; `_windowSize` is forced to 0 otherwise, so the first
+version of this mode measured nothing at all and reported a flat ~200 ns — concluding the
+row was stale when in fact it had measured a disabled feature. And `powerCache.js:514`
+already records that a previous attempt at a maintained window pointer "got it wrong"
+and was reverted, leaving behind a `_windowStart` field that is assigned `null` in two
+places and never read. This is therefore a **second attempt at a design that has already
+failed once**, and the walk counts the mode prints are the check that would say whether
+the retry worked.
+
+The row stays open.

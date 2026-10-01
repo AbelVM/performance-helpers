@@ -83,6 +83,7 @@ Environment variables (defaults shown)
 node bench/claims.js zipf      # cache admission policies under a Zipf + scan workload
 node bench/claims.js sieve     # SIEVE eviction policy, against what ships
 node bench/claims.js sketch    # TinyLFU sketch hashing cost, and its distribution
+node bench/claims.js window    # admission-window walks on the read path
 node bench/claims.js latency   # PowerHistogram quantile accuracy across 4 decades of scale
 ```
 
@@ -120,6 +121,31 @@ point of count-min. If that ever inverts, the sketch is effectively one row deep
 faster hashing bought nothing that matters.
 
 Parameters: `CLAIM_SKETCH_ITERATIONS`, `CLAIM_SKETCH_KEYLEN`.
+
+**`window` reports a gap that is measured and not yet closed.** The TinyLFU admission
+window is the contiguous suffix of the list, so `_windowOldest()` walks back from the
+tail — O(windowSize) — and it runs on **every main-space `get()`**:
+
+| `windowSize` | window walks per `get()` | walk steps |    ns/get |
+| -----------: | -----------------------: | ---------: | --------: |
+|            0 |                     0.00 |          0 |       133 |
+|           10 |                     1.00 |          9 |       279 |
+|          100 |                     0.98 |         97 |       670 |
+|         1000 |                     0.80 |        799 | **2 236** |
+
+**16.8× per `get()`**, and the walks-per-get ratio is the fraction of reads landing in
+main space rather than the window, which is why it falls below 1 as the window grows.
+
+Two things to read before changing this. First, **the window only exists under
+`admission: 'tinylfu'`** — `_windowSize` is forced to 0 otherwise, so the first version
+of this mode measured nothing and reported a flat ~200 ns, concluding the row was stale.
+Second, `powerCache.js:514` records that a previous attempt at a maintained window
+pointer _"got it wrong"_ and was reverted; the field it left behind, `_windowStart`, is
+assigned `null` in two places and never read. This is not a new design, it is a second
+attempt at one that has already failed once, and the walk counts above are the check that
+would tell you whether the retry worked.
+
+Parameters: `CLAIM_WINDOW_ENTRIES`, `CLAIM_WINDOW_RESIDENT`, `CLAIM_WINDOW_READS`, `CLAIM_WINDOW_SIZES`.
 
 The same mode also benches the **generational two-`Map`** structure (`quick-lru` / `hashlru`), and that row is the more interesting one. At the configured `maxEntries` it shows the largest number in the table — **+13.0 points** over LRU on scan-heavy — and gets there by **peaking at 1003 entries against a configured 500**. That is the row's own "up to 2x over-fill" bound, reproduced exactly. Sized so its peak lands at 502 instead, it scores **35.5 %** against LRU's 51.0 %: **the entire margin was the memory.**
 
