@@ -3547,3 +3547,56 @@ it; pinning it needs a test of the _forward_ idle path that was not written, so 
 is not claimed to be verified.
 
 Closes RES-017.
+
+#### `maxConcurrency` measured: it is a per-partition ceiling, and nothing is missing
+
+GATE-018 recorded an observation with no conclusion — `maxConcurrency: 2` with
+several concurrent `tryRun`s reported `active: 4` — and said explicitly that
+whether that was a defect or whether the option meant something other than the
+name said was not established.
+
+Measured, per partition, with `tryRun`:
+
+| partitions | maxConcurrency | submitted | accepted | `active` |
+| ---------: | -------------: | --------: | -------: | -------: |
+|          1 |              2 |         6 |        2 |        2 |
+|          2 |              2 |         8 |        4 |        4 |
+|          4 |              2 |        12 |        8 |        8 |
+
+So the global ceiling is `maxConcurrency × partitions` and `active` counts
+in-flight tasks across the whole bulkhead. The original observation was two or
+three concurrent `tryRun`s spread across partitions — correct behaviour read as a
+missing comparison. `guides/powerBulkhead.md` already says "Maximum concurrent
+tasks allowed **per partition**" in both the option table and the bullet list, so
+code, type and documentation agree.
+
+The `run()` direction, which does queue, is `maxConcurrency + queueCapacity` per
+partition:
+
+| partitions | queueCapacity | submitted | ran | refused | `pending` |
+| ---------: | ------------: | --------: | --: | ------: | --------: |
+|          1 |             2 |         6 |   4 |       2 |         2 |
+|          1 |             9 |        12 |  11 |       1 |         9 |
+|          2 |             2 |        10 |   8 |       2 |         4 |
+
+And `isFull` is `true` once the **queues** fill, not at the concurrency ceiling —
+at the ceiling with an empty queue it reads `false`. That is the other half of
+why the original observation looked wrong.
+
+`test/powerBulkhead.concurrency.test.js`, 4 tests, all counts and refusal
+numbers with no durations; the tasks are released in explicit waves.
+
+**One mutation survives, and it is a finding rather than a gap.** Disabling the
+bulkhead's own queue-admission check passes 4 of 4, because each partition's
+`PowerPermitGate` now carries the same `queueCapacity` and refuses first. That
+became true earlier in this release, when the hard-coded
+`queueCapacity: Infinity` was replaced with the real value — so the bulkhead's
+check no longer makes the decision, it labels it with the error message callers
+expect. A redundant guard, not dead code, and left in place deliberately.
+
+A first mutation run reported all three as uncaught, and two had **not actually
+applied**. Each was re-run with the mutation count printed: `maxConcurrency`
+ignored fails 4 of 4, and partitions collapsed fails 3 of 4. A mutation that does
+not take is not a test — the same lesson as the first `CACHE-010` attempt.
+
+Closes GATE-018.
