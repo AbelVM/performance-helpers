@@ -131,6 +131,54 @@ export class PowerEventLoopMonitor {
         utilization: number;
     } | null;
     /**
+     * Event-loop utilisation over the interval between two readings.
+     *
+     * **This is the half that makes the built-in worth reaching for**, and
+     * {@link PowerEventLoopMonitor#utilization} does not provide it. `utilization()`
+     * hands back Node's *cumulative* reading — `active` and `idle` grow without
+     * bound for the life of the process — so it answers "how busy has this process
+     * been since it started", which is a lifetime average and barely moves. The
+     * property ELU actually has, and the reason the row recommends it, is that it
+     * is **defined over a measured interval**: subtract two readings and you have
+     * that interval's active and idle time exactly.
+     *
+     * Measured, and the reason this is not a nicety. A 1 s synchronous block
+     * followed by one macrotask reads `active` +1000 ms against +20 ms idle. But
+     * the same block read at a different moment in the process's life reported
+     * **+0.2 ms** — because ELU's counters are refreshed by the loop, and a
+     * reading taken at the wrong moment misses the interval entirely. Handing
+     * back a cumulative number and hoping the caller spaces its reads is how that
+     * goes wrong; the interval has to be explicit.
+     *
+     * ```js
+     * let mark = monitor.utilization();
+     * setInterval(() => {
+     *   const window = monitor.utilizationSince(mark);
+     *   mark = monitor.utilization();
+     *   if (window && window.active > 100) console.warn('blocked', window.active);
+     * }, 1000);
+     * ```
+     *
+     * @param {{active:number, idle:number, utilization:number}|null} previous -
+     *   A reading from an earlier {@link PowerEventLoopMonitor#utilization} call.
+     * @returns {{active:number, idle:number, utilization:number, ratio:number, elapsed:number}|null}
+     *   `null` when ELU is unavailable or `previous` is `null`, so a caller can
+     *   distinguish "no data" from "zero utilisation". `elapsed` is the interval
+     *   in ms — `active + idle` — and `ratio` is `active / elapsed`, which is
+     *   `0` rather than `NaN` for an empty interval.
+     */
+    utilizationSince(previous: {
+        active: number;
+        idle: number;
+        utilization: number;
+    } | null): {
+        active: number;
+        idle: number;
+        utilization: number;
+        ratio: number;
+        elapsed: number;
+    } | null;
+    /**
      * Serializable snapshot of the configuration and the recorded samples.
      *
      * `mean`, `p50`, `p99` and `p99_9` are `null` before the first sample rather

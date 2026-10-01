@@ -225,3 +225,43 @@ describe('PowerSemaphore', () => {
     });
   });
 });
+
+// QUAL-011 (F13): the queue bound the wrapper's own gate supports is reachable.
+describe('the queue bound is reachable through the wrapper', () => {
+  it('defaults to unbounded, and says so', () => {
+    // Previously neither this nor `isFull` existed on `PowerSemaphore`, so a
+    // caller had no way to observe the queue the gate was already keeping.
+    expect(new PowerSemaphore(1).queueCapacity).toBe(Infinity);
+    expect(new PowerSemaphore(1).isFull).toBe(false);
+  });
+
+  it('accepts a bound and reports saturation', async () => {
+    const sem = new PowerSemaphore({ limit: 1, queueCapacity: 1 });
+    expect(sem.queueCapacity).toBe(1);
+    const release = await sem.acquire();
+    expect(sem.isFull).toBe(false);
+    sem.acquire(); // occupies the single queue slot
+    expect(sem.isFull).toBe(true);
+    release();
+  });
+
+  it('refuses with ERR_QUEUE_FULL once the queue it reports is full', async () => {
+    // The point of exposing the bound: a caller can now cap the queue, and the
+    // refusal is the code the pool already uses for the same condition.
+    const sem = new PowerSemaphore({ limit: 1, queueCapacity: 1 });
+    const release = await sem.acquire();
+    const queued = sem.acquire();
+    await expect(sem.acquire()).rejects.toMatchObject({
+      code: 'ERR_QUEUE_FULL',
+      queueCapacity: 1,
+    });
+    release();
+    await queued;
+  });
+
+  it('rejects an unknown option in the object form rather than ignoring it', () => {
+    expect(() => new PowerSemaphore({ limit: 1, nonsense: 1 })).toThrow(
+      /unknown option `nonsense`/
+    );
+  });
+});

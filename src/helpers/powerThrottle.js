@@ -206,4 +206,35 @@ export class PowerThrottle {
     this._lastRefill = this._now();
     this._tokenRemainder = 0;
   }
+
+  /**
+   * Release every resource this instance holds.
+   *
+   * A throttle holds no timer and no subscription — it refills lazily, computing
+   * the elapsed time from `_lastRefill` whenever it is read. So there is nothing
+   * to tear down, and this is a **state reset**, not a cleanup: a half-spent
+   * bucket is dropped and `_lastRefill` re-seeds, so a disposed-then-reused
+   * throttle does not immediately admit a request the previous instance
+   * "spent".
+   *
+   * It exists because `PowerThrottle` is a helper a caller holds for the
+   * process lifetime, and without `dispose()` it cannot take part in `using` /
+   * `await using` or a DI container's teardown — the one shape every other
+   * long-lived helper here supports.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    this.reset();
+  }
+
+  /**
+   * Alias for {@link dispose}, so `using x = new PowerThrottle(…)` releases it
+   * deterministically at scope exit.
+   *
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }

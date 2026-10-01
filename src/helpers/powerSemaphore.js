@@ -24,7 +24,7 @@ export class PowerSemaphore {
    * Create a semaphore.
    * @param {number} [limit=1] Maximum number of concurrent permits.
    */
-  constructor(limit = 1) {
+  constructor(limit = 1, queueCapacity = undefined) {
     // An options object as the sole argument means the caller reached for the
     // obvious shape, and it used to be rejected outright with a message naming a
     // number they had just passed an object for. `PowerTTLMap` already normalises
@@ -33,14 +33,15 @@ export class PowerSemaphore {
     // option key. A bare `{}` still falls through to the numeric path and is
     // rejected as before — which `test/powerLatch.reset.test.js` pins as a
     // property: whatever the constructor rejects, `reset()` must reject too.
-    if (limit && typeof limit === 'object' && 'limit' in limit) {
+    if (limit && typeof limit === 'object' && ('limit' in limit || 'queueCapacity' in limit)) {
       // Validate the object rather than reading one key out of it — otherwise
       // `{ limit: 3, nonsense: 1 }` would pass, and arriving in the
       // options-object form would be a way to *bypass* 8f83c07 rather than a
       // second way to satisfy it.
-      const opts = /** @type {{limit?: number}} */ (limit);
-      assertKnownOptions(opts, ['limit'], 'PowerSemaphore');
+      const opts = /** @type {{limit?: number, queueCapacity?: number}} */ (limit);
+      assertKnownOptions(opts, ['limit', 'queueCapacity'], 'PowerSemaphore');
       limit = opts.limit;
+      queueCapacity = opts.queueCapacity;
     }
     // The gate reports validation failures with the class name and option name
     // it was built with, so pass this class's own vocabulary: a caller who
@@ -52,6 +53,7 @@ export class PowerSemaphore {
     this._gate = new PowerPermitGate({
       capacity: limit,
       initialTokens: limit,
+      queueCapacity: queueCapacity,
       className: 'PowerSemaphore',
       limitName: 'limit',
     });
@@ -80,6 +82,33 @@ export class PowerSemaphore {
   /** True when the semaphore is fully acquired. */
   get isLocked() {
     return this._gate.available === 0;
+  }
+
+  /**
+   * Maximum number of waiters allowed in the queue, or `Infinity` when unbounded.
+   *
+   * Proxied from the gate rather than kept private. `PowerSemaphore` used to
+   * build a gate that could queue without limit and expose neither the bound nor
+   * whether it had been reached, so a caller using this class — the one most
+   * people reach for — could neither cap the queue nor observe it filling. Both
+   * halves of the primitive were unreachable through the wrapper.
+   *
+   * @returns {number}
+   */
+  get queueCapacity() {
+    return this._gate.queueCapacity;
+  }
+
+  /**
+   * True when the waiting queue is saturated.
+   *
+   * Counted against live waiters only, so a burst of cancellations does not read
+   * as a full queue.
+   *
+   * @returns {boolean}
+   */
+  get isFull() {
+    return this._gate.isFull;
   }
 
   /**

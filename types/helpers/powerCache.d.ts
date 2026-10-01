@@ -166,6 +166,7 @@ export class PowerCache {
      */
     _probationEnd: CacheNode | null;
     _inflightPromises: Map<any, any>;
+    _inflightControllers: Map<any, any>;
     _defaultAsyncTimeout: number;
     _metrics: {
         unregister: () => boolean;
@@ -272,6 +273,27 @@ export class PowerCache {
      * @returns {boolean}
      */
     private _staleServable;
+    /**
+     * Signal the factory in flight for `key`, if there is one.
+     *
+     * The linkage `lru-cache` documents: *"if the key is evicted or deleted before
+     * the fetchMethod resolves, the AbortSignal passed to the fetchMethod will
+     * receive an abort event."* Before this there was no cancellation path at all
+     * — measured, zero occurrences of `AbortController` in this file — so an
+     * evicted key's factory ran to completion and then wrote its result into a
+     * cache that no longer wanted it.
+     *
+     * Aborting is a **request**, not a kill. A factory that predates this takes no
+     * argument and cannot be stopped, so it still completes and still stores; the
+     * signal is there for a factory that can cooperate, and refusing to store
+     * because a key was deleted would lose the value for a caller that wanted it.
+     *
+     * @private
+     * @param {*} key
+     * @param {string} [reason] - Diagnostic surfaced through `onError`.
+     * @returns {boolean} Whether a factory was signalled.
+     */
+    private _abortInflight;
     /**
      * Start a background refresh for an expired entry.
      *

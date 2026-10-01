@@ -60,6 +60,27 @@ export class PowerSlidingWindow {
      * @returns {void}
      */
     clear(): void;
+    /**
+     * Release every resource this instance holds.
+     *
+     * The window holds a `PowerQueue` of timestamps and a clock reference. Neither
+     * is a timer or a subscription, so this clears the recorded history and
+     * re-seeds the clock rather than cancelling anything — a half-elapsed window
+     * is dropped rather than left to keep admitting what it had already counted.
+     *
+     * Present so this helper can take part in `using` / `await using` and DI
+     * teardown like every other long-lived helper in the library.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
+     * Alias for {@link dispose}, so `using x = new PowerSlidingWindow(…)` releases
+     * it deterministically at scope exit.
+     *
+     * @returns {void}
+     */
+    [Symbol.dispose](): void;
 }
 export type PowerSlidingWindowOptions = import("./jsdoc-types.js").PowerSlidingWindowOptions;
 import { PowerQueue } from './powerQueue.js';

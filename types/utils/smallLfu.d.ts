@@ -35,13 +35,18 @@ export class SmallLfuSketch {
      */
     size(): number;
     /**
-     * Column index for `key` in row `row`.
-     * @param {*} key
+     * Column index for an already-hashed key in row `row`.
+     *
+     * `mix32` still runs per row — the rows must stay independent, or the sketch
+     * degenerates to one effective row — but it is a fixed number of integer ops
+     * rather than a loop over the key's characters.
+     *
+     * @param {number} hash - From {@link hashKey}, computed once per call.
      * @param {number} row
      * @returns {number}
      * @private
      */
-    private _index;
+    private _indexFor;
     /**
      * Read one 4-bit counter.
      * @param {number} index - Flat counter index.

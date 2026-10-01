@@ -10,7 +10,7 @@
 
 ### Constructor
 
-> **new PowerSemaphore**(`limit?`): `PowerSemaphore`
+> **new PowerSemaphore**(`limit?`, `queueCapacity?`): `PowerSemaphore`
 
 Create a semaphore.
 
@@ -21,6 +21,10 @@ Create a semaphore.
 `number` = `1`
 
 Maximum number of concurrent permits.
+
+##### queueCapacity?
+
+`undefined` = `undefined`
 
 #### Returns
 
@@ -62,6 +66,23 @@ Number of permits still available.
 
 ***
 
+### isFull
+
+#### Get Signature
+
+> **get** **isFull**(): `boolean`
+
+True when the waiting queue is saturated.
+
+Counted against live waiters only, so a burst of cancellations does not read
+as a full queue.
+
+##### Returns
+
+`boolean`
+
+***
+
 ### isLocked
 
 #### Get Signature
@@ -97,6 +118,26 @@ Maximum concurrent holders.
 > **get** **pending**(): `number`
 
 Number of callers waiting for a permit.
+
+##### Returns
+
+`number`
+
+***
+
+### queueCapacity
+
+#### Get Signature
+
+> **get** **queueCapacity**(): `number`
+
+Maximum number of waiters allowed in the queue, or `Infinity` when unbounded.
+
+Proxied from the gate rather than kept private. `PowerSemaphore` used to
+build a gate that could queue without limit and expose neither the bound nor
+whether it had been reached, so a caller using this class — the one most
+people reach for — could neither cap the queue nor observe it filling. Both
+halves of the primitive were unreachable through the wrapper.
 
 ##### Returns
 

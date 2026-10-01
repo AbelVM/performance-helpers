@@ -3,7 +3,7 @@ export class PowerSemaphore {
      * Create a semaphore.
      * @param {number} [limit=1] Maximum number of concurrent permits.
      */
-    constructor(limit?: number);
+    constructor(limit?: number, queueCapacity?: undefined);
     _gate: PowerPermitGate;
     /** Maximum concurrent holders. */
     get limit(): number;
@@ -15,6 +15,27 @@ export class PowerSemaphore {
     get available(): number;
     /** True when the semaphore is fully acquired. */
     get isLocked(): boolean;
+    /**
+     * Maximum number of waiters allowed in the queue, or `Infinity` when unbounded.
+     *
+     * Proxied from the gate rather than kept private. `PowerSemaphore` used to
+     * build a gate that could queue without limit and expose neither the bound nor
+     * whether it had been reached, so a caller using this class — the one most
+     * people reach for — could neither cap the queue nor observe it filling. Both
+     * halves of the primitive were unreachable through the wrapper.
+     *
+     * @returns {number}
+     */
+    get queueCapacity(): number;
+    /**
+     * True when the waiting queue is saturated.
+     *
+     * Counted against live waiters only, so a burst of cancellations does not read
+     * as a full queue.
+     *
+     * @returns {boolean}
+     */
+    get isFull(): boolean;
     /**
      * Acquire a permit asynchronously.
      * Resolves immediately when one is available; otherwise waits in FIFO order.

@@ -121,6 +121,12 @@ When a non-object is provided as the options argument.
 
 ***
 
+### \_inflightControllers
+
+> **\_inflightControllers**: `Map`\<`any`, `any`\>
+
+***
+
 ### \_inflightPromises
 
 > **\_inflightPromises**: `Map`\<`any`, `any`\>

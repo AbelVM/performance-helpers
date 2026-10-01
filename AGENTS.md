@@ -116,6 +116,24 @@ a units error turned a 60 % band into a 3000 % allowance. Both were found only b
 injecting the fault. The same discipline caught an unreachable-coverage item that
 was a real product bug.
 
+**Write down the dispose rule, because the split is not self-evident: a helper
+that owns a timer, a listener registry, or a `FinalizationRegistry` must implement
+`dispose()` and `[Symbol.dispose]`; a lazy helper must implement it as a state
+reset.** Twelve helpers had neither, and for a stateless value type
+(`PowerDefer`, `PowerLogger`, `PowerBuffer`) that is obviously right — so the
+absence reads as deliberate everywhere, including where it was not. The
+clock-driven limiters were the real gap: `PowerThrottle`, `PowerSlidingWindow` and
+`PowerGCRA` are the helpers a caller holds for the process lifetime, and without
+`dispose()` they cannot take part in `using` / `await using` or a DI teardown,
+which every other long-lived helper here supports.
+
+The second half of the rule is the part that is easy to get wrong. None of those
+three owns a timer — each refills lazily, computing elapsed time from a stored
+timestamp whenever it is read. So their `dispose()` is a _state reset_, and
+describing it as "cancels the interval" would document work that is not
+happening. The interface is identical either way; the reason is not, and a
+comment that blurs it is worse than no comment.
+
 **A test that cannot fail on the regression it names is decoration — delete it,
 do not loosen it.** A timing assertion that passed with the fix reverted was
 removed rather than given a bigger threshold.

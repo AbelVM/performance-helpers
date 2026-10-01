@@ -134,4 +134,33 @@ export class PowerSlidingWindow {
   clear() {
     this.reset();
   }
+
+  /**
+   * Release every resource this instance holds.
+   *
+   * The window holds a `PowerQueue` of timestamps and a clock reference. Neither
+   * is a timer or a subscription, so this clears the recorded history and
+   * re-seeds the clock rather than cancelling anything — a half-elapsed window
+   * is dropped rather than left to keep admitting what it had already counted.
+   *
+   * Present so this helper can take part in `using` / `await using` and DI
+   * teardown like every other long-lived helper in the library.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    // `PowerQueue` exposes `length` and `shift`; there is no `clear`, and the
+    // optional-call dance that would paper over that is worse than a drain.
+    while (this._timestamps.length > 0) this._timestamps.shift();
+  }
+
+  /**
+   * Alias for {@link dispose}, so `using x = new PowerSlidingWindow(…)` releases
+   * it deterministically at scope exit.
+   *
+   * @returns {void}
+   */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
 }
