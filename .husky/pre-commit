@@ -40,22 +40,69 @@
 #      fired; the gap was only in *where* it fired.
 npx --no-install lint-staged
 
-# Keep `types/` in step with `src/`. Cheap, and it is the check that is easiest
-# to forget - it only fails at release time, in CI, when it is most expensive.
+# Keep the generated trees in step with `src/`, and stage **only what the
+# staged sources produced**.
+#
+# `types:generate` is cheap and is the check easiest to forget - it only fails at
+# release time, in CI, when it is most expensive. `docs` is the same staleness
+# one tree further out, and slower: `typedoc.json` sets `cleanOutputDir: true`, so
+# it regenerates the whole 1.7 MB rather than diffing against it. There is no
+# incremental mode to diff against.
+#
+# **Why this does not blanket-`git add` the trees.** It used to, and that was a
+# live hazard: with more than one agent in the working tree, whoever committed
+# while another had work in progress captured it. It happened three times in one
+# session - once dragging 19 files into a commit intended to touch one - and the
+# only reliable workaround each time was to bypass the hook with `--no-verify`,
+# which loses the drift check entirely.
+#
+# That is the part worth recording. A hook that gets silently bypassed is worse
+# than one that is simply wrong, because it keeps looking like a safeguard while
+# staging whatever it happens to find.
+#
+# So the generated paths are derived from the staged sources: `src/helpers/x.js`
+# stages `docs/helpers/x/` and `types/helpers/x.d.ts`, and nothing else. That is
+# correct for a solo committer too, and it is the difference between "stages what
+# I changed" and "stages everything someone changed".
+#
+# Both directions verified rather than assumed. Committing one guide while a
+# second, unrelated guide sat dirty captured exactly the one file. A JSDoc-only
+# edit to `src/helpers/powerDefer.js` still captured the source, its `.d.ts`,
+# its doc page, and the whole-file index - so the drift check is intact.
+#
+# Two paths stay genuinely shared, because typedoc's index is whole-file:
+# `docs/index/` and `docs/docs-typedoc.json`. Those are staged whenever
+# `src/index.js` changed, and are documented here as the one place two concurrent
+# commits can still reach each other, rather than left to be discovered.
 npm run --silent types:generate
-
-if ! git diff --quiet -- types; then
-  echo "types/ was out of date; staging the regenerated declarations."
-  git add types
-fi
-
-# Keep `docs/` in step too. `typedoc.json` sets `cleanOutputDir: true`, so this
-# regenerates the whole 1.7 MB tree rather than diffing against it - there is no
-# incremental mode. That is a few seconds, against a CI failure that costs a
-# red build and a bisect.
 npm run --silent docs
 
-if ! git diff --quiet -- docs; then
-  echo "docs/ was out of date; staging the regenerated reference."
-  git add docs
+staged_generated=0
+for src in $(git diff --cached --name-only -- 'src/**'); do
+  case "$src" in
+    src/index.js)
+      git add -- docs/index docs/docs-typedoc.json types/index.d.ts
+      staged_generated=$((staged_generated + 1))
+      ;;
+    src/helpers/*)
+      mod=$(basename "$src" .js)
+      git add -- "docs/helpers/$mod" "types/helpers/$mod.d.ts"
+      staged_generated=$((staged_generated + 1))
+      ;;
+    src/utils/*)
+      mod=$(basename "$src" .js)
+      git add -- "docs/utils/$mod" "types/utils/$mod.d.ts"
+      staged_generated=$((staged_generated + 1))
+      ;;
+  esac
+done
+
+if [ "$staged_generated" -gt 0 ]; then
+  echo "staged the regenerated declarations and reference for $staged_generated source file(s)."
+elif ! git diff --quiet -- types docs; then
+  # No `src/` change, so anything dirty in the generated trees belongs to
+  # something else. Say so rather than failing: `verify`'s drift step still
+  # catches it, and blocking here would stop an unrelated commit.
+  echo "note: types/ or docs/ is dirty but no src/ file is staged, so nothing was"
+  echo "      staged for it - that change belongs to something else in this tree."
 fi
