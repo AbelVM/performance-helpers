@@ -9,7 +9,7 @@ import { PowerPermitGate } from './powerPermitGate.js';
 import { PowerQueue } from './powerQueue.js';
 import { DEFAULT_QUEUE_CAPACITY, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { attach, detach } from './metrics.js';
-import { queueFullError } from '../utils/errors.js';
+import { isError, queueFullError } from '../utils/errors.js';
 
 /**
  * PowerBulkhead
@@ -367,10 +367,20 @@ export class PowerBulkhead {
     const available = Number.isFinite(Number(options.available))
       ? Math.max(0, Math.floor(Number(options.available)))
       : this._maxConcurrency;
-    const reason =
-      options.reason instanceof Error
-        ? options.reason
-        : new Error(options.reason || 'PowerBulkhead reset');
+    // `isError()` rather than `instanceof Error`, and this is the one site in
+    // the class where the difference is a **substitution** rather than a
+    // degradation. A caller whose `reason` came from another realm - a `vm`
+    // context, an iframe - failed `instanceof` and was wrapped in
+    // `new Error(reasonObject)`, which stringifies to "Error: <message>",
+    // **discards the caller's `code`**, and only then stamps `ERR_BULKHEAD_RESET`
+    // onto the substitute. The queued waiter was told the bulkhead reset rather
+    // than why the caller said it reset.
+    //
+    // Same defect class as the `abortReason()` one GAP-012 closed, one file
+    // over, and it was found by the same reasoning rather than by a test.
+    const reason = isError(options.reason)
+      ? options.reason
+      : new Error(options.reason || 'PowerBulkhead reset');
     /** @type {BulkheadResetError} */
     const coded = reason;
     coded.code = coded.code || 'ERR_BULKHEAD_RESET';
