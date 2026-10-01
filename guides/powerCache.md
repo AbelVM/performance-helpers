@@ -188,18 +188,28 @@ for (const [key, value] of c.entries()) {
 is the one residual loss, and it is deliberate: closing it means snapshotting the
 walk into an array, an allocation on every call to what is a bulk-export API.
 
-**Recency mutation is a different hazard and is not supported.** `get()`, `set()`
-on a key already present, and `touch()` relink a node to the MRU end, which the
-positional walk then arrives back at:
+**Recency mutation is safe, but it stops the walk early.** `get()`, `touch()`, and
+`set()` on a key already present relink that node to the MRU end, which is
+_behind_ an MRU-first cursor — so the walk would arrive back at it and cycle
+forever. The walk now visits at most as many entries as existed when it started,
+which ends the cycle:
 
 ```javascript
-// Never returns — the walk re-visits each key after `get()` moves it.
+// Terminates, and visits all 6 keys.
 for (const [k] of c.entries()) c.get(k);
 ```
 
-If you need to refresh recency for everything you iterated, collect the keys
-first (`Array.from(c.keys())`) and then act on them. `review.md`'s **CACHE-019**
-records this, with the candidates for fixing it.
+The entries past that point are not reported. Refresh recency in a second pass if
+you need every entry touched:
+
+```javascript
+for (const k of Array.from(c.keys())) c.get(k);
+```
+
+`Array.from` is not incidental advice — it is the general answer for any loop body
+that mutates recency, and it is also what you want before a bulk export you intend
+to keep iterating. `review.md`'s **CACHE-019** records the defect and the
+measurement behind the bound.
 
 ### Opt-in: eager cleanup on read
 

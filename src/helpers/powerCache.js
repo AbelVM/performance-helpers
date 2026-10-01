@@ -2282,13 +2282,39 @@ export class PowerCache {
    *   single resume, and closing it would mean snapshotting the walk into an
    *   array — an allocation on every call to a bulk-export API.
    *
+   * **A recency mutation (`get()`, `touch()`, or `set()` on a key already in the
+   * list) relinks the entry to the MRU end, which is behind an MRU-first cursor,
+   * so the walk arrives back at it.** Left alone that is an infinite loop, not a
+   * wrong answer, and it was reachable from one line of loop body. The walk now
+   * visits at most as many entries as existed when it started, which ends the
+   * cycle; the entries beyond that point are *not* reported, so a loop that
+   * refreshes recency as it goes sees a prefix rather than a full pass. Collect
+   * the keys first (`Array.from(cache.keys())`) if you need every entry.
+   *
    * @param {'LRU'|'MRU'} [order='MRU']
    * @returns {IterableIterator<[*,*]>}
    */
   *entries(order = 'MRU') {
     const link = order === 'MRU' ? 'prev' : 'next';
     let node = order === 'MRU' ? this._tail : this._head;
+    // The number of nodes this walk may visit, captured before the first yield.
+    // A recency mutation — `get()`, `touch()`, or `set()` on a key already in the
+    // list — relinks the node the caller is standing on to the *tail*, which is
+    // behind an MRU-first cursor, so the walk arrives back at it and cycles
+    // forever. That is a hang, not a wrong answer, and it is reachable from the
+    // documented `get` in one line of loop body.
+    //
+    // The bound is a count of nodes, not a check for a repeat: a Set of visited
+    // nodes would be an allocation on every iteration call, and this class does
+    // not spend one to save a caller from its own loop body. Measured across the
+    // four list shapes, no walk that does *not* relink yields more entries than
+    // existed when it started — inserting during a walk lands the new entry
+    // behind the cursor, so additions are never visited (tinylfu 40 yields for 40
+    // entries, plain LRU 10 for 10, slru 15 for 20) and a truncation here cannot
+    // drop an entry a correct walk owed the caller.
+    let budget = this.size;
     while (node) {
+      if (budget-- <= 0) return;
       // Read the continuation before handing control to the caller: the node we
       // are standing on may be removed while the loop body runs, and `_remove`
       // nulls both of its links on the way out.

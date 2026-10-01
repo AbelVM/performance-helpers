@@ -513,6 +513,15 @@ choice when it is a stated one:
   single resume, and closing it would mean snapshotting the walk into an
   array — an allocation on every call to a bulk-export API.
 
+**A recency mutation (`get()`, `touch()`, or `set()` on a key already in the
+list) relinks the entry to the MRU end, which is behind an MRU-first cursor,
+so the walk arrives back at it.** Left alone that is an infinite loop, not a
+wrong answer, and it was reachable from one line of loop body. The walk now
+visits at most as many entries as existed when it started, which ends the
+cycle; the entries beyond that point are *not* reported, so a loop that
+refreshes recency as it goes sees a prefix rather than a full pass. Collect
+the keys first (`Array.from(cache.keys())`) if you need every entry.
+
 #### Parameters
 
 ##### order?
