@@ -3600,3 +3600,46 @@ ignored fails 4 of 4, and partitions collapsed fails 3 of 4. A mutation that doe
 not take is not a test — the same lesson as the first `CACHE-010` attempt.
 
 Closes GATE-018.
+
+#### One orphan heartbeat timer per tick
+
+The heartbeat armed a deadline for every ping, and the handle was cleared only
+when a **pong** arrived. A socket that never answers therefore re-armed on every
+tick and _overwrote_ the handle: one orphan timer per tick, none of them
+clearable, and each firing later to increment `heartbeatTimeouts`, call
+`_clearTimers()` and close the socket.
+
+Measured before the fix — a socket whose `ping()` is never answered, three ticks:
+
+```
+deadlines armed: 3    cleared: 0
+```
+
+After:
+
+```
+deadlines armed: 1    live: 1
+```
+
+**The plan row's prescription was only half right, and the other half is the more
+dangerous one.** "Clear the handle before re-arming" does remove the orphan, but
+it also _resets the window_. The deadline measures from the ping, so clearing and
+re-arming every tick means a socket that never answers **never times out at all**
+whenever `heartbeatTimeoutMs` exceeds `heartbeatIntervalMs` — trading a spurious
+close for a dead socket that reports itself alive. Two existing tests caught that
+when the first version of the fix did exactly what the row said.
+
+The deadline is now armed **once per live window** and left alone while one is
+outstanding. The guard is on the _arm_ rather than being a clear-and-re-arm,
+because a pong closes the window: the next tick must be able to start a fresh
+one, and a healthy socket must still be timed out after its first pong.
+
+Fixed in **both** transport files — the bug was duplicated, and so is the fix.
+
+`test/heartbeat.deadline.test.js`, 5 tests, three mutations caught with anchor
+counts printed: the adapter guard removed, the client guard removed, and the
+row's literal prescription. The instrument is a **count of timer allocations
+against releases**, the same one PERF-001 and POOL-006 use — counting is exact,
+and a duration would be measuring the thing being removed.
+
+Closes RT-008.

@@ -883,7 +883,32 @@ export class PowerWebSocketClient {
       } catch (e) {
         this._emit('error', e);
       }
-      if (this._heartbeatTimeoutMs > 0) {
+      // Arm the deadline **once per live window**, and never while one is already
+      // outstanding. Two things were wrong here and the row's prescription only
+      // addresses the first.
+      //
+      // The handle was overwritten without being cleared, so a socket that never
+      // answered orphaned one timer per tick - none clearable, each firing later to
+      // increment `heartbeatTimeouts` and close the socket. Measured with a socket
+      // whose `ping()` is never answered: three ticks, three deadlines armed, zero
+      // cleared.
+      //
+      // But *clearing and re-arming* is worse than either: the deadline measures
+      // from the ping, so resetting it on every tick means a socket that never
+      // answers never times out at all whenever `heartbeatTimeoutMs` exceeds
+      // `heartbeatIntervalMs`. Two existing tests caught that, and they are right -
+      // the fix is to leave a live deadline alone.
+      if (this._heartbeatTimeoutMs > 0 && !this._heartbeatDeadline) {
+        // Clear the previous deadline before arming the next one. It was cleared only in
+        // `_handlePong`/`_onPong`, so a socket that never answers re-armed here on every
+        // tick and **overwrote** the handle: one orphan timer per tick, none of them
+        // clearable, and each firing later to increment `heartbeatTimeouts` and close the
+        // socket. Measured with a socket whose `ping()` is never answered, three ticks:
+        // three deadlines armed, zero cleared.
+        //
+        // The clean-up is idempotent - the handle is nulled on both the clear and the
+        // fire - so a pong landing mid-window clears nothing twice.
+
         this._heartbeatDeadline = setSafeTimeout(() => {
           this._heartbeatDeadline = null;
           this._onHeartbeatTimeout();
