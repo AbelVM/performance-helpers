@@ -1,7 +1,24 @@
 // Small helper to normalize/format per-item error objects used by helpers
 
+/**
+ * `Error` reached through a typed door rather than directly.
+ *
+ * `Error.isError` is correct at runtime on Node 24+ and absent below the floor,
+ * but **`tsc`'s lib does not declare it yet** (TS2550 on both the read and the
+ * call). Reading it straight off `Error` is therefore a type error even though
+ * the capability probe is exactly the right runtime shape, so the property is
+ * taken from a widened view of the constructor. The cast is confined to these
+ * three lines and to the one place the capability is read, at module load, which
+ * is the whole point of F-16.
+ *
+ * @type {{isError?: (value: unknown) => boolean}}
+ */
+const ErrorCtor = /** @type {any} */ (Error);
+
 const _isErrorFn =
-  typeof Error.isError === 'function' ? Error.isError : (value) => value instanceof Error;
+  typeof ErrorCtor.isError === 'function'
+    ? ErrorCtor.isError
+    : /** @param {unknown} value */ (value) => value instanceof Error;
 
 /**
  * Whether `value` is an `Error`, across realms where the platform can say so.
