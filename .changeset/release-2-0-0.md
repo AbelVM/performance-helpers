@@ -4550,8 +4550,7 @@ Closes GAP-012.
 `decodeMessage` reads **one whole frame** and throws on anything less, so it
 cannot be pointed at a socket, a `ReadableStream` or a `node:stream` chunk. Its
 JSDoc has always said that `byteLength` "lets a stream reader know how much to
-consume", and no such reader existed anywhere in the repository. `guides/
-powerMessageCodec.md` documented one you had to write yourself.
+consume", and no such reader existed anywhere in the repository. `guides/powerMessageCodec.md` documented one you had to write yourself.
 
 ```javascript
 const decoder = createFrameDecoder({ maxFrameBytes: 1 << 20 });
@@ -4591,8 +4590,7 @@ failures above and because re-concatenating per `push` is O(n²) in the chunk
 count — but it is adopted for correctness and bounded memory, and no performance
 claim is made.
 
-**Mutation is what settled that, in both directions.** `test/
-powerMessageCodec.frameDecoder.test.js`, 34 tests. Of 21 mutants, **16 caught**:
+**Mutation is what settled that, in both directions.** `test/powerMessageCodec.frameDecoder.test.js`, 34 tests. Of 21 mutants, **16 caught**:
 the ceiling removed (2), the ceiling checked only on a complete frame (2), the
 ceiling measured against the chunk rather than the frame (2), the multi-frame
 loop stopping after one frame (14), throwing on a short chunk (8), the drained
@@ -4615,12 +4613,20 @@ nothing, because the `end - start` completeness check runs first and
 `decodeMessage` is never reached with an incomplete frame. Both the source and
 the test now say which of the two is the guard.
 
-The five surviving mutants are all allocation or memory policy with no effect on
-a decoded byte — the compaction, the growth factor, the buffer release in
-`dispose()`, and that redundant bound. `dispose()` is a state reset, not a
-cancellation: the decoder owns no timer, no listener and no handle, only bytes,
-so it stays usable afterwards and a `using` block that disposes early does not
-leave a dead object behind.
+The five surviving mutants are the compaction (two separate reverts of it), the
+growth factor, the buffer release in `dispose()`, and that redundant bound — all
+allocation or memory policy with no effect on a decoded byte, which is the
+mechanism behind the null result above. The drained-cursor rewind is the
+interesting contrast: it **is** caught, by one test, and only because it changes
+buffer reuse and so changes what a `rawAsBytes` view sees next, not what any
+frame decodes to.
+
+`dispose()` is a state reset, not a cancellation: the decoder owns no timer, no
+listener and no handle, only bytes, so it stays usable afterwards and a `using`
+block that disposes early does not leave a dead object behind. Writing that test
+is what found the one real defect in the implementation — `dispose()` left a
+zero-length buffer and the growth loop doubled from zero, so the next `push`
+never terminated.
 
 The hand-rolled reader is removed from `guides/powerMessageCodec.md` — it named
 an undefined `concat()` and had no ceiling. Closes CODEC-001.

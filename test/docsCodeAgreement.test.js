@@ -133,6 +133,11 @@ const CROSS_CLASS = new Set([
   // powerMessageCodec, referenced from powerPool and powerChunking.
   'encodeMessage',
   'decodeMessage',
+  // The incremental decoder factory, alongside the two above and for the same
+  // reason: it is a module-level export in `powerMessageCodec`, not a method of
+  // the `PowerMessageCodec` object the guide documents, so the per-guide rule
+  // cannot resolve a backticked call to it.
+  'createFrameDecoder',
   'selectCodec',
   'encodeNative',
   'canUseNativeClone',
