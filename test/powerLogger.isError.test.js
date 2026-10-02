@@ -20,10 +20,21 @@
  *    `normalizeError` reads only `.code` / `.message` / `.stack` - all of which
  *    a cross-realm error has. The test `a vm-realm TypeError and a local one
  *    produce byte-identical payloads` is the proof, and it passes against the
- *    *pre-change* code. It is kept because it is the assertion that keeps
- *    `powerLogger` realm-safe if the `|| typeof a === 'object'` fallback is
- *    ever "simplified" away - which would be a real regression, and is
- *    mutation-checked below.
+ *    *pre-change* code.
+ *
+ *    **Updated by OBS-004: the `|| typeof a === 'object'` fallback is now
+ *    gone.** This header previously said that test was kept because it "keeps
+ *    `powerLogger` realm-safe if the fallback is ever simplified away", which
+ *    would be a real regression. That is no longer the mechanism, and the claim
+ *    had become wrong the moment the clause was removed. It is safe because
+ *    `isError()` is a **brand** check rather than a prototype check, so a
+ *    cross-realm `Error` fails `instanceof` and passes `isError()`. The test is
+ *    kept for the assertion itself, and it is what now proves *that* — so it is
+ *    stronger than the fallback was, not merely still passing.
+ *
+ *    What the fallback actually cost: every plain object went through
+ *    `normalizeError` and was flattened to a string, discarding its `stack`.
+ *    See the last two tests for the deliberate change.
  *
  * The defect that *is* real is in `abortReason()` (`utils/abort.js`), and it is
  * the serious one because the failure mode is a **substitute**: a caller who
@@ -244,21 +255,38 @@ describe('powerLogger.error() - realm-safe, and pinned as such', () => {
     expect(seen[0].msg).toBe('ERR_ITEM: same message');
   });
 
-  it('leaves primitives alone and still rewrites plain objects, unchanged', () => {
+  it('leaves primitives alone and passes plain objects through as objects', () => {
     // The guard above would also pass if `error()` formatted *everything*
     // identically, so this pins the actual split.
     //
-    // The `{ plain: true } -> 'ERR_ITEM: '` half is a **pre-existing quirk**,
-    // not something this change introduced: the clause is
-    // `isError(a) || (a && typeof a === 'object')`, so every plain object has
-    // always gone through `normalizeError`. Verified by running this exact
-    // expectation against `git show HEAD:src/helpers/powerLogger.js`, which
-    // produced byte-identical output. It is pinned rather than fixed because
-    // fixing it is a behaviour change outside this row's scope, and a
-    // characterisation test is the thing that makes the change deliberate
-    // rather than accidental.
+    // **This expectation is the second half of OBS-004, and it is a deliberate
+    // behaviour change rather than a cleanup.** The clause used to be
+    // `isError(a) || (a && typeof a === 'object')`, so every plain object went
+    // through `normalizeError` and came out as a string — `{ plain: true }` as
+    // the fixed `'ERR_ITEM: '`. This file previously pinned that as a
+    // "pre-existing quirk", explicitly deferred because "fixing it is a behaviour
+    // change outside this row's scope". OBS-004 is that scope, so the quirk is
+    // now gone and the objects survive.
+    //
+    // Realm safety is not what was lost: `isError()` is a brand check, not a
+    // prototype check, so a cross-realm `Error` still passes it — pinned by the
+    // `vm` test above rather than by this one.
     const { log, seen } = capturingLogger();
     log.error('a string', 42, null, undefined, { plain: true }, [1, 2]);
-    expect(seen[0].msg).toEqual(['a string', 42, null, undefined, 'ERR_ITEM: ', 'ERR_ITEM: ']);
+    expect(seen[0].msg).toEqual(['a string', 42, null, undefined, { plain: true }, [1, 2]]);
+  });
+
+  it('keeps the fields and stack of a plain error-shaped object', () => {
+    // The concrete loss the row describes: `normalizeError` copies `.stack` into
+    // the normalised object and then `formatErrorObj` renders a string from it, so
+    // the structured `stack` never reached the sink. A sink is the one consumer
+    // that can act on it — group by `code`, filter by `stack` — and it is now
+    // reachable.
+    const { log, seen } = capturingLogger();
+    const shaped = { code: 'EPLAIN', message: 'plain object', stack: 'STACKLINE' };
+    log.error(shaped);
+
+    expect(seen[0].msg, 'the object, not "EPLAIN: plain object"').toEqual(shaped);
+    expect(seen[0].msg.stack, 'the stack survived').toBe('STACKLINE');
   });
 });

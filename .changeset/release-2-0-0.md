@@ -5986,3 +5986,59 @@ states the absence and the reason instead. A comment cannot be asserted, so the
 test pins the consequence: `PowerRetry` exposes no `_metrics` and no `stats()`,
 which fails the moment it grows opt-in metrics and makes the removal a decision
 to revisit rather than an oversight.
+
+## `PowerLogger.error()`: a disabled level costs nothing, a throwing sink is visible, and plain objects survive
+
+Three separate defects on one method, two rows, both reproduced on the real call
+path before anything was edited.
+
+**A disabled error level still did the work (OBS-004).** `error()` is the only
+level that formats its arguments, and the level check lived in `_emit` — _after_
+that formatting had already run. Probed with a `{ get code() {...} }` argument:
+**1 getter invocation at level 0, identical to level 1.** So a build that had
+turned error logging off was still paying for it, and a getter that touches a
+socket, takes a lock or increments a metric fired anyway. The check is now the
+first statement of `error()`, duplicated rather than hoisted into `_emit` because
+`_emit` is the shared path for all six levels — one integer comparison on the
+enabled path being the cheap side of that trade. After: **0 at level 0.**
+
+**A throwing `output` sink failed silently (OBS-005).** `_emitSinkError` was
+wired into the formatter-returns-a-string branch and _not_ into the structured
+`output(payload)` branch three lines below it, whose `catch` was a bare
+`// swallow`. The same failure was therefore loud on one path and silent on the
+other — and this is the path a structured transport takes, i.e. the one nearly
+every caller uses. **A sink failing on every record looked exactly like a logger
+set to `level: 0`.** Both branches now report once via `console.error` and give
+up if that throws, so neither a broken sink nor a broken global console can turn
+a log call into a thrown error.
+
+**Plain objects are no longer flattened to a string (OBS-004's second half), and
+this one is observable.** The narrowing read `isError(a) || (a && typeof a ===
+'object')`. That clause existed for realm safety back when the test _was_
+`instanceof`, and its role became redundant when the check became `isError()` —
+a **brand** check rather than a prototype check, so a cross-realm `Error` fails
+`instanceof` and passes it. All it was still doing was flattening every plain
+object: `{ id: 7 }` became `"ERR_ITEM: "`, and `{ code: 'EPLAIN', message: 'x',
+stack: 'S' }` became `"EPLAIN: x"` — the `stack` read by `normalizeError` and
+then thrown away by the string formatter, on the one level where the object's own
+fields are the point and where every other level passes objects through.
+
+> **If you branch on a string `msg` from `logger.error(obj)`, check it.** A sink
+> now receives the **object**. Realm safety is unaffected and is still pinned:
+> `test/powerLogger.isError.test.js` asserts a `vm`-created `TypeError` and a
+> local one produce byte-identical payloads, which is now load-bearing for a
+> different reason — that file previously kept the assertion because the fallback
+> "keeps `powerLogger` realm-safe if it is ever simplified away", which stopped
+> being true the moment the clause was removed, so the header now explains that
+> `isError()` is what does the job.
+
+**9 tests, 3 mutants, and one that survived — which is the part worth reading.**
+Removing the level gate initially passed **9/9**. The getter test used `{ get
+code() }`, and removing the plain-object clause had _already_ stopped `.code`
+being read, so the assertion held with the gate deleted: **the two fixes were
+masking each other**, and a green test was certifying the wrong mechanism. The
+shape is now `{ get error() }`, read by the first statement of the map, so it
+distinguishes "the map ran" from "the map was skipped" — which is the only thing
+that test is about. With that, all three mutants are caught: removing the gate
+fails the level-0 test; restoring the plain-object clause fails 2 pass-through
+tests; reverting the sink wiring fails 2. Each now fails the test written for it.

@@ -304,7 +304,14 @@ export class PowerLogger {
       try {
         this._output(payload);
       } catch (e) {
-        // swallow to avoid throwing from logging
+        // A throwing sink must not take the logger down with it — but it must not
+        // vanish either. This catch used to be a bare `// swallow`, while the
+        // formatter-returns-a-string branch above reported through
+        // `_emitSinkError`: **the same failure was loud on one path and silent on
+        // the other**, and this is the path nearly every caller takes, because it
+        // is the one a structured `output` transport uses. A sink that fails on
+        // every log therefore looked exactly like a logger with `level: 0`.
+        this._emitSinkError(e);
       }
       return;
     }
@@ -377,10 +384,36 @@ export class PowerLogger {
    * @returns {void}
    */
   error(...args) {
+    // **The level gate is the first statement, not `_emit`'s.** `error()` is the
+    // only level that formats its arguments on the way through, and that map runs
+    // over every argument — touching `.error`, then `.code` / `.message` /
+    // `.stack`. `_emit` checks the level itself, but by then the map has already
+    // run, so a **disabled** level still did the expensive work: probed before
+    // this fix, a `{ get code() {...} }` argument registered **1 getter call at
+    // level 0**, identical to level 1. A caller logging an object with a getter
+    // that touches a socket, a lock, or a counter paid for it in a build that had
+    // turned error logging off.
+    //
+    // The check is duplicated rather than hoisted, because `_emit` is the shared
+    // path for every level and changing its contract would affect the other five.
+    // One integer comparison on the enabled path is the cheap side of this trade.
+    if (!this.isDebugLevel(1)) return;
     const formatted = args.map((a) => {
       try {
         if (a?.error) return formatErrorObj(a);
-        if (isError(a) || (a && typeof a === 'object')) return formatErrorObj(normalizeError(a));
+        // **`isError()` alone, and the plain-object clause is gone.** It read
+        // `isError(a) || (a && typeof a === 'object')`, whose second half was
+        // added for realm safety back when the test *was* `instanceof`. That role
+        // is redundant now and always was after the swap, because `isError()` is a
+        // brand check rather than a prototype check — a cross-realm `Error` fails
+        // `instanceof` and passes `isError`.
+        //
+        // So all the clause did was flatten **every plain object** into a string:
+        // `{ code: 'EPLAIN', message: 'x' }` came out as `"EPLAIN: x"`, and with no
+        // `code` as the fixed `"ERR_ITEM: "`. On the one level where the object's
+        // own fields and `stack` are the point, and where every other level
+        // (`warn`, `info`, `log`) passes objects through untouched.
+        if (isError(a)) return formatErrorObj(normalizeError(a));
       } catch (e) {
         /* ignore formatting failures */
       }
