@@ -31,6 +31,35 @@ const hub = new PowerRealtimeHub({
 
 Messages are encoded with [`PowerMessageCodec`](powerMessageCodec.md), so several can be batched into one `send` and the receiver still knows exactly where each message ends.
 
+### The frame is read-only
+
+**One frame is encoded per `(topic, batch)` and handed to every subscriber on
+that topic.** On a fan-out to 5 000 subscribers that is 5 000 encodes collapsed to
+one — the encode was measured at 92 % of the flush — so the same `Uint8Array`
+reaches 5 000 `send` calls.
+
+A `send` adapter must therefore **treat `frame` as read-only**. Writing into it
+corrupts every other subscriber's message, and it is the kind of bug that shows
+up as one subscriber's data appearing in another's stream rather than as an
+error:
+
+```javascript
+// Wrong — `frame` is shared with every other subscriber on this topic.
+send: (sub, frame) => sub.socket.send(frame.subarray(0, 6));
+
+// Right — copy if the transport needs to own the buffer.
+send: (sub, frame) => sub.socket.send(frame.slice());
+```
+
+`WebSocket.send()` and `WritableStreamDefaultWriter.write()` both treat their
+argument as read-only, so passing the frame straight through — as the adapter
+above does, and as `PowerWebSocketClient.sendFrame()` does — is correct.
+
+`stats().encoded` is the observable half: it counts real encodes, so it stays at
+**one per flush** however many subscribers the topic has. A count that climbs with
+the subscriber count means a transport is mutating frames or the memo is missing
+hits; both are bugs, and neither raises an error.
+
 ## Slow-consumer policies
 
 Set per subscription via `slowConsumer`:
@@ -118,7 +147,7 @@ options against this list.
 - `flush()` → `Promise<void>`, drains every subscriber immediately, bypassing batching. Resolves once every subscriber's queue has reached the transport — including a subscriber that already had a send in flight, which is **waited for** rather than skipped.
 - **One frame at a time per subscriber.** A second frame is not handed to the transport while the previous one is still outstanding, so frames for one subscription reach it in the order they were published. Work that arrives meanwhile waits for the outstanding send and is then drained; it is never dropped and never reordered.
 - `unsubscribe(id)` → `boolean`.
-- `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, list }`, where `list` has per-subscriber `queued` / `dropped` / `inFlight`.
+- `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, encoded, list }`, where `list` has per-subscriber `queued` / `dropped` / `inFlight`. `encoded` counts frame encodes rather than deliveries, so it is one per flush and does not grow with the subscriber count — see [the frame is read-only](#the-frame-is-read-only).
 - `close()` / `[Symbol.dispose]()` — detaches everything and calls your `close` adapter with a reason (`'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`).
 
 ## Observability
