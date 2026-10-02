@@ -5754,3 +5754,94 @@ continue elsewhere. The measurement worth keeping is the raw one above, because
 it establishes that a stray `MessageChannel` anywhere in a dependency — including
 a devDependency of the test runner — is sufficient to pin a process that has
 finished all its work, with nothing left running and no error.
+
+---
+
+## An elapsed bound on reconnection, and the flake that was failing the gate
+
+**Added `maxReconnectElapsedMs` to `PowerWebSocketClient`, and found the flake
+that had been failing the gate under load.**
+
+`maxReconnectAttempts` defaults to `Infinity` and there was no elapsed option at
+all, so the shipped default was the anti-pattern the row names: _"Should I
+reconnect a WebSocket forever? No. Set a maximum retry count (10–15) or a maximum
+elapsed time (2–5 minutes)."_ This adds **the option** and leaves the default at
+`Infinity` — a finite default is a behaviour change, so it is scheduled for 3.0
+rather than smuggled into this release, and the option's documentation says so at
+the point where a reader would otherwise assume the default is deliberate.
+
+Two decisions worth stating:
+
+- **The budget covers one outage, not the client's lifetime.** It is cleared when
+  a connection opens, so a long-lived connection dropping an hour later gets a
+  fresh window rather than inheriting the previous one's exhaustion. Without that,
+  a client that dropped once would never reconnect again — a strictly worse
+  failure than reconnecting too long. It is therefore the _same_ window
+  `maxReconnectAttempts` bounds, and the two compose.
+- **`stats().reconnectExhaustedBy` says which bound fired**, as `'attempts'` or
+  `'elapsed'`. Two bounds, two diagnoses: a run stopped by a count suggests the
+  peer is refusing; one stopped by the clock suggests the outage outlived the
+  budget. A caller alerting on `reconnects` alone cannot tell them apart, so
+  without this the new option would have been a bound nobody could act on.
+
+The clock starts at the **outage**, not at the first retry. The first draft
+started it lazily inside the schedule path, which made the first attempt free —
+so a budget of `0` still permitted one reconnect. That is precisely the wrong
+answer for "no time for even one retry", and a probe caught it only because it
+drove the real path rather than calling the scheduler directly on a fresh client.
+The exhausted check runs before the attempt counter, so a run stopped by the
+clock does not inflate `reconnects` with attempts that never happened.
+
+8 tests, 4 mutants, all caught — including the reset-on-open mutant, which
+**survived the first version of the clear-the-budget test** because that test
+performed the reset itself and then asserted it had been reset. Driving
+`_handleOpen` instead of hand-setting the two fields is what made the mutation
+observable.
+
+**The flake.** `test/powerCircuit.observability.test.js` gave the circuit a
+**10 ms** half-open timeout and then `await`ed before asserting
+`state === 'open'`. Under full-suite load the await exceeded 10 ms, the circuit
+transitioned to `half-open`, and the assertion failed — while passing in
+isolation every time, which is the signature of a load-sensitive test rather than
+a wrong one. It failed at least twice in one session, which is also what several
+earlier unexplained step-2 failures turned out to be.
+
+The file's own comment already recorded both the flake and the trap in fixing it:
+_"Widening the timeout without widening the waits is the same bug in the other
+direction, and is what a first attempt at this fix did."_ So **the timeout and
+the waits move together** — 1 000 ms and `TIMEOUT_MS + 200` — rather than the
+previous `x10`, which with a 1 000 ms timeout would have slept 10 seconds in each
+of the two tests that need to wait. **Honest status: I could not stage the
+reproduction.** Six runs under an artificial busy-loop load passed with both the
+old and the new value, because one busy process is not vitest running 200+ files.
+The fix rests on the two observed full-suite failures and on the code reading —
+a 10 ms window against an awaited assertion — not on a demonstration. Three
+consecutive clean full runs followed.
+
+**GAP-016 is a duplicate of RES-030, which was closed earlier in this release,
+and its premise is the claim that closure refuted.** Both rows name the same
+branch — `if (!atomic || allHaveAvailable)` — and propose the same two options,
+and RES-030's own note says it is "sharper than GAP-016".
+
+What RES-030 measured: `atomic: true` **is** honoured for every limiter this
+library ships. The `available()` pre-flight and the commit loop are **one
+synchronous block**, so on a single-threaded event loop nothing can interleave
+between "every leg can afford it" and "every leg has taken it", and the pre-flight
+_is_ the atomicity mechanism. Measured: two `PowerThrottle` legs with the second
+drained, `atomic: true` refused and **the first leg still held all 5 tokens**.
+The two-phase rollback path is unreachable through the shipped limiters and serves
+third-party ones, which is a narrower claim than "dead code" and a different claim
+from GAP-016's "`atomic: true` does not deliver it".
+
+So the defect GAP-016 describes is not one, and the fix it proposes — always take
+the two-phase path when `atomic` is set — would add a reserve/rollback round trip
+to every call in order to lose a guarantee already held. What GAP-016 gets right
+is worth keeping: the documentation did not name the two mechanisms, and the
+rollback path reads as _the_ implementation of `atomic`. Both are now fixed, and
+the no-`await` invariant the pre-flight depends on is pinned by
+`test/powerRateLimit.atomic.test.js` rather than left to a paragraph.
+
+**The duplicate itself is the finding.** Two rows describing one defect survived
+in the plan, which is how a refuted premise got re-asserted as an open P1. The
+`reset()` work found the same shape twice more — 19 implementations of `reset()`
+across six meanings where the row recorded four across three.

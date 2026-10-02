@@ -126,6 +126,30 @@ Ceiling for the backed-off poll.
 
 ***
 
+### maxReconnectElapsedMs?
+
+> `optional` **maxReconnectElapsedMs?**: `number`
+
+Wall-clock ceiling on
+  one reconnect run, in milliseconds. Unlike [maxReconnectAttempts](#maxreconnectattempts),
+  which counts attempts, this bounds the *time* spent retrying — so a backoff
+  schedule that has stretched its delay out is stopped on wall-clock grounds
+  rather than waiting for an attempt count nobody can predict.
+
+  Defaults to `Infinity`, which is **no bound** and preserves today's
+  behaviour. That default is the anti-pattern named in GAP-010 — *"Should I
+  reconnect a WebSocket forever? No. Set a maximum retry count (10–15) or a
+  maximum elapsed time (2–5 minutes)"* — and a finite default is a breaking
+  change, so it is scheduled for 3.0 rather than smuggled into this release.
+  Set it here for now.
+
+  The budget covers **one outage**: it is reset when a connection opens, so a
+  long-lived connection that drops an hour later gets a fresh window rather
+  than inheriting the previous one's exhaustion. That is the same window
+  `maxReconnectAttempts` bounds, and the two compose.
+
+***
+
 ### observability?
 
 > `optional` **observability?**: `boolean` \| [`MetricsCollector`](../../helpers/metrics/classes/MetricsCollector.md)

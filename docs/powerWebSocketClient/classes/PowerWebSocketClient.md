@@ -168,6 +168,12 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 ***
 
+### \_maxReconnectElapsedMs
+
+> **\_maxReconnectElapsedMs**: `number`
+
+***
+
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
@@ -254,6 +260,12 @@ decorrelated-jitter backoff cursor, in ms
 
 ***
 
+### \_reconnectExhaustedBy
+
+> **\_reconnectExhaustedBy**: `string` \| `null`
+
+***
+
 ### \_reconnectMaxMs
 
 > **\_reconnectMaxMs**: `number`
@@ -263,6 +275,12 @@ decorrelated-jitter backoff cursor, in ms
 ### \_reconnectOnHeartbeatTimeout
 
 > **\_reconnectOnHeartbeatTimeout**: `boolean`
+
+***
+
+### \_reconnectStartedAt
+
+> **\_reconnectStartedAt**: `number` \| `null`
 
 ***
 

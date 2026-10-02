@@ -144,6 +144,24 @@ export { READY_STATE };
  *   `0` disables heartbeats.
  * @property {number} [heartbeatTimeoutMs=10000] - Declare the socket dead if a
  *   pong does not arrive in this long.
+ * @property {number} [maxReconnectElapsedMs=Infinity] - Wall-clock ceiling on
+ *   one reconnect run, in milliseconds. Unlike {@link maxReconnectAttempts},
+ *   which counts attempts, this bounds the *time* spent retrying — so a backoff
+ *   schedule that has stretched its delay out is stopped on wall-clock grounds
+ *   rather than waiting for an attempt count nobody can predict.
+ *
+ *   Defaults to `Infinity`, which is **no bound** and preserves today's
+ *   behaviour. That default is the anti-pattern named in GAP-010 — *"Should I
+ *   reconnect a WebSocket forever? No. Set a maximum retry count (10–15) or a
+ *   maximum elapsed time (2–5 minutes)"* — and a finite default is a breaking
+ *   change, so it is scheduled for 3.0 rather than smuggled into this release.
+ *   Set it here for now.
+ *
+ *   The budget covers **one outage**: it is reset when a connection opens, so a
+ *   long-lived connection that drops an hour later gets a fresh window rather
+ *   than inheriting the previous one's exhaustion. That is the same window
+ *   `maxReconnectAttempts` bounds, and the two compose.
+ *
  * @property {number} [maxReconnectAttempts=Infinity] - `Infinity` retries
  *   forever with decorrelated-jitter backoff.
  * @property {number} [reconnectBaseMs=500] - Base delay for the backoff.
@@ -211,6 +229,7 @@ export class PowerWebSocketClient {
         'heartbeatIntervalMs',
         'heartbeatTimeoutMs',
         'maxReconnectAttempts',
+        'maxReconnectElapsedMs',
         'reconnectBaseMs',
         'reconnectMaxMs',
         'autoReconnect',
@@ -241,6 +260,7 @@ export class PowerWebSocketClient {
       heartbeatIntervalMs = 30_000,
       heartbeatTimeoutMs = 10_000,
       maxReconnectAttempts = Number.POSITIVE_INFINITY,
+      maxReconnectElapsedMs = Number.POSITIVE_INFINITY,
       reconnectBaseMs = 500,
       reconnectMaxMs = 30_000,
       autoReconnect = true,
@@ -359,6 +379,21 @@ export class PowerWebSocketClient {
       fallback: 0,
     });
     this._maxReconnectAttempts = maxReconnectAttempts;
+    // GAP-010. `allowInfinity` because `Infinity` is the documented default and
+    // means "no elapsed bound" — deliberately, since a finite default is a
+    // behaviour change reserved for 3.0.
+    this._maxReconnectElapsedMs = assertLimitRequired(maxReconnectElapsedMs, {
+      name: 'maxReconnectElapsedMs',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      allowInfinity: true,
+      fallback: Number.POSITIVE_INFINITY,
+    });
+    // When the current reconnect run began, or `null` when no run is in progress.
+    // Reset alongside `_reconnectAttempts` in `_handleOpen`, so both bounds
+    // describe the same outage — one that stops because it ran out of attempts
+    // and one that stops because it ran out of time are the same condition.
+    this._reconnectStartedAt = null;
     this._reconnectBaseMs = Math.max(1, Math.floor(Number(reconnectBaseMs) || 500));
     this._reconnectMaxMs = Math.max(
       this._reconnectBaseMs,
@@ -389,6 +424,7 @@ export class PowerWebSocketClient {
     this._state = READY_STATE.CLOSED;
     this._closedByUser = false;
     this._reconnectAttempts = 0;
+    this._reconnectExhaustedBy = null;
     this._connectTimer = null;
     this._pollTimer = null;
     this._heartbeatTimer = null;
@@ -662,6 +698,13 @@ export class PowerWebSocketClient {
       highWaterMark: this._highWaterMark,
       lowWaterMark: this._lowWaterMark,
       reconnectAttempts: this._reconnectAttempts,
+      // GAP-010: *why* reconnection stopped, or `null` while it has not.
+      // `'attempts'` and `'elapsed'` are the two bounds this client applies, and
+      // they mean different things to whoever is alerting — a run stopped by a
+      // count suggests the peer is refusing; one stopped by the clock suggests
+      // the outage outlived the budget. `Infinity` on both defaults means neither
+      // can fire, so this stays `null` for the default configuration.
+      reconnectExhaustedBy: this._reconnectExhaustedBy ?? null,
       ...this._counters,
       rtt: {
         count: this.rtt.count,
@@ -865,6 +908,10 @@ export class PowerWebSocketClient {
     }
     this._state = READY_STATE.OPEN;
     this._reconnectAttempts = 0;
+    // The elapsed budget covers one outage, so a fresh connection clears it —
+    // and clears the reason with it, since nothing is exhausted any more.
+    this._reconnectStartedAt = null;
+    this._reconnectExhaustedBy = null;
     this._lastPollInterval = this._pollBase;
     this._lastPongAt = nowMs();
     this._schedulePoll();
@@ -928,7 +975,16 @@ export class PowerWebSocketClient {
     this._writer = null;
     this._state = READY_STATE.CLOSED;
     this._emit('close', event, this);
-    if (!this._closedByUser) this._scheduleReconnect();
+    // The reconnect run begins at the **outage**, not at the first retry, which
+    // is what makes the elapsed budget mean what it says. A probe with a budget
+    // of 0 still allowed one reconnect, because the clock was started lazily
+    // inside `_scheduleReconnect` — so the first attempt was always free, and
+    // "no time for even one retry" permitted exactly one. Starting it here means
+    // a budget of 0 yields 0 attempts and 10s yields every retry inside 10s.
+    if (!this._closedByUser) {
+      if (this._reconnectStartedAt === null) this._reconnectStartedAt = nowMs();
+      this._scheduleReconnect();
+    }
   }
 
   /**
@@ -1123,7 +1179,20 @@ export class PowerWebSocketClient {
    */
   _scheduleReconnect() {
     if (!this._autoReconnect || this._closedByUser) return;
-    if (this._reconnectAttempts >= this._maxReconnectAttempts) return;
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      this._reconnectExhaustedBy = 'attempts';
+      return;
+    }
+    // The elapsed bound. Checked *before* the attempt is counted, so an exhausted
+    // clock does not inflate `reconnects` with an attempt that never happened.
+    if (
+      this._maxReconnectElapsedMs !== Number.POSITIVE_INFINITY &&
+      this._reconnectStartedAt !== null &&
+      nowMs() - this._reconnectStartedAt >= this._maxReconnectElapsedMs
+    ) {
+      this._reconnectExhaustedBy = 'elapsed';
+      return;
+    }
     this._reconnectAttempts += 1;
     this._counters.reconnects += 1;
     const delay = this._nextReconnectDelay();
