@@ -4630,3 +4630,762 @@ never terminated.
 
 The hand-rolled reader is removed from `guides/powerMessageCodec.md` — it named
 an undefined `concat()` and had no ceiling. Closes CODEC-001.
+
+---
+
+**Added in the session that closed the cache, retry and queue review rows.**
+Eight changesets were added alongside this file during that work and then folded
+in here, because `CHANGELOG.md` records that consolidated notes are the decision
+for this release and that "a changelog that is maintained separately from the
+release notes is a changelog that goes stale". They were correct individually and
+together they read as a list of edits, which is the thing consolidation exists to
+prevent. Nothing was dropped in folding them in.
+
+**Fixed**
+
+- **Mutating a `PowerCache` while iterating it silently truncated the walk.**
+  `for (const [key] of cache.entries()) cache.delete(key)` removed exactly one
+  entry and reported `size: 0` afterwards, through `entries()`, `entries('LRU')`,
+  `keys()` and `values()`. Measured n=2 left 1, n=3 left 2, n=4 left 3, n=10
+  left 9. The walk advanced `node = node.prev` after each `yield` resumed, and
+  `_remove` nulls both links on the node it removes. `cleanupExpired()` called
+  from inside a loop was the worse trigger, because it is a public maintenance
+  method rather than a mutation the caller chose: a bulk export that swept each
+  turn visited the expired entry and **no live entries at all**. Fixed by reading
+  the continuation before the yield. The contract is now stated rather than left
+  to be discovered, and the one residual loss — two adjacent removals in a single
+  step may end the walk early — is deliberate, because closing it means
+  snapshotting the walk into an array on every call to a bulk-export API.
+
+- **A recency mutation inside a `PowerCache` iteration loop was an infinite
+  loop.** `for (const [k] of cache.entries()) cache.get(k)` never returned:
+  `get()` relinks the entry to the MRU end, which is behind an MRU-first cursor,
+  so the walk arrived back at the node it was standing on (60 yields on 6 keys).
+  `touch()` and `set()` on a key already present reach the same state. The walk
+  now visits at most as many entries as existed when it started, which ends the
+  cycle without truncating a correct walk — measured 0.00 window walks per
+  main-space read, and a maximum excess of 0 over 300 clean walks.
+
+- **`PowerQueue` no longer retains its high-water mark forever.** The buffer only
+  ever grew, so a queue that took 5 000 items once kept an 8 192-slot buffer for
+  the rest of its life, and `clear()` emptied the slots without releasing them.
+  This was a leak inside the library rather than only a sharp edge for callers:
+  `PowerSlidingWindow` keeps its timestamps in a `PowerQueue`, so one large
+  `tryConsume` window left every instance holding the memory of the worst burst it
+  had ever seen. Now measured **8 192 → 16** once the window ages out, with
+  steady traffic settling at 16 without reallocating.
+
+- **The pre-commit hook could not commit changes to eight source files.** It
+  mapped `src/helpers/x.js` to `docs/helpers/x` unconditionally, but the docs
+  tree is not uniform — five helpers are documented at `docs/<name>`, and a
+  typedef-only module has no page at all — and `git add` treats a missing
+  pathspec as fatal under `sh -e`. Any commit touching `powerRetry.js`,
+  `powerGCRA.js`, `powerMessageCodec.js`, `powerRealtimeHub.js`,
+  `powerWebSocketClient.js`, `options.js`, `timers.js` or `jsdoc-types.js` was
+  rejected by its own hook. Both layouts are now tried and only existing paths
+  are staged.
+
+- **Prettier was reformatting typedoc's own output.** `docs:drift` compares the
+  committed tree against `npm run docs`, and typedoc writes
+  `docs/docs-typedoc.json` with tabs. Prettier reformatted it to two spaces, so a
+  verified commit failed step 10 of `verify` minutes later — 77 589 insertions
+  across 2.6 MB. Fixed with a `.prettierignore`. The obvious fix, lint-staged's
+  `"!docs/**"` negation, **does not work**: a later
+  `"*.{json,md,yml,yaml}"` glob re-claims the file the negation dropped, which
+  was tried, committed, and measured not to help.
+
+**New**
+
+- **`PowerRetry.run` takes a `signal`, and the backoff wait is interruptible.**
+  It previously could not be cancelled at all: `attemptTimeout` bounded a slow
+  _attempt_ and nothing bounded a slow _gap_, so the sleep ran to completion — up
+  to `maxDelay`, 30 s at the default. Measured: an abort during a 5 000 ms
+  backoff now rejects in **81 ms**. Rejections carry `code: 'EABORT'` and the
+  signal's `reason`, the shape `PowerDeadline` already uses, so one `err.code`
+  check covers both helpers.
+
+- **`PowerQueue.shrink(minimum)` and `PowerQueue.fill(item, count)`.** The first
+  gives back the memory a burst grew, explicitly rather than on every dequeue;
+  the second removes a temporary `new Array(n)` and a second `pushMany` pass from
+  every `tryConsume(n)` with `n > 1`.
+
+**Docs**
+
+- **What `PowerRateLimit`'s `atomic: true` actually guarantees.** The option is
+  reached by two mechanisms and the documentation named neither: a limiter with
+  `available()` is settled by a synchronous pre-flight, while a limiter without it
+  is composed through `reserve` with best-effort rollback. The rollback path reads
+  as _the_ implementation of `atomic`, and measuring it says otherwise — with two
+  `PowerThrottle` legs and the second drained, `atomic: true` refused and the
+  first leg still held all 5 tokens. The no-`await` invariant the pre-flight
+  depends on is now pinned.
+
+- **What `reset()` means on each of the 19 classes that have one**, which is six
+  different things: refill to full; refill counting held permits and rejecting
+  queued waiters; empty; zero the measurements; return to the initial machine
+  state; and halve, which is `smallLfu`'s documented half-life reset. The
+  sharpest pair points in opposite directions: after `queue.reset()` and
+  `throttle.reset()` on equally drained instances, the queue has nothing and the
+  throttle has everything. That is why there is no shared `refill()` primitive,
+  and the divergences are now enforced rather than merely documented.
+
+---
+
+**Folded in from the remaining individual changesets.** `CHANGELOG.md` records
+that the 22 accumulated changesets "are now one file", but these were still
+separate and their content was **absent** from the consolidated file rather than
+duplicated in it — 31 distinctive entries had no other route into the release
+notes. They are appended here under their original filenames so the move is
+auditable, and the originals deleted. Nothing was dropped.
+
+### From `broadcast-channel-audit-defects.md` (minor)
+
+Four defects found by probing the shipped surface rather than reading it. Two were
+silent message loss, one was a feature that reported the wrong thing, and one was
+a fix from an earlier release that had introduced a failure of its own.
+
+**`PowerScheduler` — `dispose()` on one macrotask scheduler used to wedge every
+other one, permanently**
+
+The macrotask channel is module-level, so it is shared. `dispose()` closes it,
+which was correct in isolation — a started `MessagePort` keeps a Node process
+alive forever, and `unref()` alone does not stop that once the ports are open.
+But "release the channel" meant "release it for the whole process", so disposing
+one scheduler tore the listener off every _other_ scheduler's pending flush. The
+message was discarded, `_run()` never ran, and `scheduled` stayed `true` — which
+makes `schedule()` short-circuit on its first line forever after. Only `cancel()`
+recovered it, and nothing documented that.
+
+Measured before the fix: two macrotask schedulers, `a.schedule()`, `b.schedule()`,
+`b.dispose()` before delivery — `a` flushed **0** times, and `a.scheduled` was
+still `true` after three further `schedule()` calls. The trigger is the `using`
+pattern the class advertises through `[Symbol.dispose]`.
+
+Posts in flight are now counted, and `dispose()` drops the module reference but
+**only closes the ports when nothing is pending**. The next scheduler builds a
+fresh pair; the pending post is still delivered on the old, already-`unref()`ed
+one, so nothing holds the process open. Disposing on an idle path closes the
+ports exactly as before, and a subprocess that schedules and disposes still exits
+cleanly.
+
+Worth naming: this was introduced by RES-005 / F-53, the fix for a real and
+separate process-hang bug. Both were real; the second only showed once two
+schedulers shared a process.
+
+**`PowerTTLMap` — a `ttl` that was not a number made an entry immortal**
+
+`PowerCache` was repaired for this (CACHE-003) by extracting its check into
+`powerCache.js` — which **exports nothing**, so `PowerTTLMap` could not reach it
+and kept `Number(ttl) || 0`. The defect survived the fix, in the class next door.
+
+```js
+new PowerCache().set('k', 1, { ttl: 'abc' }); // TypeError, naming the value
+new PowerTTLMap().set('k', 1, 'abc'); // stored expiresAt === 0
+```
+
+`0` is this class's "no expiry" sentinel, so a typo produced an entry that never
+expires — silent, unbounded, and indistinguishable from correct behaviour. `[]`,
+`true` and `NaN` did the same, and a **negative** TTL granted the same immortality.
+
+The validator now lives in `utils/options.js` as one shared `normalizeTtl`, used
+by both classes, so the next change to it lands on both. `PowerTTLMap` accepts a
+number, a numeric string (still legitimate — `process.env.TTL` is a string) and
+the `{ ttl }` object form; `Infinity`, `null`/`undefined` and `0` still mean no
+expiry; everything else throws a `TypeError`, and a negative TTL a `RangeError`.
+`{}` still means "use `defaultTTL`".
+
+**This is a behaviour change.** Callers who were passing a computed TTL that can
+be `NaN` will now get a `TypeError` where they previously got an entry that never
+expired. That is the same trade `PowerCache` already makes, and the alternative —
+silently keeping an immortal entry — is worse, but it is a throw at a call site
+that used to succeed.
+
+**`PowerGCRA.onError` fired on every ordinary refusal**
+
+The predicate was `now < this._tat`, and a TAT ahead of `now` is not a clock
+fault: it is the limiter's **normal saturated state**, and exactly what a
+rate-limiting limiter looks like while it is working. Measured at
+`rate: 1, capacity: 1`, **19 refusals produced 19 `onError` calls**, each carrying
+a raw number rather than an `Error`, on a clock that never moved. So a correctly
+rate-limiting limiter looked broken to anything watching, and a genuine backwards
+clock step was indistinguishable from the noise.
+
+The option is documented as reporting a misbehaving clock, so it now compares
+against the last reading taken rather than against the TAT: a real backwards step
+reports once, ordinary refusals report nothing, and the first reading after
+construction reports nothing (there is no previous one to compare against). Still
+never throws, and still guarded so a throwing handler cannot break admission.
+
+**`PowerLatch.reset(count)` accepted what its own constructor rejects**
+
+The constructor runs `assertLimitRequired(count, { integer: true })` and throws on
+`2.5`; `reset()` ran `Math.max(0, Number(count) || 0)`. A fraction is not a smaller
+latch, it is a latch that **cannot finish**: `reset(2.5)` then one `countDown()`
+leaves `1.5` and `wait()` never settles. In the other direction `NaN` and `-5` both
+collapsed to `0`, which _resolved_ every pending waiter — a bad argument
+fabricating completion out of a latch nobody had counted down. `reset()` now uses
+the same validator, and a rejected count leaves the latch untouched.
+
+### From `cache-observability.md` (patch)
+
+fix(cache): `observability` was read by the constructor and missing from `PowerCacheOptions`
+
+`PowerCache`'s constructor calls `attach(this, 'cache', options)`, and
+`attach()` in `src/helpers/metrics.js` reads `options.observability` to decide
+whether to register the helper with the shared `MetricsCollector`. The option
+worked; `PowerCacheOptions` did not declare it, so a TypeScript caller could not
+pass it.
+
+Seven of the eight constructors that call `attach()` declared the field. This was
+the one that did not, which is the harder half of the bug to see — nothing fails,
+the option is documented in `guides/metrics.md`, and seven sibling classes accept
+it, so the gap reads as an oversight in the type rather than a missing feature.
+
+Same defect class as `PowerPool`'s `encodeCacheLimit` / `encodeCacheByteLimit`,
+fixed in 3d54d29. Both were found by a pass built to reject options a class does
+_not_ accept, which flagged them as the exception.
+
+Pinned in `test/types.test-d.ts` across all eight `attach()` callers, so a future
+removal is caught by this repository's compiler rather than a consumer's.
+
+One limit stated rather than left to be found: the _value_ type is not enforced —
+`new PowerCache({ observability: 'yes' })` still compiles, so the declared
+boolean-or-collector union is not checked at the constructor. Only acceptance is
+asserted here. Tightening the value type is separate work.
+
+### From `constructor-forms.md` (patch)
+
+fix: a leading numeric argument is now accepted positionally _or_ as an option
+
+Six helpers took a positional number while about twenty took an options object,
+and the split had no rule a reader could infer. `PowerTTLMap` already normalised
+both forms — the right answer, applied to one class out of seven. The other five
+did not, in two distinct ways, both bad:
+
+```js
+new PowerLogger({ level: 2 }); // silently came up at level 0
+new PowerObserver({ value: 5 }); // stored the *object* as the observed value
+new PowerSemaphore({ limit: 3 }); // threw, naming a number you just passed an object for
+```
+
+`PowerLogger` is the worse of the two silent cases: a logger asked to be verbose
+was quiet, with nothing to indicate why. `PowerObserver` was worse still — it
+appeared to work while observing `{ value: 5 }` rather than `5`.
+
+All five now accept both forms. **Positional calls are untouched**, so this is
+additive; nothing that compiles today stops compiling.
+
+Two rules keep it honest rather than a second way to be wrong:
+
+- **An object is read as options only when it carries a known option key.** A
+  bare `{}` still falls through to the numeric path and is rejected, which
+  `test/powerLatch.reset.test.js` already pins as a property — "whatever the
+  constructor rejects, `reset()` must reject too". A looser normalisation broke
+  that on the first attempt and the existing test caught it.
+- **The whole object is validated, not just the key being read.** Otherwise
+  `{ limit: 3, nonsense: 1 }` would pass, and arriving in the options-object form
+  would be a way to _bypass_ the strict-options check in 8f83c07 rather than a
+  second way to satisfy it.
+
+Pinned in `test/constructorForms.test.js`, including that the object form is not
+a validation bypass. Mutation-checked: dropping the `assertKnownOptions` call
+from the `PowerSemaphore` branch fails the test.
+
+### From `ergonomics-audit.md` (patch)
+
+An ergonomics audit of the helpers, found by probing the built surface rather than
+by reading it: an error that named the wrong class, a method that silently dropped
+its arguments, a guide documenting an option that no longer exists, and a `stats()`
+split that had reached the documentation as a false claim.
+
+**Behaviour**
+
+- **`PowerSemaphore.run(fn, options)` honours `options`.** It took no second
+  parameter, so the `{ signal }` a caller writes by mirroring `acquire(options)` —
+  which this class does accept — was silently discarded. It was discarded
+  _quietly_: the promise stayed pending until a permit happened to be released, so
+  an uncancellable request was indistinguishable from a slow one. With an
+  already-aborted signal against a saturated semaphore, it never settled at all.
+  `run` is the form people reach for first, so cancellation matters more here than
+  on `acquire`, and `PowerBulkhead.run`, `PowerDeadline.run` and `PowerRetry.run`
+  all accepted options already.
+
+- **`PowerSemaphore`'s validation errors name itself and its own option.** It
+  delegates its whole body to `new PowerPermitGate({ capacity: limit })`, and the
+  gate's `className` was hardcoded, so every error told a caller who had written
+  `new PowerSemaphore(...)` to look at a class they never constructed and an
+  option they never typed:
+
+  ```text
+  before: PowerPermitGate: `capacity` must be a finite number
+  after:  PowerSemaphore:   `limit` must be a finite number
+  ```
+
+  `PowerPermitGate` reports itself unchanged, and `queueCapacity` / `initialTokens`
+  keep the gate's names on purpose — `PowerSemaphore` exposes neither, so pointing
+  a caller at them would invent options. **If you match on the error text of a
+  `PowerSemaphore` construction failure, update the pattern.**
+
+**Additive**
+
+- **`getStats()` on every helper that reports through `stats()`.** Nine helpers
+  spelled it `stats()` and one — `PowerPool` — spelled it `getStats()`, with no
+  stated rule and nothing pinning it. A user who learned one reached for the other
+  name everywhere else and got `TypeError: x.getStats is not a function` from
+  whichever class they had not learned the exception to. `getStats()` now
+  delegates to `stats()` on all ten. `PowerPool` is unchanged — it is the older
+  and far larger surface, and renaming it would be breaking.
+
+  Two reversals are worth recording, because both shipped green first.
+
+  **The first implementation was a dynamic prototype patch.** A
+  `src/utils/statsAlias.js` applied `Object.defineProperty` at module scope. It
+  worked at runtime and passed every runtime test, and was **absent from the
+  published `types/`** — `tsc` cannot see a prototype patch — so a TypeScript
+  caller would have got `Property 'getStats' does not exist` on a method that ran
+  fine. That file no longer exists. The alias is now an ordinary method on each
+  class, so `tsc` emits it like any other.
+
+  **The second carried a hand-written copy of each `stats()` return shape.** The
+  reasoning was that an explicit type was safer. It is not: a concurrent change
+  added `staleServes` and `expirations` to `PowerCache.stats()` and the copies
+  were stale within the same session. Omitting `@returns` lets `tsc` infer a
+  byte-identical published type, and with nothing written twice there is nothing
+  to keep in sync. The copies are gone.
+
+  The type guarantee is now asserted where it belongs — `test/types.test-d.ts`
+  compiles bidirectional assignments between `stats()` and `getStats()`, which is
+  the property a consumer relies on. An earlier test compared the two _declaration
+  strings_ and reported a false mismatch (`PowerRetryBudgetStats` versus
+  `import("./jsdoc-types.js").PowerRetryBudgetStats` — the same type), which was
+  itself arguing for putting the hand-written copies back.
+
+  The alias is deliberately **not** added to classes with no `stats()` at all
+  (`PowerTTLMap`, `PowerLogger`): it would hand a caller a `TypeError` from a name
+  this change is teaching them to expect.
+
+**Documentation**
+
+- `guides/powerThrottle.md` documented `refillInterval` as a real option with a
+  default of `1000`. The option was removed in 9a1d9d5 precisely because it was
+  inert, and `types/` correctly omitted it — **only the guide still carried it**,
+  so a user reading the guide set it, got silence in return, and landed on a
+  limiter that behaved correctly by accident. Fixed there; the same stale name was
+  in two of this repository's own tests, which passed only because unknown options
+  are ignored and so were teaching an option name the API does not have.
+- `guides/metrics.md` and `llm.txt` claimed that every helper reporting anything
+  does it through its own `stats()`. Both were false about `PowerPool`, and
+  `metrics.md` contradicted itself seven lines later by writing
+  `metrics.register('pool', () => pool.getStats())`.
+
+Closes QUAL-011.
+
+**Known limits of this change, stated rather than left to be discovered:**
+
+- Nothing here makes an **unknown option** an error. Every helper still ignores
+  unrecognized keys, and `test/deadOptions.family.test.js` pins that as correct —
+  sound reasoning for an option that was _removed_, since no caller could have been
+  depending on behaviour that did not exist. It does not extend to a _misspelled_
+  option, which is the common case: `new PowerThrottle({ refillRat: 5 })` yields a
+  bucket that never refills. An opt-in `strictOptions` is the intended answer and
+  is deliberately **not** in this release; the default is unchanged.
+- Six constructors still take a positional primitive and throw on an options object
+  (`PowerSemaphore`, `PowerQueue`, `PowerLatch`, `PowerLogger`, `PowerObserver`,
+  and `PowerPermitGate` in its options-object form only), while about twenty take
+  an options object. `PowerTTLMap` accepts both. Unifying the six is a 2.0 API
+  decision rather than a patch, and is not attempted here.
+
+**Per-call options are now typed.** Twelve methods used to publish
+`options?: {}` — an empty object type-checks _anything_, so a TypeScript caller
+passing `{ now: 1234 }` got no completion, no error, and no pointer to
+`LimiterNowOptions`. The runtime has always forwarded and honoured these; only
+the declaration was missing. They are now declared:
+
+```ts
+throttle.tryConsume(1, options?: LimiterNowOptions): boolean;
+gate.acquire(options?: { signal?: AbortSignal }): Promise<PowerReleaseFn>;
+timed.set(key, value, options?: { ttl?: number; weight?: number }): ...
+```
+
+This is worth spelling out because it **narrows** those twelve signatures in a
+patch release: an options bag that used to accept anything now rejects unknown
+keys. Code that was passing a misspelled key type-checked before and will not
+now. That is the intended direction — a `PowerThrottle` whose `{ refillRat: 5 }`
+was silently dropped is the bug — but it is a type-level tightening and is the
+one part of this changeset that can break a compile that passed before.
+
+Three things were needed to get there, none obvious:
+
+- Each limiter needs an explicit
+  `@typedef {import('../utils/limiterClock.js').LimiterNowOptions}` line. Without
+  it `tsc` emits `.d.ts` files referencing an undefined name — the emitted
+  declarations were wrong while the source looked correct.
+- `test/types.test-d.ts` now carries `@ts-expect-error` directives proving an
+  unknown key is _rejected_. Under `options?: {}` those directives would have
+  compiled and then failed as unused, which is the only way to tell this fix from
+  a decorative one.
+- A runtime test pins that per-call `now` is honoured on a limiter constructed
+  **with no injected clock**, which no existing test covered: every prior case went
+  through an injected `now` or through the `PowerRateLimit` composition. Declaring
+  an option is a promise it works, so it is pinned rather than assumed.
+
+**Two options are now declared rather than left as `{}`.** `PowerPermitGate`'s
+`className` and `limitName` are on `PowerPermitGateOptions`, which is what makes
+the corrected error messages type-check at all — an undeclared property read
+inside the constructor was 10 of the 14 type errors this change initially
+introduced, and `npm run typecheck:ratchet` caught them at exactly the ceiling.
+The ratchet did its job.
+**A new gate step: `docs:claims` (step 9 of 10)**
+
+Written because two defects in this repository shipped undetected, and neither
+was caught by `docs:drift` — `docsCodeAgreement.test.js` and `docsLinks.test.js`
+both check code _referenced from_ the docs, while these were a doc asserting
+something about the code.
+
+It found real drift immediately. Seven entries in `llm.txt` had prose sliced off
+mid-sentence and a code fragment spliced onto the end — including
+`import { PowerLatch } from '../src/helpers/powerLatch.js';` appended to a
+summary. That is a generation bug in the one file whose entire purpose is
+machine consumption, and it shipped. All seven are fixed.
+
+Two corrections to documents that were actively wrong rather than merely stale:
+
+- `llm.txt` claimed every line was "a title and that guide's own opening sentence
+  … so the two can only disagree if the guide changes". Ten of its 49 entries are
+  deliberate paraphrases, so the guarantee never held. It now describes what is
+  actually true and what is actually checked.
+- `guides/powerThrottle.md` documented `refillInterval` as a real option, removed
+  in 9a1d9d5 because it was inert. `types/` correctly omitted it; only the guide
+  carried it.
+
+The check reads the **generated** declarations, so it runs after `types:generate`
+and `types:drift`. Both halves are mutation-checked: re-injecting the
+`refillInterval` row fails it, and re-injecting a code fragment into `llm.txt`
+fails it.
+
+Two limits stated rather than left to be found. It does not check option
+_defaults_ — a default is not recorded in the published `.d.ts` at all, and
+`refillInterval`'s wrong default was the more misleading half of that row. And
+ten guides report "option names not checked" because they have no options typedef
+in the declaration; that is reported honestly rather than counted as a pass.
+
+**`docs:claims` now covers 26 guides rather than 10.** The six it skipped were not
+skipped because they have no options — two of them were skipped by a regex that
+missed the inline-import spelling the emitted declarations use for a type that
+lives outside `jsdoc-types.js`:
+
+    options?: PowerThrottleOptions                              // matched
+    options?: import("./jsdoc-types.js").PowerBatchOptions      // was not
+
+and the rest because the table was found by looking for a `## Constructor`
+heading, when the guides variously use `## Constructor`, `## Options` and
+`### API`. Both were silent: the script reported "not checked" and exited 0. It
+now locates an options table by its _header row_ — first column named `option` —
+which is the actual intent, and drops the heading match that had also produced a
+false positive on `powerSocketAdapter.md`, whose `## Constructor` section is a
+transport-detection table, not an options table.
+
+Six guides remain unchecked and all six are correct: `powerQueue` and
+`powerSemaphore` take a positional primitive, `powerDefer` has no constructor,
+`WorkerAgnostic`, `metrics` and `powerRealtimeHub` document their options as prose
+rather than a table. The report says so rather than claiming a pass.
+
+Mutation-checked against four of the newly-covered guides — injecting a bogus
+option row into `powerGCRA`, `powerCache`, `powerPool` and `powerRetry` fails the
+guard on all four, including the two whose typedef spelling it previously missed.
+
+### From `hub-constructor-docs.md` (patch)
+
+docs(realtime): document `PowerRealtimeHub`'s constructor options, and fix a guard that was not checking them
+
+The hub's guide documented the per-call `subscribe()` options but never its
+constructor options — eight of them, including `send`, which is required. There
+was nothing to check against, so `npm run docs:claims` reported the guide as
+"no options table; option names not checked" and passed.
+
+Two fixes, and the second is the one that matters:
+
+- The guide now carries a constructor options table, so seven names are checked.
+- **`docs:claims` was not resolving options for this class at all**, and said
+  nothing. Its parser matched `options?: SomeOptions` — the _optional_ form —
+  while `PowerRealtimeHub`'s constructor is `constructor(options: HubOptions)`,
+  required. No match meant no options resolved, which the script reported as a
+  benign "no options typedef found" note rather than a gap.
+
+A required options parameter lists exactly the same accepted names as an optional
+one, so the pattern now accepts both. This is the fourth time a guard in this
+project has passed while checking nothing, and the reason is recorded in the
+script: a miss that reports itself as "nothing to see" is indistinguishable from a
+guide that genuinely has no options.
+
+Mutation-checked: renaming `batchDelayMs` to `batchDelay` in the new table fails
+the guard, naming that option alone rather than all seven.
+
+### From `observability-validated.md` (patch)
+
+fix(metrics): a wrong `observability` value registered nothing and reported nothing
+
+`attach()` in `src/helpers/metrics.js` read `options.observability`, treated any
+truthy value as a request to be measured, then discarded anything that was not
+`true` or a collector — silently.
+
+    new PowerCache({ observability: 'yes' })
+
+`'yes'` is truthy, is not `true`, and has no `register`, so it registered nothing
+and raised nothing. A caller who asked to be measured was silently not measured,
+and would find out from a dashboard that looked plausible. The option's type was
+declared as `boolean | MetricsCollector` and never checked.
+
+A bad value now throws, naming the class and what was passed. Falsy stays inert,
+because "off" is a legitimate answer and `observability: false` is how you say it.
+
+`test/metrics.test.js` had a test pinning the lenient behaviour — _"ignores a
+value that is not a collector … A typo must be inert rather than fatal"_ — which
+was the bug rather than the virtue. It is rewritten to assert the new contract,
+with the reasoning kept, because the old reasoning is worth recording as the thing
+that was wrong.
+
+### From `pool-encode-cache-options.md` (patch)
+
+fix(pool): `encodeCacheLimit` and `encodeCacheByteLimit` were read but never declared
+
+Both were read by the `PowerPool` constructor and absent from `PowerPoolOptions`,
+so a TypeScript caller could not pass either — the options existed at runtime and
+in the implementation, and nowhere a consumer could see them.
+
+    this._encodeCacheLimit = Math.max(
+      16,
+      options?.encodeCacheLimit ? options.encodeCacheLimit : 64
+    );
+
+Found by a pass that was checking for the opposite problem: it rejected options a
+class does _not_ accept, and these two came back as the exception — read by the
+constructor, missing from the published type. That is worth recording separately,
+because a check built to find one class of defect turned up the other, and the
+fix is a typedef rather than any change to behaviour.
+
+`encodeCacheLimit` bounds the entry count of the LRU that caches serialized
+messages so an identical message is not re-encoded every time (floor of 16,
+default 64). `encodeCacheByteLimit` bounds the total bytes it holds, evicting
+oldest entries to fit; it defaults to `Infinity`, which leaves the count-only
+behaviour unchanged.
+
+### From `realtime-hub-silent-loss.md` (minor)
+
+Three defects in `PowerRealtimeHub`, all with the same signature: a message that
+never arrived, and no counter that said so.
+
+**`flush()` permanently wedged a hub configured with `batchDelayMs > 0`**
+
+`flush()` cleared `_flushTimer` but not `_flushScheduled`, and the timer callback
+was the only other place that reset that flag — so clearing the timer removed the
+one thing that would have. Every later `publish` then short-circuited at
+`_scheduleFlush`, and the hub stopped flushing for the life of the object.
+
+Measured: publish, `flush()`, publish again, wait 100 ms — **0 frames sent**, 1
+still queued. What made it worth a P0 rather than a missed frame is the counters:
+`published` kept climbing, so a dashboard showed a live publisher, `delivered`
+froze, and **`dropped` never moved** — because the slow-consumer policy only runs
+in `_enqueue` and the message never reached a full queue. It reached a dead
+scheduler. Both counters this library's own guide tells you to alert on reported
+nothing wrong.
+
+The trigger is any `flush()` before a later `publish`, so tests and any
+timer-driven caller hit it. `batchDelayMs: 0` was never affected — it takes the
+`queueMicrotask` branch, whose callback _does_ reset the flag — and neither was
+`batch: false`, which never sets it. All three are now pinned.
+
+**`codec: 'raw'` silently discarded every message in a batch of two or more**
+
+`_flushSubscriber` splices the batch off the subscriber's queue _before_
+`_encodeBatch` runs, and `raw` cannot frame a batch boundary, so the throw
+discarded everything it had taken. Two `publish` calls in one microtask is the
+**default** `batch: true` path, so this was the normal case: measured
+`published: 2, delivered: 0, dropped: 0` — no counter moved, for two messages the
+caller published and the transport never saw.
+
+A subscriber that could coalesce more than one is now rejected at `subscribe()`,
+naming the option to change. The check is there rather than in the constructor
+because `maxBatch` is a per-subscriber option and the hub's default is 32:
+`raw` is legal, `maxBatch: 1` is the configuration the hub can honour, and
+`subscribe()` is the only place both facts are visible. Note that `batch: false`
+does **not** rescue the default, since the splice is unconditional.
+
+A payload that cannot be framed at all is now counted in `dropped` and reported
+through `onError`. Re-queuing it instead was the obvious fix and is wrong — an
+encode failure is permanent, so the retry spins and `flush()` never resolves.
+
+**`retain` never replayed, and publishing to an empty topic retained nothing**
+
+`publish(topic, msg, { retain: true })` wrote to an internal map that nothing ever
+read: it was consulted in exactly two places, its own write path and the detach
+path. A subscriber arriving after a retained publish got `[]`, while the option is
+documented as "keep the message for a subscriber that subscribes later". The
+existing test could not catch it — it asserts `seen.length <= 32` on a value that
+is structurally always `0`.
+
+Worse, `_retain` sat _below_ the `if (no subscribers) return 0` early return, so
+publishing into a topic nobody was listening to retained nothing at all — which is
+precisely the case the option exists for. Both are fixed; a replay goes through
+the same queue and the same slow-consumer policy as a live delivery, and does not
+increment `published`, because it is not a publication.
+
+Separately, detaching one subscriber emptied the retained log for the **whole
+topic**, so one subscriber leaving destroyed history every other live subscriber
+on that topic still depended on. The log is per topic and the detach is per
+subscriber; it is now released only when the last subscriber on that topic leaves,
+with `close()` clearing the rest.
+
+### From `remaining-findings.md` (patch)
+
+Three small gaps the ergonomics audit left open, all of them cases where the
+library accepted something it should have made reachable or refused.
+
+**`PowerSemaphore` exposes its gate's queue bound.** It built a `PowerPermitGate`
+that could queue without limit and proxied neither the bound nor whether it had
+been reached, so a caller using the class most people reach for could neither cap
+the queue nor observe it filling. `queueCapacity` is now an accepted option, with
+`get queueCapacity()` and `get isFull()` on the instance:
+
+    const sem = new PowerSemaphore({ limit: 1, queueCapacity: 1 });
+    // A third caller is refused with ERR_QUEUE_FULL and `queueCapacity: 1`
+    // rather than queued forever behind a bound it cannot see.
+
+**`PowerThrottle` and `PowerSlidingWindow` can be disposed.** These held clock
+state and no teardown, so — unlike every other long-lived helper here — they
+could not take part in `using` / `await using` or DI teardown. `PowerGCRA` already
+had it.
+
+Their `dispose()` is a **state reset, not a cancellation**: none of the three owns
+a timer, each refilling lazily from a stored timestamp. A spent bucket is dropped
+and recorded history cleared. The rule is now written into `AGENTS.md`, because the
+split is not self-evident — for a stateless value type the absence of `dispose()`
+is obviously right, so it reads as deliberate everywhere, including where it was
+not.
+
+**`Cache.startCleanup` accepts `{intervalMs}`.** It read only `.interval`, so
+`intervalMs` — the spelling about fifteen other options in this library use, and
+the one a caller reaching for the obvious name would write — was accepted and
+silently dropped, in a method whose entire job is reading its options. The cleanup
+then ran on the default interval the caller believed they had overridden. `interval`
+wins when both are given.
+
+Pinned in `test/powerSemaphore.test.js`, `test/limiterDispose.test.js` and
+`test/powerCache.extra.test.js`. The limiter dispose is mutation-checked, and the
+`using` test is a parse-time assertion — without the symbol that call site does
+not compile, which is the gap being closed.
+
+### From `strict-options.md` (major)
+
+BREAKING: an unknown constructor option now throws instead of being ignored
+
+Every helper silently ignored unrecognised option keys. This change makes that an
+error, naming the option, the class, and — where there is an obvious near miss —
+what was probably meant:
+
+    new PowerThrottle({ capacity: 10, refillRat: 5 })
+    // TypeError: PowerThrottle: unknown option `refillRat`.
+    //   Did you mean `refillRate`? Accepted options: capacity, now, refillRate, tokens.
+
+The error carries `code: 'ERR_UNKNOWN_OPTION'` and `option: '<key>'`, so a caller
+need not parse the message.
+
+Why this is the right trade
+
+The old tolerance was introduced in 9a1f9d5, when four inert options were removed,
+with sound reasoning: a caller already passing a removed option could not have
+been depending on behaviour that never existed, so ignoring the key cost nothing.
+That reasoning is correct for a **removed** option and does not cover a
+**misspelled** one, which is the common case and the one that reaches production:
+
+    new PowerThrottle({ capacity: 10, refillRat: 5 })
+
+builds a bucket that never refills. Nothing is thrown, nothing is warned, and the
+limiter is indistinguishable from a correct one until a request is refused in
+production.
+
+What it cost, measured
+
+Turning the check on for a commit found **nine tests across six classes** passing
+options that do not exist. Every one of those tests passed, and every one was
+asserting nothing — the helper behaved exactly as it would have with the option
+absent. Three passed _both_ the real option and a misspelling of it:
+
+    new PowerThrottle({ capacity: 10, windowMs: 1000, capacity: 10 })
+
+where `windowMs` is a `PowerSlidingWindow` option. Read as intent that is
+ambiguous — was the test exercising a window, or a throttle with a redundant
+capacity? — and that ambiguity, not the typo, is the real damage.
+
+The same defect had reached a guide: `guides/powerThrottle.md` documented
+`refillInterval`, removed in `9a1d9d5` because it was inert, as a live option with
+a default, while the generated types correctly omitted it. And two shipped
+examples set options that never existed — `maxWaitMs` on `PowerBatch` and
+`refillInterval` on `PowerThrottle`.
+
+## Migrating
+
+If you pass an option that no longer exists, the error names the class and the
+key. Either remove it, or — if it genuinely crosses a version boundary — strip it
+before constructing:
+
+    new PowerThrottle({ capacity: 10, ...pickKnown(opts, 'refillRate') })
+
+Falsy values are unaffected: `observability: false` still means "off", and a
+class with no options object still constructs as before.
+
+## Scope
+
+30 classes. The accepted set is derived from each class's published typedef, so a
+constructor and its `types/` declaration now agree by construction rather than by
+inspection — which is the property whose absence let the drifted spellings above
+through in the first place.
+
+Two of them accept keys that belong to a collaborator rather than to them:
+`PowerCache` also takes `keyResolver`, `cacheOptions`, `ttl` and `weight`, because
+`PowerMemoizer` forwards its own options straight into the cache it owns.
+
+### From `test-option-names.md` (patch)
+
+test: four classes' tests were passing option names that do not exist
+
+`PowerHistogram`, `PowerThrottle`, `PowerBulkhead` and `PowerCircuit` tests each
+passed an option the constructor does not have — `buckets`, `limit`, `size` and
+`resetTimeoutMs` respectively. Every one of those assertions passed, and every one
+of them was asserting nothing: unknown options were ignored, so the helper
+behaved exactly as it would with the option absent.
+
+Some were worse than inert. Three calls passed **both** the real option and a
+misspelling of it —
+
+    new PowerThrottle({ capacity: 10, windowMs: 1000, capacity: 10 })
+
+— where `windowMs` is a `PowerSlidingWindow` option. Reading that, the intent looks
+unclear: was the test exercising a window, or a throttle with a redundant
+capacity? The duplicate `capacity` is now gone and the cross-class `windowMs` with
+it, and the assertions around it are unchanged.
+
+This is the same defect class as the `refillInterval` row that shipped in
+`guides/powerThrottle.md`, found from the other end: a guide documenting an option
+the code does not have, and tests exercising options the code does not have. Both
+were invisible because unknown keys were silently ignored.
+
+Three more, in `test/disposal.test.js`, `test/invariants.test.js` and
+`test/powerPool.uncovered.test.js`:
+
+- `new PowerBackpressure({ highWaterMark: 2, lowWaterMark: 1, refillRate: 1 })` —
+  two invalid names in one call. The source reads `lowWaterMark` and
+  `refillAmount` (`powerBackpressure.js:77`); `highWaterMark` is a
+  `PowerWebSocketClient` option and `refillRate` a `PowerThrottle` one. Since the
+  test only needs a constructed resource-owner, the faithful translation is
+  `capacity: 2` with the two real options.
+- `{ maxSize: 10, maxWaitMs: 0 }` on `PowerBatch` — `maxWaitMs` is not an option
+  at all, and the tests call `flush()` explicitly, so the key was doing nothing.
+- `taskQueueEnabled: true` passed to `new PowerPool(...)` — the option is
+  `taskQueue`; `taskQueueEnabled` is the public property it sets
+  (`powerPool.js:478`). Assigning the property directly, which the same file does
+  elsewhere, remains correct.
+
+Found while attempting the corresponding strict-options change, which is not
+included here. Every case found is now fixed; the strict-options change itself is
+still to land, and is mechanical once these are.
