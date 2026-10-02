@@ -192,11 +192,28 @@ Extra options: `policy` (`'ewma'|'aimd'|'vegas'|'gradient2'`), `limitMin`, `limi
 Observability — `getStats().performance` gains:
 
 - `concurrencyLimit` — the controller's current limit, or `null` for the `ewma` policy.
-- `autoScalePolicy` — the active policy name, or `null` when autoscaling is off.
+- `autoScalePolicy` — the policy name **while its interval is ticking**, or `null` when no controller is running.
 - `congestion` — whether the controller currently believes it is over-provisioned.
+- `idleReapingActive` — whether the idle-worker reaper's interval is running.
 
 Notes:
 
+- **`autoScalePolicy: null` means "stopped", not "misconfigured".** Before 2.0 this
+  field reported the _stored configuration_, and `stopThePress(..., {
+recreateWorkers: false })` clears the interval without clearing the policy —
+  correctly, since a pool stopped and recreated gets a working controller again.
+  So a pool could report `autoScalePolicy: 'aimd'` with an interval that would
+  never fire again, and an operator reading it would conclude adaptation was
+  running. It now answers the only question it can answer honestly.
+- **`concurrencyLimit` is deliberately _not_ gated the same way**, and the
+  asymmetry is the point: it reports a _retained_ number. `_adaptiveLimit` keeps
+  its value when the controller stops, so the field stays true. Only
+  `autoScalePolicy` was making a claim about the present.
+- **`idleReapingActive` exists because nothing reported it at all.** The reaper's
+  interval is cleared by the same two calls, and neither is restorable, so a pool
+  can accumulate idle workers past `idleTimeout` for the rest of its life with no
+  signal in `getStats()`. It is independent of `autoScale` — with autoscaling off
+  there is no policy field to read, leaving nothing to notice a stopped reaper by.
 - `'aimd'` and `'vegas'` only move the limit once there is at least one latency sample. A pool that has never completed a task holds its seed value rather than guessing.
 - Vegas's `alpha`/`beta` scale with `log10(limit)`, so at small limits the queue estimate lands in a neutral band and the limit holds steady. It needs a limit above roughly 3 before it will step down. That is the algorithm's behaviour, not a stall.
 - `'gradient2'` has no queue-pressure term to grow from, so an idle pool with an empty queue correctly holds its limit steady. Depth is what drives it up.

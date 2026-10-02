@@ -6090,3 +6090,76 @@ asserted thing rather than an incidental.
 **Two of this file's own tests asserted the wrong thing, and one of them asserted the opposite of the row.** An early draft claimed a signal handed to `fn` "must still observe a later abort" after the attempt settled. It does not, deliberately — that is what detaching _means_, and keeping it wired is the retention being fixed. It is replaced by the property that actually matters and that fails if someone fixes the leak by never attaching: **the listener is live during each attempt and gone after it, on every attempt.** A second draft asserted `fn` receives `undefined` when no signal is given, having set a `totalTimeout` — which correctly failed, because a deadline creates its own controller and `fn` _should_ receive that signal. Both are now split into the two branches they actually describe.
 
 **GATE-001 caught the two new `catch` sites** and was right to: `/* ignore */` went to 21 against a ceiling of 19. Raising the ceiling would have been the wrong call — both sites carry a real reason. One is `AbortController#abort`, specified never to throw, so the catch exists for a partial polyfill and falls back to an argument-less abort rather than losing the cancellation. The other is the one that matters: **`detach` runs inside a `finally`, so a throw from `removeEventListener` would replace the attempt's real outcome** — the actual error, or the value the caller was waiting for — with a message about a broken `EventTarget`. The leak is a slow one; losing the error to fix it fast is a bad trade.
+
+## `PowerPool.getStats()` reports the controller that is running, not the one that was configured
+
+**`autoScalePolicy` no longer describes a controller that can never tick.**
+`_clearLifecycleIntervals()` nulls `_autoScaleInterval` but deliberately leaves
+`_autoScale` in place — the policy and its bounds are still the pool's
+configuration, and `recreateWorkers: true` starts the controller again from them.
+Reporting that config object therefore described the past. Reproduced on a real
+pool: after `stopThePress('stop', undefined, { recreateWorkers: false })`,
+`getStats()` reported `autoScalePolicy: 'aimd'` with `_autoScaleInterval` null. An
+operator reading that concludes adaptation is running, and would tune a controller
+that will never tick again. The field is now gated on the **interval** rather than
+the config, which is the only thing that distinguishes the two states.
+
+**`concurrencyLimit` is deliberately not gated the same way**, and the asymmetry
+is recorded rather than tidied: it reports `_adaptiveLimit`, a _retained_ number
+that keeps its value when the controller stops, so the field stays true. Only
+`autoScalePolicy` was making a claim about the present. A test asserts both
+together so the difference cannot be "simplified" into uniformity.
+
+**`idleReapingActive` is new, because nothing reported the reaper at all.** The
+row's second half. The reaper's interval is cleared by the same two calls and
+neither is restorable, so a pool can accumulate idle workers past `idleTimeout`
+for the rest of its life with no signal in `getStats()`. It is a boolean, and it
+is **independent of `autoScale`**: with autoscaling off there is no policy field
+left to read, so nothing at all would have revealed a stopped reaper.
+
+**11 tests, 3 mutants, all caught.** The two that matter are the _wrong_ gate and
+the _over-corrected_ one. Gating on `_autoScale` — the pre-fix code — fails 4;
+gating on something that also breaks the restart path fails 3, including the
+`recreateWorkers: true` case, so a fix that traded one wrong answer for the
+opposite one cannot pass; hardcoding `idleReapingActive` to `true` fails 2. Every
+policy name is checked rather than only `aimd`, since the defect was demonstrated
+on one policy and a gate written against that literal would lie about the rest.
+
+**One thing found while scoping this and deliberately left alone:**
+`_adaptiveLimit` is written by the controller and read by `getStats()`, and is
+**not read on the dispatch path** — so `concurrencyLimit` reports a number that
+appears to be enforced and may not be. That is a separate question from this row
+and changing it would alter a field consumers read today, so it is recorded here
+rather than fixed under POOL-007. It is worth its own row.
+
+## `maxReconnectAttempts` still defaults to `Infinity`, and 2.0 says so on purpose
+
+**GAP-010 is half shipped by decision, not by omission.** `maxReconnectElapsedMs`
+ships in 2.0 — the option, its validation, `stats().reconnectExhaustedBy` to say
+_which_ bound ended a run, the guide section, and a test. The row's other half is
+the **finite default**, and that is deferred to **3.0**. This entry exists so the
+release does not ship the anti-pattern silently:
+
+> `maxReconnectAttempts` and `maxReconnectElapsedMs` both default to `Infinity`,
+> which is the documented anti-pattern for an always-on connection: _"Should I
+> reconnect a WebSocket forever? No… Retrying forever wastes mobile battery and
+> server resources with no benefit."_
+
+**Set at least one bound explicitly.** An attempt count alone bounds nothing
+useful anyway: a peer that closes the connection the instant you accept it
+produces one attempt per second for as long as you tolerate it, which is what
+`maxReconnectElapsedMs` exists for.
+
+**Why the default is not the finite one in this release.** Turning it on closes
+sockets that currently stay open. For an always-on consumer that is a silent
+behaviour change — the socket a user believes is connected goes away on a network
+blip — and shipping that in a release whose headline is a set of options and
+documentation fixes would be the worst possible place to introduce it. The
+mitigation that _does_ ship is diagnostic: `reconnectExhaustedBy` reports
+`'attempts'`, `'elapsed'` or `null`, so an operator running the `Infinity` default
+can tell a peer that is refusing from an outage that outlived the budget, instead
+of both reading "reconnect failed".
+
+**Recorded as 🟡 rather than ✅ in the plan table**, so a partial row stays visible
+rather than being read as done. The remaining half is the 3.0 default change and
+nothing else.

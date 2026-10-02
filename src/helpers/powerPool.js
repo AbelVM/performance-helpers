@@ -3961,14 +3961,47 @@ export class PowerPool {
         averageTasksPerWorkerUntilTermination: avgTasksPerWorkerUntilTermination,
         timePerTask: { max, min, average, stddev },
         percentSlowTasks,
-        // Adaptive concurrency controller. `null` when autoScale is off or
-        // running the default 'ewma' policy, which has no concurrency limit.
+        // Adaptive concurrency controller.
+        //
+        // **`autoScalePolicy` is gated on the interval, not on the config object.**
+        // `_clearLifecycleIntervals()` nulls `_autoScaleInterval` but leaves
+        // `_autoScale` in place, because the policy and its bounds are still the
+        // pool's configuration and `recreateWorkers: true` must be able to start
+        // the controller again from them. Reporting the config therefore described
+        // a controller that **can never tick**: verified after
+        // `stopThePress(..., { recreateWorkers: false })`, which reported
+        // `autoScalePolicy: 'aimd'` with `_autoScaleInterval` null. An operator
+        // reading that would conclude adaptation was running. `null` means "no
+        // controller is ticking", which is the only question this field can answer
+        // honestly.
+        //
+        // `concurrencyLimit` is deliberately **not** gated the same way, and the
+        // difference is deliberate: it reports `_adaptiveLimit`, a stored number
+        // that keeps its value when the controller stops, so it stays true. The
+        // policy was a live claim and this is a retained one.
         concurrencyLimit:
           this._autoScale && this._autoScale.policy !== 'ewma'
             ? Math.round(this._adaptiveLimit * 100) / 100
             : null,
-        autoScalePolicy: this._autoScale ? this._autoScale.policy : null,
+        autoScalePolicy: this._autoScale && this._autoScaleInterval ? this._autoScale.policy : null,
         congestion: this._autoScale ? Boolean(this._congestion) : null,
+        // **Whether the idle reaper is actually running.** The reaper had no field
+        // at all, which is how POOL-007's second half stayed invisible: the
+        // interval is cleared by `stopThePress(..., { recreateWorkers: false })`
+        // and by `shutdown()`, and neither is restorable, so a pool can silently
+        // accumulate idle workers past `idleTimeout` for the rest of its life with
+        // nothing in `getStats()` to say so.
+        //
+        // **A plain boolean, deliberately.** An earlier draft of this comment
+        // claimed a tri-state — `null` for "never configured" against `false` for
+        // "configured and stopped" — which the code does not have and cannot have:
+        // the reaper is created unconditionally in the constructor, so there is no
+        // pool with no reaper, only pools whose reaper is stopped. A comment
+        // describing a state the value never takes is worse than none, and a
+        // reader branching on `=== null` would silently never match. `false` means
+        // "not running", full stop; `test/powerPool.lifecycleState.test.js` asserts
+        // the type so the value cannot drift into a tri-state later either.
+        idleReapingActive: this._reaperInterval !== null && this._reaperInterval !== undefined,
       },
       // Silent batch drops were invisible; this makes them countable.
       postFailures: this._postFailures,
