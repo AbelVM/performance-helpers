@@ -27,27 +27,28 @@ If you already know the exact helper you want, go straight to its dedicated guid
 
 ## Quick chooser
 
-| If your problem is...                                                 | Start here                                         | Add these when needed                                      | Do not start with                                            |
-| --------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------ |
-| Cache expensive values by key                                         | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function          |
-| Memoize a function call                                               | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control            |
-| Expire keys after a fixed TTL                                         | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights             |
-| Offload CPU-heavy or blocking work                                    | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control               |
-| Write code that runs on any runtime with a worker                     | `WorkerAgnostic`                                   | `PowerPool`                                                | runtime `if (typeof Worker)` branches                        |
-| Move structured values across a byte-stream transport                 | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary               |
-| Fan out to many subscribers without one slow client stalling the rest | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                           |
-| Push to a socket without unbounded client-side buffering              | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                      |
-| Handle an accepted socket without knowing which library produced it   | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler      |
-| Process a very large iterable in parallel                             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle          |
-| Smooth bursts from producers                                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                       |
-| Limit concurrent async work globally                                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block           |
-| Isolate noisy workloads from critical ones                            | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                        |
-| Enforce burst and sustained API quotas                                | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                           |
-| Retry flaky work safely                                               | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                  |
-| Stop retries amplifying an outage                                     | `PowerRetry` with a shared `PowerRetryBudget`      | `PowerCircuit`, `PowerDeadline`                            | `maxAttempts` alone, which caps nothing across traffic       |
-| Cut a p99 far above your p50                                          | `PowerRetry` with `hedgeDelay`                     | `PowerDeadline`                                            | raising `maxAttempts`, which costs retries, not tail latency |
-| Put a hard time budget on work                                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                             |
-| Broadcast events across components                                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure  |
+| If your problem is...                                                 | Start here                                         | Add these when needed                                      | Do not start with                                                       |
+| --------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| Cache expensive values by key                                         | `PowerCache`                                       | `PowerPool`, `PowerEventBus`, `PowerDeadline`              | `PowerMemoizer` if you are not memoizing a function                     |
+| Memoize a function call                                               | `PowerMemoizer`                                    | `PowerRetry`, `PowerDeadline`                              | `PowerCache` unless you need direct cache control                       |
+| Expire keys after a fixed TTL                                         | `PowerTimedCache` or `PowerTTLMap`                 | `PowerLogger`                                              | `PowerCache` unless you also need LRU or weights                        |
+| Offload CPU-heavy or blocking work                                    | `PowerPool`                                        | `PowerCache`, `PowerQueue`, `PowerEventBus`, `PowerBuffer` | `PowerChunker` if you need real worker control                          |
+| Write code that runs on any runtime with a worker                     | `WorkerAgnostic`                                   | `PowerPool`                                                | runtime `if (typeof Worker)` branches                                   |
+| Move structured values across a byte-stream transport                 | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary                          |
+| Fan out to many subscribers without one slow client stalling the rest | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                                      |
+| Push to a socket without unbounded client-side buffering              | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                                 |
+| Handle an accepted socket without knowing which library produced it   | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
+| Find out whether this build supports `WebTransport` at all            | `detectWebTransportSupport()`                      | —                                                          | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
+| Process a very large iterable in parallel                             | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
+| Smooth bursts from producers                                          | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                                  |
+| Limit concurrent async work globally                                  | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block                      |
+| Isolate noisy workloads from critical ones                            | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                                   |
+| Enforce burst and sustained API quotas                                | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                                      |
+| Retry flaky work safely                                               | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                             |
+| Stop retries amplifying an outage                                     | `PowerRetry` with a shared `PowerRetryBudget`      | `PowerCircuit`, `PowerDeadline`                            | `maxAttempts` alone, which caps nothing across traffic                  |
+| Cut a p99 far above your p50                                          | `PowerRetry` with `hedgeDelay`                     | `PowerDeadline`                                            | raising `maxAttempts`, which costs retries, not tail latency            |
+| Put a hard time budget on work                                        | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                                        |
+| Broadcast events across components                                    | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure             |
 
 `PowerEventBus` is **intra-process**. It is not a cross-tab or cross-worker bus,
 and reaching for a platform broadcast primitive to extend it is slower, unbounded,
@@ -611,6 +612,13 @@ a socket somebody else accepted, and the other two sit between them.
   handler written for one transport simply never fires against another. Wrap the accepted socket
   once and add liveness, per-message rate limiting, and a graceful `drain()`. There is no WebSocket
   server in this package, and there should not be — use `ws`.
+- `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing
+  any `WebTransport` branch, and note it is detection only — there is no WebTransport transport in
+  this package. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
+  reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so a build can
+  expose one and still throw from it. Every non-Baseline surface defaults to `false` rather than
+  optimistic `true`, and the probe opens no connection — so the instance-level answers
+  (`datagrams`, `createWritable`, `byob`) are `false` unless you pass a live transport in.
 
 Reach for the framed codec when the transport carries bytes (WebSocket, file, HTTP body), and
 `encodeNative` when it is an in-process message port. Reach for the hub before writing

@@ -42,43 +42,8 @@ import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { READY_STATE } from './constants.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
-
-/**
- * Byte length of a frame, whichever of the shapes the platform hands us.
- *
- * A `message` event carries a `Blob` for binary frames by default and an
- * `ArrayBuffer` or `Uint8Array` once `binaryType` is set — so a size check that
- * assumed one shape would either miss `Blob`s entirely or force an awaited
- * `arrayBuffer()` on every frame just to read `.size` off it. All three shapes
- * expose a length synchronously, so the check is always non-blocking.
- *
- * @param {any} data
- * @returns {number} Bytes, or `0` when the shape carries no readable length.
- */
-function byteLengthOf(data) {
-  if (data == null) return 0;
-  if (typeof data.byteLength === 'number') return data.byteLength;
-  if (typeof data.size === 'number') return data.size;
-  if (typeof data.length === 'number') return data.length;
-  return 0;
-}
-
-/**
- * The error reported for a frame over `maxPayloadSizeBytes`.
- *
- * @param {number} size - The frame's length in bytes.
- * @param {number} limit - The configured limit.
- * @param {string} className - Reporting class, for a message that says where.
- * @returns {Error}
- */
-function oversizedFrameError(size, limit, className) {
-  return new Error(
-    `${className}: received a ${size}-byte frame, over the maxPayloadSizeBytes limit of ${limit}. ` +
-      'This is detection, not prevention — the frame was already received and buffered before ' +
-      'this was checked, so the limit reports what arrived rather than stopping it. Bound the ' +
-      'payload at the peer that produces it.'
-  );
-}
+import { frameByteLength } from '../utils/frameSize.js';
+import { oversizedFrameError } from '../utils/errors.js';
 
 /** @typedef {'connecting'|'open'|'closing'|'closed'} WebSocketReadyState */
 
@@ -937,7 +902,7 @@ export class PowerWebSocketClient {
     // in `stats()` and in your logs, and `_counters.oversizeFrames` makes it
     // alertable. The prevention belongs at the edge that owns the bytes — the
     // server, or a proxy in front of it.
-    const size = byteLengthOf(data);
+    const size = frameByteLength(data);
     // `0` disables the check, the same convention `highWaterMarkBytes: 0` uses
     // in this class. The first draft took `min: 0` as "accepted" and documented
     // it as "no check", which is the opposite of what `size > 0` does for every
@@ -947,7 +912,7 @@ export class PowerWebSocketClient {
       this._counters.oversizeFrames += 1;
       this._emit(
         'error',
-        oversizedFrameError(size, this._maxPayloadSizeBytes, 'PowerWebSocketClient')
+        oversizedFrameError('PowerWebSocketClient', size, this._maxPayloadSizeBytes)
       );
     }
 

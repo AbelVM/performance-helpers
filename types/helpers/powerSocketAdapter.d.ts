@@ -71,6 +71,7 @@ export class PowerSocketAdapter {
     _heartbeatTimeoutMs: number;
     _idleTimeoutMs: number;
     _drainTimeoutMs: number;
+    _maxPayloadSizeBytes: number;
     /** @type {PowerSlidingWindow|null} */
     _limiter: PowerSlidingWindow | null;
     _state: any;
@@ -116,6 +117,7 @@ export class PowerSocketAdapter {
         drained: number;
         drainTimeouts: number;
         drainedFromDrain: number;
+        oversizeFrames: number;
     };
     _metrics: {
         unregister: () => boolean;

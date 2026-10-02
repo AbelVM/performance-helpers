@@ -11,4 +11,5 @@
 - [formatErrorObj](functions/formatErrorObj.md)
 - [isError](functions/isError.md)
 - [normalizeError](functions/normalizeError.md)
+- [oversizedFrameError](functions/oversizedFrameError.md)
 - [queueFullError](functions/queueFullError.md)

@@ -89,6 +89,10 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 > **messages**: `number` = `0`
 
+#### oversizeFrames
+
+> **oversizeFrames**: `number` = `0`
+
 #### rateLimited
 
 > **rateLimited**: `number` = `0`
@@ -200,6 +204,12 @@ A Node `ws` socket, a browser `WebSocket`, or a
 ### \_limiter
 
 > **\_limiter**: [`PowerSlidingWindow`](../../powerSlidingWindow/classes/PowerSlidingWindow.md) \| `null`
+
+***
+
+### \_maxPayloadSizeBytes
+
+> **\_maxPayloadSizeBytes**: `number`
 
 ***
 

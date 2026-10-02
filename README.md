@@ -84,6 +84,17 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 - [PowerSocketAdapter: One interface over three socket models](guides/powerSocketAdapter.md). Normalise a Node `ws` socket, a browser `WebSocket`, or a `WebSocketStream` behind one API. They are genuinely incompatible — a `ws` `message` handler receives `(data, isBinary)`, an `EventTarget` one receives an event object, and a `WebSocketStream` has neither `on`, `readyState`, nor `bufferedAmount` — and the mismatches fail silently. Adds socket-level liveness, per-message rate limiting, and a graceful `drain()` for shutdown. The server-side counterpart to the client above; there is no WebSocket server here, and there should not be.
 
+- [WebTransport feature detection](guides/webTransportSupport.md). `detectWebTransportSupport()` — a pure probe for what a build actually supports, with no connection opened. Three of the surfaces it reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so `reliableOnly` is the one flag to branch on: it is `true` only when every surface present is Baseline.
+
+  ```javascript
+  const support = detectWebTransportSupport();
+  if (support.available && support.reliableOnly) {
+    // safe to depend on
+  }
+  ```
+
+  Presence and usability are tracked separately, because a Limited-availability `getStats()` can exist and still throw — and a build carrying one is not a build to gate on.
+
 ## Logging
 
 - [PowerLogger: Gated logging](guides/powerLogger.md). Simple runtime debug gate and in-memory counters useful for lightweight instrumentation and tests.

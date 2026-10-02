@@ -519,8 +519,6 @@ export {};
  *   metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Off by default, so the common case allocates nothing.
  *   See `guides/metrics.md`.
- *   from the socket's capabilities by default; pass it only to override a
- *   misdetection.
  * @property {function(PowerSocketAdapterMessage): (void|Promise<void>)} [onMessage] -
  *   Called for each accepted inbound message. A returned promise is awaited
  *   for {@link PowerSocketAdapter#drain}, and a rejection is routed to
@@ -535,6 +533,22 @@ export {};
  * @property {number} [idleTimeoutMs=0] - Declare the socket dead if nothing at
  *   all arrives for this long. `0` disables. This is the liveness signal
  *   available on transports with no `ping()`.
+ * @property {number} [maxPayloadSizeBytes=Infinity] - Inbound frames larger than
+ *   this are **reported, not prevented**, and the distinction is the point. By the
+ *   time any transport delivers a frame the platform has already received and
+ *   materialised it, so this option **counts** it (`stats().oversizeFrames`) and
+ *   emits an `error` naming the size and the limit. It is observability, not a
+ *   guard — a number that reads like a limit and is not one is worse than no
+ *   number. Bound the payload at the peer that produces it.
+ *
+ *   This is the same option, with the same `0`-disables convention, that
+ *   {@link import('./powerWebSocketClient.js').WebSocketClientOptions.maxPayloadSizeBytes}
+ *   offers on the client. Both helpers report through the same error factory so
+ *   one handler can serve both directions.
+ *
+ *   A **text** frame is measured in UTF-16 code units rather than UTF-8 bytes,
+ *   because an exact figure would cost a `TextEncoder` per frame. Binary frames
+ *   — the ones this exists for — are measured exactly.
  * @property {{limit:number, windowMs:number}} [rateLimit] - Per-socket inbound
  *   rate limit. Omitted means no limit.
  * @property {'drop'|'close'} [rateLimitAction='drop'] - What to do with a

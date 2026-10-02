@@ -92,6 +92,7 @@ The `ws` test requires `send` as well as `on`, because `on` alone matches every 
 | `heartbeatIntervalMs` |                          `number` |     `30000` | Send a ping at this interval. `0` disables.                                                                                                                        |
 | `heartbeatTimeoutMs`  |                          `number` |     `10000` | Declare the socket dead if no pong or message arrives in this long. `0` disables.                                                                                  |
 | `idleTimeoutMs`       |                          `number` |         `0` | Declare the socket dead if nothing at all arrives for this long. `0` disables.                                                                                     |
+| `maxPayloadSizeBytes` |                          `number` |  `Infinity` | Report inbound frames over this size — **detection, not prevention**, see below. `0` disables the report.                                                          |
 | `rateLimit`           |             `{ limit, windowMs }` | `undefined` | Per-socket inbound rate limit. Omitted means no limit.                                                                                                             |
 | `rateLimitAction`     |               `'drop' \| 'close'` |    `'drop'` | What to do with a rate-limited message. `close` uses code 1008.                                                                                                    |
 | `drainTimeoutMs`      |                          `number` |      `5000` | How long `drain()` waits for in-flight handlers before closing anyway. `0` waits indefinitely.                                                                     |
@@ -143,6 +144,31 @@ new PowerSocketAdapter(ws, {
 
 Rate-limited messages are **counted**, not delivered, and never reach `onMessage`.
 
+## Oversized frames: detection, not prevention
+
+```javascript
+new PowerSocketAdapter(ws, {
+  maxPayloadSizeBytes: 1 << 20, // 1 MiB
+  onError: (err) => {
+    if (err.code === 'ERR_FRAME_TOO_LARGE') {
+      metrics.increment('ws.frame.oversize', { size: err.size });
+    }
+  },
+});
+```
+
+**Read the option name as what it is.** By the time any transport hands you a frame, the platform has already received and materialised it. A `ws` socket has allocated the `Buffer`; a browser has the `Blob`. Nothing at this layer can stop that allocation, so `maxPayloadSizeBytes` **counts** the frame (`stats().oversizeFrames`) and emits an `error` naming the size and the limit — and then handles the frame exactly as it would have handled any other.
+
+That is why it is described this way in the option, in the error message, and here. A number that reads like a limit and is not one is worse than no number, because a deployment sets it, believes it is protected, and is not. **Prevention belongs at the peer that produces the frame** — the server, or a proxy in front of it.
+
+Three things worth knowing about the semantics:
+
+- **`0` disables the report**, the same convention `idleTimeoutMs: 0` and the client's `highWaterMarkBytes: 0` use. The limit is inclusive: a frame exactly at the limit is not over it.
+- **The check runs before the drain and rate-limit filters**, so `oversizeFrames` answers _what arrived_ rather than _what survived two filters_. An oversized frame the rate limit then refuses is counted in **both** counters, and that is deliberate: folding it into `rateLimited` would hide the peer sending 40 MB frames, which is the exact fact this option exists to make alertable.
+- **A text frame is measured in UTF-16 code units, not UTF-8 bytes.** An exact figure would cost a `TextEncoder` per frame on the hot path. Binary frames — the ones this is for — are measured exactly.
+
+The error carries a stable `code` and both figures, so you branch on `err.code` rather than parsing text. `PowerWebSocketClient` reports through the same factory with the same wording, so one `onError` handler can serve both directions.
+
 ## Graceful drain
 
 `drain()` is the difference between a deploy that drops a thousand in-flight requests and one that does not.
@@ -187,6 +213,7 @@ using adapter = new PowerSocketAdapter(ws, handlers);
   handled,         // frames that actually reached onMessage
   rateLimited, sent, sendFailures, backpressureEvents,
   heartbeatTimeouts, idleTimeouts, drained, drainTimeouts, drainedFromDrain,
+  oversizeFrames,  // frames over maxPayloadSizeBytes — counted, not dropped
   kind,          // 'ws' | 'websocket' | 'stream'
   state,         // a READY_STATE constant
   canPing,       // whether the transport exposes ping()
@@ -197,6 +224,8 @@ using adapter = new PowerSocketAdapter(ws, handlers);
 ```
 
 `messages` and `handled` are separate on purpose. `messages` is every frame that arrived, so it includes the ones the rate limiter refused; `handled` is what your application actually processed. Without the split you cannot compute the fraction of inbound traffic you really served, which is the number you need when deciding whether a rate limit is set correctly — and `handled + rateLimited + drainedFromDrain === messages` always holds, which is worth asserting in your own metrics.
+
+`oversizeFrames` does **not** enter that identity, and that is the point: an oversized frame is reported and then handled normally, so counting it as a drop would both break the identity and misrepresent a report as a filter. A frame can be counted in `oversizeFrames` _and_ in `rateLimited`, or in `oversizeFrames` _and_ `drainedFromDrain`.
 
 `canPing` is the field worth alerting on together with `heartbeatTimeouts`: a socket family that can never heartbeat is worth knowing about at configuration time rather than discovering when a stale connection serves 100 % errors.
 

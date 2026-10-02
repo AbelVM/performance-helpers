@@ -35,6 +35,8 @@ import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+import { frameByteLength } from '../utils/frameSize.js';
+import { oversizedFrameError } from '../utils/errors.js';
 import { PowerSlidingWindow } from './powerSlidingWindow.js';
 import { MS_PER_SEC, READY_STATE } from './constants.js';
 
@@ -188,6 +190,7 @@ export class PowerSocketAdapter {
         'heartbeatIntervalMs',
         'heartbeatTimeoutMs',
         'idleTimeoutMs',
+        'maxPayloadSizeBytes',
         'rateLimit',
         'rateLimitAction',
         'drainTimeoutMs',
@@ -204,6 +207,7 @@ export class PowerSocketAdapter {
       heartbeatIntervalMs = 30_000,
       heartbeatTimeoutMs = 10_000,
       idleTimeoutMs = 0,
+      maxPayloadSizeBytes = Number.POSITIVE_INFINITY,
       rateLimit = null,
       rateLimitAction = 'drop',
       drainTimeoutMs = 5_000,
@@ -262,6 +266,22 @@ export class PowerSocketAdapter {
       min: 0,
       fallback: 5_000,
     });
+    // RT-009: the server-side counterpart of the client's same-named option.
+    // Deliberately *detection*, not prevention — see the typedef and the error
+    // text, which say so in the same words the client uses so one `onError`
+    // handler can serve both directions without special-casing.
+    //
+    // `0` disables the check, matching `highWaterMarkBytes: 0` in the client and
+    // `idleTimeoutMs: 0` here. `assertLimitRequired`'s `fallback` would paper
+    // over a bad value instead of reporting it, and the client's version is
+    // validated the same way, so the two cannot disagree about what a typo means.
+    this._maxPayloadSizeBytes = assertLimitRequired(maxPayloadSizeBytes, {
+      name: 'maxPayloadSizeBytes',
+      className: 'PowerSocketAdapter',
+      min: 0,
+      allowInfinity: true,
+      fallback: Number.POSITIVE_INFINITY,
+    });
 
     /** @type {PowerSlidingWindow|null} */
     this._limiter = null;
@@ -315,6 +335,14 @@ export class PowerSocketAdapter {
       drained: 0,
       drainTimeouts: 0,
       drainedFromDrain: 0,
+      // RT-009: frames received over `maxPayloadSizeBytes`. A count rather than a
+      // rejection, because by this point the platform has already materialised the
+      // frame — see the option's documentation. Counted *before* the drain and
+      // rate-limit checks, so it answers "what arrived" rather than "what
+      // survived two filters": an oversized frame refused by the rate limit is
+      // both an oversize and a rate-limited frame, and folding it into the latter
+      // would hide the peer sending 40 MB frames.
+      oversizeFrames: 0,
     };
 
     this._attach();
@@ -759,6 +787,17 @@ export class PowerSocketAdapter {
     this._resetIdleTimer();
     this._handlePong();
     this._counters.messages += 1;
+    // RT-009, before the drain and rate-limit filters and before `onMessage`.
+    // The frame is reported and then handled exactly as it would have been —
+    // detection, not prevention — so the option cannot be mistaken for a filter
+    // by reading only the counter.
+    const frameSize = frameByteLength(data);
+    if (this._maxPayloadSizeBytes > 0 && frameSize > this._maxPayloadSizeBytes) {
+      this._counters.oversizeFrames += 1;
+      this._emitError(
+        oversizedFrameError('PowerSocketAdapter', frameSize, this._maxPayloadSizeBytes)
+      );
+    }
     if (this._draining) {
       // Counting a dropped message is the whole point of a drain: the number
       // is what tells you whether the timeout was generous enough.

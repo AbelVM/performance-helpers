@@ -5577,17 +5577,35 @@ optional argument rather than reading globals directly, which is both why it is
 testable on Node — where there is no `WebTransport` to probe — and why the
 absence cases above are meaningful rather than merely unreachable.
 
+**The function shipped without a word of documentation, and that is now fixed.**
+It was exported, tested, and mentioned in no guide, not in the README, not in
+`metaGuide.md`, and not in `assets/5_Realtime.md` — so a user who found the
+export had no way to learn that three of its seven fields are not Baseline, which
+is the entire reason to call it. `guides/webTransportSupport.md` is new, wired
+into the README's Realtime section, the realtime asset index, both the prose
+family list and the quick-chooser table in `guides/metaGuide.md`, and `llm.txt`.
+Every behavioural claim in it was re-verified against the function by probe
+before the row was closed rather than restated from the JSDoc, including the two
+that would be got wrong: a **throwing `getStats()` reports `stats: false` and
+`reliableOnly: false`**, because presence is what the conservative flag is
+computed from; and `byob` reads `incomingHighWaterMark` off the **transport**,
+where a probe with it on the stream reports `false`. The scope limit is stated in
+the guide, the index and here rather than left implicit: **detection only** —
+there is no WebTransport _transport_ in this package, so the row's prohibition
+holds vacuously today and is recorded as a requirement on whoever adds one.
+
 ## Payload size: detection at the transport, safety already in the codec
 
-**Added `maxPayloadSizeBytes` to `PowerWebSocketClient`, documented as detection
-rather than prevention.** The row's requirement is not a guard but an honest
-label, and the distinction is the deliverable: by the time a `message` event
-fires the platform has already received and materialised the whole frame, so
-nothing at this layer can stop that allocation. The option therefore counts the
-oversized frame (`stats().oversizeFrames`), emits an `error` saying what arrived,
-and lets the frame through. A number that reads like a limit and is not one is
-worse than no number at all, so it is described that way in the option, in the
-error message, and in the guide.
+**Added `maxPayloadSizeBytes` to `PowerWebSocketClient` and
+`PowerSocketAdapter`, documented as detection rather than prevention.** The row's
+requirement is not a guard but an honest label, and the distinction is the
+deliverable: by the time a `message` event fires — or, on the server, by the time
+the adapter is handed a frame — the platform has already received and materialised
+it, so nothing at this layer can stop that allocation. The option therefore counts
+the oversized frame (`stats().oversizeFrames`), emits an `error` saying what
+arrived, and lets the frame through. A number that reads like a limit and is not
+one is worse than no number at all, so it is described that way in the option, in
+the error message, and in both guides.
 
 The prevention belongs at the peer that produces the frame.
 
@@ -5608,11 +5626,41 @@ decoder cannot, because more bytes may still be arriving — so it buffers and
 waits, and the safety comes from `maxFrameBytes` refusing to be omitted rather
 than from a default.
 
-**The row's "both helpers" does not match the tree, and there is one boundary,
-not two.** `PowerWebSocketClient._handleMessage` is the only transport inbound
-path: `PowerRealtimeHub` is outbound-only and decodes nothing, and the
-`decodeMessage` references in `powerPool` and `powerChunking` are in JSDoc
-examples and comments. The detection is implemented where the boundary is.
+**The row's "both helpers" was read as "two transports" and that reading was
+wrong — a correction, because the wrong version was in an earlier draft of this
+file.** The claim here was that `PowerWebSocketClient._handleMessage` is the
+only transport inbound path, so there was one boundary and not two. **There are
+two.** `PowerSocketAdapter._handleMessage` is the second, and it is the more
+interesting of the pair: the adapter is the **server-side** helper, it wraps a
+socket somebody else accepted, and an oversized inbound frame from a client is
+exactly the case the option is for. `PowerRealtimeHub` really is outbound-only
+and decodes nothing, and the `decodeMessage` references in `powerPool` and
+`powerChunking` really are JSDoc examples — that part was right, and it is why
+the hub is not a third site. So `maxPayloadSizeBytes` now exists on **both**
+helpers, and the detection is where the boundaries are.
+
+**The two implementations are one implementation, not two copies.**
+`frameByteLength()` lives in `src/utils/frameSize.js` and `oversizedFrameError()`
+in `src/utils/errors.js`, shared by both, for the reason `READY_STATE` already
+lives in `constants.js`: the adapter deliberately does not import the client, so
+a copied helper is free to drift. The error gained a stable
+`code: 'ERR_FRAME_TOO_LARGE'` plus `size` and `limit`, because that is the shape
+`queueFullError` already returns and a caller should not have to parse text — one
+condition, one error, written once, with the same wording in both directions so a
+single `onError` handler can serve them without special-casing.
+
+**The adapter's check sits above the drain and rate-limit filters, and that
+placement is the substantive decision.** `oversizeFrames` has to answer _what
+arrived_. A frame can be counted in `oversizeFrames` **and** `rateLimited`, or in
+`oversizeFrames` **and** `drainedFromDrain`, and folding it into the second would
+hide the peer sending 40 MB frames — the exact fact the option exists to make
+alertable. It also means `oversizeFrames` deliberately stays out of the adapter's
+documented identity `handled + rateLimited + drainedFromDrain === messages`, and
+the guide says so rather than leaving a reader to wonder why a fourth counter
+breaks the sum. The client's existing tests are in the same file as the 10 above;
+the adapter's 11 are separate, and the two ordering cases were **mutation-checked
+by moving the check below both filters**, which fails exactly those two and
+nothing else — the evidence that they are not decoration.
 
 Two `docs:claims`-relevant details the option carries: the length is read from
 whichever shape the platform hands over — a `message` event carries a `Blob` for
@@ -5845,3 +5893,46 @@ the no-`await` invariant the pre-flight depends on is pinned by
 in the plan, which is how a refuted premise got re-asserted as an open P1. The
 `reset()` work found the same shape twice more — 19 implementations of `reset()`
 across six meanings where the row recorded four across three.
+
+## Reconciling the plan table with the tree, and a lost-update window
+
+**Seven rows had work that landed and were never closed** — RT-006, RT-009,
+RT-018, POOL-008, GAP-010, GAP-016 and WT-001 — each sitting at ⬜ with a note
+describing the code as absent. That is the failure mode the review itself calls
+worse than a missing row, because it sends the next reader to rebuild something
+already built. Each was re-verified against the live source before its status was
+touched, not read off the commit message: GAP-016's "narrow the guarantee" was
+found already resolved in JSDoc with a test pinning it; GAP-010 was recorded as
+**🟡 rather than closed**, because `maxReconnectElapsedMs` shipped and the finite
+default it also asks for did not — that half is the row's own 3.0 deferral, and
+turning it on silently would close sockets that currently stay open.
+
+**The guard written to catch this did not catch any of it.**
+`scripts/review-row.mjs` reports a stale row by matching `Done.` / `Done,` in the
+note. All seven notes had simply never been edited, so there was no such token to
+match — the guard matched nothing across the whole table, and its documented
+history ("RT-005 sat that way for four commits") is not evidence that it works.
+It has never been observed failing on a real defect, which is the condition this
+project treats as disqualifying.
+
+**One row was also structurally damaged and had to be repaired before any of
+this could be read.** WT-006 was missing its trailing cell delimiter, so it
+parsed as 7 columns rather than 8, and its closure note was pasted twice with the
+second copy missing its first 82 characters — the botched-append shape that loses
+content in a table. Restored by index arithmetic on the single affected line and
+verified against a full-file diff, rather than by pattern replacement over the
+file, which is how the earlier drafts of this table were lost.
+
+**`scripts/close-review-row.mjs` now refuses to write if the file changed
+underneath it.** It reads a 465 KB file, edits one line, and writes the whole
+thing back with no lock, so two sessions editing the same table can silently
+discard each other's closures — and `review.md` is gitignored, so `git checkout`
+cannot undo a clobber. That is not hypothetical: a concurrent sweep's edits
+(CACHE-018, CACHE-019, five `BC-*` rows flipped to ❌, a new §8 block) survived
+alongside six of this session's closures only by luck of interleaving. The
+script now stats the file before the read and again before the write, and exits
+non-zero rather than overwriting. **Mutation-checked by widening the
+read-to-write window by 400 ms and appending inside it:** the run exits 1, the
+concurrent write is preserved, and the target row is left untouched. A size
+change alone is not trusted — a same-length edit is possible, so mtime is
+compared too.

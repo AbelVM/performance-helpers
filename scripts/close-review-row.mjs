@@ -15,7 +15,7 @@
  * @module scripts/close-review-row
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { buildRow, splitRow, COLUMNS } from './review-row.mjs';
@@ -36,6 +36,21 @@ if (!id || !note) {
   process.exit(2);
 }
 
+// Read, edit one line, write the whole 465 KB file back — with no lock. That is
+// a lost-update window, and it is not hypothetical: `review.md` is gitignored
+// (so `git checkout` cannot undo a clobber) and more than one session has been
+// editing it, which is how a concurrent sweep's rows survived alongside this
+// one's only by luck of interleaving.
+//
+// The stat is taken **before** the read and re-taken **after** the edit, so a
+// write that landed in between is caught rather than silently overwritten. It
+// is a cheap optimistic-concurrency check, and it converts a silent data loss
+// into a loud failure — the same principle as `review-row.mjs` making a stale
+// status loud. A size change alone is not trusted: a same-length edit is
+// possible, so mtime is compared too, and mtime resolution means a write inside
+// the same tick can slip past — which is why the failure message tells the
+// caller to re-read and re-apply rather than to retry blindly.
+const before = statSync(REVIEW);
 const lines = readFileSync(REVIEW, 'utf8').split('\n');
 const idx = lines.findIndex((l) => l.startsWith(`| ${id} |`));
 if (idx === -1) {
@@ -72,5 +87,18 @@ lines[idx] = buildRow({
   effort: unescape(effort),
   note: merged,
 });
+// Re-check before writing, not after: by the time a post-write stat runs the
+// damage is already on disk.
+const after = statSync(REVIEW);
+if (after.mtimeMs !== before.mtimeMs || after.size !== before.size) {
+  console.error(
+    `close-review-row: ${id} NOT written — review.md changed underneath this run ` +
+      `(mtime ${before.mtimeMs} -> ${after.mtimeMs}, size ${before.size} -> ${after.size}). ` +
+      'Another writer is active. Re-read the row and re-run; do not retry blindly, because ' +
+      'the other session may have closed it already.'
+  );
+  process.exit(1);
+}
+
 writeFileSync(REVIEW, lines.join('\n'));
 console.log(`close-review-row: ${id} -> ${status}`);

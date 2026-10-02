@@ -148,9 +148,49 @@ An unexpected close triggers reconnection with **decorrelated-jitter** backoff (
 - A successful open resets the counter and the backoff.
 - `close()` sets a user-initiated flag, so it never reconnects.
 
+### Bounding a reconnect run
+
+An attempt _count_ alone bounds nothing useful: a peer that closes the connection the instant you accept it produces one attempt per second for as long as you tolerate it. `maxReconnectElapsedMs` is the wall-clock ceiling on a single reconnect run, and the two compose — whichever is reached first stops the run.
+
+```javascript
+new PowerWebSocketClient({
+  url,
+  maxReconnectAttempts: 10,
+  maxReconnectElapsedMs: 120_000, // 2 minutes, then stop
+});
+```
+
+When a run ends because a bound was reached, `stats().reconnectExhaustedBy` says **which** one — `'attempts'` or `'elapsed'`, and `null` while reconnection has not been stopped. They mean different things to whoever is alerting: a run stopped by a count suggests the peer is refusing, one stopped by the clock suggests the outage outlived the budget. Without the distinction both read as "reconnect failed".
+
+Both default to `Infinity`, which is the documented anti-pattern for an always-on connection: _"Should I reconnect a WebSocket forever? No… Retrying forever wastes mobile battery and server resources with no benefit."_ The finite defaults are a **3.0** change, because turning them on by default closes sockets that currently stay open — a behaviour change this release does not make silently. Set at least one bound explicitly.
+
 ## Connect timeout
 
 `connectTimeoutMs` (default 10 s) aborts an attempt that never completes, rejecting with `ERR_WS_CONNECT_TIMEOUT`. Without it, a silently-failing DNS or a black-holed TCP connect hangs the promise forever.
+
+## Oversized frames: detection, not prevention
+
+```javascript
+const client = new PowerWebSocketClient({
+  url,
+  maxPayloadSizeBytes: 1 << 20, // 1 MiB
+  onError: (err) => {
+    if (err.code === 'ERR_FRAME_TOO_LARGE') {
+      metrics.increment('ws.frame.oversize', { size: err.size });
+    }
+  },
+});
+```
+
+**Read the option name as what it is.** By the time a `message` event fires, the platform has already received and materialised the whole frame — a `Blob` in a browser, an `ArrayBuffer` once `binaryType` is set. Nothing at this layer can stop that allocation, so `maxPayloadSizeBytes` **counts** the frame (`stats().oversizeFrames`) and emits an `error` naming the size and the limit, then decodes and delivers it as usual.
+
+That is why it is described this way in the option, in the error message, and here. A number that reads like a limit and is not one is worse than no number, because a deployment sets it, believes it is protected, and is not. **Prevention belongs at the peer that produces the frame.**
+
+`0` disables the report, the same convention `highWaterMarkBytes: 0` uses, and the limit is inclusive — a frame exactly at the limit is not over it. A **text** frame is measured in UTF-16 code units rather than UTF-8 bytes, because an exact figure would cost a `TextEncoder` per frame; binary frames, the ones this is for, are exact.
+
+**The codec is safe regardless, which is a separate fact and worth not conflating.** `decodeMessage` validates a declared payload length against the bytes actually present _before_ slicing, so a frame lying about its size throws rather than reserving anything, and the payload is a view rather than a copy. The incremental decoder's `createFrameDecoder({ maxFrameBytes })` is **required** rather than defaulted, because a peer that sends a header and then stops would otherwise pin its buffer at whatever size it named.
+
+`PowerSocketAdapter` carries the same option with the same wording and the same error factory, so one `onError` handler can serve both directions.
 
 ## API
 
@@ -160,7 +200,7 @@ An unexpected close triggers reconnection with **decorrelated-jitter** backoff (
 - `close(code = 1000, reason = '')` / `[Symbol.dispose]()`.
 - `on(type, handler)` → one-shot unsubscribe; `off(type)`. Types: `message`, `open`, `close`, `error`, `pause`, `resume`. One handler per event; registering again replaces.
 - `ping()` — application-level ping, for protocols that expose one.
-- `stats()` → `{ readyState, backpressureMode, paused, bufferedAmount, highWaterMark, lowWaterMark, reconnectAttempts, sent, received, drops, decodeErrors, reconnects, heartbeatTimeouts, rtt }`.
+- `stats()` → `{ readyState, backpressureMode, paused, bufferedAmount, highWaterMark, lowWaterMark, reconnectAttempts, reconnectExhaustedBy, sent, received, drops, decodeErrors, oversizeFrames, reconnects, heartbeatTimeouts, heartbeats, rtt }`. `reconnectExhaustedBy` is `'attempts'`, `'elapsed'`, or `null`.
 - Getters: `isOpen`, `paused`, `bufferedAmount`, `readyState`, `backpressureMode`.
 
 ## Error handling

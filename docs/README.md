@@ -44,6 +44,7 @@
 - [powerWebSocketClient](powerWebSocketClient/README.md)
 - [utils/abort](utils/abort/README.md)
 - [utils/errors](utils/errors/README.md)
+- [utils/frameSize](utils/frameSize/README.md)
 - [utils/limiterClock](utils/limiterClock/README.md)
 - [utils/now](utils/now/README.md)
 - [utils/smallLfu](utils/smallLfu/README.md)
