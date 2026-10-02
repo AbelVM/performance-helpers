@@ -5443,3 +5443,38 @@ And three presentation bugs would each have printed a wrong number: broken colum
 padding, frame sizes derived from the body rather than the frame (281 B and 32 KB
 printed as 548 B and 500 B), and a fixed prose claim about the small row that
 ignored what the run had actually measured.
+**Added `bench/claims.js correlation`, the gate for optimising the awaited
+reply path.** POOL-008 records 2 423 -> 4 450 and 3 198 -> 4 537 ns/op across two
+runs — the two runs disagree by ~30 % on the plain arm — and says the mode is the
+deliverable rather than the number. It now exists, and its first run is what
+qualified that instruction rather than merely repeating it.
+
+The mode replays one payload through `postMessage` and
+`postMessage(..., { awaitResponse: true })` from a single interleaved loop, with
+the reply produced by a `queueMicrotask` in a fake worker modelled on the one in
+`test/powerPool.negotiation.test.js`. Two things it found about itself:
+
+- **min/max is the wrong estimator here.** The first version reported a
+  **21 244 %** spread on the plain arm, which is not noise but a broken statistic:
+  min/max over 16 000 samples is whichever GC pause landed in the window. It now
+  warms up explicitly and reports a p10–p90 band, and still prints `min` because
+  that is the robust lower bound a regression test would use.
+- **Even p10–p90 is unstable run to run** — 73 %, then 249 %, then 73 % for the
+  same arm — while the median moves only a few percent. The mode says so and
+  nominates the median as the only figure worth comparing, which is the honest
+  version of the row's instruction.
+
+**Measured 4 027 ns plain against 12 082 ns awaited, a 3.06x ratio on medians**,
+against a recorded 1.84x and 1.42x. The mode explains why the ratio is larger
+rather than leaving it as another disagreement: the two arms do different amounts
+of waiting. The plain arm only enqueues — 20 000 messages posted, none awaited —
+so it measures dispatch. The awaited arm is necessarily serialised, one round trip
+at a time, so it measures dispatch _plus_ a message turn and a settle. A ratio
+between those is a statement about the semantics of fire-and-forget rather than a
+defect in either path, and it will not reproduce a figure recorded from a setup
+where the plain arm also waited for something.
+
+So the mode claims no cost for `awaitResponse`. What it does establish is that a
+regression _is_ detectable even though the cost is not: a change that made the
+awaited path allocate per task, or scan the pending set linearly, would move the
+median by more than its run-to-run movement.

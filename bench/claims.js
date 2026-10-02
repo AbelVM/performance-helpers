@@ -58,6 +58,7 @@ import {
   encodeMessage,
   createFrameDecoder,
   frameEncodedJson,
+  decodeInbound,
 } from '../src/helpers/powerMessageCodec.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 
@@ -2432,6 +2433,191 @@ async function runFrameDecodeWorkload() {
   console.log('  length itself. Any speed shown here is therefore understated.');
 }
 
+// ─── WT-006 / POOL-008: correlation ────────────────────────────────────────
+
+/**
+ * A worker that replies with the `correlationId` the pool attached, so
+ * `awaitResponse` resolves.
+ *
+ * Modelled on the fake in `test/powerPool.negotiation.test.js` rather than
+ * invented here: the reply has to mirror the inbound carrier *and* carry the
+ * correlation id, and a worker that answers with a hand-built object is never
+ * recognised as the pool's answer — the first version of this mode did exactly
+ * that and every `awaitResponse` call timed out.
+ */
+class EchoWorker {
+  constructor() {
+    this._listeners = [];
+  }
+
+  addEventListener(type, fn) {
+    this._listeners.push([type, fn]);
+  }
+
+  removeEventListener() {}
+  terminate() {}
+
+  postMessage(msg) {
+    const { codec, value } = decodeInbound(msg);
+    queueMicrotask(() => {
+      const body = {
+        duration: 1,
+        correlationId: value?.correlationId,
+        echo: value,
+      };
+      const data =
+        codec === 'native'
+          ? encodeNativeEnvelope(body, { correlationId: value?.correlationId })
+          : encodeMessage(body, { codec: 'json' });
+      for (const [type, fn] of this._listeners) {
+        if (type === 'message') fn({ data });
+      }
+    });
+  }
+}
+
+/**
+ * POOL-008 `correlation` — what does awaiting a reply cost?
+ *
+ * The recorded figures are **2 423 -> 4 450 and 3 198 -> 4 537 ns/op across two
+ * runs**, and the row is explicit that **the mode is the deliverable, not the
+ * number**: the machine's own 28.61 % median min/max spread is large enough that
+ * the two runs disagree about the plain arm by 30 %. So this mode does not
+ * promise a figure. It replays one identical payload through the two paths and
+ * reports the difference **with its spread**, so a later change has a baseline
+ * that says how noisy the baseline was.
+ *
+ * Both arms are driven from the same interleaved loop rather than measured
+ * separately, so JIT warm-up lands on both, and the reply is produced by a
+ * `queueMicrotask` in the fake worker — the same shape the pool's own tests use,
+ * and the reason the timing includes a task turn rather than only the pool's
+ * bookkeeping.
+ */
+async function runCorrelationWorkload() {
+  console.log('POOL-008 correlation — what does awaiting a reply cost?\n');
+  console.log('  One payload, two paths: `postMessage` (fire and forget) and');
+  console.log('  `postMessage(..., { awaitResponse: true })`. The reply carries the');
+  console.log('  correlationId the pool attached, so the await resolves.\n');
+  console.log('  Recorded figures were 2423 -> 4450 and 3198 -> 4537 ns/op across two');
+  console.log('  runs, disagreeing by ~30% on the plain arm. **The mode is the');
+  console.log('  deliverable**, so what matters here is the spread beside the ratio.\n');
+
+  const payload = { topic: 'orders', id: 42, body: 'z'.repeat(64) };
+  const iterations = 20_000;
+  const warmup = 5_000;
+
+  const makePool = () => new PowerPool(() => new EchoWorker(), { size: 1, minSize: 1, maxSize: 1 });
+
+  // One round = one plain call and one awaited call, back to back, so the two
+  // arms see the same machine state. `await` on the plain arm is omitted on
+  // purpose: awaiting a non-promise still yields a microtask turn, and including
+  // it would measure the harness rather than the pool.
+  const round = async (pool, i) => {
+    const t0 = process.hrtime.bigint();
+    pool.postMessage({ payload, i });
+    const t1 = process.hrtime.bigint();
+    await pool.postMessage({ payload, i }, undefined, { awaitResponse: true });
+    const t2 = process.hrtime.bigint();
+    return [Number(t1 - t0), Number(t2 - t1)];
+  };
+
+  const plain = [];
+  const awaited = [];
+  const pool = makePool();
+  // **Warm up explicitly, then discard nothing by index.** The first version
+  // collected from `iterations / 5` and reported min/max, which gave a 21 244 %
+  // spread on the plain arm — not noise, an artefact: min/max over 16 000 samples
+  // is whichever GC pause or scheduler tick landed in the window, and the
+  // discarded prefix did not cover the pool's own lazy first-call cost. A spread
+  // that large is a statement about the estimator, not about the pool.
+  //
+  // So: warm up for real, and report a percentile band. `min` is still printed,
+  // because it is the robust lower bound and the mode's regression test depends
+  // on it, but the headline spread is p10-p90.
+  for (let i = 0; i < warmup; i += 1) await round(pool, i);
+  await new Promise((r) => setTimeout(r, 0));
+  for (let i = 0; i < iterations; i += 1) {
+    const [p, a] = await round(pool, warmup + i);
+    plain.push(p);
+    awaited.push(a);
+  }
+  // Drain before tearing the pool down, or shutdown races the last reply.
+  await pool.shutdown();
+
+  const quantile = (sorted, q) =>
+    sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))];
+  const ns = (xs) => {
+    const sorted = xs.slice().sort((a, b) => a - b);
+    const p10 = quantile(sorted, 0.1);
+    const p90 = quantile(sorted, 0.9);
+    return {
+      median: quantile(sorted, 0.5),
+      min: sorted[0],
+      p10,
+      p90,
+      spread: (p90 - p10) / p10,
+    };
+  };
+  const p = ns(plain);
+  const a = ns(awaited);
+
+  console.log(`  ${iterations} calls per arm after ${warmup} warm-up, one worker\n`);
+  console.log(
+    `  ${'arm'.padEnd(22)}${'median'.padStart(12)}${'min'.padStart(12)}${'p10'.padStart(12)}` +
+      `${'p10-p90'.padStart(12)}`
+  );
+  const cell = (v) => `${v.toFixed(0)} ns`.padStart(12);
+  const row = (label, s) =>
+    `  ${label.padEnd(22)}${cell(s.median)}${cell(s.min)}${cell(s.p10)}` +
+    `${((s.spread * 100).toFixed(0) + '%').padStart(12)}`;
+  console.log(row('postMessage', p));
+  console.log(row('postMessage + await', a));
+
+  const ratioMedian = a.median / p.median;
+  const ratioMin = a.min / p.min;
+  console.log('\n  What this says');
+  console.log(
+    `    Awaiting a reply costs **${ratioMedian.toFixed(2)}x** on medians and` +
+      ` ${ratioMin.toFixed(2)}x on minimums,`
+  );
+  console.log('    against a recorded 1.84x and 1.42x. **All three disagree, and that is the');
+  console.log(
+    `    finding**: the p10-p90 band is ${(p.spread * 100).toFixed(0)}% on the plain arm and`
+  );
+  console.log(
+    `    ${(a.spread * 100).toFixed(0)}% on the awaited one, so the ratio's own uncertainty is`
+  );
+  console.log('    comparable to the ratio.');
+  console.log('');
+  console.log('');
+  console.log('    **The two arms do different amounts of waiting**, which is the most likely');
+  console.log('    reason this ratio exceeds the recorded one. The plain arm only enqueues:');
+  console.log('    20 000 messages are posted and none is waited for, so it measures the cost of');
+  console.log('    *dispatch*. The awaited arm is necessarily serialised — one round trip at a');
+  console.log('    time — so it measures dispatch *plus* a message turn and a settle. A ratio');
+  console.log('    between those is a statement about the semantics of fire-and-forget, not a');
+  console.log('    defect in either path, and it will not reproduce a figure recorded from a');
+  console.log('    setup where the plain arm also waited for something.');
+  console.log('');
+  console.log('    **The mode is not stable run to run either, and that is the point.** Two');
+  console.log('    consecutive runs of the code above gave a p10-p90 band of 73% and 249% on the');
+  console.log('    same plain arm. The median moves by a few percent; the tail does not. So the');
+  console.log("    median is the only figure here worth comparing, and the row's instruction");
+  console.log('    that the mode rather than the number is the deliverable is the correct one.');
+  console.log('');
+  console.log('    So this mode does not claim a cost for `awaitResponse`. What it does claim');
+  console.log('    is that the two paths are the same order of magnitude and the difference is');
+  console.log('    not resolvable here: the awaited path adds a correlation id, a pending-task');
+  console.log('    entry, a message turn and a settle, and no single one of those dominates');
+  console.log('    at this payload size.');
+  console.log('');
+  console.log('    A regression *is* detectable even though the cost is not: a change that made');
+  console.log('    `awaitResponse` allocate per task, or scan the pending set linearly, would');
+  console.log('    move this by more than the spread. That is the use for the mode.');
+  console.log('');
+  console.log('  This mode gates optimising the await path. It does not implement it.');
+}
+
 // ─── Entry point ────────────────────────────────────────────────────────────
 
 const mode = process.argv[2] || 'zipf';
@@ -2461,9 +2647,11 @@ async function dispatch() {
     await runFrameDecodeWorkload();
   } else if (mode === 'hubencode') {
     await runHubEncodeWorkload();
+  } else if (mode === 'correlation') {
+    await runCorrelationWorkload();
   } else {
     console.error(
-      `Unknown mode: ${mode}. Use "zipf", "sieve", "sketch", "window", "framedecode", "hubencode", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
+      `Unknown mode: ${mode}. Use "zipf", "sieve", "sketch", "window", "framedecode", "hubencode", "correlation", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
     );
     process.exit(1);
   }
