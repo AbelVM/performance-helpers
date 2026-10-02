@@ -72,6 +72,12 @@ Re-exports [detectEnv](../helpers/WorkerAgnostic/functions/detectEnv.md)
 
 ***
 
+### detectWebTransportSupport
+
+Re-exports [detectWebTransportSupport](../utils/webtransport/functions/detectWebTransportSupport.md)
+
+***
+
 ### encodeMessage
 
 Re-exports [encodeMessage](../powerMessageCodec/functions/encodeMessage.md)

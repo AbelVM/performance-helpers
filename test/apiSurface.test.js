@@ -94,6 +94,7 @@ describe('API surface', () => {
         'PowerWebSocketClient',
         'PowerSocketAdapter',
         'detectSocketKind',
+        'detectWebTransportSupport',
         'READY_STATE',
         'WorkerAgnostic',
         'b2o',

@@ -5532,3 +5532,47 @@ same batch. Subscribers whose `maxBatch` differs interleave _different_ batch
 shapes and the slot is overwritten between them, so it misses and pays an extra
 `JSON.stringify`. The consequence is extra encodes, never a wrong frame, and that
 is pinned as a known miss rather than presented as a win.
+
+## WebTransport feature detection
+
+**Added `detectWebTransportSupport()`.** Pure feature detection returning
+`{ available, reliableOnly, datagrams, createWritable, sendGroups, stats, byob }`.
+
+**Three of those surfaces are not Baseline, and the point of the function is that
+nothing may be gated on them.** `reliability` and `getStats()` are Limited
+availability; `WebTransportSendGroup` is Experimental. Each defaults to `false`
+on absence and never to an optimistic `true`, because a detector that guessed
+optimistically would be the more dangerous kind of wrong — the caller branches,
+reaches a surface that is not there, and discovers it as a `TypeError` several
+frames from the mistake.
+
+`reliableOnly` is the flag for callers who want a promise rather than a fact: it
+is `false` whenever a non-Baseline surface is **present in the build**, computed
+rather than read from a table so a field added later cannot leave it stale. That
+distinction is load-bearing for a `getStats` that is exposed but throws — Limited
+availability means a build can do exactly that — so it reports `stats: false`
+(the call cannot be used) while `reliableOnly` stays `false` too (the surface is
+still there).
+
+`createWritable` detects `transport.datagrams.writable`, which is **deprecated
+and non-standard** per MDN and which most examples in circulation still use. Its
+absence is reported because a build without it cannot write datagrams at all; its
+presence is reported without endorsement, and the documentation says so.
+
+The function is pure and opens no connection, which is why the instance-level
+fields are `false` without a transport: `datagrams`, `createWritable`, `stats`
+and `byob` are attributes of a live `WebTransport`, and the only other way to
+learn them is to construct one. Pass a transport to read them — it is used
+read-only, and `getStats` is called once to prove it works rather than for its
+value. `byob` is a capability rather than a constructor, so it is detected from
+both an `incomingHighWaterMark` on the transport and a readable datagram stream.
+
+15 tests, 5 mutants, all caught — including the two that matter most to the row's
+prohibition: making `sendGroups` optimistic fails 4 tests, and treating an
+exposed-but-throwing `getStats` as usable fails the case that separates presence
+from usability.
+
+Zero new type debt, so the ratchet ceiling is unchanged. The probe takes an
+optional argument rather than reading globals directly, which is both why it is
+testable on Node — where there is no `WebTransport` to probe — and why the
+absence cases above are meaningful rather than merely unreachable.

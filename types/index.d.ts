@@ -11,6 +11,7 @@ export { PowerSubscriberSet } from "./helpers/powerSubscriberSet.js";
 export { PowerSemaphore } from "./helpers/powerSemaphore.js";
 export { PowerDefer } from "./helpers/powerDefer.js";
 export { PowerTTLMap } from "./helpers/powerTTLMap.js";
+export { detectWebTransportSupport } from "./utils/webtransport.js";
 export { PowerCircuit } from "./helpers/powerCircuit.js";
 export { PowerCron } from "./helpers/powerCron.js";
 export { PowerDeadline } from "./helpers/powerDeadline.js";

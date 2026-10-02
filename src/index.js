@@ -24,6 +24,7 @@ export { PowerTTLMap } from './helpers/powerTTLMap.js';
 export { MetricsCollector, defaultMetrics, toSeries, METRICS_VERSION } from './helpers/metrics.js';
 export { normalizeError, formatErrorObj } from './utils/errors.js';
 export { nowMs, measureSync, measureAsync } from './utils/now.js';
+export { detectWebTransportSupport } from './utils/webtransport.js';
 export { PowerCircuit } from './helpers/powerCircuit.js';
 export { PowerCron } from './helpers/powerCron.js';
 export { PowerRetry, PowerRetryBudget } from './helpers/powerRetry.js';
