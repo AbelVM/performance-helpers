@@ -75,7 +75,28 @@ const unescape = (s) => s.replaceAll('\\|', '|');
 // Appended rather than replaced: the row's evidence — the reproduction, the
 // measured number, the surviving mutant — is why a future reader believes the
 // row was closed, and it does not go stale when the fix lands.
-const merged = unescape(oldNote).replace(/\s*$/, '') + ' ' + note;
+//
+// **Collapse the note to a single line here, not in the caller.** `buildRow`'s
+// own cell assertion does not catch a newline: `escapeCell` does not strip one,
+// and a `\n` inside the note cell splits a *table row* across physical lines
+// while the in-memory string still parses as 8 cells. On disk the first physical
+// line then has one pipe too few, `splitRow` drops the trailing cell, and the
+// note vanishes from the row — which is how WT-006 was found to be missing its
+// trailing delimiter in the first place.
+//
+// This has now happened three times in this project (twice recorded in
+// AGENTS.md, once here) and every instance came from a note drafted as more
+// than one paragraph. `--note "$(cat file)"` preserves internal newlines and
+// strips only trailing ones, so a note file written with a blank line between
+// paragraphs reproduces it exactly. Flattening at the boundary is the one place
+// it cannot be forgotten, and it is also why a paragraph break in a note
+// arrives as a single space rather than being silently dropped.
+const flatten = (s) =>
+  String(s ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ');
+const merged = `${unescape(oldNote).replace(/\s*$/, '')} ${flatten(note)}`.trim();
 
 lines[idx] = buildRow({
   id: cellId,
