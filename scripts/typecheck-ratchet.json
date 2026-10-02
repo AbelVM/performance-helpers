@@ -1,6 +1,6 @@
 {
-  "ceiling": 290,
+  "ceiling": 289,
   "minFilesWithDiagnostics": 12,
-  "recordedAt": "2026-09-30",
-  "reason": "POOL-001: introduced a shared `PreparedItem` typedef so `deferred` is on the type rather than implied at each dispatch site. Three pre-existing errors disappeared with the inline type spellings it replaced."
+  "recordedAt": "2026-10-01",
+  "reason": "CACHE-012: remove the dead _windowStart field (assigned null twice, read by neither)"
 }

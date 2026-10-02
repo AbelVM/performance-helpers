@@ -143,17 +143,6 @@ export class PowerCache {
      */
     private _windowSize;
     /**
-     * MRU end of the admission window, or `null` when the list is shorter than
-     * the window. Derived rather than tracked: `_windowOldest()` walks back
-     * from the tail, because every attempt that maintained this pointer
-     * incrementally got it wrong. The window is *positional*, and a node
-     * carrying a correct `inWindow` flag can still be on the wrong side of the
-     * boundary.
-     * @type {CacheNode|null}
-     * @private
-     */
-    private _windowStart;
-    /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
      *

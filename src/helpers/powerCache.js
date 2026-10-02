@@ -509,17 +509,18 @@ export class PowerCache {
       // room for the comparison to mean something.
       this._windowSize = Math.floor(this.maxEntries / 4);
     }
-    /**
-     * MRU end of the admission window, or `null` when the list is shorter than
-     * the window. Derived rather than tracked: `_windowOldest()` walks back
-     * from the tail, because every attempt that maintained this pointer
-     * incrementally got it wrong. The window is *positional*, and a node
-     * carrying a correct `inWindow` flag can still be on the wrong side of the
-     * boundary.
-     * @type {CacheNode|null}
-     * @private
-     */
-    this._windowStart = null;
+    // There is no `_windowStart` field here, and that is the record rather than
+    // an omission. It was a maintained window pointer, assigned `null` in two
+    // places and read by neither, left behind by the attempt `_windowOldest()`
+    // documents: the window is *positional*, and a node carrying a correct
+    // `inWindow` flag can still sit on the wrong side of the boundary.
+    //
+    // It is gone because leaving it was worse than removing it. An unused field
+    // that a comment says is the *reason* the current design is derived is an
+    // invitation to the next person to "fix" it by populating it, which is the
+    // exact change that already failed here once. CACHE-006 still wants this
+    // cost removed; the route it should take is spelled out in that row, and it
+    // is not a resurrected field.
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -1131,7 +1132,6 @@ export class PowerCache {
     this._remove(node);
     this._insertAtMainSpaceMrU(node);
     node.inWindow = false;
-    this._windowStart = null;
   }
 
   /**
