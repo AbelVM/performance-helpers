@@ -67,6 +67,20 @@ function getMacrotaskChannel() {
   if (typeof MessageChannel !== 'function') return null;
   try {
     _macrotaskChannel = new MessageChannel();
+    // Unref the port that is only ever *received* on. A live `MessagePort` keeps
+    // a Node event loop alive on its own, so a scheduler that has finished its work
+    // but still holds the channel keeps the process from exiting — which is what a
+    // channel left un-unref'd does. `port1` receives; `port2` posts, and is
+    // reachable only from the returned handle, so unref'ing it would break the
+    // very thing this channel exists to do.
+    // `unref` is a Node extension: it is absent from the DOM `MessagePort`, so
+    // the guard is not paranoia. The cast is because `tsc` resolves `port1` to
+    // the DOM type from lib.dom, where `unref` does not exist — and the cast
+    // costs nothing here because the preceding `typeof` guard is the real check.
+    const _unref = /** @type {{unref?: () => void}} */ (
+      /** @type {unknown} */ (_macrotaskChannel.port1)
+    ).unref;
+    if (typeof _unref === 'function') _unref.call(_macrotaskChannel.port1);
     // Deliberately never unlisten: the handler is the queue. Unlistening after
     // one message would make the second post a no-op and hang the flush.
     _macrotaskChannel.port1.onmessage = () => {
