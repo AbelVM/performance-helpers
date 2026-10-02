@@ -15,6 +15,26 @@
  * `release(tokenOrN)` workflows when underlying limiters expose those
  * methods. When `atomic: true` is configured, it will attempt to preserve
  * all-or-nothing semantics across the set of limiters.
+ *
+ * **How it preserves them depends on the limiter, and the two paths are not
+ * equivalent.** A limiter exposing `available()` is settled by the pre-flight
+ * in `_consumeIn`: every leg is asked whether it can afford the request, and
+ * nothing is charged if any says no. A limiter without `available()` cannot be
+ * pre-flighted, so it is composed through `reserve` with a best-effort
+ * rollback of whatever was already committed. Every limiter this library ships
+ * has `available()`, so the rollback path exists for third-party limiters and is
+ * unreachable through a composition of `PowerThrottle`, `PowerGCRA` and
+ * `PowerSlidingWindow`.
+ *
+ * That is worth stating because the rollback path reads as *the* implementation
+ * of `atomic`, and measuring it says otherwise: with two `PowerThrottle` legs and
+ * the second drained, `atomic: true` refused and **the first leg still held all
+ * its tokens** — no rollback involved. The pre-flight and the commit that
+ * follows it are one synchronous block, and that is what makes the pre-flight
+ * sufficient on a single-threaded event loop. **The no-`await` invariant is
+ * load-bearing** — an `await` between them would let another task take a token
+ * in the gap and quietly turn `atomic` into best-effort — and it is pinned by
+ * `test/powerRateLimit.atomic.test.js` rather than left to this paragraph.
  */
 
 import { resolveComposerNow } from '../utils/limiterClock.js';

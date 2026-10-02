@@ -1025,6 +1025,22 @@ export {};
  *   composed limiters. Requires each to expose `available()` or an undo
  *   primitive (`reserve`/`release`, or `addTokens`); when a safe rollback cannot
  *   be guaranteed the call returns `false`.
+ *
+ *   **Two mechanisms, and which one applies depends on the limiter rather than
+ *   on this option.** A limiter with `available()` is satisfied by a
+ *   pre-flight that asks every leg whether it can afford the request and
+ *   refuses before charging anything — so no rollback is needed, and none is
+ *   performed. A limiter *without* it cannot be pre-flighted, and is composed
+ *   through `reserve` with best-effort rollback of the legs already committed.
+ *   All three limiters this library ships (`PowerThrottle`, `PowerGCRA`,
+ *   `PowerSlidingWindow`) have `available()`, so in practice the rollback path
+ *   serves third-party limiters — `p-limit`-shaped ones in particular.
+ *
+ *   The pre-flight only works because it and the commit that follows it are a
+ *   single synchronous block: an `await` between "every leg can afford it" and
+ *   "every leg has taken it" would let another task take a token in the gap, and
+ *   `atomic` would quietly become best-effort. That invariant is pinned by
+ *   `test/powerRateLimit.atomic.test.js`.
  * @property {function(any): string} [keyFn] Enables per-key limiting (Bottleneck
  *   `Group`-shaped). Called with the per-call `context` and returning the key;
  *   each distinct key gets its own budget. **Requires every entry of `limiters`
