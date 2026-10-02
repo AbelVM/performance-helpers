@@ -160,6 +160,15 @@ export class PowerRetry {
     /** @type {PowerRetryOptions} */
     _options: PowerRetryOptions;
     /**
+     * A constructor-supplied `signal`, used only while it is not aborted. An
+     * aborted signal stays aborted, so once the caller cancels, later runs on
+     * this instance reject without doing work — which is the safe direction: a
+     * cancelled instance is not a usable one, and silently retrying would be the
+     * opposite of what cancelling means.
+     * @type {AbortSignal|null}
+     */
+    _defaultSignal: AbortSignal | null;
+    /**
      * `null`, a shared bucket, or a bucket created from a ratio here. A bucket
      * built at construction time is the only form that can ration retries
      * *across* calls, because that is the traffic a budget is about.

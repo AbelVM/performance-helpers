@@ -77,21 +77,47 @@ npx --no-install lint-staged
 npm run --silent types:generate
 npm run --silent docs
 
+# Stage a generated path **only if it exists**.
+#
+# `git add` treats a non-existent pathspec as fatal - `fatal: pathspec '...' did
+# not match any files`, exit 128 - and husky runs this script under `sh -e`, so a
+# single wrong guess aborts the whole hook and the commit does not happen. That is
+# not hypothetical: the docs tree is **not uniform**. Most helpers are documented
+# at `docs/helpers/<name>` and five are documented at `docs/<name>` -
+# `powerRetry`, `powerGCRA`, `powerMessageCodec`, `powerRealtimeHub`,
+# `powerWebSocketClient` - plus `docs/utils/options` and `docs/utils/timers`
+# against `docs/options`. A typedef-only module like `src/helpers/jsdoc-types.js`
+# has no page at all. The hook hardcoded one layout and was fatal for any commit
+# touching one of those, which is how it survived several commits and then broke
+# on the first one that touched `powerRetry.js`.
+#
+# So both candidate layouts are tried and only what exists is staged. An `if`
+# rather than a `&&` chain on purpose: `[ -e "$p" ] && git add ...` returns
+# non-zero when the test fails, which `sh -e` would treat as fatal - the same
+# bug in a different spelling.
+add_generated() {
+  for p in "$@"; do
+    if [ -e "$p" ]; then
+      git add -- "$p"
+    fi
+  done
+}
+
 staged_generated=0
 for src in $(git diff --cached --name-only -- 'src/**'); do
   case "$src" in
     src/index.js)
-      git add -- docs/index docs/docs-typedoc.json types/index.d.ts
+      add_generated docs/index docs/docs-typedoc.json types/index.d.ts
       staged_generated=$((staged_generated + 1))
       ;;
     src/helpers/*)
       mod=$(basename "$src" .js)
-      git add -- "docs/helpers/$mod" "types/helpers/$mod.d.ts"
+      add_generated "docs/helpers/$mod" "docs/$mod" "types/helpers/$mod.d.ts"
       staged_generated=$((staged_generated + 1))
       ;;
     src/utils/*)
       mod=$(basename "$src" .js)
-      git add -- "docs/utils/$mod" "types/utils/$mod.d.ts"
+      add_generated "docs/utils/$mod" "docs/$mod" "types/utils/$mod.d.ts"
       staged_generated=$((staged_generated + 1))
       ;;
   esac

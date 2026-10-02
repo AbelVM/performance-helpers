@@ -238,6 +238,76 @@ export class PowerRetryBudget {
 }
 
 /**
+ * Wait `ms`, or reject as soon as `signal` aborts.
+ *
+ * The backoff sleep used to be `await new Promise((r) => setTimeout(r, delay))`,
+ * which is uninterruptible: a caller who abandoned the request still had to wait
+ * out the delay, up to `maxDelay` (30 s at the default) and 30 s is long enough
+ * that the promise settles long after anyone stopped listening. Cancelling the
+ * *wait* rather than the attempt is the half that was missing — `attemptTimeout`
+ * already covers a slow attempt, and nothing covered a slow gap between them.
+ *
+ * The listener is removed on every path out. Leaving one attached keeps a
+ * closure over the timer alive for the rest of the process's life, which on a
+ * retry loop that runs for hours is a slow leak rather than an obvious one.
+ *
+ * With no signal this is the plain `setTimeout` path, so the common case pays
+ * one extra function call and allocates no listener.
+ *
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<void>}
+ * @private
+ */
+function sleepOrAbort(ms, signal) {
+  if (!signal) return new Promise((r) => setTimeout(r, ms));
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(abortError(signal.reason));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortError(signal.reason));
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * The rejection shape for a cancelled call.
+ *
+ * `code: 'EABORT'` and `reason` are the convention `PowerDeadline` already
+ * established, so a caller distinguishes a cancellation from a failure with
+ * `err.code === 'EABORT'` in both helpers rather than learning two conventions.
+ * `attempts: 0` says no attempt ran, which distinguishes "cancelled before we
+ * started" from "cancelled between attempts" — a caller logging retry counts
+ * needs to tell those apart.
+ *
+ * @param {any} reason - `signal.reason`.
+ * @returns {Error & {code:string, reason:any, attempts:number}}
+ * @private
+ */
+function abortError(reason) {
+  // `Object.assign` rather than three property assignments on an `Error`, and the
+  // reason is the typecheck ratchet: assigning `.code`/`.reason`/`.attempts` onto
+  // a `new Error` is three `TS2339`s, because `Error` declares none of them. The
+  // returned type is declared above, so the cast is real rather than a way to
+  // silence the checker. `powerDeadline.createAbortError` writes the same three
+  // properties the same way and carries the same three errors in the baseline —
+  // copying its shape would have reproduced its debt instead of avoiding it.
+  return Object.assign(new Error('Aborted'), {
+    code: 'EABORT',
+    reason,
+    attempts: 0,
+  });
+}
+
+/**
  * Validate a `backoff` value.
  *
  * The original implementation was `linear | fixed | else exponential`, so a
@@ -309,7 +379,7 @@ function resolveBudget(budget, className) {
  * thrown from inside the loop would have already put a request on the wire.
  *
  * @param {any} options
- * @returns {{attempts:number, strategy:'exponential'|'linear'|'fixed'|'decorrelated', base:number, cap:number, timeoutMs:number, hedgeMs:number, jitter:boolean}}
+ * @returns {{attempts:number, strategy:'exponential'|'linear'|'fixed'|'decorrelated', base:number, cap:number, timeoutMs:number, hedgeMs:number, jitter:boolean, signal:AbortSignal|undefined}}
  * @private
  */
 function resolveRunOptions(options) {
@@ -321,6 +391,7 @@ function resolveRunOptions(options) {
     jitter = true,
     attemptTimeout,
     hedgeDelay = 0,
+    signal,
   } = options || {};
 
   const attempts = assertLimitRequired(maxAttempts, {
@@ -379,7 +450,7 @@ function resolveRunOptions(options) {
     );
   }
 
-  return { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter };
+  return { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter, signal };
 }
 
 /**
@@ -419,12 +490,28 @@ export class PowerRetry {
         'attemptTimeout',
         'budget',
         'hedgeDelay',
+        'signal',
       ],
       'PowerRetry'
     );
-    const { budget = null, ...rest } = options || {};
+    // `signal` is split out rather than left in `rest`, and that is the only
+    // reason this destructuring exists rather than the usual one. `_options` is
+    // spread into **every** `run`, and a stored `AbortSignal` is a one-shot
+    // object: keep it in `_options` and the first call that consumes it leaves
+    // the instance holding an aborted signal, so every later `run` rejects
+    // immediately and for a reason the caller did not cause on that call.
+    const { budget = null, signal: defaultSignal = null, ...rest } = options || {};
     /** @type {PowerRetryOptions} */
     this._options = rest;
+    /**
+     * A constructor-supplied `signal`, used only while it is not aborted. An
+     * aborted signal stays aborted, so once the caller cancels, later runs on
+     * this instance reject without doing work — which is the safe direction: a
+     * cancelled instance is not a usable one, and silently retrying would be the
+     * opposite of what cancelling means.
+     * @type {AbortSignal|null}
+     */
+    this._defaultSignal = defaultSignal;
     /**
      * `null`, a shared bucket, or a bucket created from a ratio here. A bucket
      * built at construction time is the only form that can ration retries
@@ -447,6 +534,10 @@ export class PowerRetry {
     // The instance budget is the default rather than something `_options`
     // carries, so it survives across calls instead of being rebuilt per call.
     if (merged.budget == null && this._budget) merged.budget = this._budget;
+    // Likewise the constructor's `signal`, and like the budget it is *not* in
+    // `_options` — see the constructor. A per-call `signal` wins, so one call
+    // can opt out of an instance default without mutating the instance.
+    if (merged.signal == null && this._defaultSignal) merged.signal = this._defaultSignal;
     return PowerRetry.run(fn, merged);
   }
 
@@ -470,7 +561,7 @@ export class PowerRetry {
     const bucket = resolveBudget(budget, 'PowerRetry.run');
     if (bucket) bucket.recordRequest();
 
-    const { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter } = cfg;
+    const { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter, signal } = cfg;
     let decorrelated = base;
 
     /**
@@ -620,6 +711,13 @@ export class PowerRetry {
 
     let lastErr = null;
     for (let attempt = 1; attempt <= attempts; attempt++) {
+      // Checked *before* each attempt, not once at entry. An abort during a
+      // backoff wait is caught by `sleepOrAbort` below, so by the time the loop
+      // iterates the signal may already be aborted — and a caller who cancelled
+      // should not get one more attempt out of it. Also checked here rather than
+      // only in `sleepOrAbort` because a run that starts already aborted has no
+      // sleep to interrupt.
+      if (signal && signal.aborted) throw abortError(signal.reason);
       try {
         return await runAttempt(attempt);
       } catch (err) {
@@ -640,7 +738,10 @@ export class PowerRetry {
             /* a throwing observer must not change the retry outcome */
           }
         }
-        await new Promise((r) => setTimeout(r, delay));
+        // Interruptible: an abort during the wait rejects now, not after the
+        // remaining delay. Without a `signal` this is the same `setTimeout` wait
+        // it always was.
+        await sleepOrAbort(delay, signal);
       }
     }
     throw lastErr;

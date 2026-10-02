@@ -57,6 +57,18 @@ built at construction time is the only form that can ration retries
 
 ***
 
+### \_defaultSignal
+
+> **\_defaultSignal**: `AbortSignal` \| `null`
+
+A constructor-supplied `signal`, used only while it is not aborted. An
+aborted signal stays aborted, so once the caller cancels, later runs on
+this instance reject without doing work — which is the safe direction: a
+cancelled instance is not a usable one, and silently retrying would be the
+opposite of what cancelling means.
+
+***
+
 ### \_options
 
 > **\_options**: `PowerRetryOptions`

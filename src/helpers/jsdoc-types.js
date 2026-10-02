@@ -225,6 +225,16 @@ export {};
  *   attempt before sending a duplicate. The first to succeed wins and the
  *   loser is aborted. `0` disables hedging. Only a hedge draws the budget a
  *   token; a refused budget means no hedge rather than a failed attempt.
+ * @property {AbortSignal} [signal] - Cancels the whole call, including the
+ *   wait between attempts. Without it `PowerRetry.run` cannot be cancelled at
+ *   all, and the wait is the larger half of the problem: the backoff sleep was
+ *   `await new Promise((r) => setTimeout(r, delay))`, so an abort during a
+ *   `maxDelay` wait took up to `maxDelay` ms to be noticed (30 s at the
+ *   default), which is long enough that a caller abandoning a request sees it
+ *   settle long after they stopped waiting. An already-aborted signal rejects
+ *   without running an attempt, and an abort during the wait rejects at once
+ *   rather than after the remaining delay. Rejects with `code: 'EABORT'`, the
+ *   same shape `PowerDeadline` uses.
  */
 
 /**

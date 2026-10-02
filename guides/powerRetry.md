@@ -244,6 +244,35 @@ any request is sent**:
 |                                             | because a budget can be reset and reused.                       |
 | `ratio` / `capacity`                        | The configured values.                                          |
 
+## Cancelling a run
+
+Pass a `signal` and the whole call becomes cancellable, **including the wait
+between attempts**:
+
+```javascript
+const controller = new AbortController();
+const run = PowerRetry.run(fetchFn, { signal: controller.signal });
+
+controller.abort(); // rejects at once, even mid-backoff
+```
+
+The backoff wait is the part that matters. Before this, a run could not be
+cancelled at all: `attemptTimeout` bounds a slow _attempt_, and nothing bounded a
+slow _gap_, so the sleep ran to completion — up to `maxDelay`, which is 30 s at
+the default. A promise that settles 30 s after everyone stopped listening is not
+a slow success, it is a leaked one.
+
+Rejections carry `code: 'EABORT'` and the signal's `reason`, the same shape
+[`PowerDeadline`](powerDeadline.md) uses, so one `err.code` check covers both. An
+already-aborted signal rejects **without running an attempt**, and an abort
+between attempts stops the next one rather than buying it.
+
+A `signal` given to the constructor is a default for every `run` on that
+instance, and is deliberately not stored in the reusable options — an
+`AbortSignal` is one-shot, so a stored one would leave the instance holding an
+aborted signal after its first use. Once it is aborted, later runs on that
+instance reject without doing work, which is the safe direction.
+
 ## Composes with
 
 - **`PowerCircuit`** — stops sending at all once the dependency is known-bad.
@@ -252,7 +281,8 @@ any request is sent**:
   unhealthy rather than briefly slow.
 - **`PowerDeadline`** — adds a total time budget across all attempts, plus
   external abort. Prefer it when the caller's latency SLO matters more than
-  the retry policy.
+  the retry policy. `PowerRetry`'s own `signal` is for cancelling _this_ call;
+  `PowerDeadline` is for bounding it, and the two compose.
 - **`PowerLogger`** — surface `budget.stats()` so a rising `refused` count is
   visible before it becomes an outage.
 
