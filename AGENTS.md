@@ -242,6 +242,28 @@ Style that is deliberate here, not incidental:
   the test that pins it in the same commit.
 - Do not run `git commit` without a changeset unless the change is docs-only.
 - Do not edit `types/` by hand. It is generated and `types:drift` will fail.
+- **Do not edit `review.md` with a multi-step script, and do not trust one that
+  reported success.** It is 450 KB+, gitignored — so `git checkout` cannot undo a
+  bad edit and no commit ever holds it — and a markdown table row cannot contain
+  a newline. Three failures in one session, all mine, and the third cost ~150 KB
+  that is unrecoverable:
+  - A `String.replace` whose "region" ran to end-of-file collapsed everything
+    after the edited row into four characters.
+  - A note written to a temp file with hard line breaks was appended verbatim,
+    splitting one table row across ~50 physical lines.
+  - A repair reported `row 649 -> 4268 chars, file +3619 bytes` as success while
+    the line on disk was still 649 characters, because the measurement and the
+    write had diverged. Only reading the line directly caught it.
+    So: `cp review.md /tmp/…` first, collapse any note to a single line with
+    `' '.join(text.split())` before it goes anywhere near a row, edit by index
+    arithmetic on one line rather than by pattern over the file, and verify by
+    diffing the prefix and suffix against the backup — not by the script's own
+    report. `test/reviewTable.test.js` checks **structure** (column count, header,
+    duplicate ids) and cannot see a truncated cell, so a green run there is not
+    evidence the file is intact.
+- Do not put a bare `|` in a `review.md` cell. Escape it as `\|`. The same
+  applies to a shell operator inside backticks — `a || b` splits a cell, and the
+  table test reports a _column_ error for a _character_ mistake.
 
 ## Before you finish
 
