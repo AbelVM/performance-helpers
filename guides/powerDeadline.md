@@ -98,6 +98,23 @@ try {
 - `totalTimeout` governs the entire operation, including retries and retry delays.
 - If `retryIf` returns `false`, the helper rejects immediately without retrying.
 - Aborted runs reject with `code === 'EABORT'` and include the signal reason if provided.
+- **An already-aborted signal rejects without calling `fn` at all.** If you pass a
+  signal that has already been cancelled, no attempt is made and no side effect
+  happens. This is not the same as aborting mid-flight, and it used to be:
+  `fn` was invoked once, its side effects happened, and its result was then
+  discarded in favour of the same `EABORT` rejection.
+- **Your `fn` receives one combined signal, and it is released when the attempt
+  ends.** `PowerDeadline` joins your `signal` with the per-attempt timeout signal
+  (and with the internal deadline controller) so a single `signal` parameter
+  covers all three. The combination is **detached in the attempt's `finally`**,
+  so a long-lived signal — a request-scoped one, passed to every operation in the
+  request — does not accumulate a listener per attempt. Before 2.0 it did:
+  20 runs × 4 attempts left **80 retained `abort` listeners** on one shared
+  signal, because `AbortSignal` is an `EventTarget` and `{ once: true }` only
+  avoids a _second_ invocation after an event that, on a successful run, never
+  fires. The consequence of detaching is that the combined signal **stops
+  observing aborts once the attempt has settled** — it is scoped to that attempt,
+  not to the run.
 - A timed-out attempt is a **failed attempt**, not a terminal error, so it is retried
   like any other. `maxAttempts: 3` with `attemptTimeout: 2000` means "up to 3 attempts,
   each bounded at 2s" — not "2s in total, tried once".

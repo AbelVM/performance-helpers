@@ -111,16 +111,55 @@ export class PowerDeadline {
         throw err;
       }
 
+      // **An already-aborted signal must not start the work.** Handing `fn` a
+      // signal the caller has already cancelled means starting it and then
+      // abandoning it: `createAbortPromise` returns a rejected promise, so
+      // `Promise.race` rejects with `EABORT` — but `candidates[0]` has already
+      // been constructed by then, so `fn` ran, its side effects happened, and its
+      // result was thrown away. Measured before this fix: an already-aborted
+      // external signal produced **1 `fn` invocation** on the way to the correct
+      // `EABORT` rejection.
+      //
+      // Checked here, beside the deadline guard, for the same reason that one
+      // exists: the cheapest place to refuse is before anything is constructed.
+      // `retrySignal` is checked too — a per-attempt timeout that already fired
+      // means this attempt is over, and it is the same defect with a different
+      // clock.
+      if (signal?.aborted) {
+        const err = createAbortError(signal.reason, startedAt, deadlineMs);
+        err.attempts = attempt;
+        err.attemptTimeout = perAttemptTimeout;
+        err.totalTimeout = deadlineMs;
+        throw err;
+      }
+      if (retrySignal?.aborted) {
+        const err = createAbortError(retrySignal.reason, startedAt, deadlineMs);
+        err.attempts = attempt;
+        err.attemptTimeout = perAttemptTimeout;
+        err.totalTimeout = deadlineMs;
+        throw err;
+      }
+
       // Signal handed to the user's fn: aborts on external abort and/or on the
       // per-attempt timeout signal provided by PowerRetry, so callers can stop
       // in-flight work instead of leaving it running after a timeout fires.
-      const userSignal = combineSignals(
-        signal,
-        combineSignals(retrySignal, deadlineController ? deadlineController.signal : null)
+      //
+      // **Both combines register their detacher in `cleanups`.** They are nested
+      // because the outer one joins the caller's signal to the inner one, and an
+      // inner signal that outlives its attempt is what retains the caller's
+      // listener. The inner detacher is registered *first*, so teardown runs in
+      // the reverse of setup — detach the join before the thing being joined.
+      // Nothing else had to change: the `finally` already runs on every path out
+      // of the attempt, including the early throw from the race.
+      const inner = combineSignals(
+        retrySignal,
+        deadlineController ? deadlineController.signal : null
       );
+      const combined = combineSignals(signal, inner.signal);
+      const userSignal = combined.signal;
       const abortPromise = createAbortPromise();
       const candidates = [Promise.resolve().then(() => fn(userSignal))];
-      const cleanups = [];
+      const cleanups = [inner.detach, combined.detach];
 
       if (deadlineAt !== null) {
         const remaining = deadlineAt - nowMs();
@@ -236,44 +275,131 @@ export class PowerDeadline {
   }
 }
 
+/**
+ * The error every aborted run rejects with.
+ *
+ * **The `@returns` is load-bearing, not decoration.** Without it `tsc` infers a
+ * bare `Error`, and every `err.attempts` / `err.code` assignment at a call site
+ * becomes a type error — which is how the callers that set `attempts` and
+ * `attemptTimeout` added seven errors to the ratchet when RES-013 started throwing
+ * this error directly instead of letting `Promise.race` reject with it. Same
+ * treatment `queueFullError` and `oversizedFrameError` already get in
+ * `utils/errors.js`, for the same reason: one condition, one error shape, and a
+ * caller branches on `code` rather than parsing a message.
+ *
+ * @param {any} reason - The aborting signal's `reason`, passed through as-is so
+ *   a caller can attribute the cancellation.
+ * @param {number} startedAt - `nowMs()` at the start of the run, for `elapsedMs`.
+ * @param {number|null} deadlineMs - The configured total timeout, for context.
+ * @returns {Error & {code: 'EABORT', reason: any, attempts: number, elapsedMs: number, totalTimeout: number|null}}
+ */
 const createAbortError = (reason, startedAt, deadlineMs) => {
   const err = new Error('Aborted');
-  err.code = 'EABORT';
-  err.reason = reason;
-  err.attempts = 0;
-  err.elapsedMs = nowMs() - startedAt;
-  err.totalTimeout = deadlineMs;
-  return err;
+  /** @type {Error & {code: 'EABORT', reason: any, attempts: number, elapsedMs: number, totalTimeout: number|null}} */
+  const typed = /** @type {any} */ (err);
+  typed.code = 'EABORT';
+  typed.reason = reason;
+  typed.attempts = 0;
+  typed.elapsedMs = nowMs() - startedAt;
+  typed.totalTimeout = deadlineMs;
+  return typed;
 };
 
 /**
  * Combine zero, one, or two AbortSignals into a single signal for the user fn.
- * The returned signal aborts if any of the provided signals abort. Returns
- * `undefined` when no signals are supplied (so `fn` is called without one).
- * @param {AbortSignal} [external]
- * @param {AbortSignal} [retry]
- * @returns {AbortSignal|undefined}
+ *
+ * **Returns `{ signal, detach }`, and the caller must register `detach`.** An
+ * `AbortSignal` is an `EventTarget`, not an `EventEmitter`: attaching an `abort`
+ * listener adds one that is removed only when `abort` actually fires, and the
+ * common case is that it never does — the run succeeds and the process moves on.
+ * So `{ once: true }` is not a cleanup, it only avoids a second invocation once
+ * the event has happened. Measured before this fix: **80 retained `abort`
+ * listeners on one shared signal after 20 runs x 4 attempts**, one per attempt,
+ * each holding `onAbort` → `controller` → the combined signal and everything the
+ * caller attached to it. Nothing warned, because nothing could.
+ *
+ * `detach()` removes both listeners and is idempotent, so registering it in the
+ * existing `cleanups` array is enough — no ownership question, and the `finally`
+ * already runs on every path out of the attempt.
+ *
+ * **An already-aborted input aborts the result immediately.** Registering a
+ * listener on a signal that has already fired is a no-op — the event is not
+ * replayed — so the combined signal would never abort and `fn` would be invoked
+ * against a signal the caller had already cancelled. Also checked before
+ * attaching, because attaching to a dead signal is precisely what retains the
+ * listener for nothing.
+ *
+ * `signal` is `undefined` when there is nothing to combine, so `fn` is called
+ * without one — and `detach` is then a no-op rather than `undefined`, so the
+ * caller never has to test it before pushing it onto `cleanups`.
+ *
+ * @param {AbortSignal|null} [external]
+ * @param {AbortSignal|null} [retry]
+ * @returns {{signal: AbortSignal|undefined, detach: () => void}}
  */
 const combineSignals = (external, retry) => {
-  if (!external && !retry) return undefined;
-  if (!external) return retry;
-  if (!retry) return external;
-  if (typeof AbortController === 'undefined') return external;
-  const controller = new AbortController();
-  const onAbort = () => {
+  const noop = () => {};
+  if (!external && !retry) return { signal: undefined, detach: noop };
+  if (!external) return { signal: retry, detach: noop };
+  if (!retry) return { signal: external, detach: noop };
+  if (typeof AbortController === 'undefined') return { signal: external, detach: noop };
+
+  // **Aborted before anything is attached.** `addEventListener` on an
+  // already-aborted signal never fires, so this is the only point at which the
+  // already-aborted case can be answered.
+  if (external.aborted || retry.aborted) {
+    const controller = new AbortController();
+    const reason = external.aborted ? external.reason : retry.reason;
     try {
-      controller.abort();
+      controller.abort(reason);
     } catch (e) {
+      // `AbortController#abort` is specified never to throw, so this is for a
+      // partial polyfill. Losing the forwarded reason would be bad; losing the
+      // abort itself would be worse, and neither is worth propagating here —
+      // the caller is already on the rejected path.
+      controller.abort();
+    }
+    return { signal: controller.signal, detach: noop };
+  }
+
+  const controller = new AbortController();
+  const onAbort = (e) => {
+    // Forward the originating signal's reason so the caller can tell *which*
+    // limit fired. `controller.abort()` with no argument would invent an
+    // `AbortError` and lose that, which is the whole value of combining rather
+    // than merely concatenating.
+    try {
+      controller.abort(e && e.target && 'reason' in e.target ? e.target.reason : undefined);
+    } catch (err) {
       /* ignore */
     }
   };
-  if (typeof external.addEventListener === 'function') {
-    external.addEventListener('abort', onAbort, { once: true });
+  const sources = [external, retry].filter(
+    (s) =>
+      s && typeof s.addEventListener === 'function' && typeof s.removeEventListener === 'function'
+  );
+  for (const source of sources) {
+    source.addEventListener('abort', onAbort, { once: true });
   }
-  if (typeof retry.addEventListener === 'function') {
-    retry.addEventListener('abort', onAbort, { once: true });
-  }
-  return controller.signal;
+  let detached = false;
+  const detach = () => {
+    if (detached) return;
+    detached = true;
+    for (const source of sources) {
+      try {
+        source.removeEventListener('abort', onAbort);
+      } catch (e) {
+        // **A `finally` is the worst place to throw from.** `detach` runs inside
+        // the attempt teardown, so an exception here would replace the attempt's
+        // real outcome — the actual error, or the value the caller was waiting
+        // for — with a message about a broken EventTarget. The leak this method
+        // exists to fix is a slow one; losing the error to fix it fast is a bad
+        // trade. A source that adds but throws on removal is broken anyway, and
+        // the next attempt's `detach` will simply try again.
+      }
+    }
+  };
+  return { signal: controller.signal, detach };
 };
 
 export default PowerDeadline;

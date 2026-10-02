@@ -6042,3 +6042,51 @@ distinguishes "the map ran" from "the map was skipped" — which is the only thi
 that test is about. With that, all three mutants are caught: removing the gate
 fails the level-0 test; restoring the plain-object clause fails 2 pass-through
 tests; reverting the sink wiring fails 2. Each now fails the test written for it.
+
+## `PowerDeadline`: an abort listener per attempt is gone, and a cancelled run no longer starts
+
+**Two defects in how `PowerDeadline` wires a signal to your operation, both measured before they were fixed.**
+
+**The leak.** `combineSignals` added an `abort` listener to each input signal and
+nothing ever removed one. `AbortSignal` is an `EventTarget`, not an
+`EventEmitter`: `{ once: true }` is not a cleanup, it only avoids a _second_
+invocation once the event has fired — and on a successful run it never fires.
+Measured: **20 runs × 4 attempts against one shared external signal left 80
+retained `abort` listeners**, one per attempt, each holding `onAbort` → the
+internal `AbortController` → the combined signal and everything the caller had
+attached. Nothing warned, because nothing could: there is no listener count to
+observe and no `off()`. This is the shape that shows up in a six-hour memory
+profile rather than a stack trace.
+
+`combineSignals` now returns `{ signal, detach }` and the call site registers
+**both** detachers in the existing `cleanups` array, inner first so teardown runs
+in the reverse of setup. `detach` is idempotent and always a function — never
+`undefined` — so the caller never has to test before pushing it onto `cleanups`.
+After the fix the same 20 × 4 leaves **0**.
+
+**The cancelled run that still started.** An already-aborted external signal
+rejected with `EABORT`, which is correct — but `fn` had **already been invoked**
+first. `createAbortPromise` returned a rejected promise while `candidates[0]` had
+already been constructed, so `fn` ran, its side effects happened, and its result
+was thrown away. Starting work you are about to abandon is the defect; the
+rejection never was. Measured before the fix: **1 invocation**; after, **0**. The
+check sits beside the existing deadline guard, because the cheapest place to
+refuse is before anything is constructed, and it covers `retrySignal` too — a
+per-attempt timeout that already fired means the attempt is over, which is the
+same defect with a different clock.
+
+**The abort reason is now forwarded through the combination.** `onAbort` reads
+`e.target.reason` rather than calling `controller.abort()` bare, so a caller can
+tell _which_ limit fired instead of receiving an invented `AbortError`.
+
+**11 tests, 3 mutants, all caught.** The listener count is read with
+`getEventListeners` from `node:events` — a real `EventTarget`, not a stub
+recording calls — because a fake would have passed against a `removeEventListener`
+that removed the wrong function. Neutering `detach` fails 4; removing the
+already-aborted guard fails 2; registering the detachers but never running them
+fails the same 4, which is what makes the `finally` registration itself the
+asserted thing rather than an incidental.
+
+**Two of this file's own tests asserted the wrong thing, and one of them asserted the opposite of the row.** An early draft claimed a signal handed to `fn` "must still observe a later abort" after the attempt settled. It does not, deliberately — that is what detaching _means_, and keeping it wired is the retention being fixed. It is replaced by the property that actually matters and that fails if someone fixes the leak by never attaching: **the listener is live during each attempt and gone after it, on every attempt.** A second draft asserted `fn` receives `undefined` when no signal is given, having set a `totalTimeout` — which correctly failed, because a deadline creates its own controller and `fn` _should_ receive that signal. Both are now split into the two branches they actually describe.
+
+**GATE-001 caught the two new `catch` sites** and was right to: `/* ignore */` went to 21 against a ceiling of 19. Raising the ceiling would have been the wrong call — both sites carry a real reason. One is `AbortController#abort`, specified never to throw, so the catch exists for a partial polyfill and falls back to an argument-less abort rather than losing the cancellation. The other is the one that matters: **`detach` runs inside a `finally`, so a throw from `removeEventListener` would replace the attempt's real outcome** — the actual error, or the value the caller was waiting for — with a message about a broken `EventTarget`. The leak is a slow one; losing the error to fix it fast is a bad trade.
