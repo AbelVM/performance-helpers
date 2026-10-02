@@ -61,6 +61,46 @@ export class PowerQueue {
     reset(): void;
     clear(): void;
     /**
+     * Release memory held by a burst, by reallocating the buffer smaller.
+     *
+     * The buffer only ever grows: `_grow()` doubles it and nothing halves it, so a
+     * queue that took 5 000 items once keeps an 8 192-slot buffer for the rest of
+     * its life. `clear()` empties the slots but does not release them, and that is
+     * the right behaviour for a container whose purpose is bounding memory.
+     * Measured: 5 000 pushes, then drained or cleared, leaves `capacity` at 8 192
+     * with `length` 0.
+     *
+     * **Explicit rather than automatic, and the reason is the hot path.** The
+     * obvious alternative is to shrink inside `shift()` whenever
+     * `size < capacity / 2`, which costs a comparison and a branch on every
+     * dequeue forever to reclaim memory only after a burst. A caller that has just
+     * finished a burst knows when to pay; the dequeue path does not.
+     *
+     * `minimum` is the capacity to keep — a floor for a queue that is expected to
+     * refill to a known size, so a burst followed by steady traffic does not
+     * reallocate on every cycle. It is rounded **up** to a power of two like the
+     * constructor, and never below 2, which is the same floor the constructor
+     * applies. Passing anything smaller than the current length is a no-op: the
+     * buffer cannot hold what is in it.
+     *
+     * @param {number} [minimum=POWER_QUEUE_INITIAL_CAPACITY] Capacity to keep.
+     * @returns {number} The capacity after the call.
+     */
+    shrink(minimum?: number): number;
+    /**
+     * Enqueue `count` copies of `item` without building an intermediate array.
+     *
+     * Exists for the one caller that wanted it: filling a window with `n` equal
+     * timestamps used to be `new Array(n)`, a loop to populate the holes, and then
+     * `pushMany` to walk the result — a temporary allocation and a second pass on
+     * a path that runs per `tryConsume(n)` with `n > 1`.
+     *
+     * @param {any} item The value to enqueue `count` times.
+     * @param {number} count How many copies.
+     * @returns {number} New queue length after the pushes.
+     */
+    fill(item: any, count?: number): number;
+    /**
      * Internal buffer capacity (always a power-of-two).
      * @returns {number}
      */

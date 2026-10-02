@@ -6,9 +6,9 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 `new PowerQueue(initialCapacity?)`
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `initialCapacity` | `number` | `16` | Initial capacity (will be rounded up to a power-of-two). The queue automatically grows when full.
+| option            |     type | default | description                                                                                       |
+| ----------------- | -------: | ------: | ------------------------------------------------------------------------------------------------- |
+| `initialCapacity` | `number` |    `16` | Initial capacity (will be rounded up to a power-of-two). The queue automatically grows when full. |
 
 ## API
 
@@ -28,8 +28,40 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 - `pushMany(items)` — Enqueue multiple items in one call. The implementation grows the backing buffer at most once and copies items efficiently; returns the new queue length.
 
+- `fill(item, count)` — Enqueue `count` copies of `item`. Equivalent to
+  `pushMany(Array(count).fill(item))` without the temporary array, for the case
+  where every value is the same.
+
+- `shrink(minimum = 16)` — Give back the memory a burst grew, and return the
+  capacity afterwards.
+
+### Reclaiming a burst
+
+The buffer only ever grows, so a queue that held 5 000 items once keeps an
+8 192-slot buffer for the rest of its life. `clear()` empties the slots but does
+not release them, which is right for a container whose purpose is bounding
+memory — so shrinking is **explicit**:
+
+```javascript
+queue.push(...burstOfFiveThousand);
+await drain(queue);
+
+// Still 8192 here. This is the line that gives it back.
+queue.shrink(); // => 16
+```
+
+`minimum` is a floor for a queue expected to refill to a known size, so steady
+traffic does not reallocate every cycle; it is rounded up to a power of two, and
+is never below the current length, so nothing is ever dropped.
+
+`PowerSlidingWindow` uses this on your behalf: its timestamps live in a
+`PowerQueue`, and it shrinks when a window ages out. `shrink()` is not automatic
+inside `shift()` on purpose — that would put a comparison and a branch on every
+dequeue forever to reclaim memory only after a burst, and a caller that has just
+finished a burst is the one that knows when to pay.
+
 - `unshiftMany(items)` — Prepend multiple items to the head so that `items[0]` becomes the next value returned by `shift()`. Efficient for bulk prepends.
- 
+
 - `values()` — Non-destructive iterator of values (alias of the default iterator, i.e. `[Symbol.iterator]`).
 
 - `keys()` — Non-destructive iterator of zero-based indexes (0 is the head).

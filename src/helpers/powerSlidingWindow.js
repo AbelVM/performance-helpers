@@ -69,6 +69,18 @@ export class PowerSlidingWindow {
       if (t === undefined || t > threshold) break;
       this._timestamps.shift();
     }
+    // Hand back the buffer a burst grew. The ring only ever doubles, so without
+    // this a single large `tryConsume` window leaves `capacity` at its
+    // high-water mark for the lifetime of the limiter — a helper whose job is
+    // bounding what it remembers, keeping the memory of the worst moment it saw.
+    // Called here rather than inside `shift()` so the dequeue path pays nothing:
+    // this is one comparison per prune, and a prune is a window boundary rather
+    // than a per-item event.
+    //
+    // The default floor is the queue's own initial capacity, so a limiter doing
+    // steady traffic settles at that rather than reallocating on every window
+    // that empties. Only a genuine drop below it reallocates.
+    this._timestamps.shrink();
   }
 
   /**
@@ -92,11 +104,7 @@ export class PowerSlidingWindow {
     this._prune(now);
     if (this._timestamps.length + want <= this.capacity) {
       if (want === 1) this._timestamps.push(now);
-      else {
-        const arr = new Array(want);
-        for (let i = 0; i < want; i++) arr[i] = now;
-        this._timestamps.pushMany(arr);
-      }
+      else this._timestamps.fill(now, want);
       return true;
     }
     return false;
