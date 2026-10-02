@@ -16,11 +16,24 @@ import { PowerEventBus } from '../src/helpers/powerEventBus.js';
  * direction, and is what a first attempt at this fix did: it made two of the
  * three tests fail deterministically, because the circuit could then never
  * reach half-open within the literal wait.
+ *
+ * **So the timeout is now 1 000 ms and the waits move with it**, which is what
+ * the note above asks for and what the previous value did not do. The `x10`
+ * relationship is replaced by `+ 200` because with a 1 000 ms timeout a `x10`
+ * wait would sleep 10 seconds in each of the two tests that need one. `+ 200`
+ * keeps the property the tests actually depend on — *past* the timeout, so the
+ * reopen timer has fired — at a cost of 1.2 s each.
+ *
+ * The flake was not hypothetical when this was written: `powerCircuit` failed
+ * this assertion under full-suite load at least twice in one session, reading
+ * `half-open` where `open` was expected, because the `await` before the
+ * assertion exceeded a 10 ms window. It passed in isolation every time, which is
+ * the signature of a load-sensitive test rather than a wrong one.
  */
-const TIMEOUT_MS = 10;
+const TIMEOUT_MS = 1_000;
 
-/** Comfortably past {@link TIMEOUT_MS}, so the reopen timer has fired. */
-const PAST_TIMEOUT_MS = TIMEOUT_MS * 10;
+/** Past {@link TIMEOUT_MS}, so the reopen timer has fired. */
+const PAST_TIMEOUT_MS = TIMEOUT_MS + 200;
 
 describe('PowerCircuit observability', () => {
   it('calls onStateChange callback when state transitions occur', async () => {
