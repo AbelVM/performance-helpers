@@ -242,6 +242,22 @@ Style that is deliberate here, not incidental:
   the test that pins it in the same commit.
 - Do not run `git commit` without a changeset unless the change is docs-only.
 - Do not edit `types/` by hand. It is generated and `types:drift` will fail.
+- **Do not use `git stash` to run an A/B comparison — copy the file instead.**
+  Mutating a source file to see whether a test catches the difference is the
+  standard move here, and `git stash push -- <path>` is the obvious way to undo
+  it. It is also how you lose work on a dirty tree, because the pop re-applies
+  the stashed state over anything that changed in between:
+  - `git stash push -- src/` then `git stash pop` conflicted on
+    `powerScheduler.js` and left nine conflict markers in a working tree, because
+    the stash had captured a partial state. `HEAD` was clean, so the fix was
+    `git checkout HEAD -- <file>`; had the commit been needed first, it would not
+    have been.
+  - The same round-trip a second time reproduced the conflict, on the same file,
+    for the same reason.
+    So: `cp src/foo.js /tmp/kilo/foo.bak`, mutate the real file, run the test,
+    `cp /tmp/kilo/foo.bak src/foo.js`. It is faster, it cannot conflict, and it
+    leaves the index alone. `git stash` is for parking work you intend to resume,
+    not for a thirty-second experiment.
 - **Do not edit `review.md` with a multi-step script, and do not trust one that
   reported success.** It is 450 KB+, gitignored — so `git checkout` cannot undo a
   bad edit and no commit ever holds it — and a markdown table row cannot contain
