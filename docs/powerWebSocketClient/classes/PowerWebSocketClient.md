@@ -595,13 +595,13 @@ has already buffered it and there is nothing left to await.
 
 ##### options?
 
-###### dropOnBackpressure?
-
-`boolean`
-
 When the socket is
   over its high-water mark, drop the message instead of queueing it. Use for
   telemetry where a gap is better than growing an unbounded buffer.
+
+###### dropOnBackpressure?
+
+`boolean`
 
 #### Returns
 

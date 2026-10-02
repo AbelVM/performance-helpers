@@ -11,47 +11,52 @@ describe('nowMs extra branches', () => {
     vi.resetModules();
     // Make perf-based time close to Date.now()
     global.performance = { timeOrigin: 1_000_000, now: () => 10 };
-    const origDateNow = Date.now;
-    Date.now = () => 1_000_010;
-
-    const mod = await import('../src/utils/now.js');
-    const v = mod.nowMs();
-    expect(v).toBe(1_000_010);
-
-    Date.now = origDateNow;
+    // `vi.spyOn` owns the restore, which is what `require-atomic-updates` is
+    // asking for: reading `Date.now` into a local, yielding on `await import`,
+    // then assigning it back is the shape the rule exists to catch. It also
+    // cannot be skipped — the mock restores itself from a `finally`, where the
+    // trailing `Date.now = origDateNow` this replaced sat *after* the assertion
+    // and so leaked a stubbed `Date.now` into every later test whenever an
+    // `expect` failed.
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(1_000_010);
+    try {
+      const mod = await import('../src/utils/now.js');
+      const v = mod.nowMs();
+      expect(v).toBe(1_000_010);
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it('falls back to Date.now() when performance diverges', async () => {
     vi.resetModules();
     // Perf reports epoch far away from Date.now()
     global.performance = { timeOrigin: 0, now: () => 0 };
-    const origDateNow = Date.now;
-    Date.now = () => 2_000;
-
-    const mod = await import('../src/utils/now.js');
-    const v = mod.nowMs();
-    expect(v).toBe(2_000);
-
-    Date.now = origDateNow;
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(2_000);
+    try {
+      const mod = await import('../src/utils/now.js');
+      const v = mod.nowMs();
+      expect(v).toBe(2_000);
+    } finally {
+      dateNow.mockRestore();
+    }
   });
 
   it('uses process.hrtime.bigint() when performance is absent', async () => {
     vi.resetModules();
     // Remove performance to force hrtime path
-    // Stub process.hrtime.bigint to make hrVal align with Date.now()
-    const origHr = process.hrtime && process.hrtime.bigint;
     const now = Date.now();
-    process.hrtime = process.hrtime || (() => {});
-    process.hrtime = Object.assign(process.hrtime, {});
-    process.hrtime.bigint = () => BigInt(now * 1_000_000);
+    // Stub process.hrtime.bigint to make hrVal align with Date.now()
+    const hrBigint = vi.spyOn(process.hrtime, 'bigint').mockReturnValue(BigInt(now * 1_000_000));
 
     delete global.performance;
-
-    const mod = await import('../src/utils/now.js');
-    const v = mod.nowMs();
-    // hrtime-backed value should be close to Date.now() (module logic returns hrVal)
-    expect(Math.abs(v - now)).toBeLessThan(10);
-
-    if (origHr) process.hrtime.bigint = origHr;
+    try {
+      const mod = await import('../src/utils/now.js');
+      const v = mod.nowMs();
+      // hrtime-backed value should be close to Date.now() (module logic returns hrVal)
+      expect(Math.abs(v - now)).toBeLessThan(10);
+    } finally {
+      hrBigint.mockRestore();
+    }
   });
 });

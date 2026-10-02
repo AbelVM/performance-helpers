@@ -330,7 +330,9 @@ export class PowerCache {
     // Measured with both values set: identical `size`, `_expirations` and
     // `onExpire` counts. The *guide* was the actual defect, claiming a
     // non-mutating default the code never had. See CACHE-008.
+    /** @type {CacheNode|null} */
     this._head = null;
+    /** @type {CacheNode|null} */
     this._tail = null;
     /**
      * Recycled nodes, kept to avoid allocating one per insert.
@@ -403,6 +405,7 @@ export class PowerCache {
     this._cleanupRunning = false;
     this._cleanupParams = null;
     // Cursor used to resume incremental expiration scans to avoid re-scanning the list start
+    /** @type {CacheNode|null} */
     this._cleanupCursor = null;
     // Whether the `_cleanupCursor` still points to a live node in `this._map`.
     // This avoids a Map lookup on every incremental cleanup scan — mutation paths
@@ -616,7 +619,12 @@ export class PowerCache {
       return Number.isFinite(v) ? Math.max(0, v) : 0;
     }
     try {
-      const w = this.weightFn(value);
+      // `weightFn` is nullable, and the null case is deliberately handled by the
+      // catch below rather than by a guard here: calling a missing function throws
+      // `TypeError`, the catch swallows it, and the method's documented contract is
+      // that any thrown error yields a weight of 0. The cast states that contract;
+      // adding a null check would silently take a different path to the same answer.
+      const w = /** @type {function(any): number} */ (this.weightFn)(value);
       const n = +w;
       return Number.isFinite(n) ? Math.max(0, n) : 0;
     } catch (err) {
@@ -1699,7 +1707,11 @@ export class PowerCache {
     if (typeof factory === 'function') {
       const res = factory();
       if (typeof res?.then === 'function') {
-        return res.then((value) => {
+        // `res` is whatever a user-supplied factory returned, so the resolved
+        // value is genuinely untyped here - this is not a hole in the types but
+        // the boundary they stop at. Annotated inline because the factory's own
+        // return type is `any` and a named type would be a lie.
+        return res.then((/** @type {any} */ value) => {
           try {
             this.set(key, value, { ttl, weight });
           } catch (err) {
@@ -1876,6 +1888,7 @@ export class PowerCache {
     // Wrap with a timeout race when requested
     let timed = p;
     if (Number.isFinite(effectiveTimeout) && effectiveTimeout > 0) {
+      /** @type {ReturnType<typeof setTimeout>|null} */
       let timer = null;
       timed = new Promise((resolve, reject) => {
         timer = setTimeout(() => {
@@ -1971,8 +1984,9 @@ export class PowerCache {
    *
    * @param {*} key
    * @param {*} value
-   * @param {Object} [options]
-   * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
+   * @param {{ignoreExpiry?: boolean, maxNodes?: number, compareFn?: function(any, any): boolean}} [options]
+   *   `ignoreExpiry` considers expired entries as present; `maxNodes` bounds how far
+   *   the scan goes and `compareFn` replaces the default deep comparison.
    * @returns {boolean}
    */
   hasEqual(key, value, options = {}) {
@@ -2072,6 +2086,9 @@ export class PowerCache {
    * Remove expired entries by scanning from least-recently used to most.
    * @returns {void}
    */
+  /**
+   * @returns {number} How many expired entries the sweep removed.
+   */
   cleanupExpired() {
     // Backwards-compatible: allow optional scan limit
     return this.cleanupExpiredUpTo();
@@ -2122,10 +2139,12 @@ export class PowerCache {
    * to avoid long event-loop stalls.
    * Note: call `stopCleanup()` to stop the periodic timer (for example, on application shutdown)
    * to ensure the internal timer is cleared and resources can be reclaimed.
-   * @param {number|Object} [intervalOrOptions] - Cleanup interval in ms, or an
-   *   options object `{ interval, maxCleanupPerTick }`. The nested tags were
-   *   removed because a qualified `@param` is only valid when the parent is a
-   *   bare `{Object}`; against `number|Object` it is rejected with TS8032.
+   * @param {number|{interval?: number, intervalMs?: number, maxCleanupPerTick?: number}} [intervalOrOptions] -
+   *   Cleanup interval in ms, or an options object. Written as one type expression rather
+   *   than a bare `{Object}` with nested `@param` tags: those tags are only valid when
+   *   the parent is a bare object, so the earlier spelling had to be `{number|Object}`
+   *   and every property read off it was an error. Spelling the shape out removes the
+   *   reason the nested tags were dropped.
    * @returns {void}
    */
   startCleanup(intervalOrOptions = {}) {
@@ -2139,14 +2158,14 @@ export class PowerCache {
       // reaching for the obvious name had it accepted and dropped — the one
       // argument shape `startCleanup` silently ignored.
       const requestedInterval = intervalOrOptions.interval ?? intervalOrOptions.intervalMs;
-      interval = Number.isFinite(+requestedInterval)
-        ? +requestedInterval
+      interval = Number.isFinite(Number(requestedInterval))
+        ? Number(requestedInterval)
         : Math.max(
             MS_PER_SEC,
             Math.min(this.defaultTTL || DEFAULT_CACHE_DEFAULT_TTL_MS, DEFAULT_CACHE_DEFAULT_TTL_MS)
           );
-      maxCleanupPerTick = Number.isFinite(+intervalOrOptions.maxCleanupPerTick)
-        ? Math.max(1, +intervalOrOptions.maxCleanupPerTick)
+      maxCleanupPerTick = Number.isFinite(Number(intervalOrOptions.maxCleanupPerTick))
+        ? Math.max(1, Number(intervalOrOptions.maxCleanupPerTick))
         : this.maxCleanupPerTick;
     }
     this.stopCleanup();
@@ -2318,8 +2337,12 @@ export class PowerCache {
    * @param {number} [options.maxWeight]
    */
   resize({ maxEntries, maxWeight } = {}) {
-    if (Number.isFinite(+maxEntries)) this.maxEntries = Math.max(0, +maxEntries);
-    if (Number.isFinite(+maxWeight)) this.maxWeight = Math.max(0, +maxWeight);
+    // `Number(x)` rather than `+x`: identical at runtime (unary `+` is defined as
+    // `Number(x)`, and `Number(undefined)` is `NaN`, so an omitted option still
+    // fails the `isFinite` gate below) but it accepts an optional property, where
+    // `+x` on a possibly-undefined value is a type error at every one of these.
+    if (Number.isFinite(Number(maxEntries))) this.maxEntries = Math.max(0, Number(maxEntries));
+    if (Number.isFinite(Number(maxWeight))) this.maxWeight = Math.max(0, Number(maxWeight));
     // Mutations that trigger bulk evictions can invalidate the incremental
     // cleanup cursor used by `cleanupExpiredUpTo`. Reset the cursor so
     // subsequent incremental scans start from a known-good head node.
@@ -2658,7 +2681,9 @@ function deepEqual(a, b, state, depth = 0) {
     for (let i = 0; i < bItems.length; i++) refIndex.set(bItems[i], i);
 
     // Helper: try to produce a stable-ish signature for many common objects
-    const trySignature = (val) => {
+    // `any`, and deliberately so: this is called on values that came out of a
+    // user's cache, whose type the library does not know.
+    const trySignature = (/** @type {any} */ val) => {
       try {
         return JSON.stringify(val, (k, v) => {
           if (v instanceof Date) return { __type: 'Date', v: v.getTime() };
@@ -3226,6 +3251,10 @@ export class PowerTimedCache {
   }
 
   // Delegate commonly used methods to the underlying PowerCache
+  /**
+   * @param {any} key
+   * @returns {any}
+   */
   get(key) {
     return this.cache.get(key);
   }
@@ -3309,12 +3338,27 @@ export class PowerTimedCache {
   get hitRate() {
     return this.cache.hitRate;
   }
+  /**
+   * @param {'LRU'|'MRU'} [order='MRU'] Iteration order, forwarded verbatim to
+   *   the inner `PowerCache`. Declared here rather than left implicit because an
+   *   undeclared parameter is published as an implicit `any`, which accepts a
+   *   typo like `'lru'` that the inner method would then reject at runtime.
+   * @returns {IterableIterator<[any, any]>}
+   */
   entries(order) {
     return this.cache.entries(order);
   }
+  /**
+   * @param {'LRU'|'MRU'} [order='MRU']
+   * @returns {IterableIterator<any>}
+   */
   keys(order) {
     return this.cache.keys(order);
   }
+  /**
+   * @param {'LRU'|'MRU'} [order='MRU']
+   * @returns {IterableIterator<any>}
+   */
   values(order) {
     return this.cache.values(order);
   }

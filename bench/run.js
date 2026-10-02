@@ -27,7 +27,14 @@ const ITERS = Number(process.env.BENCH_ITERS || 1000000);
 const POOL_SIZES = (process.env.BENCH_POOLS || '1,2,4,8').split(',').map((s) => Number(s));
 const CACHE_DUPLICATE_KEYS = Number(process.env.BENCH_CACHE_DUPLICATE_KEYS || 10);
 const MEMOIZER_DUPLICATE_KEYS = Number(process.env.BENCH_MEMOIZER_DUPLICATE_KEYS || 10);
-const AUTOSCALE_CACHE_KEYS = Number(process.env.BENCH_AUTOSCALE_CACHE_KEYS || 10);
+// `BENCH_AUTOSCALE_CACHE_KEYS` used to be read here and nothing consumed the
+// result, while `bench/README.md` documented it as "unique key count for
+// autoscale + cache duplicate-key benchmark". So it was a knob that accepted an
+// argument, changed no measurement, and was described in the README as if it
+// did. Deleted rather than wired up: the autoscale arms in `runScenario*` share
+// the pool workload and do not build a cache at all, so there is no duplicate-key
+// count for it to govern, and inventing one would add a measurement nobody has
+// asked for.
 // How many times to repeat each helper micro-benchmark; the trimmed median is
 // reported. 9 (was 5) because at 5 runs a single GC pause moves the reported
 // median by more than most of the deltas this harness is asked to justify.
@@ -1153,7 +1160,19 @@ async function runBenchmarkPowerRateLimit(ops) {
       for (let i = 0; i < ops; i++) {
         if (limiter2.tryConsume(1)) passed++;
       }
-      return Number(process.hrtime.bigint() - t0) / 1e6;
+      const t1 = process.hrtime.bigint();
+      // The premise in this variant's own comment — "every tryConsume succeeds"
+      // — asserted rather than assumed, and *after* the clock is read so the
+      // check is not inside the measurement. It is what makes "under rate" mean
+      // under rate: a bucket quietly rejecting would be reported under the
+      // `underRateMs` label while timing the rejection path instead, which is
+      // the opposite of what the label tells a reader.
+      if (passed !== ops) {
+        throw new Error(
+          `underRate: ${ops - passed}/${ops} tryConsume calls were rejected (${passed} passed)`
+        );
+      }
+      return Number(t1 - t0) / 1e6;
     },
     'underRateMs'
   );
@@ -1233,7 +1252,16 @@ async function runBenchmarkPowerCircuit(ops) {
           rejections++;
         }
       }
-      return Number(process.hrtime.bigint() - t0) / 1e6;
+      const t1 = process.hrtime.bigint();
+      // Same reasoning as `underRateMs`: the variant is labelled "open
+      // (fast-fail)", and fast-fail is only what was measured if every call was
+      // rejected. `timeout: 60000` is what makes the assertion safe — the open
+      // window cannot expire inside a loop of this size. Clock read first, check
+      // second, so the assertion costs the measurement nothing.
+      if (rejections !== smallOps) {
+        throw new Error(`open: only ${rejections}/${smallOps} calls were fast-failed`);
+      }
+      return Number(t1 - t0) / 1e6;
     },
     'openMs'
   );
@@ -1435,7 +1463,7 @@ async function runBenchmarkPowerBatch(ops) {
     async () => {
       handlerCallsCoalesced = 0;
       const batch = new PowerBatch(
-        (items) => {
+        () => {
           handlerCallsCoalesced++;
         },
         { maxSize: smallOps }
@@ -1590,10 +1618,25 @@ async function runBenchmarkPowerEventBus(ops) {
           });
         // warmup
         for (let i = 0; i < Math.min(100, smallOps / 100); i++) bus.emit('evt', i);
+        // Reset *after* warm-up, not before: the counter is the assertion below,
+        // and the warm-up's deliveries are not deliveries of the measured loop.
         received = 0;
         const t0 = process.hrtime.bigint();
         for (let i = 0; i < smallOps; i++) bus.emit('evt', i);
-        return Number(process.hrtime.bigint() - t0) / 1e6;
+        const t1 = process.hrtime.bigint();
+        // The variant reports `totalDeliveries: smallOps * subCount`, which is a
+        // number derived from the configuration rather than from the run. This
+        // is the fact it stands for, so it is checked here — outside the timed
+        // region, so the check is not part of the cost being compared. A bus that
+        // dropped a subscriber would otherwise report the same deliveries as one
+        // that delivered them all.
+        const expected = smallOps * subCount;
+        if (received !== expected) {
+          throw new Error(
+            `PowerEventBus/${subCount}: ${received} deliveries, expected ${expected}`
+          );
+        }
+        return Number(t1 - t0) / 1e6;
       },
       'ms'
     );
@@ -1694,7 +1737,18 @@ async function runBenchmarkPowerSlidingWindow(ops) {
       for (let i = 0; i < ops; i++) {
         if (win.tryConsume(1)) consumed++;
       }
-      return Number(process.hrtime.bigint() - t0) / 1e6;
+      const t1 = process.hrtime.bigint();
+      // `capacity` bounds the timestamps retained in the current window, and
+      // `windowMs: 60000` puts the whole loop inside one window, so exactly
+      // `capacity` calls can be admitted. Asserted because the label claims
+      // "~50% reject": a ratio printed from a comment rather than from the run
+      // is a number that cannot change even when the helper does. Outside the
+      // timed region, so the check is not part of what is being compared.
+      const expected = Math.ceil(ops / 2);
+      if (consumed !== expected) {
+        throw new Error(`atCapacity: ${consumed}/${ops} admitted, expected ${expected}`);
+      }
+      return Number(t1 - t0) / 1e6;
     },
     'capMs'
   );
@@ -1893,7 +1947,10 @@ async function runCacheEvictionPressure(tasks, iterations) {
 }
 
 // ── Serial vs concurrent cache getOrSetAsync ─────────────────────────────────
-async function runCacheSerialVsConcurrent(tasks, iterations) {
+// `iterations` is not a parameter: the factory below is a 1 ms `setTimeout`, so
+// there is no per-call CPU weight to scale and a second argument would only
+// suggest one. It was passed (`ITERS`) and ignored.
+async function runCacheSerialVsConcurrent(tasks) {
   const uniqueKeys = 10;
   // Use a 1-ms async factory to simulate I/O latency so in-flight deduplication
   // can activate. A sync factory (e.g. Promise.resolve(heavy())) caches the
@@ -2183,7 +2240,10 @@ async function runCacheGetOrSetAsyncBenchmark(
 
 function runMemoizerBenchmark(tasks, iterations, uniqueKeys = MEMOIZER_DUPLICATE_KEYS) {
   const memo = new PowerMemoizer({ cacheOptions: { maxEntries: uniqueKeys, defaultTTL: 60000 } });
-  const fn = memo.memoize((key) => heavy(iterations));
+  // The memoised function ignores its key deliberately: `heavy(iterations)` costs
+  // the same whatever it is called with, so passing the key through would measure
+  // `repeatedKey()`'s string building rather than the memo's lookup.
+  const fn = memo.memoize(() => heavy(iterations));
 
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
@@ -2342,34 +2402,12 @@ async function runAllHelperBenchmarks() {
 
 function formatMd(report, filename, prevDeltaMap = new Map()) {
   const lines = [];
-  // Labels map and helper for rendering short, descriptive column headers
-  const LABELS = {
-    size: 'Pool Size',
-    totalMs: 'T Total',
-    avgMs: 'Avg',
-    poolLiveDuration: 'T Pool',
-    totalWorkersCreated: 'Workers',
-    totalTasksPerformed: 'Tasks',
-    averageTasksPerWorkerUntilTermination: 'tasks/worker',
-    'timePerTask.max': 'T Max',
-    'timePerTask.min': 'T Min',
-    'timePerTask.average': 'T Avg',
-    'timePerTask.stddev': 'T Std',
-    percentSlowTasks: '% Slow',
-  };
-  function headerLabel(k) {
-    if (LABELS[k]) return LABELS[k];
-    if (k.includes('.')) {
-      const [a, b] = k.split('.');
-      const pa = LABELS[a] || a;
-      const pb = LABELS[`${a}.${b}`] || b;
-      return `${pa} ${pb}`;
-    }
-    return k
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .replace(/_/g, ' ')
-      .replace(/^./, (s) => s.toUpperCase());
-  }
+  // `LABELS` and its `headerLabel()` renderer were deleted here. They dated from
+  // `755d206`, when deltas were rendered as their own labelled columns; the
+  // delta is now inlined into each cell next to the value it compares against,
+  // so there is no header left to label. `LABELS` had no other reader, which is
+  // why it went with the function rather than being kept "in case" — an
+  // unreferenced label table is a second place for a metric's name to drift.
 
   lines.push('# Benchmark Results');
   lines.push(`\nGenerated: ${report.timestamp}\n`);
@@ -2469,7 +2507,12 @@ function formatMd(report, filename, prevDeltaMap = new Map()) {
 
     // Build header: one column per pool size + optional speedup column
     const sizeHeaders = report.config.POOL_SIZES.map((size) => `${size}`);
-    const hasDelta = prevDeltaMap && prevDeltaMap.size > 0;
+    // `hasDelta` was deleted here. It guarded nothing: this header has no delta
+    // column to suppress, because the delta is inlined into each cell below
+    // (`prevDeltaMap.get(deltaKey)` decides per cell whether there is one to
+    // show). The variable was an intent marker for a column that was never
+    // added, and the two other `prevDeltaMap.size > 0` tests in this function —
+    // which gate the summary section — are the ones that do decide something.
     lines.push(
       `| Pattern \\ Pool size  | ${sizeHeaders.join(' | ')} |${singleThreadedMs ? ' Speedup |' : ''}`
     );
@@ -2967,7 +3010,7 @@ async function main() {
     // Serial vs concurrent getOrSetAsync
     try {
       console.log('Running serial vs concurrent cache benchmark...');
-      report.cacheSerialVsConcurrent = await runCacheSerialVsConcurrent(TASKS, ITERS);
+      report.cacheSerialVsConcurrent = await runCacheSerialVsConcurrent(TASKS);
       console.log(
         `Serial ${report.cacheSerialVsConcurrent.serialMs.toFixed(2)}ms  Concurrent ${report.cacheSerialVsConcurrent.concurrentMs.toFixed(2)}ms`
       );

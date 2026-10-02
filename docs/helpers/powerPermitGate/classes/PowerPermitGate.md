@@ -44,6 +44,28 @@
 
 ***
 
+### \_held
+
+> `protected` **\_held**: `number`
+
+Permits that have been granted and not yet returned.
+
+The single count of outstanding work in this class, and the reason
+[PowerPermitGate#reset](#reset) can no longer mint a permit. The invariant
+it maintains is `_available + _held === _capacity`; `reset()` may only set
+`_available` up to `capacity - _held`, so a holder that is still running
+keeps occupying its permit across a reset instead of the reset handing
+out a second one. Both grant paths go through `_grantTo`, so there is no
+way for a permit to exist without being counted here.
+
+`protected` rather than `private`: `PowerBackpressure` reads it for its
+heartbeat termination condition and for its `_inFlight` view, and
+`_serveWaiters` below is driven the same way. Neither is part of the
+public surface - `protected` keeps them out of what a consumer calls - but
+a subclass reading a base field is precisely what the tag describes.
+
+***
+
 ### \_queueCapacity
 
 > **\_queueCapacity**: `number`
@@ -157,6 +179,52 @@ Maximum number of waiters allowed in the queue.
 #### Returns
 
 () => `void`
+
+***
+
+### \_serveWaiters()
+
+> `protected` **\_serveWaiters**(`permits`, `fromAvailable`): `number`
+
+Hand permits to queued waiters, skipping any that have been aborted.
+
+Shared by `release()` and the `PowerBackpressure` refill loop, which is the
+point: the refill loop used to shift entries itself, so it neither skipped
+cancelled ones nor decremented `_cancelledWaiters`. A single cancellation
+therefore left the counter permanently one too high, `pending` reported 0
+with a live waiter still queued, and every refill tick short-circuited on
+`pending === 0` - a self-sustaining deadlock that only `reset()` cleared.
+
+Aborted entries are compacted here rather than on the abort path, on
+purpose: removing by reference from a ring buffer is O(n) per cancellation,
+and a cancellation storm is exactly when an O(n) walk per cancelled waiter
+is least affordable. The `_cancelledWaiters` counter keeps
+[PowerPermitGate#pending](#pending) and [PowerPermitGate#isFull](#isfull) honest in
+the meantime.
+
+#### Parameters
+
+##### permits
+
+`number`
+
+Maximum number of waiters to serve.
+
+##### fromAvailable
+
+`boolean`
+
+Whether the served permits are drawn from
+  `_available` (they were counted into the pool first) or transferred
+  straight from a holder without ever entering it. See
+  PowerPermitGate#\_grantTo; the two routes differ only in that
+  flag, and conflating them is what put `_available` below zero.
+
+#### Returns
+
+`number`
+
+How many were served.
 
 ***
 

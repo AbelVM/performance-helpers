@@ -261,11 +261,19 @@ export class PowerWebSocketClient {
         'PowerWebSocketClient: no WebSocket implementation found. Pass `WebSocketImpl`.'
       );
     }
+    const globalObj = /** @type {Record<string, *>} */ (/** @type {*} */ (globalThis));
     this._WSStream =
       WebSocketStreamImpl ||
       // Feature test, deliberately: the DOM type is not in every lib, and reading
       // it as an unknown global is exactly the runtime check we want.
-      (typeof WebSocketStream !== 'undefined' ? /** @type {*} */ (WebSocketStream) : null);
+      //
+      // Read off `globalThis` through an index rather than as a bare identifier,
+      // because a bare `WebSocketStream` is resolved when the *program* is built:
+      // without the DOM lib that is a compile error, raised before the runtime
+      // check below ever runs. So the identifier spelling could not perform the
+      // feature test it was written to perform - it failed the build instead of
+      // answering the question.
+      (typeof globalObj.WebSocketStream !== 'undefined' ? globalObj.WebSocketStream : null);
     this._codec = codec;
     // Split by what `0` *means* here, because the two are not the same mistake.
     //
@@ -547,8 +555,7 @@ export class PowerWebSocketClient {
    * has already buffered it and there is nothing left to await.
    *
    * @param {any} message
-   * @param {Object} [options]
-   * @param {boolean} [options.dropOnBackpressure=false] - When the socket is
+   * @param {{dropOnBackpressure?: boolean}} [options] - When the socket is
    *   over its high-water mark, drop the message instead of queueing it. Use for
    *   telemetry where a gap is better than growing an unbounded buffer.
    * @returns {Promise<boolean>} `true` when the frame was handed to the socket.
@@ -739,7 +746,7 @@ export class PowerWebSocketClient {
   _open() {
     return new Promise((resolve, reject) => {
       let settled = false;
-      const done = (err) => {
+      const done = (/** @type {any} */ err) => {
         if (settled) return;
         settled = true;
         this._clearConnectTimer();
@@ -755,7 +762,7 @@ export class PowerWebSocketClient {
           this._writer = this._socket.writable?.getWriter?.() || null;
           this._socket.opened
             ?.then(() => this._handleOpen(done))
-            .catch((e) => {
+            .catch((/** @type {any} */ e) => {
               this._handleError(e);
               done(e);
             });
@@ -809,7 +816,9 @@ export class PowerWebSocketClient {
               this._handleClose(e);
               done(e);
             });
-            this._socket.addEventListener('message', (e) => this._handleMessage(e));
+            this._socket.addEventListener('message', (/** @type {any} */ e) =>
+              this._handleMessage(e)
+            );
             // The heartbeat's reply. A browser socket has no `ping()`, so
             // `_pingSentAt` is never set and the deadline below can only ever
             // expire — on a browser the heartbeat is inert, and `stats().rtt` is
@@ -819,15 +828,15 @@ export class PowerWebSocketClient {
             }
           } else {
             this._socket.onopen = () => this._handleOpen(done);
-            this._socket.onerror = (e) => {
+            this._socket.onerror = (/** @type {any} */ e) => {
               this._handleError(e);
               done(e);
             };
-            this._socket.onclose = (e) => {
+            this._socket.onclose = (/** @type {any} */ e) => {
               this._handleClose(e);
               done(e);
             };
-            this._socket.onmessage = (e) => this._handleMessage(e);
+            this._socket.onmessage = (/** @type {any} */ e) => this._handleMessage(e);
           }
         }
       } catch (e) {
@@ -841,8 +850,8 @@ export class PowerWebSocketClient {
         this._connectTimer = setSafeTimeout(() => {
           this._connectTimer = null;
           if (this._state !== READY_STATE.OPEN) {
-            const err = new Error(
-              `PowerWebSocketClient: connect timed out after ${this._connectTimeoutMs}ms`
+            const err = /** @type {Error & {code: 'ERR_WS_CONNECT_TIMEOUT'}} */ (
+              new Error(`PowerWebSocketClient: connect timed out after ${this._connectTimeoutMs}ms`)
             );
             err.code = 'ERR_WS_CONNECT_TIMEOUT';
             // **Settle before closing.** Closing emits a `close` event, and since
@@ -864,6 +873,7 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * @param {(err?: any) => void} done Settles the pending connect exactly once.
    * @private
    */
   _handleOpen(done) {
@@ -886,6 +896,8 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
+   *   the caller delivers one directly - hence `event?.data ?? event`.
    * @private
    */
   _handleMessage(event) {
@@ -931,6 +943,8 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
+   *   absent on a synthetic close.
    * @private
    */
   _handleClose(event) {
@@ -953,6 +967,8 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * @param {any} err Whatever the platform or the caller reported. `any` because
+   *   the WS `error` event carries no guaranteed shape.
    * @private
    */
   _handleError(err) {
@@ -1038,6 +1054,7 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * @param {boolean} paused
    * @private
    */
   _setPaused(paused) {
@@ -1209,10 +1226,12 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * @param {string} type One of the keys of `this._on`.
+   * @param {...any} args
    * @private
    */
   _emit(type, ...args) {
-    const handler = this._on[type];
+    const handler = /** @type {Record<string, (Function|null)|undefined>} */ (this._on)[type];
     if (!handler) return;
     try {
       handler(...args);

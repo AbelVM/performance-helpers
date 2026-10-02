@@ -30,7 +30,6 @@ import {
  */
 /**
  * @typedef {import('./jsdoc-types.js').PowerReleaseFn} PowerReleaseFn
- * @typedef {import('./jsdoc-types.js').BackpressureAdaptiveOptions} BackpressureAdaptiveOptions
  */
 /**
  * Normalize the `adaptive` option into a settings object.

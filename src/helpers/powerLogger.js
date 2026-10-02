@@ -173,7 +173,9 @@ export class PowerLogger {
     if (
       level &&
       typeof level === 'object' &&
-      ['level', 'format', 'name', 'formatter', 'output'].some((k) => k in level)
+      ['level', 'format', 'name', 'formatter', 'output'].some(
+        (k) => k in /** @type {object} */ (level)
+      )
     ) {
       const carried = /** @type {*} */ (level);
       options = /** @type {PowerLoggerOptions} */ (carried);

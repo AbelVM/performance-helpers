@@ -77,21 +77,31 @@ Limiter instances to compose. Each
 
 ### \_undoCommit()
 
-> **\_undoCommit**(`entry`, `want`): `Promise`\<`any`\>
+> **\_undoCommit**(`entry`, `want`): `Promise`\<`void`\>
 
 #### Parameters
 
 ##### entry
 
+###### l
+
+`RateLimiterLike`
+
+###### method
+
+`string`
+
+###### token
+
 `any`
 
 ##### want
 
-`any`
+`number`
 
 #### Returns
 
-`Promise`\<`any`\>
+`Promise`\<`void`\>
 
 ***
 
@@ -211,17 +221,19 @@ fresh allowance — the eviction-is-a-reset bypass this design exists to avoid.
 
 ### rollback()
 
-> **rollback**(`nOrToken`): `void`
+> **rollback**(`nOrToken?`): `void` \| `Promise`\<`void`\>
 
 #### Parameters
 
-##### nOrToken
+##### nOrToken?
 
-`any`
+`number` \| \{ `n?`: `number`; \}
+
+Same argument shape as `release`.
 
 #### Returns
 
-`void`
+`void` \| `Promise`\<`void`\>
 
 ***
 

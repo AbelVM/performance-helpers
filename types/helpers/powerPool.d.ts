@@ -764,7 +764,7 @@ export class PowerPool {
     /**
      * Normalize stop-the-press options and strip internal-only flags.
      * @private
-     * @param {Object=} options
+     * @param {{recreateWorkers?: boolean}&PostMessageOptions=} options
      * @returns {{recreate: boolean, fwdOptions: Object|undefined}}
      */
     private _normalizeStopThePressOptions;
@@ -798,14 +798,16 @@ export class PowerPool {
      * Returns an array with the same length as `items` where each element is
      * either a boolean (accepted) or a Promise (when `options.awaitResponse` is used).
      * @param {{message:*,transfer?:Transferable[]}[]} items
-     * @param {Object=} options - Optional options forwarded to each `postMessage` call.
+     * @param {PostMessageOptions&{correlationIdFactory?: function(number): (string|number)}=} options - Optional options forwarded to each `postMessage` call.
      * @returns {(boolean|Promise<any>)[]}
      * @throws {Error} When `items` is not an array.
      */
     postMessageBatch(items: {
         message: any;
         transfer?: Transferable[];
-    }[], options?: Object | undefined): (boolean | Promise<any>)[];
+    }[], options?: (PostMessageOptions & {
+        correlationIdFactory?: (arg0: number) => (string | number);
+    }) | undefined): (boolean | Promise<any>)[];
     /**
      * Stop the press and then post a batch of messages.
      *

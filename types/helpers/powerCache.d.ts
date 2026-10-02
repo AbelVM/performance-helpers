@@ -64,8 +64,10 @@ export class PowerCache {
     onExpire: ((arg0: any, arg1: any) => void) | null;
     maxCleanupPerTick: number;
     _map: Map<any, any>;
-    _head: import("./jsdoc-types.js").CacheNode | null;
-    _tail: any;
+    /** @type {CacheNode|null} */
+    _head: CacheNode | null;
+    /** @type {CacheNode|null} */
+    _tail: CacheNode | null;
     /**
      * Recycled nodes, kept to avoid allocating one per insert.
      *
@@ -104,7 +106,8 @@ export class PowerCache {
         interval: number;
         maxCleanupPerTick: number;
     } | null;
-    _cleanupCursor: any;
+    /** @type {CacheNode|null} */
+    _cleanupCursor: CacheNode | null;
     _cleanupCursorValid: boolean;
     _evictionCandidate: any;
     /**
@@ -142,8 +145,8 @@ export class PowerCache {
      * @private
      */
     private _windowSize;
-    _windowStartMemo: any;
-    _windowTail: any;
+    _windowStartMemo: import("./jsdoc-types.js").CacheNode | null;
+    _windowTail: import("./jsdoc-types.js").CacheNode | null;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -776,12 +779,15 @@ export class PowerCache {
      *
      * @param {*} key
      * @param {*} value
-     * @param {Object} [options]
-     * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
+     * @param {{ignoreExpiry?: boolean, maxNodes?: number, compareFn?: function(any, any): boolean}} [options]
+     *   `ignoreExpiry` considers expired entries as present; `maxNodes` bounds how far
+     *   the scan goes and `compareFn` replaces the default deep comparison.
      * @returns {boolean}
      */
     hasEqual(key: any, value: any, options?: {
-        ignoreExpiry?: boolean | undefined;
+        ignoreExpiry?: boolean;
+        maxNodes?: number;
+        compareFn?: (arg0: any, arg1: any) => boolean;
     }): boolean;
     /**
      * Delete an entry from the cache.
@@ -798,7 +804,10 @@ export class PowerCache {
      * Remove expired entries by scanning from least-recently used to most.
      * @returns {void}
      */
-    cleanupExpired(): void;
+    /**
+     * @returns {number} How many expired entries the sweep removed.
+     */
+    cleanupExpired(): number;
     /**
      * Cleanup expired entries, scanning up to `maxScan` nodes.
      * Scanning resumes from an internal cursor so repeated small passes will cover the list
@@ -815,13 +824,19 @@ export class PowerCache {
      * to avoid long event-loop stalls.
      * Note: call `stopCleanup()` to stop the periodic timer (for example, on application shutdown)
      * to ensure the internal timer is cleared and resources can be reclaimed.
-     * @param {number|Object} [intervalOrOptions] - Cleanup interval in ms, or an
-     *   options object `{ interval, maxCleanupPerTick }`. The nested tags were
-     *   removed because a qualified `@param` is only valid when the parent is a
-     *   bare `{Object}`; against `number|Object` it is rejected with TS8032.
+     * @param {number|{interval?: number, intervalMs?: number, maxCleanupPerTick?: number}} [intervalOrOptions] -
+     *   Cleanup interval in ms, or an options object. Written as one type expression rather
+     *   than a bare `{Object}` with nested `@param` tags: those tags are only valid when
+     *   the parent is a bare object, so the earlier spelling had to be `{number|Object}`
+     *   and every property read off it was an error. Spelling the shape out removes the
+     *   reason the nested tags were dropped.
      * @returns {void}
      */
-    startCleanup(intervalOrOptions?: number | Object): void;
+    startCleanup(intervalOrOptions?: number | {
+        interval?: number;
+        intervalMs?: number;
+        maxCleanupPerTick?: number;
+    }): void;
     /**
      * Stop periodic cleanup.
      * @returns {void}
@@ -1224,6 +1239,10 @@ export class PowerTimedCache {
      */
     constructor(ttl: number, { maxEntries, interval, maxCleanupPerTick, cacheOptions }?: PowerTimedCacheOptions);
     cache: PowerCache;
+    /**
+     * @param {any} key
+     * @returns {any}
+     */
     get(key: any): any;
     /**
      * @param {any} key
@@ -1303,9 +1322,24 @@ export class PowerTimedCache {
     stopCleanup(): void;
     get size(): number;
     get hitRate(): number;
-    entries(order: any): IterableIterator<[any, any]>;
-    keys(order: any): Generator<any, void, unknown>;
-    values(order: any): Generator<any, void, unknown>;
+    /**
+     * @param {'LRU'|'MRU'} [order='MRU'] Iteration order, forwarded verbatim to
+     *   the inner `PowerCache`. Declared here rather than left implicit because an
+     *   undeclared parameter is published as an implicit `any`, which accepts a
+     *   typo like `'lru'` that the inner method would then reject at runtime.
+     * @returns {IterableIterator<[any, any]>}
+     */
+    entries(order?: "LRU" | "MRU"): IterableIterator<[any, any]>;
+    /**
+     * @param {'LRU'|'MRU'} [order='MRU']
+     * @returns {IterableIterator<any>}
+     */
+    keys(order?: "LRU" | "MRU"): IterableIterator<any>;
+    /**
+     * @param {'LRU'|'MRU'} [order='MRU']
+     * @returns {IterableIterator<any>}
+     */
+    values(order?: "LRU" | "MRU"): IterableIterator<any>;
     /**
      * Named alias for the `Symbol.dispose` implementation, so callers who
      * do not want to reach for the symbol still have something to call.

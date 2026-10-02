@@ -77,6 +77,11 @@ describe('PowerPool additional shallow branches', () => {
       taskQueue: true,
     });
 
+    // Declared out here, not inside the `try`: the `finally` has to reach it, and a
+    // `const` created in the `try` block is in its temporal dead zone for the whole
+    // `finally` — so an assertion failing before the spy was built turned a test
+    // failure into a `ReferenceError` that hid the original.
+    let workerPost = null;
     try {
       pool._logger.error = vi.fn();
       pool.pause();
@@ -86,13 +91,20 @@ describe('PowerPool additional shallow branches', () => {
       expect(pool.queue.length).toBe(1);
 
       await new Promise((resolve) => setTimeout(resolve, 30));
-      pool.workers[0].worker.postMessage = vi.fn(() => {
+      // `vi.spyOn` rather than assigning the method directly. The direct
+      // assignment reads `pool` before the `await` and writes to a property of
+      // it afterwards, which is what `require-atomic-updates` flags; it is also
+      // the reason this needed a `finally` at all, since a plain assignment onto
+      // a real wrapper instance survives `pool.terminate()` and the test leaks a
+      // patched method into whatever runs next. The spy restores the original.
+      workerPost = vi.spyOn(pool.workers[0].worker, 'postMessage').mockImplementation(() => {
         throw new Error('queued dispatch failed');
       });
 
       expect(() => pool.resume()).not.toThrow();
       expect(pool._logger.error).toHaveBeenCalled();
     } finally {
+      workerPost?.mockRestore();
       pool.terminate();
     }
   });

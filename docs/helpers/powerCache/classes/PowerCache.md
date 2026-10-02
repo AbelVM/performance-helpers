@@ -51,7 +51,7 @@ When a non-object is provided as the options argument.
 
 ### \_cleanupCursor
 
-> **\_cleanupCursor**: `any`
+> **\_cleanupCursor**: `CacheNode` \| `null`
 
 ***
 
@@ -243,7 +243,7 @@ caller's side it was served.
 
 ### \_tail
 
-> **\_tail**: `any`
+> **\_tail**: `CacheNode` \| `null`
 
 ***
 
@@ -258,13 +258,13 @@ number of times `weightFn` threw; a non-zero value means `maxWeight`
 
 ### \_windowStartMemo
 
-> **\_windowStartMemo**: `any`
+> **\_windowStartMemo**: `CacheNode` \| `null`
 
 ***
 
 ### \_windowTail
 
-> **\_windowTail**: `any`
+> **\_windowTail**: `CacheNode` \| `null`
 
 ***
 
@@ -415,13 +415,13 @@ returns a resolved Promise for await compatibility.
 
 ### cleanupExpired()
 
-> **cleanupExpired**(): `void`
-
-Remove expired entries by scanning from least-recently used to most.
+> **cleanupExpired**(): `number`
 
 #### Returns
 
-`void`
+`number`
+
+How many expired entries the sweep removed.
 
 ***
 
@@ -848,11 +848,20 @@ Optimizations:
 
 ##### options?
 
+`ignoreExpiry` considers expired entries as present; `maxNodes` bounds how far
+  the scan goes and `compareFn` replaces the default deep comparison.
+
+###### compareFn?
+
+(`arg0`, `arg1`) => `boolean`
+
 ###### ignoreExpiry?
 
 `boolean`
 
-If true, consider expired entries as present.
+###### maxNodes?
+
+`number`
 
 #### Returns
 
@@ -1022,12 +1031,13 @@ to ensure the internal timer is cleared and resources can be reclaimed.
 
 ##### intervalOrOptions?
 
-`number` \| `Object`
+`number` \| \{ `interval?`: `number`; `intervalMs?`: `number`; `maxCleanupPerTick?`: `number`; \}
 
-Cleanup interval in ms, or an
-  options object `{ interval, maxCleanupPerTick }`. The nested tags were
-  removed because a qualified `@param` is only valid when the parent is a
-  bare `{Object}`; against `number|Object` it is rejected with TS8032.
+Cleanup interval in ms, or an options object. Written as one type expression rather
+  than a bare `{Object}` with nested `@param` tags: those tags are only valid when
+  the parent is a bare object, so the earlier spelling had to be `{number|Object}`
+  and every property read off it was an error. Spelling the shape out removes the
+  reason the nested tags were dropped.
 
 #### Returns
 

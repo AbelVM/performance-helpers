@@ -16,13 +16,11 @@
  * The pool uses this automatically. You need it directly when you are writing
  * a worker, or when you are debugging what actually crossed the wire.
  */
-import {
-  encodeMessage,
-  decodeMessage,
-  decodeInbound,
-  selectCodec,
-  isRawPayload,
-} from 'performance-helpers';
+// `decodeInbound` is deliberately *not* imported here: it appears below inside
+// the worker snippet this script prints, and that snippet is the deliverable —
+// it is text for the reader, not code this file runs. Importing it would leave
+// a binding the linter is right to call unused.
+import { encodeMessage, decodeMessage, selectCodec, isRawPayload } from 'performance-helpers';
 
 // --- Why the length prefix, demonstrated -----------------------------------
 console.log('The problem with newline-delimited JSON:');

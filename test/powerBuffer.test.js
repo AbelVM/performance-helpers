@@ -33,14 +33,20 @@ describe('powerBuffer', () => {
   it('falls back to Buffer-based encoder/decoder when TextEncoder/TextDecoder are absent', async () => {
     // Reload module with globals stubbed
     vi.resetModules();
-    const origTE = global.TextEncoder;
-    const origTD = global.TextDecoder;
+    // `vi.stubGlobal` rather than saving the originals and assigning them back.
+    // The hand-written restore is what `require-atomic-updates` fires on: the
+    // value is read, `await import` yields, and it is written back afterwards.
+    // It is also the mechanism `WorkerAgnostic.browser.test.js` already uses in
+    // this repo, and it restores the original property descriptor — so a global
+    // that was absent stays absent instead of being assigned `undefined`.
+    //
+    // `undefined` rather than a deletion, because `powerBuffer` asks
+    // `typeof globalThis.TextEncoder === 'function'`; a missing key would answer
+    // the same way, but `stubGlobal` cannot express a deletion portably and the
+    // distinction is not one this code path has.
+    vi.stubGlobal('TextEncoder', undefined);
+    vi.stubGlobal('TextDecoder', undefined);
     try {
-      // remove TextEncoder/TextDecoder to force Buffer fallback
-      // @ts-ignore
-      global.TextEncoder = undefined;
-      // @ts-ignore
-      global.TextDecoder = undefined;
       const mod = await import('../src/helpers/powerBuffer.js');
       const { o2u8, u82o } = mod;
       const obj = { fallback: true };
@@ -49,11 +55,7 @@ describe('powerBuffer', () => {
       const decoded = u82o(u8);
       expect(decoded).toEqual(obj);
     } finally {
-      // restore
-      // @ts-ignore
-      global.TextEncoder = origTE;
-      // @ts-ignore
-      global.TextDecoder = origTD;
+      vi.unstubAllGlobals();
     }
   });
 
@@ -111,31 +113,22 @@ describe('powerBuffer', () => {
   it('throws when no encoder/decoder available (simulated)', async () => {
     // reload module with globals removed so getEncoder/getDecoder return null
     vi.resetModules();
-    const origTE = global.TextEncoder;
-    const origTD = global.TextDecoder;
-    const origBuf = global.Buffer;
+    vi.stubGlobal('TextEncoder', undefined);
+    vi.stubGlobal('TextDecoder', undefined);
+    vi.stubGlobal('Buffer', undefined);
     try {
-      // remove global encoders/Buffer
-      // @ts-ignore
-      global.TextEncoder = undefined;
-      // @ts-ignore
-      global.TextDecoder = undefined;
-      // @ts-ignore
-      global.Buffer = undefined;
-
       const mod = await import('../src/helpers/powerBuffer.js');
       const { o2u8, u82o } = mod;
       expect(() => o2u8({ a: 1 })).toThrow(/No TextEncoder or Buffer available/);
       const u = new Uint8Array([1, 2, 3]);
       expect(() => u82o(u)).toThrow(/No TextDecoder or Buffer available/);
     } finally {
-      // restore
-      // @ts-ignore
-      global.TextEncoder = origTE;
-      // @ts-ignore
-      global.TextDecoder = origTD;
-      // @ts-ignore
-      global.Buffer = origBuf;
+      // The hand-written restore this replaced assigned `undefined` back onto
+      // `global.Buffer` when the original had been captured as `undefined`, which
+      // leaves the global *present but undefined* — a different thing from absent,
+      // and one that would leak into every later test in the file. `unstubAllGlobals`
+      // restores the descriptor instead.
+      vi.unstubAllGlobals();
     }
   });
 });

@@ -62,15 +62,35 @@ describe('PowerLogger table and debug methods', () => {
 
   it('falls back to console.log when console.table is unavailable', () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-    const originalTable = console.table;
+    // `PowerLogger` gates on `typeof ROOT_CONSOLE.table === 'function'`, so the
+    // condition to build is a property whose *value* is not a function — deleting
+    // the key would test something else, and stubbing `globalThis.table` is not
+    // the same property at all.
+    //
+    // Written with descriptors rather than `console.table = undefined`, for two
+    // reasons. The first is why `no-console` fired here at all: it flags the read
+    // that stashes the original and both writes, and it is right to, because
+    // reaching past `console` to manufacture a test condition is exactly what
+    // that rule exists to notice. Suppressing it would silence the rule for every
+    // later test in this file. The second is correctness — restoring a descriptor
+    // restores the property's own attributes, where assigning the value back
+    // leaves behind whatever `defineProperty` was handed.
+    const originalTable = Object.getOwnPropertyDescriptor(console, 'table');
     try {
-      // @ts-ignore
-      console.table = undefined;
+      Object.defineProperty(console, 'table', {
+        value: undefined,
+        configurable: true,
+        writable: true,
+      });
       const logger = new PowerLogger(3);
       logger.table('fallback-table');
       expect(logSpy).toHaveBeenCalledWith('fallback-table');
     } finally {
-      console.table = originalTable;
+      if (originalTable) Object.defineProperty(console, 'table', originalTable);
+      // `Reflect` rather than `delete console.table` for the same rule: a member
+      // expression is what `no-console` matches on, and this branch only runs if
+      // the property was inherited rather than own.
+      else Reflect.deleteProperty(console, 'table');
       logSpy.mockRestore();
     }
   });

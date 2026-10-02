@@ -85,8 +85,7 @@ let _correlationSequence = 0;
  * @private
  */
 function poolRefusal(code, message) {
-  /** @type {Error & {code: string}} */
-  const err = new Error(message);
+  const err = /** @type {Error & {code: string}} */ (new Error(message));
   err.code = code;
   return err;
 }
@@ -859,7 +858,9 @@ export class PowerPool {
         );
         this._cleanupPendingResponse(correlationKey, {
           rejectWith: (() => {
-            const err = new Error(`duplicate correlationId: ${correlationKey}`);
+            const err = /** @type {Error & {code: 'ERR_POOL_DUPLICATE_CORRELATION_ID'}} */ (
+              new Error(`duplicate correlationId: ${correlationKey}`)
+            );
             err.code = 'ERR_POOL_DUPLICATE_CORRELATION_ID';
             return err;
           })(),
@@ -1324,8 +1325,10 @@ export class PowerPool {
     for (let i = 0; i < items.length; i++) {
       const id = String(factory(i, items[i] || {}));
       if (seen.has(id) || this._pendingResponses.has(id)) {
-        const err = new Error(
-          `postMessageBatch correlationIdFactory produced a duplicate correlationId: "${id}" (item ${i})`
+        const err = /** @type {Error & {code: 'ERR_POOL_DUPLICATE_CORRELATION_ID'}} */ (
+          new Error(
+            `postMessageBatch correlationIdFactory produced a duplicate correlationId: "${id}" (item ${i})`
+          )
         );
         err.code = 'ERR_POOL_DUPLICATE_CORRELATION_ID';
         throw err;
@@ -1422,8 +1425,10 @@ export class PowerPool {
       if (wantResponse && correlationKey) {
         this._cleanupPendingResponse(correlationKey, {
           rejectWith: (() => {
-            const err = new Error(
-              `postMessage rejected: task queue is full (maxQueueLength ${this._maxQueueLength})`
+            const err = /** @type {Error & {code: 'ERR_POOL_QUEUE_FULL'}} */ (
+              new Error(
+                `postMessage rejected: task queue is full (maxQueueLength ${this._maxQueueLength})`
+              )
             );
             err.code = 'ERR_POOL_QUEUE_FULL';
             return err;
@@ -1595,7 +1600,9 @@ export class PowerPool {
    */
   _assertNotTerminated() {
     if (!this._terminated) return;
-    const err = new Error('PowerPool has been shut down');
+    const err = /** @type {Error & {code: 'ERR_POOL_TERMINATED'}} */ (
+      new Error('PowerPool has been shut down')
+    );
     err.code = 'ERR_POOL_TERMINATED';
     throw err;
   }
@@ -2236,14 +2243,20 @@ export class PowerPool {
       // only", which is what a worker that has never announced supports, so an
       // un-negotiated pool sends exactly what it sent before.
       protocol: { codecs: ['json'], native: false, announced: false },
+      // Tasks this worker has finished over its lifetime, kept so a terminated
+      // worker's output is not lost from `_terminatedWorkerTaskCountsTotal`.
+      // Declared in the literal rather than assigned on the next line, which is
+      // where it was: the two are the same at runtime, but a property added
+      // after construction is absent from the type TypeScript infers here, so
+      // every later `workerObj.completedTasks` read was an error against a shape
+      // the code itself had just described.
+      completedTasks: 0,
       // Set once this worker's in-flight tasks have been settled in bulk, so a
       // `message` that was already in flight when the worker was terminated does
       // not decrement the global counter a second time. See `_terminateWorker`
       // and the guard in the `onmessage` handler. BUG-011.
       tasksSettled: false,
     };
-    // track completed tasks per worker (for termination-time averages)
-    workerObj.completedTasks = 0;
     this.workers.push(workerObj);
     this._totalWorkersCreated++;
     this._bus.emit('pool:scale', {
@@ -2903,7 +2916,7 @@ export class PowerPool {
   /**
    * Normalize stop-the-press options and strip internal-only flags.
    * @private
-   * @param {Object=} options
+   * @param {{recreateWorkers?: boolean}&PostMessageOptions=} options
    * @returns {{recreate: boolean, fwdOptions: Object|undefined}}
    */
   _normalizeStopThePressOptions(options) {
@@ -3093,7 +3106,7 @@ export class PowerPool {
    * Returns an array with the same length as `items` where each element is
    * either a boolean (accepted) or a Promise (when `options.awaitResponse` is used).
    * @param {{message:*,transfer?:Transferable[]}[]} items
-   * @param {Object=} options - Optional options forwarded to each `postMessage` call.
+   * @param {PostMessageOptions&{correlationIdFactory?: function(number): (string|number)}=} options - Optional options forwarded to each `postMessage` call.
    * @returns {(boolean|Promise<any>)[]}
    * @throws {Error} When `items` is not an array.
    */

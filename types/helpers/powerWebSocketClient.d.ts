@@ -246,14 +246,13 @@ export class PowerWebSocketClient {
      * has already buffered it and there is nothing left to await.
      *
      * @param {any} message
-     * @param {Object} [options]
-     * @param {boolean} [options.dropOnBackpressure=false] - When the socket is
+     * @param {{dropOnBackpressure?: boolean}} [options] - When the socket is
      *   over its high-water mark, drop the message instead of queueing it. Use for
      *   telemetry where a gap is better than growing an unbounded buffer.
      * @returns {Promise<boolean>} `true` when the frame was handed to the socket.
      */
     send(message: any, options?: {
-        dropOnBackpressure?: boolean | undefined;
+        dropOnBackpressure?: boolean;
     }): Promise<boolean>;
     /**
      * @private
@@ -334,18 +333,25 @@ export class PowerWebSocketClient {
      */
     private _open;
     /**
+     * @param {(err?: any) => void} done Settles the pending connect exactly once.
      * @private
      */
     private _handleOpen;
     /**
+     * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
+     *   the caller delivers one directly - hence `event?.data ?? event`.
      * @private
      */
     private _handleMessage;
     /**
+     * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
+     *   absent on a synthetic close.
      * @private
      */
     private _handleClose;
     /**
+     * @param {any} err Whatever the platform or the caller reported. `any` because
+     *   the WS `error` event carries no guaranteed shape.
      * @private
      */
     private _handleError;
@@ -382,6 +388,7 @@ export class PowerWebSocketClient {
      */
     private _tickWatermark;
     /**
+     * @param {boolean} paused
      * @private
      */
     private _setPaused;
@@ -423,6 +430,8 @@ export class PowerWebSocketClient {
      */
     private _clearTimers;
     /**
+     * @param {string} type One of the keys of `this._on`.
+     * @param {...any} args
      * @private
      */
     private _emit;

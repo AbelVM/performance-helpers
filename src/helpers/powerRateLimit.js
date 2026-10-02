@@ -449,7 +449,7 @@ export class PowerRateLimit {
       tokenOrN == null
         ? 0
         : typeof tokenOrN === 'object'
-          ? Number(tokenOrN.n) || 0
+          ? Number(/** @type {{n?: number}} */ (tokenOrN).n) || 0
           : Math.max(0, Math.floor(+tokenOrN) || 0);
     if (n === 0) return;
 
@@ -481,6 +481,10 @@ export class PowerRateLimit {
     }
   }
 
+  /**
+   * @param {number|{n?: number}} [nOrToken] Same argument shape as `release`.
+   * @returns {Promise<void>|void}
+   */
   rollback(nOrToken) {
     return this.release(nOrToken);
   }
@@ -501,6 +505,11 @@ export class PowerRateLimit {
     return out;
   }
 
+  /**
+   * @param {{l: RateLimiterLike, method: string, token: *}} entry
+   * @param {number} want
+   * @returns {Promise<void>}
+   */
   async _undoCommit(entry, want) {
     const { l, method, token } = entry;
     try {

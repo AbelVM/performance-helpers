@@ -139,7 +139,13 @@ export class PowerRateLimit {
      * @param {object|number} tokenOrN
      */
     release(tokenOrN: object | number): void;
-    rollback(nOrToken: any): void;
+    /**
+     * @param {number|{n?: number}} [nOrToken] Same argument shape as `release`.
+     * @returns {Promise<void>|void}
+     */
+    rollback(nOrToken?: number | {
+        n?: number;
+    }): Promise<void> | void;
     /**
      * Every limiter that is currently real: the instance's own legs, or every
      * built slot's legs when `keyFn` is configured.
@@ -148,7 +154,16 @@ export class PowerRateLimit {
      * @private
      */
     private _liveLimiters;
-    _undoCommit(entry: any, want: any): Promise<any>;
+    /**
+     * @param {{l: RateLimiterLike, method: string, token: *}} entry
+     * @param {number} want
+     * @returns {Promise<void>}
+     */
+    _undoCommit(entry: {
+        l: RateLimiterLike;
+        method: string;
+        token: any;
+    }, want: number): Promise<void>;
     /**
      * Reset all underlying limiters where supported.
      *

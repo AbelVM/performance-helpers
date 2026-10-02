@@ -18,6 +18,14 @@ export type PostMessageOptions = {
      * - When true and the message is a plain object, attempt zero-copy transfer (encode to `Uint8Array` and transfer its buffer).
      */
     zeroCopy?: boolean | undefined;
+    /**
+     * - Caller-chosen id for this message. Supplying one is what
+     * turns `awaitResponse` on, so it is an alternative to setting that flag; the pool coerces it with
+     * `String()`, which is why it is a number as well as a string here. `postMessageBatch` reads it
+     * directly too, and rejects a batch that carries one without a `correlationIdFactory` to make the
+     * per-item ids unique.
+     */
+    correlationId?: string | number | undefined;
 };
 /**
  * Entry used to track pending responses for `awaitResponse` callers.
@@ -161,6 +169,17 @@ export type AutoScaleOptions = {
     backoffResetMs?: number | undefined;
     longWindowAlpha?: number | undefined;
     aimdBeta?: number | undefined;
+    /**
+     * - How many workers to add per scaling tick. Clamped to `>= 1` and
+     * floored, so `0` and negatives mean 1 rather than disabling growth.
+     */
+    stepUp?: number | undefined;
+    /**
+     * - How many workers to remove per scaling tick, clamped the same way.
+     * Both were read at construction and absent from this typedef, so every read was an error and a
+     * caller had no way to discover the options the pool actually honours.
+     */
+    stepDown?: number | undefined;
 };
 /**
  * /**
@@ -221,6 +240,23 @@ export type WorkerObj = {
      * - Timestamp (ms) of last activity on this worker.
      */
     lastActive: number;
+    /**
+     * - Tasks this worker finished over its lifetime, carried so a
+     * terminated worker's output is not lost from `_terminatedWorkerTaskCountsTotal`. Written as
+     * `completedTasks || 0` at every read, so it is optional here: an entry built before the field
+     * existed reads the same as one that never recorded a completion.
+     */
+    completedTasks?: number | undefined;
+    /**
+     * - The negotiated
+     * codec state for this worker. `announced` records that the pool has told the worker which codec
+     * to use; `native` that it speaks structured clone directly.
+     */
+    protocol?: {
+        codecs: string[];
+        native: boolean;
+        announced: boolean;
+    } | undefined;
     /**
      * - EWMA of historical task latency (ms).
      */
@@ -792,6 +828,15 @@ export type PowerLoggerOptions = {
     name?: string | undefined;
     formatter?: ((payload: PowerLoggerPayload) => string | PowerLoggerPayload | null) | undefined;
     output?: ((payload: PowerLoggerPayload | string) => void) | undefined;
+    /**
+     * Initial debug level (0..3), accepted in the options
+     * object as an alternative to the constructor's first argument. It was read as
+     * `options.level` and listed in `assertKnownOptions`, so it is a real option
+     * that the typedef did not describe — which is the same gap
+     * {@link PowerGCRAOptions} and the `autoScale` knobs had, and it made every
+     * read of it an error.
+     */
+    level?: number | undefined;
 };
 /**
  * The structured record `PowerLogger` builds and hands to `formatter` and to an
@@ -1155,7 +1200,7 @@ export type PowerCacheOptions = {
      * options found the constructor reading it via `attach()` and the type not
      * saying so — a TypeScript caller could not pass it.
      */
-    observability?: boolean | any;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
 };
 /**
  * A memoized wrapper returned by `PowerMemoizer.memoize()`.

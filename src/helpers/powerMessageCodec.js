@@ -578,8 +578,12 @@ export function encodeNative(value) {
   // Clone first so `transfer` is computed against the copy, not the caller's
   // buffer, and so the returned object shares no memory with the input.
   const message = structuredClone(value);
+  /** @type {ArrayBuffer[]} */
   const transfer = [];
-  const collect = (v, depth) => {
+  // `any` on both parameters deliberately: this walks caller-supplied values of a
+  // type the library does not know, and narrowing `v` to `object` here would
+  // reject the primitives the `typeof v === 'object'` guard is there to skip.
+  const collect = (/** @type {any} */ v, /** @type {number} */ depth) => {
     if (!v || depth > 8) return;
     if (v instanceof ArrayBuffer) {
       if (!transfer.includes(v)) transfer.push(v);
@@ -752,9 +756,10 @@ export function announceCapabilities(options = {}) {
  * @returns {ArrayBuffer[]} Unique buffers, in encounter order.
  */
 export function collectTransferables(value, maxDepth = 8) {
+  /** @type {ArrayBuffer[]} */
   const found = [];
   const seen = new Set();
-  const walk = (v, depth) => {
+  const walk = (/** @type {any} */ v, /** @type {number} */ depth) => {
     if (!v || depth > maxDepth) return;
     if (v instanceof ArrayBuffer) {
       if (!seen.has(v)) {

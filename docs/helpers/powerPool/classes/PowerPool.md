@@ -913,7 +913,7 @@ either a boolean (accepted) or a Promise (when `options.awaitResponse` is used).
 
 ##### options
 
-`Object` \| `undefined`
+`PostMessageOptions` & `object` \| `undefined`
 
 Optional options forwarded to each `postMessage` call.
 

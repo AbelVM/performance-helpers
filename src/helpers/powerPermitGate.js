@@ -106,8 +106,14 @@ export class PowerPermitGate {
      * out a second one. Both grant paths go through `_grantTo`, so there is no
      * way for a permit to exist without being counted here.
      *
+     * `protected` rather than `private`: `PowerBackpressure` reads it for its
+     * heartbeat termination condition and for its `_inFlight` view, and
+     * `_serveWaiters` below is driven the same way. Neither is part of the
+     * public surface - `protected` keeps them out of what a consumer calls - but
+     * a subclass reading a base field is precisely what the tag describes.
+     *
      * @type {number}
-     * @private
+     * @protected
      */
     this._held = 0;
     /**
@@ -391,7 +397,7 @@ export class PowerPermitGate {
    *   {@link PowerPermitGate#_grantTo}; the two routes differ only in that
    *   flag, and conflating them is what put `_available` below zero.
    * @returns {number} How many were served.
-   * @private
+   * @protected
    */
   _serveWaiters(permits, fromAvailable) {
     let served = 0;

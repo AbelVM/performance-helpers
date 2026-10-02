@@ -140,13 +140,18 @@ do not want to reach for the symbol still have something to call.
 
 ### entries()
 
-> **entries**(`order`): `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
+> **entries**(`order?`): `IterableIterator`\<\[`any`, `any`\], `any`, `any`\>
 
 #### Parameters
 
-##### order
+##### order?
 
-`any`
+`"LRU"` \| `"MRU"`
+
+Iteration order, forwarded verbatim to
+  the inner `PowerCache`. Declared here rather than left implicit because an
+  undeclared parameter is published as an implicit `any`, which accepts a
+  typo like `'lru'` that the inner method would then reject at runtime.
 
 #### Returns
 
@@ -274,17 +279,17 @@ which is the property a consumer relies on.
 
 ### keys()
 
-> **keys**(`order`): `Generator`\<`any`, `void`, `unknown`\>
+> **keys**(`order?`): `IterableIterator`\<`any`, `any`, `any`\>
 
 #### Parameters
 
-##### order
+##### order?
 
-`any`
+`"LRU"` \| `"MRU"`
 
 #### Returns
 
-`Generator`\<`any`, `void`, `unknown`\>
+`IterableIterator`\<`any`, `any`, `any`\>
 
 ***
 
@@ -396,14 +401,14 @@ Per-entry TTL in ms and
 
 ### values()
 
-> **values**(`order`): `Generator`\<`any`, `void`, `unknown`\>
+> **values**(`order?`): `IterableIterator`\<`any`, `any`, `any`\>
 
 #### Parameters
 
-##### order
+##### order?
 
-`any`
+`"LRU"` \| `"MRU"`
 
 #### Returns
 
-`Generator`\<`any`, `void`, `unknown`\>
+`IterableIterator`\<`any`, `any`, `any`\>

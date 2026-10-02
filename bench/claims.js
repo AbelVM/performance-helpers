@@ -1751,8 +1751,12 @@ function runSketchWorkload() {
   console.log('CACHE-007 — TinyLFU sketch: one hash per call, not per row\n');
   console.log(`  ${iterations} calls per measurement, median of 5. Key length ${keyLen}.\n`);
   console.log('  cost');
-  const inc = timePerCall((i) => sketch.increment(key), iterations);
-  const est = timePerCall((i) => sketch.estimate(key), iterations);
+  // `timePerCall` passes the iteration index so a caller *can* vary its key per
+  // call. These two cannot: the sketch is measured against one fixed key, which
+  // is the whole point — a varying key would measure the key's cache behaviour
+  // instead of the hash.
+  const inc = timePerCall(() => sketch.increment(key), iterations);
+  const est = timePerCall(() => sketch.estimate(key), iterations);
   console.log(`    increment (depth 4)          ${inc.toFixed(1).padStart(7)} ns`);
   console.log(`    estimate  (depth 4)          ${est.toFixed(1).padStart(7)} ns`);
   console.log(`    both                        ${(inc + est).toFixed(1).padStart(7)} ns`);
@@ -2198,6 +2202,14 @@ async function runHubEncodeWorkload() {
     `    memoised hub runs ${memoEncodes}. That is a ${plainBatches}-to-1 reduction, it is a`
   );
   console.log('    count rather than a timing, and it is the same on every machine.');
+  console.log(
+    `    Both arms made ${memoBatches} _encodeBatch calls, and that is not a rounding of the`
+  );
+  console.log('    first number — it is equal to it. The memo removes the work inside those');
+  console.log('    calls, not the calls, which is why the report has to state encodes');
+  console.log('    separately from batches. An earlier version of this mode printed only the');
+  console.log('    call count and called it "encodes", and the memoised arm then claimed 5000');
+  console.log('    encodes while doing one, so the saving read as nothing.');
   console.log('');
   console.log(
     `    On timings: **${(plainMs / memoMs).toFixed(1)}x** on medians,` +

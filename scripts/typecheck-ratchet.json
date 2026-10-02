@@ -1,6 +1,6 @@
 {
-  "ceiling": 289,
+  "ceiling": 194,
   "minFilesWithDiagnostics": 12,
-  "recordedAt": "2026-10-01",
-  "reason": "CACHE-012: remove the dead _windowStart field (assigned null twice, read by neither)"
+  "recordedAt": "2026-10-02",
+  "reason": "powerPermitGate _held/_serveWaiters are protected, not private - PowerBackpressure reads them - and a duplicated BackpressureAdaptiveOptions typedef import removed; fixed jsdoc-types.js pointing at ../utils/metrics.js when MetricsCollector lives in ./metrics.js, and added the PowerLoggerOptions.level option that assertKnownOptions already accepted"
 }

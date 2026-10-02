@@ -54,14 +54,17 @@ describe('PowerChunker branches extra', () => {
   });
 
   it('continues streaming when pool.postMessage throws for a chunk', async () => {
-    const original = PowerPool.prototype.postMessage;
-    let calls = 0;
-
-    PowerPool.prototype.postMessage = function patchedPostMessage(...args) {
-      calls += 1;
-      if (calls === 1) throw new Error('chunk dispatch failed');
-      return original.apply(this, args);
-    };
+    // `vi.spyOn` rather than assigning `PowerPool.prototype.postMessage` and
+    // putting the original back in a `finally`. That hand-written restore is what
+    // `require-atomic-updates` fires on — the method is read, `await pool.drain()`
+    // yields, and it is written back — and it is the one thing here that could not
+    // be skipped safely, because the test's subject is a prototype patch.
+    //
+    // `mockImplementationOnce` reproduces the original patch exactly: the first
+    // call throws, and every call after it falls through to the real method.
+    const postMessage = vi.spyOn(PowerPool.prototype, 'postMessage').mockImplementationOnce(() => {
+      throw new Error('chunk dispatch failed');
+    });
 
     try {
       const values = function* () {
@@ -82,7 +85,7 @@ describe('PowerChunker branches extra', () => {
       expect(seen).toContain(4);
       pool.terminate();
     } finally {
-      PowerPool.prototype.postMessage = original;
+      postMessage.mockRestore();
     }
   });
 

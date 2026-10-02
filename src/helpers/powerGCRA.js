@@ -70,8 +70,12 @@ export class PowerGCRA {
    *   `new PowerGCRA()` must stay callable to reach it.
    */
   constructor(options) {
+    // Cast rather than `options ?? {}`: the parameter is deliberately optional so
+    // that `new PowerGCRA()` stays callable and throws its documented TypeError, so
+    // `assertKnownOptions` already handles the absent case on its own. Coalescing
+    // here would be a second, silently-different answer to the same question.
     assertKnownOptions(
-      options,
+      /** @type {object} */ (options),
       ['rate', 'per', 'burst', 'observability', 'now', 'onError'],
       'PowerGCRA'
     );
