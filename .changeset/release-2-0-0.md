@@ -2,6 +2,20 @@
 'performance-helpers': major
 ---
 
+This release is long, and the length is the point: it records two dozen commits
+of audit remediation, every claim that measurement retracted, and the benchmarks
+that replaced them. Read it by section rather than end to end.
+
+| if you want                                         | read                                                                         |
+| --------------------------------------------------- | ---------------------------------------------------------------------------- |
+| what to know before upgrading                       | **Breaking** below, then `## Migrating`                                      |
+| the three things that changed direction             | `## What a reader should know about 2.0` in `CHANGELOG.md`                   |
+| whether a performance claim survived                | `## Reading a claim in this project` in `CHANGELOG.md`                       |
+| why a proposal was closed rather than built         | the `### From <file>` sections under `## Folded in`                          |
+| the incremental frame decoder                       | `## createFrameDecoder()`                                                    |
+| cache iteration, cancellation and the queue ring    | `## Cache iteration, the window memo, retry cancellation and the queue ring` |
+| the benchmark modes, and which numbers they retired | `## Benchmarks: the numbers that were not numbers`                           |
+
 The wire protocol, the histogram, and the release process all changed: 23
 commits of audit remediation, two new helper families, and a real release
 pipeline.
@@ -4633,6 +4647,8 @@ an undefined `concat()` and had no ceiling. Closes CODEC-001.
 
 ---
 
+## Cache iteration, the window memo, retry cancellation and the queue ring
+
 **Added in the session that closed the cache, retry and queue review rows.**
 Eight changesets were added alongside this file during that work and then folded
 in here, because `CHANGELOG.md` records that consolidated notes are the decision
@@ -4730,6 +4746,8 @@ prevent. Nothing was dropped in folding them in.
   and the divergences are now enforced rather than merely documented.
 
 ---
+
+## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
 that the 22 accumulated changesets "are now one file", but these were still
@@ -5389,6 +5407,8 @@ Three more, in `test/disposal.test.js`, `test/invariants.test.js` and
 Found while attempting the corresponding strict-options change, which is not
 included here. Every case found is now fixed; the strict-options change itself is
 still to land, and is mechanical once these are.
+
+## Benchmarks: the numbers that were not numbers
 
 **Added two benchmark modes, because two recorded numbers were not numbers.**
 
