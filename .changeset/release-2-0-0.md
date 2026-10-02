@@ -5675,3 +5675,55 @@ which is the real hazard, a poll timer firing between teardown and the state
 update. A test written the comfortable way passed against code that would throw,
 which is the same trap as the `PLAN_ROW` regex that matched nothing and the
 `WebSocketImpl` fixture the client silently ignored.
+
+## PowerChunker streaming: the hang is real, the memory claim is not
+
+**RT-010's premise is half right, and the half that is wrong changes what the fix
+is.** Streaming mode does drain the iterable inside the constructor, so **an
+infinite or lazy generator hangs it forever** — measured as a 4 s child-process
+timeout with the constructor still running, and no pool returned, so there is
+nothing to `terminate()`. That is a real liveness defect.
+
+But **"streaming mode fully materialises the iterable" is not true.** A lazy
+generator of 400 000 objects left the heap at **5.2 MB during construction** —
+the pre-construction baseline — reaching 48.7 MB only afterwards.
+`streamIterableIntoPool` posts each chunk as it fills, and `powerChunking.js:128`
+says it streams "to avoid materializing the entire iterable". So this is a
+**liveness** defect, not a memory one.
+
+**The fix is an API decision rather than a mechanical change, and that is the
+useful finding.** Pumping on a macrotask needs something to stop the pump, and
+**the constructor returns a pool, not a handle** — `terminate()` stops the workers
+while the pump keeps pulling the generator, which trades a constructor that hangs
+for a pump that runs forever. The same unbounded behaviour by a different route.
+Either the return contract becomes a handle, or an async pump is only cancellable
+by exhausting its own iterable, and that is a choice rather than a bug fix.
+
+**The defect is written as a test and left skipped.** `PowerChunker` in
+streaming mode draining inside the constructor is asserted by a child-process
+probe with a timeout — a hang cannot be asserted in-process, because the test
+would hang with it. It fails today and should pass once the pump lands. It is
+**skipped** because a permanently red gate is not shippable and `npm run verify`
+is the project's exit condition, and the skip says so and names the command to
+enable it. The enabled cases pin what can be asserted without hanging: a finite
+lazy generator constructs and returns its pool, and there is no pump-cancellation
+surface yet — which is the constraint the fix has to satisfy.
+
+**There is deliberately no heap-measurement test, and the reason is worth
+recording** because the first attempt looked like it worked. The claim cannot be
+tested by heap delta, because **the pool's queue retains the posted chunks
+either way**: with `size: 2` and nothing draining it, the pool holds all 400 000
+items regardless of how the chunker obtained them, and that ~40 MB baseline swamps
+the difference. Measured, in order:
+
+- An absolute threshold read **41.6 MB against correct code** — tuning a constant
+  would have made it pass or fail depending on which way the guess went.
+- Two **separate processes**: the comparison inverted under full-suite load and
+  failed about 1 run in 4, because the arms saw different machine states.
+- One process, in sequence: inverted the other way — `streaming used 42.1 MB,
+materialising used 35.5 MB` — because the second arm starts on a heap the first
+  has already grown.
+
+So the memory claim is refuted by measurement and by the source comment, neither of
+which is a test, and the file says exactly that rather than shipping a
+near-decoration that passes for the wrong reason.
