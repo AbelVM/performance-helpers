@@ -519,8 +519,16 @@ export class PowerRetry {
      * @type {PowerRetryBudget|null}
      */
     this._budget = resolveBudget(budget, 'PowerRetry');
-    // FEAT-007: opt-in metrics. Off by default, so the common case pays
-    // nothing and allocates no closure.
+    // **No `attach` here, and the absence is deliberate.** This comment used to
+    // read "FEAT-007: opt-in metrics. Off by default, so the common case pays
+    // nothing and allocates no closure" — describing an opt-in that this class
+    // does not have. `_metrics` exists on `PowerRetryBudget` only, because the
+    // *budget* is the thing worth observing: it is the state that decides whether
+    // a call is refused, and registering `PowerRetry` itself would produce a
+    // series that always reads zero. So the sentence claimed a cost this
+    // constructor does not pay and implied a `stats()` that does not exist.
+    // Written down here because "why is there no FEAT-007 line in this
+    // constructor?" is otherwise a fair question to ask of the file.
   }
 
   /**
@@ -726,7 +734,28 @@ export class PowerRetry {
         // documented contract is that it is "rejected and counted as a failed
         // attempt". Early-throwing on `ETIMEOUT` here would silently turn
         // `maxAttempts` into `1` for every caller who also set a timeout.
-        const should = typeof retryIf === 'function' ? Boolean(retryIf(err)) : Boolean(retryIf);
+        // `retryIf` is user code invoked from inside this catch, so it is guarded
+        // exactly as `onRetry` is below — and the asymmetry was the defect. An
+        // unguarded throw from here escapes the `catch` block entirely and
+        // becomes the caller's rejection, so the real failure is replaced by an
+        // error from the predicate that was only supposed to advise about it.
+        // Probed before fixing: with a throwing `retryIf` the caller received
+        // `"retryIf exploded"` rather than `"the real failure"`, while
+        // `retryIf: () => false` and no `retryIf` at all both preserved it.
+        //
+        // A throw is treated as **declining**, not as permitting a retry.
+        // `retryIf` answers "is it safe to run this again?", and a predicate that
+        // cannot be evaluated has not said yes — so the conservative reading is
+        // the one that does not repeat a possibly non-idempotent operation.
+        // `lastErr` is then thrown by the code after the loop, so the caller
+        // still gets the error that actually happened.
+        let should;
+        try {
+          should = typeof retryIf === 'function' ? Boolean(retryIf(err)) : Boolean(retryIf);
+        } catch (e) {
+          /* a throwing predicate must not change the outcome either */
+          should = false;
+        }
         if (!should || attempt === attempts) break;
         // The budget is the last gate before more traffic is put on the wire.
         if (bucket && !bucket.tryConsumeRetry()) break;

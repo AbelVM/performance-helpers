@@ -277,6 +277,19 @@ export type PowerRetryOptions = {
      * randomised.
      */
     jitter?: boolean | undefined;
+    /**
+     * - Decides whether a failed attempt is
+     * worth repeating. Return `false` to stop immediately and receive the error
+     * that actually happened.
+     *
+     * **A throwing `retryIf` is treated as `false`.** It is user code called from
+     * inside the retry loop's `catch`, so an unguarded throw would escape that
+     * block and become the caller's rejection — replacing the real failure with an
+     * error from a predicate that was only meant to advise about it. Declining is
+     * the conservative reading: this answers "is it safe to run this again?", and a
+     * predicate that cannot be evaluated has not said yes. The same rule as the
+     * non-throwing case applies — you receive the original error, not the throw.
+     */
     retryIf?: ((err: any) => boolean) | undefined;
     onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;
     /**
@@ -1180,6 +1193,12 @@ export type PowerDeadlineOptions = {
     attemptTimeout?: number | undefined;
     totalTimeout?: number | undefined;
     retryDelay?: number | undefined;
+    /**
+     * - See
+     * {@link PowerRetryOptions.retryIf}, whose contract this shares; this helper
+     * forwards the predicate into `PowerRetry.run`, so a throw there is treated as
+     * `false` and the caller still receives the original error.
+     */
     retryIf?: ((err: any) => boolean) | undefined;
     signal?: AbortSignal | undefined;
     onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;

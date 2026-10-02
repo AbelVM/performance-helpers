@@ -121,8 +121,25 @@ export const OPEN_MARKER = '⬜';
  * Deliberately narrow. It matches the phrase this document's own closures use —
  * `Done,` or `Done.` as its own token — and nothing looser, because a gate that
  * fires on the word "done" anywhere in 130 rows of prose is a gate that gets
- * switched off. Measured against the whole table it currently matches nothing,
- * which is the only evidence that it is quiet rather than merely unused.
+ * switched off.
+ *
+ * **Mutation-checked, and it passes.** Flipping a closed row (CACHE-004) back to
+ * `⬜` while leaving its note's `Done.` claim in place makes `--check` fail with
+ * exactly this message, so the guard is not merely unused — it detects the defect
+ * it was written for. Its own history ("RT-005 sat that way for four commits") is
+ * not that evidence; this is.
+ *
+ * **What it cannot detect, and no version of it can, is the seven rows that
+ * really went stale this release.** Those were work that landed with the note
+ * never edited — the note still described the code as absent, so there was no
+ * completion claim in it for this guard to match. Distinguishing "the work landed"
+ * from "the work is outstanding" requires reading `src/`, not the table, which is
+ * why they were found by hand rather than by a gate. The cheap structural fix is
+ * not a better matcher: it is that **`review.md` is gitignored, so the rule
+ * "close the row in the same commit as the work" cannot be enforced by a
+ * pre-commit hook at all** — git never sees the file. That is the actual reason
+ * seven rows drifted, and it is a reason to rely on the discipline rather than on
+ * another regex.
  *
  * @param {string} note
  * @returns {boolean}

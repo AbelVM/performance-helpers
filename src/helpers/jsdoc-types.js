@@ -206,7 +206,18 @@ export {};
  * @property {boolean} [jitter=true] - Randomise within `[0.5 * delay, delay]`.
  *   Rejected at `false` when `backoff` is `decorrelated`, which is defined as
  *   randomised.
- * @property {(err:any)=>boolean} [retryIf]
+ * @property {(err:any)=>boolean} [retryIf] - Decides whether a failed attempt is
+ *   worth repeating. Return `false` to stop immediately and receive the error
+ *   that actually happened.
+ *
+ *   **A throwing `retryIf` is treated as `false`.** It is user code called from
+ *   inside the retry loop's `catch`, so an unguarded throw would escape that
+ *   block and become the caller's rejection — replacing the real failure with an
+ *   error from a predicate that was only meant to advise about it. Declining is
+ *   the conservative reading: this answers "is it safe to run this again?", and a
+ *   predicate that cannot be evaluated has not said yes. The same rule as the
+ *   non-throwing case applies — you receive the original error, not the throw.
+ *
  * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
  * @property {number} [attemptTimeout] - Per-attempt timeout in ms. When set,
  *   `fn` receives the attempt's `AbortSignal` and it is aborted when the attempt
@@ -868,7 +879,10 @@ export {};
  * @property {number} [attemptTimeout]
  * @property {number} [totalTimeout]
  * @property {number} [retryDelay]
- * @property {(err:any)=>boolean} [retryIf]
+ * @property {(err:any)=>boolean} [retryIf] - See
+ *   {@link PowerRetryOptions.retryIf}, whose contract this shares; this helper
+ *   forwards the predicate into `PowerRetry.run`, so a throw there is treated as
+ *   `false` and the caller still receives the original error.
  * @property {AbortSignal} [signal]
  * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
  * @property {'exponential'|'linear'|'fixed'} [backoff]

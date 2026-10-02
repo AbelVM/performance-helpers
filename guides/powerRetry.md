@@ -27,18 +27,18 @@ Or use the static convenience: `await PowerRetry.run(fn, options?)`.
 
 ## Options
 
-| Option           |                                                     Type |         Default | Description                                                                                                                       |
-| ---------------- | -------------------------------------------------------: | --------------: | --------------------------------------------------------------------------------------------------------------------------------- |
-| `maxAttempts`    |                                                 `number` |             `3` | Maximum attempts (initial try + retries). Must be `>= 1`.                                                                         |
-| `backoff`        | `'exponential' \| 'linear' \| 'fixed' \| 'decorrelated'` | `'exponential'` | Backoff strategy. An unrecognised value throws.                                                                                   |
-| `baseDelay`      |                                            `number` (ms) |           `100` | Base delay used to compute backoff.                                                                                               |
-| `maxDelay`       |                                            `number` (ms) |         `10000` | Maximum delay between retries.                                                                                                    |
-| `jitter`         |                                                `boolean` |          `true` | Randomise the delay within `[0.5 * delay, delay]`. Rejected when `backoff` is `decorrelated`.                                     |
-| `retryIf`        |                                    `Function \| boolean` |    `() => true` | Predicate `(err) => boolean` to decide whether to retry on a given error. A non-function is read as a fixed policy.               |
-| `onRetry`        |                                               `Function` |     `undefined` | Callback `(attempt, err, delay) => void` invoked before waiting the delay. Throwing here does not change the outcome.             |
-| `attemptTimeout` |                                            `number` (ms) |     `undefined` | Per-attempt timeout. An attempt that exceeds it is rejected and **counted as a failed attempt**, so it is retried like any other. |
-| `budget`         |      `PowerRetryBudget \| { ratio, capacity } \| number` |     `undefined` | Retry budget. See [Retry budget](#retry-budget).                                                                                  |
-| `hedgeDelay`     |                                            `number` (ms) |             `0` | Send a duplicate of the **first** attempt if it has not returned in this long. `0` disables hedging. See [Hedging](#hedging).     |
+| Option           |                                                     Type |         Default | Description                                                                                                                                            |
+| ---------------- | -------------------------------------------------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxAttempts`    |                                                 `number` |             `3` | Maximum attempts (initial try + retries). Must be `>= 1`.                                                                                              |
+| `backoff`        | `'exponential' \| 'linear' \| 'fixed' \| 'decorrelated'` | `'exponential'` | Backoff strategy. An unrecognised value throws.                                                                                                        |
+| `baseDelay`      |                                            `number` (ms) |           `100` | Base delay used to compute backoff.                                                                                                                    |
+| `maxDelay`       |                                            `number` (ms) |         `10000` | Maximum delay between retries.                                                                                                                         |
+| `jitter`         |                                                `boolean` |          `true` | Randomise the delay within `[0.5 * delay, delay]`. Rejected when `backoff` is `decorrelated`.                                                          |
+| `retryIf`        |                                    `Function \| boolean` |    `() => true` | Predicate `(err) => boolean` to decide whether to retry on a given error. A non-function is read as a fixed policy. **A throw is treated as `false`.** |
+| `onRetry`        |                                               `Function` |     `undefined` | Callback `(attempt, err, delay) => void` invoked before waiting the delay. Throwing here does not change the outcome.                                  |
+| `attemptTimeout` |                                            `number` (ms) |     `undefined` | Per-attempt timeout. An attempt that exceeds it is rejected and **counted as a failed attempt**, so it is retried like any other.                      |
+| `budget`         |      `PowerRetryBudget \| { ratio, capacity } \| number` |     `undefined` | Retry budget. See [Retry budget](#retry-budget).                                                                                                       |
+| `hedgeDelay`     |                                            `number` (ms) |             `0` | Send a duplicate of the **first** attempt if it has not returned in this long. `0` disables hedging. See [Hedging](#hedging).                          |
 
 ## Example
 
@@ -67,6 +67,28 @@ async function fetchJson(url) {
 // Or call the static helper directly for one-off calls
 const config = await PowerRetry.run(() => fetch('/api/config').then((r) => r.json()));
 ```
+
+### A throwing `retryIf` declines
+
+`retryIf` is your code, called from inside the retry loop's `catch` block. **A
+throw from it is caught and treated as `false`** — the run stops and you receive
+the error your operation actually failed with.
+
+Two things follow from that, and both are deliberate:
+
+- **You never receive the predicate's own error.** Without the guard, a throw
+  escaped the `catch` entirely and became the rejection, so `PowerRetry.run`
+  rejected with `"retryIf exploded"` instead of `"the real failure"` — the real
+  failure replaced by an error from a function that was only meant to advise
+  about it. `onRetry` was already guarded for the same reason; the two are now
+  symmetric.
+- **Declining is the conservative reading.** `retryIf` answers "is it safe to run
+  this again?", and a predicate that cannot be evaluated has not said yes — so
+  the fix does not repeat a possibly non-idempotent operation on your behalf.
+
+If you want a thrown predicate to be visible rather than absorbed, log it inside
+the predicate, or use `onRetry`, which is called for every attempt that is
+actually about to be retried and whose throws are ignored in the same way.
 
 ## Backoff
 

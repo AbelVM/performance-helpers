@@ -5936,3 +5936,53 @@ read-to-write window by 400 ms and appending inside it:** the run exits 1, the
 concurrent write is preserved, and the target row is left untouched. A size
 change alone is not trusted — a same-length edit is possible, so mtime is
 compared too.
+
+## A throwing `retryIf` no longer replaces the error you needed
+
+**`PowerRetry.run` now catches a throwing `retryIf` and treats it as `false`.**
+`retryIf` is caller code invoked from inside the retry loop's `catch` block, so an
+unguarded throw escaped that block entirely and became the rejection. Probed
+before fixing, on the real call path:
+
+| `retryIf`     | what the caller received |
+| ------------- | ------------------------ |
+| throws        | `"retryIf exploded"`     |
+| `() => false` | `"the real failure"`     |
+| absent        | `"the real failure"`     |
+
+So the one configuration that loses information is the one that was supposed to
+be advising about it — a predicate written to say "not a 404, go again" could
+replace a `503` with an error of its own, and the caller's `err.status` handling
+would never see the response. `onRetry`, three lines below, already had a
+`try`/`catch` and a comment saying why; the two are now symmetric.
+
+**A throw is treated as declining rather than permitting a retry**, and that is a
+decision rather than a shrug. `retryIf` answers "is it safe to run this again?",
+and a predicate that cannot be evaluated has not said yes — so the conservative
+reading is the one that does not repeat a possibly non-idempotent operation on
+the caller's behalf. The original error is still what propagates, so the non-
+throwing contract is unchanged: you receive the failure, never the predicate.
+
+`PowerDeadline` shares this fix rather than needing its own: it forwards the
+predicate into `PowerRetry.run`, so the guard is already inside the path it takes.
+Its option docs now say so instead of repeating a shorter version of the rule.
+
+**8 tests, two mutants, both caught.** Removing the guard fails 3 — the three
+that assert **error identity** rather than message, since a wrapper carrying the
+right text would pass a message assertion while losing the stack, the `code` and
+everything the caller attached. Treating a throw as permitting a retry fails 2,
+including the one that asserts the operation ran **once**: a too-eager guard that
+turned `retryIf` into a permanent `false`, or a too-lenient one that treated a
+throw as consent, both surface there.
+
+**The second half of the row was a comment describing work that is not
+happening.** `PowerRetry`'s constructor ended with _"FEAT-007: opt-in metrics. Off
+by default, so the common case pays nothing and allocates no closure"_ — while
+calling nothing. `_metrics` is on `PowerRetryBudget` alone, because the budget is
+the state that decides whether a call is refused; registering `PowerRetry` itself
+would produce a series that always reads zero. The comment claimed a cost this
+constructor does not pay and implied a `stats()` that does not exist, so it now
+states the absence and the reason instead. A comment cannot be asserted, so the
+test pins the consequence: `PowerRetry` exposes no `_metrics` and no `stats()`,
+which fails the moment it grows opt-in metrics and makes the removal a decision
+to revisit rather than an oversight.
