@@ -5727,3 +5727,30 @@ materialising used 35.5 MB` — because the second arm starts on a heap the firs
 So the memory claim is refuted by measurement and by the source comment, neither of
 which is a test, and the file says exactly that rather than shipping a
 near-decoration that passes for the wrong reason.
+
+## Stranded processes: the scheduler is not the cause
+
+**The scheduler's macrotask path is verified not to hold a Node event loop open,
+and the remaining unexplained survivor is elsewhere.**
+
+This closes out the dangling-process lead. A `MessagePort` with `onmessage`
+assigned really does keep a Node event loop alive — measured on the raw platform
+with no library involved: `const c = new MessageChannel(); c.port1.onmessage =
+() => {};` hangs until killed, and adding `port1.unref()` lets the same script
+exit cleanly. So the theory behind the 11-hour-old processes was right in
+principle.
+
+But a probe that actually builds the scheduler's channel — `scheduling:
+'macrotask'`, schedule, flush, finish, and never dispose — **exits cleanly**. The
+reason is that `powerScheduler.js` already guards the channel with `unref()` at
+creation, and `test/powerScheduler.macrotask.test.js` already enforces it in a
+subprocess with a microtask control and a never-disposed case. That work predates
+this session; an A/B probe with and without the guard shows no difference **because
+the guard is present**, and a duplicate of it was added and reverted in the
+course of checking.
+
+So the scheduler is not the source of a stranded process, and the search should
+continue elsewhere. The measurement worth keeping is the raw one above, because
+it establishes that a stray `MessageChannel` anywhere in a dependency — including
+a devDependency of the test runner — is sufficient to pin a process that has
+finished all its work, with nothing left running and no error.
