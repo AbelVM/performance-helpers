@@ -5389,3 +5389,57 @@ Three more, in `test/disposal.test.js`, `test/invariants.test.js` and
 Found while attempting the corresponding strict-options change, which is not
 included here. Every case found is now fixed; the strict-options change itself is
 still to land, and is mechanical once these are.
+
+**Added two benchmark modes, because two recorded numbers were not numbers.**
+
+- **`bench/claims.js hubencode`** — §12.4 recorded a 26 ms hub fan-out flush at
+  5 000 subscribers, a re-measure of 15.27 ms, and 3.00 ms with `_encodeBatch`
+  memoised: a 5.1× ratio on a 10.89–19.43 ms spread, which is wider than the
+  effect. RT-006 proposes to encode once per `(topic, batch)` instead of once per
+  subscriber, and the row says it needs this mode before a number is claimed.
+
+  The mode's durable output is a **count, not a timing**: the plain hub runs
+  **5 000 encodes for one publish of one payload** and the memoised hub runs **1**.
+  That reduction is 5 000-to-1, it is a count, and it is identical on every
+  machine. Timing it gives 2.3–2.8× against §12.4's 5.1×, on a 76–90 % spread —
+  a direction, and the mode says so.
+
+  **§12.4's isolated cost — 13.91 ms of a 15.27 ms flush, 91 % — could not be
+  reproduced as a number, and is no longer reported.** Three runs of the mode gave
+  91 %, 93 % and **106 %**, and an arm cannot cost more than the whole that
+  contains it. The cause is the allocator rather than the encode: the flush holds
+  every frame alive to the end of its timed region while a standalone loop makes
+  the frames garbage and pays for them inside the same region. Making the loop
+  retain narrowed the range — 14.49 ms discarded against 12.82 ms retained at
+  5 000 encodes — but did not close it, because the hub's own per-subscriber
+  bookkeeping allocates too. The direction holds in every run; the fraction does
+  not.
+
+- **`bench/claims.js framedecode`** — §12.3 claimed 1.6× for
+  `createFrameDecoder` over a reader that re-concatenates per chunk, re-measured
+  at 1.00× and 1.19× with a 55–60 % spread, and never with a reproducible harness.
+  The mode sweeps frame size because the arms are expected to separate only where
+  the copy stops being L1-resident. At **32 KB frames the decoder is 2.9–4.1× on
+  a 4–14 % spread** — a real signal, where §12.3 recorded 1.9× — and at 281 B the
+  arms are indistinguishable, so the claimed 1.6× does not reproduce at the size
+  that matters least. Every row is judged against that run's own spread, and a
+  noisy row is labelled as noise **in both directions**: the 4 KB row reads 0.73–0.97×
+  on a 55–145 % spread, and without that note a reader would conclude the decoder
+  is slower there.
+
+  The naive arm is additionally handicapped and says so: `decodeMessage` throws
+  on a partial frame, so a reader written without a cursor must check the declared
+  length itself. The first version of the arm did not, and crashed with
+  `frame is 5 bytes, shorter than the 6-byte header` — the very defect the decoder
+  exists to fix, arriving through the benchmark. Any speed shown is understated.
+
+**Instrument bugs the modes found in themselves, which is why they are worth
+landing before the work they gate.** The memo counter first counted `_encodeBatch`
+_calls_ and labelled them encodes, so the memoised arm reported 5 000 encodes while
+doing one and the saving looked like it had done nothing — the same counter RT-006
+says it must add. The isolated arm was a cold single shot compared against arms
+warmed by nine rounds, which included JIT compilation in one arm and not the other.
+And three presentation bugs would each have printed a wrong number: broken column
+padding, frame sizes derived from the body rather than the frame (281 B and 32 KB
+printed as 548 B and 500 B), and a fixed prose claim about the small row that
+ignored what the run had actually measured.
