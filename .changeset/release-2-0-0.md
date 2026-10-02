@@ -5627,3 +5627,51 @@ two that carry the distinction: removing the detection fails 5, and making the
 limit exclusive fails the at-the-limit case. Every oversized-frame test asserts
 that the message is **still delivered**, because that assertion is what fails if
 a later change "fixes" the report into a rejection.
+
+## The bufferedAmount-after-close trap
+
+**Documented the `bufferedAmount`-after-close trap in the WebSocket client's
+guide.** MDN, on `WebSocket.bufferedAmount`: _"This value does not reset to zero
+when the connection is closed; if you keep calling `send()`, this will continue to
+climb."_ The number meant to say "the socket is full" therefore keeps growing on a
+socket that is not open and never comes back down.
+
+That makes a naive wait loop a hang rather than back-pressure, and worse than an
+ordinary one: the loop is usually written _before_ the close, so it is correct in
+testing and hangs in production, and because the number is climbing every check
+keeps passing, so nothing throws and no timeout fires. The guide shows the loop
+that spins, the `readyState === WebSocket.OPEN` gate that fixes it, and what to do
+in the branch where the socket is not open — stop sending, rather than wait for
+room that will never come.
+
+**This client already had both halves**, which the row did not record: the
+`bufferedAmount` getter returns `0` unless `readyState === OPEN`, so a closed or
+not-yet-open socket reads as _empty_ rather than _full_, and the poll runs on the
+backing-off timer rather than in a tight loop. Reading the raw socket instead
+would reintroduce the hang.
+
+The row says to land this **with RT-017**, and it did not, because RT-017 is P2,
+Medium, and blocked on RT-001 through RT-005 — while this row's own instruction is
+_"Ship day one, never after"_. Deferring a trap that costs someone a day of
+debugging behind five blocked rows is the exact failure the note warns about, so
+the urgency won and the two land separately. MDN's wording was checked against the
+page rather than taken from the row, because a guide entry documenting a trap
+that does not exist would be worse than no entry.
+
+The property is now pinned rather than left as a consequence of the getter's
+implementation: `test/powerWebSocketClient.bufferedAfterClose.test.js` asserts a
+socket whose raw `bufferedAmount` has climbed to 64 KiB while `readyState` is
+CLOSING reports `0` here, that a genuinely-full open socket still reports its real
+number, that a non-numeric value coerces to `0` rather than `NaN` (because
+`NaN > limit` is false, so a `ws` socket reporting a string would be silently
+treated as _empty_), and that a torn-down socket reports `0` rather than throwing
+from a timer callback.
+
+5 tests, 4 mutants, all caught. **One of those mutants initially survived and the
+test that should have killed it was vacuous**: the draft set the state to CLOSED
+alongside a null socket, so the state check short-circuited and the null guard was
+never reached. The corrected case holds `readyState` at `OPEN` with no socket —
+which is the real hazard, a poll timer firing between teardown and the state
+update. A test written the comfortable way passed against code that would throw,
+which is the same trap as the `PLAN_ROW` regex that matched nothing and the
+`WebSocketImpl` fixture the client silently ignored.

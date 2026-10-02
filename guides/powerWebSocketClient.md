@@ -30,6 +30,48 @@ const client = new PowerWebSocketClient({
 - The poll interval **backs off** while paused (up to `maxPollIntervalMs`), so a stuck socket does not spin the event loop. MDN's own advice is to poll; doing it on a backing-off timer is the difference between a CPU pegged at 100 % and one that is not.
 - `lowWaterMarkBytes` must be ≤ `highWaterMarkBytes`; otherwise the socket would pause and never resume. That is rejected at construction.
 
+#### `bufferedAmount` does not reset on close — gate on `readyState`
+
+MDN, on `WebSocket.bufferedAmount`:
+
+> This value does not reset to zero when the connection is closed; if you keep
+> calling `send()`, this will continue to climb.
+
+So the number that is supposed to tell you the socket is full **keeps growing on a
+socket that is not open**, and never comes back down. That makes a naive wait
+loop into a hang rather than into back-pressure:
+
+```javascript
+// Spins forever on a closed socket: bufferedAmount only climbs.
+while (socket.bufferedAmount > highWaterMarkBytes) {
+  await new Promise((r) => setTimeout(r, 10));
+}
+```
+
+Two things make it worse than an ordinary hang. The loop is usually written
+_before_ the close, so it is correct in testing and hangs in production; and
+because `bufferedAmount` is climbing, every check passes, so nothing ever throws
+and no timeout fires.
+
+Gate on `readyState` instead, and treat a socket that is not open as "no
+back-pressure" rather than "full":
+
+```javascript
+while (socket.readyState === WebSocket.OPEN && socket.bufferedAmount > highWaterMarkBytes) {
+  await new Promise((r) => setTimeout(r, 10));
+}
+if (socket.readyState !== WebSocket.OPEN) {
+  // Closed or closing: stop sending, do not wait for room that never comes.
+}
+```
+
+**This client already does both halves**, which is why the trap cannot bite you
+here: `bufferedAmount` returns `0` unless `readyState === OPEN`, so a
+not-yet-open or closed socket reads as empty rather than full, and the poll runs
+on the backing-off timer above rather than in a tight loop. That is a deliberate
+property and not an accident of the getter — reading the raw socket instead would
+reintroduce the hang.
+
 ### 2. Streams (where `WebSocketStream` exists)
 
 `WebSocketStream` is a Promise-based alternative built on the Streams API and therefore "can take advantage of stream back-pressure automatically". It is not yet standard or universally available, so it is feature-detected:
