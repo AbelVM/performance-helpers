@@ -26,7 +26,12 @@ export class PowerRealtimeHub {
         dropped: number;
         disconnected: number;
         bytesOut: number;
+        encoded: number;
     };
+    _frameMemo: Uint8Array<ArrayBufferLike> | null;
+    _frameMemoLength: number;
+    _frameMemoFirst: any;
+    _frameMemoLast: any;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -361,6 +366,13 @@ export type HubOptions = {
      * See `guides/metrics.md`.
      * transport adapter, called as `send(subscriber, frame)`. Return a promise if
      * the transport is async; the hub tracks in-flight sends per subscriber.
+     *
+     * **The `frame` is shared and must be treated as read-only.** RT-006 encodes one
+     * frame per `(topic, batch)` and hands the same buffer to every subscriber on
+     * the topic, so a transport that writes into `frame` corrupts every other
+     * subscriber's message. Copy it if the transport needs to own it.
+     * `stats().encoded` makes a violation visible: it counts real encodes, so it
+     * stays at one per flush however many subscribers the topic has.
      */
     observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**

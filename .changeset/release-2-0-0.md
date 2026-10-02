@@ -5478,3 +5478,37 @@ So the mode claims no cost for `awaitResponse`. What it does establish is that a
 regression _is_ detectable even though the cost is not: a change that made the
 awaited path allocate per task, or scan the pending set linearly, would move the
 median by more than its run-to-run movement.
+
+**`PowerRealtimeHub` now encodes the fan-out frame once per `(topic, batch)`
+instead of once per subscriber.** Every subscriber on a topic receives the same
+bytes, so the encode was repeated N times for one payload. Measured on 5 000
+subscribers: the encode was **92 % of the flush**, and the plain hub ran **5 000
+encodes for one publish**.
+
+The saving is a count, not a duration: **5 000 encodes become 1**, which is why
+the memo is keyed on identity rather than on contents. Keying on the batch's
+contents would mean paying `JSON.stringify` per subscriber in order to save the
+`frameEncodedJson` per subscriber, and the stringify is the larger half — which
+is also why the 91 % "encode is the flush" figure could not be reproduced as a
+number and was retired rather than confirmed.
+
+The key is `(length, first, last)` compared **by reference**, which is sound
+because of two properties of how a queue is filled: the same message object is
+pushed into every subscriber of a topic, and a slow-consumer drop removes only
+from the front. So two batches agreeing on length and both ends are the same
+batch. It is an identity check, not a value comparison, so publishing the same
+value twice encodes twice and nothing has to assume the contents were compared.
+
+**The frame is now shared, and that is the one new contract.** The `send` adapter
+is documented as receiving a **read-only** buffer, because a transport that
+writes into it corrupts every other subscriber on the topic. `stats().encoded` was
+added for exactly that reason: it counts real encodes, so it stays at one per
+flush however many subscribers the topic has, and a transport mutating frames
+shows up as a count that does not behave.
+
+The memo is a **single slot**, which is the right shape for the fan-out loop — the
+drain walks a topic's subscribers consecutively, so consecutive calls carry the
+same batch. Subscribers whose `maxBatch` differs interleave _different_ batch
+shapes and the slot is overwritten between them, so it misses and pays an extra
+`JSON.stringify`. The consequence is extra encodes, never a wrong frame, and that
+is pinned as a known miss rather than presented as a win.

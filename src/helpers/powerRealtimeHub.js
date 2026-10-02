@@ -132,6 +132,13 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  *   See `guides/metrics.md`.
  *   transport adapter, called as `send(subscriber, frame)`. Return a promise if
  *   the transport is async; the hub tracks in-flight sends per subscriber.
+ *
+ *   **The `frame` is shared and must be treated as read-only.** RT-006 encodes one
+ *   frame per `(topic, batch)` and hands the same buffer to every subscriber on
+ *   the topic, so a transport that writes into `frame` corrupts every other
+ *   subscriber's message. Copy it if the transport needs to own it.
+ *   `stats().encoded` makes a violation visible: it counts real encodes, so it
+ *   stays at one per flush however many subscribers the topic has.
  * @property {function(object, string):(void|Promise<void>)} [close] - Optional
  *   adapter called when the hub closes a subscriber for falling behind or on
  *   `close()`. Takes the same `(subscriber, reason)` pair as `send` plus why
@@ -227,7 +234,36 @@ export class PowerRealtimeHub {
       dropped: 0,
       disconnected: 0,
       bytesOut: 0,
+      encoded: 0,
     };
+    // RT-006: one encoded frame per `(topic, batch)` instead of one per
+    // subscriber. The memo is a **single entry**, which is the right shape for the
+    // fan-out loop rather than a general cache: `_drain` walks the subscribers of
+    // a topic consecutively, so consecutive calls carry the same batch and a
+    // one-slot memo hits on every one of them. A `Map` would cost a string or a
+    // nested lookup per subscriber to hold the key, which is the cost this change
+    // exists to remove.
+    //
+    // The key is `(length, first, last)` of the batch, compared **by identity**,
+    // and it is sound because of two properties of how a queue is filled:
+    // `_enqueue` pushes the *same message object* into every subscriber of a
+    // topic, and `drop-oldest` removes only from the front. So two batches that
+    // agree on length and on both ends are the same batch — different subscribes
+    // differ at an end, and a different `maxBatch` differs in length. This is an
+    // identity check, not a value comparison, so a caller publishing the same
+    // value twice gets two encodes, which is correct: nothing has to assume the
+    // contents were compared.
+    //
+    // The memo holds a frame that several subscribers are handed, so **the frame
+    // is shared and must be treated as read-only by the transport.** A `send`
+    // adapter that mutates the buffer corrupts every other subscriber. That is
+    // documented on the `send` option and is the one contract this change adds.
+    // `stats().encoded` exists so a violation is visible: if it ever exceeds the
+    // number of flushes, a caller is mutating frames or the memo is missing hits.
+    this._frameMemo = null;
+    this._frameMemoLength = -1;
+    this._frameMemoFirst = null;
+    this._frameMemoLast = null;
     // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
     this._metrics = attach(this, 'hub', options);
   }
@@ -773,7 +809,29 @@ export class PowerRealtimeHub {
     // as a single JSON array, and the frame stays self-delimiting.
     // One `JSON.stringify` for the whole batch, then one frame. Passing the
     // string straight to `frameEncodedJson` avoids encoding the array twice.
-    return frameEncodedJson(JSON.stringify(batch));
+    //
+    // **RT-006: the memo is checked before the stringify, not after.** Keying on
+    // the batch contents would mean paying `JSON.stringify` per subscriber to
+    // save the `frameEncodedJson` per subscriber — and the stringify was measured
+    // as the larger of the two. The key is the batch's identity triple instead;
+    // see the constructor for why that is sound.
+    const first = batch[0];
+    const last = batch[batch.length - 1];
+    if (
+      this._frameMemo !== null &&
+      this._frameMemoLength === batch.length &&
+      this._frameMemoFirst === first &&
+      this._frameMemoLast === last
+    ) {
+      return this._frameMemo;
+    }
+    const frame = frameEncodedJson(JSON.stringify(batch));
+    this._counters.encoded += 1;
+    this._frameMemo = frame;
+    this._frameMemoLength = batch.length;
+    this._frameMemoFirst = first;
+    this._frameMemoLast = last;
+    return frame;
   }
 
   /**

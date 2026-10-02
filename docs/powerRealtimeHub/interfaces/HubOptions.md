@@ -85,6 +85,13 @@ Opt in to
   transport adapter, called as `send(subscriber, frame)`. Return a promise if
   the transport is async; the hub tracks in-flight sends per subscriber.
 
+  **The `frame` is shared and must be treated as read-only.** RT-006 encodes one
+  frame per `(topic, batch)` and hands the same buffer to every subscriber on
+  the topic, so a transport that writes into `frame` corrupts every other
+  subscriber's message. Copy it if the transport needs to own it.
+  `stats().encoded` makes a violation visible: it counts real encodes, so it
+  stays at one per flush however many subscribers the topic has.
+
 ***
 
 ### onError?

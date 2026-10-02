@@ -77,6 +77,10 @@
 
 > **dropped**: `number` = `0`
 
+#### encoded
+
+> **encoded**: `number` = `0`
+
 #### published
 
 > **published**: `number` = `0`
@@ -92,6 +96,30 @@
 ### \_flushTimer
 
 > **\_flushTimer**: `any`
+
+***
+
+### \_frameMemo
+
+> **\_frameMemo**: `Uint8Array`\<`ArrayBufferLike`\> \| `null`
+
+***
+
+### \_frameMemoFirst
+
+> **\_frameMemoFirst**: `any`
+
+***
+
+### \_frameMemoLast
+
+> **\_frameMemoLast**: `any`
+
+***
+
+### \_frameMemoLength
+
+> **\_frameMemoLength**: `number`
 
 ***
 
