@@ -90,6 +90,10 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 > **heartbeatTimeouts**: `number` = `0`
 
+#### oversizeFrames
+
+> **oversizeFrames**: `number` = `0`
+
 #### received
 
 > **received**: `number` = `0`
@@ -149,6 +153,12 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 ### \_lowWaterMark
 
 > **\_lowWaterMark**: `number`
+
+***
+
+### \_maxPayloadSizeBytes
+
+> **\_maxPayloadSizeBytes**: `number`
 
 ***
 

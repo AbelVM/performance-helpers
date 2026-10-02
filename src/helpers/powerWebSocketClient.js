@@ -43,6 +43,43 @@ import { attach, detach } from './metrics.js';
 import { READY_STATE } from './constants.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
+/**
+ * Byte length of a frame, whichever of the shapes the platform hands us.
+ *
+ * A `message` event carries a `Blob` for binary frames by default and an
+ * `ArrayBuffer` or `Uint8Array` once `binaryType` is set — so a size check that
+ * assumed one shape would either miss `Blob`s entirely or force an awaited
+ * `arrayBuffer()` on every frame just to read `.size` off it. All three shapes
+ * expose a length synchronously, so the check is always non-blocking.
+ *
+ * @param {any} data
+ * @returns {number} Bytes, or `0` when the shape carries no readable length.
+ */
+function byteLengthOf(data) {
+  if (data == null) return 0;
+  if (typeof data.byteLength === 'number') return data.byteLength;
+  if (typeof data.size === 'number') return data.size;
+  if (typeof data.length === 'number') return data.length;
+  return 0;
+}
+
+/**
+ * The error reported for a frame over `maxPayloadSizeBytes`.
+ *
+ * @param {number} size - The frame's length in bytes.
+ * @param {number} limit - The configured limit.
+ * @param {string} className - Reporting class, for a message that says where.
+ * @returns {Error}
+ */
+function oversizedFrameError(size, limit, className) {
+  return new Error(
+    `${className}: received a ${size}-byte frame, over the maxPayloadSizeBytes limit of ${limit}. ` +
+      'This is detection, not prevention — the frame was already received and buffered before ' +
+      'this was checked, so the limit reports what arrived rather than stopping it. Bound the ' +
+      'payload at the peer that produces it.'
+  );
+}
+
 /** @typedef {'connecting'|'open'|'closing'|'closed'} WebSocketReadyState */
 
 /**
@@ -69,6 +106,30 @@ export { READY_STATE };
  *   module.
  * @property {number} [connectTimeoutMs=10000] - Abort the connect attempt after
  *   this long. `0` disables the timeout.
+ * @property {number} [maxPayloadSizeBytes=Infinity] - Frames larger than this are
+ *   **reported, not prevented** — and the distinction is the point, so read this
+ *   before relying on it.
+ *
+ *   By the time a `message` event fires, the platform has already received and
+ *   materialised the whole frame. Nothing at this layer can stop that allocation,
+ *   so this option **counts** the oversized frame (`stats().oversizeFrames`) and
+ *   emits an `error` saying what arrived. It is observability, not a guard: a
+ *   number that reads like a limit and is not one is worse than no number, which
+ *   is why it is described this way in the option, in the error message and here.
+ *
+ *   **Prevention belongs at the peer that produces the frame.** And the codec is
+ *   already safe regardless: `decodeMessage` validates a declared payload length
+ *   against the bytes actually present *before* slicing, so a frame lying about
+ *   its size throws instead of reserving anything, and the payload is a view
+ *   rather than a copy. The incremental decoder's equivalent bound —
+ *   `createFrameDecoder`'s `maxFrameBytes` — is **required** rather than
+ *   defaulted, because a peer that sends a header and then stops would otherwise
+ *   pin its buffer at whatever size it named.
+ *
+ *   Defaults to `Infinity`, which disables the report; `0` disables it too, the
+ *   same convention `highWaterMarkBytes: 0` uses in this class. Set it to the
+ *   largest frame your peer should ever send, and alert on `oversizeFrames`.
+ *
  * @property {number} [highWaterMarkBytes=1<<20] - Above this `bufferedAmount`
  *   the producer is paused. 1 MiB by default.
  * @property {number} [lowWaterMarkBytes=1<<19] - Below this, the producer is
@@ -146,6 +207,7 @@ export class PowerWebSocketClient {
         'pollIntervalMs',
         'protocols',
         'maxPollIntervalMs',
+        'maxPayloadSizeBytes',
         'heartbeatIntervalMs',
         'heartbeatTimeoutMs',
         'maxReconnectAttempts',
@@ -175,6 +237,7 @@ export class PowerWebSocketClient {
       lowWaterMarkBytes = 1 << 19,
       pollIntervalMs = 20,
       maxPollIntervalMs = 250,
+      maxPayloadSizeBytes = Infinity,
       heartbeatIntervalMs = 30_000,
       heartbeatTimeoutMs = 10_000,
       maxReconnectAttempts = Number.POSITIVE_INFINITY,
@@ -249,6 +312,18 @@ export class PowerWebSocketClient {
       className: 'PowerWebSocketClient',
       min: 0,
       fallback: 0,
+    });
+    // RT-009. `allowInfinity` because `Infinity` is the documented default and
+    // means "do not report" — the same deliberate opt-in `createFrameDecoder`
+    // takes for `maxFrameBytes`. `min: 0` is accepted because `0` *disables* the
+    // check, which this class already spells that way for its watermarks; without
+    // it, `0` would be rejected rather than meaning "no limit".
+    this._maxPayloadSizeBytes = assertLimitRequired(maxPayloadSizeBytes, {
+      name: 'maxPayloadSizeBytes',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      allowInfinity: true,
+      fallback: Infinity,
     });
     this._lowWaterMark = assertLimitRequired(lowWaterMarkBytes, {
       name: 'lowWaterMarkBytes',
@@ -332,6 +407,10 @@ export class PowerWebSocketClient {
       received: 0,
       drops: 0,
       decodeErrors: 0,
+      // RT-009: frames received over `maxPayloadSizeBytes`. A count rather than a
+      // rejection, because by this point the platform has already materialised
+      // the frame — see the option's documentation.
+      oversizeFrames: 0,
       reconnects: 0,
       heartbeatTimeouts: 0,
       // Heartbeats that came back. Always 0 before `RT-003`: the client had no
@@ -799,6 +878,32 @@ export class PowerWebSocketClient {
    */
   _handleMessage(event) {
     const data = event?.data ?? event;
+
+    // RT-009: **detection, not prevention**, and the wording is load-bearing.
+    // By the time a `message` event fires the platform has already materialised
+    // the whole frame, so this limit cannot stop the allocation — it reports a
+    // frame that exceeded it, after the fact. A number that sounds like a limit
+    // and is not is worse than no number, which is why the option is documented
+    // this way in three places rather than as protection.
+    //
+    // It is still worth having: a peer that sends 40 MB frames is a fact you want
+    // in `stats()` and in your logs, and `_counters.oversizeFrames` makes it
+    // alertable. The prevention belongs at the edge that owns the bytes — the
+    // server, or a proxy in front of it.
+    const size = byteLengthOf(data);
+    // `0` disables the check, the same convention `highWaterMarkBytes: 0` uses
+    // in this class. The first draft took `min: 0` as "accepted" and documented
+    // it as "no check", which is the opposite of what `size > 0` does for every
+    // non-empty frame — so `0` meant *report everything*. Two spellings for one
+    // idea, and the wrong one documented.
+    if (this._maxPayloadSizeBytes > 0 && size > this._maxPayloadSizeBytes) {
+      this._counters.oversizeFrames += 1;
+      this._emit(
+        'error',
+        oversizedFrameError(size, this._maxPayloadSizeBytes, 'PowerWebSocketClient')
+      );
+    }
+
     let message;
     try {
       message = decodeMessage(data).value;

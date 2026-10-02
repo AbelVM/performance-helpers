@@ -5576,3 +5576,54 @@ Zero new type debt, so the ratchet ceiling is unchanged. The probe takes an
 optional argument rather than reading globals directly, which is both why it is
 testable on Node — where there is no `WebTransport` to probe — and why the
 absence cases above are meaningful rather than merely unreachable.
+
+## Payload size: detection at the transport, safety already in the codec
+
+**Added `maxPayloadSizeBytes` to `PowerWebSocketClient`, documented as detection
+rather than prevention.** The row's requirement is not a guard but an honest
+label, and the distinction is the deliverable: by the time a `message` event
+fires the platform has already received and materialised the whole frame, so
+nothing at this layer can stop that allocation. The option therefore counts the
+oversized frame (`stats().oversizeFrames`), emits an `error` saying what arrived,
+and lets the frame through. A number that reads like a limit and is not one is
+worse than no number at all, so it is described that way in the option, in the
+error message, and in the guide.
+
+The prevention belongs at the peer that produces the frame.
+
+**The codec was already safe, and that is now pinned rather than asserted.**
+Verified before writing anything: a frame declaring 4 294 967 295 bytes while
+carrying 2 throws a `RangeError` in ~120 µs with **0.0 MB** of heap movement,
+because `decodeMessage` validates a declared payload length against the bytes
+actually present _before_ slicing, and the payload is a `subarray` view rather
+than a copy. That is why a codec-side limit would be redundant — it would check a
+number the codec already enforces. The incremental decoder's equivalent bound,
+`createFrameDecoder`'s `maxFrameBytes`, is **required** rather than defaulted,
+with an error message that names the hazard exactly: a peer that sends a header
+and then stops would otherwise pin the buffer at whatever size it named.
+
+The streaming path behaves differently _on purpose_ and the tests say so. Given a
+frame declaring 4 GB after two bytes, `decodeMessage` can say "truncated" and the
+decoder cannot, because more bytes may still be arriving — so it buffers and
+waits, and the safety comes from `maxFrameBytes` refusing to be omitted rather
+than from a default.
+
+**The row's "both helpers" does not match the tree, and there is one boundary,
+not two.** `PowerWebSocketClient._handleMessage` is the only transport inbound
+path: `PowerRealtimeHub` is outbound-only and decodes nothing, and the
+`decodeMessage` references in `powerPool` and `powerChunking` are in JSDoc
+examples and comments. The detection is implemented where the boundary is.
+
+Two `docs:claims`-relevant details the option carries: the length is read from
+whichever shape the platform hands over — a `message` event carries a `Blob` for
+binary frames by default, and all three shapes expose a length synchronously, so
+the check never forces an awaited `arrayBuffer()`. And `0` **disables** the check
+rather than reporting every frame, which is this class's existing convention for
+`highWaterMarkBytes: 0`; the first draft documented `0` as "no check" while the
+code reported every non-empty frame, and the test caught the contradiction.
+
+10 tests for the option, 8 for the codec, 9 mutants, all caught — including the
+two that carry the distinction: removing the detection fails 5, and making the
+limit exclusive fails the at-the-limit case. Every oversized-frame test asserts
+that the message is **still delivered**, because that assertion is what fails if
+a later change "fixes" the report into a rejection.

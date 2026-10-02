@@ -12,6 +12,30 @@ export { READY_STATE };
  *   module.
  * @property {number} [connectTimeoutMs=10000] - Abort the connect attempt after
  *   this long. `0` disables the timeout.
+ * @property {number} [maxPayloadSizeBytes=Infinity] - Frames larger than this are
+ *   **reported, not prevented** — and the distinction is the point, so read this
+ *   before relying on it.
+ *
+ *   By the time a `message` event fires, the platform has already received and
+ *   materialised the whole frame. Nothing at this layer can stop that allocation,
+ *   so this option **counts** the oversized frame (`stats().oversizeFrames`) and
+ *   emits an `error` saying what arrived. It is observability, not a guard: a
+ *   number that reads like a limit and is not one is worse than no number, which
+ *   is why it is described this way in the option, in the error message and here.
+ *
+ *   **Prevention belongs at the peer that produces the frame.** And the codec is
+ *   already safe regardless: `decodeMessage` validates a declared payload length
+ *   against the bytes actually present *before* slicing, so a frame lying about
+ *   its size throws instead of reserving anything, and the payload is a view
+ *   rather than a copy. The incremental decoder's equivalent bound —
+ *   `createFrameDecoder`'s `maxFrameBytes` — is **required** rather than
+ *   defaulted, because a peer that sends a header and then stops would otherwise
+ *   pin its buffer at whatever size it named.
+ *
+ *   Defaults to `Infinity`, which disables the report; `0` disables it too, the
+ *   same convention `highWaterMarkBytes: 0` uses in this class. Set it to the
+ *   largest frame your peer should ever send, and alert on `oversizeFrames`.
+ *
  * @property {number} [highWaterMarkBytes=1<<20] - Above this `bufferedAmount`
  *   the producer is paused. 1 MiB by default.
  * @property {number} [lowWaterMarkBytes=1<<19] - Below this, the producer is
@@ -82,6 +106,7 @@ export class PowerWebSocketClient {
     _codec: "json" | "raw";
     _connectTimeoutMs: number;
     _highWaterMark: number;
+    _maxPayloadSizeBytes: number;
     _lowWaterMark: number;
     _pollBase: number;
     _pollMax: number;
@@ -124,6 +149,7 @@ export class PowerWebSocketClient {
         received: number;
         drops: number;
         decodeErrors: number;
+        oversizeFrames: number;
         reconnects: number;
         heartbeatTimeouts: number;
         heartbeats: number;
@@ -410,6 +436,32 @@ export type WebSocketClientOptions = {
      * this long. `0` disables the timeout.
      */
     connectTimeoutMs?: number | undefined;
+    /**
+     * - Frames larger than this are
+     * **reported, not prevented** — and the distinction is the point, so read this
+     * before relying on it.
+     *
+     * By the time a `message` event fires, the platform has already received and
+     * materialised the whole frame. Nothing at this layer can stop that allocation,
+     * so this option **counts** the oversized frame (`stats().oversizeFrames`) and
+     * emits an `error` saying what arrived. It is observability, not a guard: a
+     * number that reads like a limit and is not one is worse than no number, which
+     * is why it is described this way in the option, in the error message and here.
+     *
+     * **Prevention belongs at the peer that produces the frame.** And the codec is
+     * already safe regardless: `decodeMessage` validates a declared payload length
+     * against the bytes actually present *before* slicing, so a frame lying about
+     * its size throws instead of reserving anything, and the payload is a view
+     * rather than a copy. The incremental decoder's equivalent bound —
+     * `createFrameDecoder`'s `maxFrameBytes` — is **required** rather than
+     * defaulted, because a peer that sends a header and then stops would otherwise
+     * pin its buffer at whatever size it named.
+     *
+     * Defaults to `Infinity`, which disables the report; `0` disables it too, the
+     * same convention `highWaterMarkBytes: 0` uses in this class. Set it to the
+     * largest frame your peer should ever send, and alert on `oversizeFrames`.
+     */
+    maxPayloadSizeBytes?: number | undefined;
     /**
      * - Above this `bufferedAmount`
      * the producer is paused. 1 MiB by default.
