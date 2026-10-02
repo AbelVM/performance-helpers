@@ -521,6 +521,15 @@ export class PowerCache {
     // exact change that already failed here once. CACHE-006 still wants this
     // cost removed; the route it should take is spelled out in that row, and it
     // is not a resurrected field.
+    //
+    // These two are not a pointer and must not become one. `_windowOldest()`
+    // memoises its walk in `_windowStartMemo` and *validates* the memo on every
+    // read, so a mistake about some mutation costs a walk instead of producing a
+    // confidently wrong answer. `_windowTail` is the tail at the time of that
+    // walk, and it is what makes a memo written before an unlink comparable to
+    // the list afterwards. See that method for why each condition is needed.
+    this._windowStartMemo = null;
+    this._windowTail = null;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -968,6 +977,20 @@ export class PowerCache {
     if (n) n.prev = p;
     else this._tail = p;
     if (this._probationEnd === node) this._probationEnd = p;
+    // Drop the window memo when a window node leaves the list. This is here, in
+    // the one funnel every unlink passes through, rather than in `_unlinkNode`:
+    // `_moveToTail` unlinks and re-appends through `_remove` directly, so
+    // invalidating only in the map-removing path would miss it, and a memo that
+    // is "usually" invalidated is the maintained pointer this design exists to
+    // avoid. `_remove` cannot know whether it removed the *start* of the run, and
+    // guessing is the failure `_windowOldest()` documents — so it discards rather
+    // than corrects, and the next read walks. An unlink of a main-space node
+    // cannot move the window's start and is left alone, which is the common case
+    // on the read path the memo is here to make cheap.
+    if (node.inWindow) {
+      this._windowStartMemo = null;
+      this._windowTail = null;
+    }
     node.prev = node.next = null;
   }
 
@@ -1050,13 +1073,74 @@ export class PowerCache {
    * drop). List consistency against it is checked by `test/powerCache.window.test.js`,
    * which is the half this cannot verify on its own.
    *
+   * **The walk is memoised, and the memo is validated rather than maintained.**
+   * This is deliberately not the maintained pointer the note above describes as
+   * having failed: a pointer has to be *corrected* by every mutation, and the
+   * way it went wrong was producing a confidently wrong answer, because a node
+   * with a correct `inWindow` flag can still sit on the wrong side of the
+   * boundary. Here the memo can only be **trusted or discarded**, never
+   * adjusted, so a mistake in reasoning about some mutation costs a walk and
+   * nothing else — and the conditions below are each individually
+   * necessary, so the failure mode is a stale memo rather than a wrong one.
+   *
+   * The memo is valid when the walk would return the same node, and the two
+   * checks are the complete set of ways that can stop being true:
+   *
+   * 1. `memo.prev === null || !memo.prev.inWindow`. If the node *before* the
+   *    memo is now flagged, the memo is no longer the start of the run.
+   * 2. `this._windowTail === this._tail`, where `_windowTail` is the tail at the
+   *    moment of the walk. This is what makes a memo written before an unlink
+   *    comparable to the list afterwards: the tail is unchanged, the removed node
+   *    was not the memo, and the run's start is genuinely unmoved — so a walk
+   *    would return the same node and skipping it is correct.
+   *
+   * **There is deliberately no `memo.inWindow` check**, and it was there first.
+   * It is redundant rather than merely untested: every way a node stops being
+   * flagged is a promotion or a drop, and both of those *unlink* it, and `_remove`
+   * discards the memo for any window node it unlinks. Deleting the check left
+   // every test in `test/powerCache.window.test.js` passing, and the reason it
+   * is safe to delete is that `_remove` is the single funnel every unlink passes
+   * through. The same test run is what established it — the check had survived
+   * deleting it, which is how a guard nobody has watched fail gets deleted
+   * instead of justified.
+   *
+   * **There is also no `memo === this._tail` condition**, and the first draft of
+   * this had one. The walk starts at the tail and walks *backwards*, so the
+   * window's oldest node is the tail only when the window holds a single entry —
+   * requiring it made the memo miss on *every* read while a multi-entry window was
+   * resident, which is precisely the case the row is about. It measured 1.00
+   * calls per get and zero benefit, and the diagnostic that found it printed which
+   * condition had failed rather than a bare count.
+   *
+   * The case that is *not* free is a node removed from the window **immediately
+   * before the memo**, which moves the run's start without touching the tail or
+   * the memo. That is one unlink, and it is covered by the same rule the rest
+   * of this class uses: any unlink of a window node drops the memo, because
+   * `_remove` cannot know whether it removed the run's start and a wrong guess
+   * is the failure this whole design exists to avoid. Dropping it costs one
+   * walk, which is what the walk is for.
+   *
    * @private
    * @returns {CacheNode|null}
    */
   _windowOldest() {
+    const memo = this._windowStartMemo;
+    if (
+      memo !== null &&
+      (memo.prev === null || !memo.prev.inWindow) &&
+      this._windowTail === this._tail
+    ) {
+      return memo;
+    }
     let node = this._tail;
-    if (!node || !node.inWindow) return null;
+    if (!node || !node.inWindow) {
+      this._windowStartMemo = null;
+      this._windowTail = this._tail;
+      return null;
+    }
     while (node.prev && node.prev.inWindow) node = node.prev;
+    this._windowStartMemo = node;
+    this._windowTail = this._tail;
     return node;
   }
 

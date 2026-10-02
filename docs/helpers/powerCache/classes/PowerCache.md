@@ -256,6 +256,18 @@ number of times `weightFn` threw; a non-zero value means `maxWeight`
 
 ***
 
+### \_windowStartMemo
+
+> **\_windowStartMemo**: `any`
+
+***
+
+### \_windowTail
+
+> **\_windowTail**: `any`
+
+***
+
 ### allowStale
 
 > **allowStale**: `boolean`

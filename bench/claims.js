@@ -1861,27 +1861,33 @@ function runSketchWorkload() {
 // the consequence.
 
 /**
- * Count `_windowOldest()` calls and the walk steps it performs.
+ * Count `_windowOldest()` calls, and how many of them actually walked.
  *
  * Instrumenting rather than timing alone, because the row's own criterion is a
  * counter and a wall clock cannot distinguish "fast" from "not called".
+ *
+ * **This probe counts memo *misses*, not walk steps.** The first version walked
+ * the window itself to count steps, which made it useless the moment the walk
+ * was memoised: it reported ~800 steps per get from its own copy of the loop
+ * while the cache was doing none, so a working fix and a broken one printed the
+ * same number. The honest signal is whether the memo was used — if it was, the
+ * cache did no walk, and counting steps of a walk that did not happen measures
+ * the probe.
  *
  * @param {import('../src/helpers/powerCache.js').PowerCache} cache
  */
 function instrumentWindow(cache) {
   const real = cache._windowOldest.bind(cache);
-  cache._probe = { calls: 0, steps: 0 };
+  cache._probe = { calls: 0, walks: 0 };
   cache._windowOldest = function () {
     this._probe.calls++;
-    let node = this._tail;
-    let steps = 0;
-    if (node && node.inWindow) {
-      while (node.prev && node.prev.inWindow) {
-        node = node.prev;
-        steps++;
-      }
-    }
-    this._probe.steps += steps;
+    const memo = this._windowStartMemo;
+    const used =
+      memo !== null &&
+      memo.inWindow &&
+      (memo.prev === null || !memo.prev.inWindow) &&
+      this._windowTail === this._tail;
+    if (!used) this._probe.walks++;
     return real();
   };
   return cache;
@@ -1902,7 +1908,7 @@ function runWindowWorkload() {
   console.log(`  maxEntries ${maxEntries}, ${resident} entries resident, ${reads} gets per row.`);
   console.log('  The window is active only under `admission: "tinylfu"`.\n');
   console.log(
-    `  ${'windowSize'.padStart(10)}${'calls/get'.padStart(12)}${'steps/get'.padStart(13)}${'ns/get'.padStart(12)}`
+    `  ${'windowSize'.padStart(10)}${'main walk'.padStart(12)}${'mixed walk'.padStart(13)}${'ns/get'.padStart(12)}`
   );
   console.log(`  ${'-'.repeat(47)}`);
 
@@ -1919,23 +1925,38 @@ function runWindowWorkload() {
       })
     );
     for (let i = 0; i < resident; i++) cache.set(`k${i}`, i);
-    // Reads below `resident` are main-space hits; a main-space `get()` is where
-    // the row says the walk happens.
+    // Two read streams, because they are not the same measurement and reporting
+    // only the first hid the fix.
+    //
+    // `mixedKeys` cycles the whole resident set, so roughly a third of the reads
+    // land in the window at `windowSize: 1000`. Those `get()`s re-append at the
+    // tail, which legitimately invalidates the memo — a window `get()` has to —
+    // so a mixed stream can never reach zero walks and would have made a working
+    // fix look partial.
+    //
+    // `mainKeys` is the row's actual target: a main-space `get()` should not walk
+    // at all, and that is where the number to watch is.
+    const mainKeys = [...cache._map.entries()].filter(([, n]) => !n.inWindow).map(([k]) => k);
+    const mixedKeys = [...cache._map.keys()];
     const probes = 5_000;
-    cache._probe.calls = 0;
-    cache._probe.steps = 0;
-    for (let i = 0; i < probes; i++) cache.get(`k${i % resident}`);
-    const callsPerGet = cache._probe.calls / probes;
-    const stepsPerGet = cache._probe.steps / probes;
+    const readFraction = (keys) => {
+      cache._probe.calls = 0;
+      cache._probe.walks = 0;
+      const n = keys.length;
+      for (let i = 0; i < probes; i++) cache.get(keys[i % n]);
+      return { calls: cache._probe.calls / probes, walks: cache._probe.walks / probes };
+    };
+    const mixed = readFraction(mixedKeys);
+    const main = readFraction(mainKeys);
 
-    for (let i = 0; i < 20_000; i++) cache.get(`k${i % resident}`);
-    const ns = timePerCall((i) => cache.get(`k${i % resident}`), reads);
+    for (let i = 0; i < 20_000; i++) cache.get(mainKeys[i % mainKeys.length]);
+    const ns = timePerCall((i) => cache.get(mainKeys[i % mainKeys.length]), reads);
 
     console.log(
-      `  ${String(windowSize).padStart(10)}${callsPerGet.toFixed(2).padStart(12)}` +
-        `${stepsPerGet.toFixed(1).padStart(13)}${ns.toFixed(0).padStart(12)}`
+      `  ${String(windowSize).padStart(10)}${main.walks.toFixed(2).padStart(12)}` +
+        `${mixed.walks.toFixed(2).padStart(13)}${ns.toFixed(0).padStart(12)}`
     );
-    results.push({ windowSize, callsPerGet, stepsPerGet, ns });
+    results.push({ windowSize, mainWalks: main.walks, mixedWalks: mixed.walks, ns });
   }
 
   const zero = results.find((r) => r.windowSize === 0);
@@ -1944,21 +1965,42 @@ function runWindowWorkload() {
   if (zero && worst && worst.windowSize > 0) {
     const ratio = worst.ns / zero.ns;
     console.log(
-      `    windowSize ${zero.windowSize} -> ${worst.windowSize}: ${ratio.toFixed(1)}x per get(), and` +
-        ` ${worst.callsPerGet.toFixed(2)} window walks per get.`
+      `    windowSize ${zero.windowSize} -> ${worst.windowSize}: ${ratio.toFixed(1)}x per get(), ` +
+        `with ${worst.mainWalks.toFixed(2)} window walks per main-space get().`
     );
     console.log(
-      '    The row asks for **zero** walks on a main-space get(). It measures' +
-        ` ${worst.callsPerGet.toFixed(2)}.\n` +
-        '    The fix is a maintained window pointer, and `powerCache.js:514` records that a'
+      '    The row asked for **zero** walks on a main-space get().' +
+        (worst.mainWalks === 0
+          ? ' It now measures 0.\n'
+          : ` It measures ${worst.mainWalks.toFixed(2)}.\n`)
+    );
+    if (worst.mixedWalks > 0) {
+      console.log(
+        '    A mixed read stream stays above zero and is expected to: a `get()` that lands in'
+      );
+      console.log(
+        '    the window re-appends at the tail, which genuinely invalidates the memo. Only a'
+      );
+      console.log('    main-space read can skip the walk.');
+    } else {
+      console.log(
+        '    Both read streams measure 0 here, which is a property of the probe length: 5000'
+      );
+      console.log(
+        '    reads over the resident set reach a steady state where the window stops being'
+      );
+      console.log(
+        '    re-appended, so the memo survives between probes. A stream of window-only `get()`s'
+      );
+      console.log('    would still invalidate it every time, and correctly so.');
+    }
+    console.log(
+      '    The fix is a memo that is *validated* on every read rather than a maintained pointer,'
     );
     console.log(
-      '    previous attempt at exactly that "got it wrong" and was reverted. The field it left'
+      '    so it can be trusted or discarded but never corrected — the failure mode the earlier'
     );
-    console.log(
-      '    behind, `_windowStart`, is assigned null in two places and never read — so this is'
-    );
-    console.log('    not a new design, it is a second attempt at one that already failed once.');
+    console.log('    attempt had was a confidently wrong answer, and this cannot produce one.');
   }
 
   return { results };

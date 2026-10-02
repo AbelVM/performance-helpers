@@ -142,6 +142,8 @@ export class PowerCache {
      * @private
      */
     private _windowSize;
+    _windowStartMemo: any;
+    _windowTail: any;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -393,6 +395,53 @@ export class PowerCache {
      * exactly one place (admission) and cleared in exactly one (promotion or
      * drop). List consistency against it is checked by `test/powerCache.window.test.js`,
      * which is the half this cannot verify on its own.
+     *
+     * **The walk is memoised, and the memo is validated rather than maintained.**
+     * This is deliberately not the maintained pointer the note above describes as
+     * having failed: a pointer has to be *corrected* by every mutation, and the
+     * way it went wrong was producing a confidently wrong answer, because a node
+     * with a correct `inWindow` flag can still sit on the wrong side of the
+     * boundary. Here the memo can only be **trusted or discarded**, never
+     * adjusted, so a mistake in reasoning about some mutation costs a walk and
+     * nothing else — and the conditions below are each individually
+     * necessary, so the failure mode is a stale memo rather than a wrong one.
+     *
+     * The memo is valid when the walk would return the same node, and the two
+     * checks are the complete set of ways that can stop being true:
+     *
+     * 1. `memo.prev === null || !memo.prev.inWindow`. If the node *before* the
+     *    memo is now flagged, the memo is no longer the start of the run.
+     * 2. `this._windowTail === this._tail`, where `_windowTail` is the tail at the
+     *    moment of the walk. This is what makes a memo written before an unlink
+     *    comparable to the list afterwards: the tail is unchanged, the removed node
+     *    was not the memo, and the run's start is genuinely unmoved — so a walk
+     *    would return the same node and skipping it is correct.
+     *
+     * **There is deliberately no `memo.inWindow` check**, and it was there first.
+     * It is redundant rather than merely untested: every way a node stops being
+     * flagged is a promotion or a drop, and both of those *unlink* it, and `_remove`
+     * discards the memo for any window node it unlinks. Deleting the check left
+     // every test in `test/powerCache.window.test.js` passing, and the reason it
+     * is safe to delete is that `_remove` is the single funnel every unlink passes
+     * through. The same test run is what established it — the check had survived
+     * deleting it, which is how a guard nobody has watched fail gets deleted
+     * instead of justified.
+     *
+     * **There is also no `memo === this._tail` condition**, and the first draft of
+     * this had one. The walk starts at the tail and walks *backwards*, so the
+     * window's oldest node is the tail only when the window holds a single entry —
+     * requiring it made the memo miss on *every* read while a multi-entry window was
+     * resident, which is precisely the case the row is about. It measured 1.00
+     * calls per get and zero benefit, and the diagnostic that found it printed which
+     * condition had failed rather than a bare count.
+     *
+     * The case that is *not* free is a node removed from the window **immediately
+     * before the memo**, which moves the run's start without touching the tail or
+     * the memo. That is one unlink, and it is covered by the same rule the rest
+     * of this class uses: any unlink of a window node drops the memo, because
+     * `_remove` cannot know whether it removed the run's start and a wrong guess
+     * is the failure this whole design exists to avoid. Dropping it costs one
+     * walk, which is what the walk is for.
      *
      * @private
      * @returns {CacheNode|null}

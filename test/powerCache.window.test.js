@@ -290,41 +290,189 @@ describe('PowerCache admission window: what it actually does', () => {
  * recorded as needing the same scrutiny the `zipf` numbers got. Measured: 65
  * walks over 30 evicting inserts, about 2.2 per insert.
  */
-describe('TEST-003: _windowOldest() call counter', () => {
-  /** @param {PowerCache} cache */
+describe('TEST-003: _windowOldest() walk counter', () => {
+  /**
+   * Count calls to `_windowOldest()` that **actually walked**.
+   *
+   * This counts *misses*, not calls. With the walk memoised, `_windowOldest` is
+   * still called on every read and returns the memo without walking, so counting
+   * calls measures nothing and reads 50 for 50 reads. The first version of these
+   * tests counted calls and asserted 0, which failed for that reason and not
+   * because the memo was broken — the diagnostic that separated them was
+   * comparing memo identity before and after the call.
+   *
+   * @param {PowerCache} cache
+   */
   const countWalks = (cache) => {
-    let calls = 0;
+    let walks = 0;
     const original = cache._windowOldest.bind(cache);
     cache._windowOldest = (...a) => {
-      calls += 1;
+      // The same two conditions `_windowOldest` itself uses to decide whether
+      // the memo is usable. Duplicated deliberately rather than exported: this is
+      // the cache's internal rule, and a test that called the method under test
+      // to ask whether the method under test was about to do its job would be
+      // asserting nothing.
+      const memo = cache._windowStartMemo;
+      const usable =
+        memo !== null &&
+        (memo.prev === null || !memo.prev.inWindow) &&
+        cache._windowTail === cache._tail;
+      if (!usable) walks += 1;
       return original(...a);
     };
     return {
       get calls() {
-        return calls;
+        return walks;
       },
     };
   };
 
-  it('a main-space get() walks the window exactly once, under tinylfu', () => {
-    // CACHE-006's specified assertion, and the row's premise **holds** — under
-    // `admission: 'tinylfu'`, which is the configuration the row is about.
+  it('a main-space get() walks zero times once the window is steady', () => {
+    // CACHE-006's assertion, now satisfied. The counter reads 0 where it read 1,
+    // and it reads 0 because the memo is *validated* on each call rather than
+    // maintained: `_windowOldest` is still called, but it returns the memo
+    // without walking.
     //
-    // It looked like it did not for a moment: a first measurement of this path
-    // read 0, and the reason was that the cache omitted `admission: 'tinylfu'`.
-    // The walk on a `get()` comes from `_arbitrateWindow`, which only runs when
-    // the filter is enabled, so measuring without it measured a different
-    // configuration and appeared to clear the row. The count is pinned to 1,
-    // which discriminates: removing the walk fails it, and CACHE-006's
-    // pointer-based fix will make it fail at 0.
-    const cache = new PowerCache({ maxEntries: 100, windowSize: 20, admission: 'tinylfu' });
-    for (let i = 0; i < 60; i += 1) cache.set(`k${i}`, i);
-    cache.get('k5'); // settle, uncounted
+    // "Steady" is load-bearing and the reason the first two drafts of this test
+    // measured the wrong thing. Both read 1 rather than 0, and both for the same
+    // non-bug: a `get()` that lands *inside* the window re-appends at the tail,
+    // which genuinely invalidates the memo. A window that holds most of a small
+    // cache is re-appended constantly, so its reads can never reach 0 — and
+    // asserting 0 there would have been asserting something false. The row's
+    // target is a read in **main space**, which is what a real cache with a
+    // working set produces, so that is what this builds.
+    const cache = new PowerCache({ maxEntries: 4000, windowSize: 100, admission: 'tinylfu' });
+    for (let i = 0; i < 3000; i += 1) cache.set(`k${i}`, i);
+    const mainKeys = [...cache._map.entries()].filter(([, n]) => !n.inWindow).map(([k]) => k);
+    expect(mainKeys.length, 'the fixture must have main space to read').toBeGreaterThan(1000);
+
+    cache.get(mainKeys[0]); // settle, uncounted
     const counter = countWalks(cache);
+    for (let i = 0; i < 50; i += 1) cache.get(mainKeys[i]);
 
-    cache.get('k5');
+    expect(counter.calls).toBe(0);
+    cache.dispose();
+  });
 
-    expect(counter.calls).toBe(1);
+  it('still walks when a window node is promoted, which must invalidate the memo', () => {
+    // The other direction, and the reason the fix is a *validated* memo rather
+    // than a bare one: a `get()` in the window re-appends it at the tail, so the
+    // walk's answer genuinely changes and skipping it would splice a main-space
+    // node into the wrong place. The memo is discarded there, and this fails if a
+    // future change makes it trust a stale answer.
+    const cache = new PowerCache({ maxEntries: 4000, windowSize: 100, admission: 'tinylfu' });
+    for (let i = 0; i < 3000; i += 1) cache.set(`k${i}`, i);
+    const windowKey = [...cache._map.entries()].find(([, n]) => n.inWindow)[0];
+    const before = cache._windowOldest();
+    expect(before, 'the fixture must have a window').not.toBeNull();
+
+    cache.get(windowKey); // re-appends at the tail
+
+    expect(cache._windowOldest(), 'a promotion moves the window start').not.toBe(before);
+    expect(windowIntegrity(cache).ok).toBe(true);
+    cache.dispose();
+  });
+
+  it('discards the memo when the node before it becomes part of the window', () => {
+    // The `memo.prev` condition, and it is **not** redundant.
+    //
+    // The memo is only the run's start while the node before it is *not* flagged.
+    // If that node joins the window, the run's start has moved one step earlier —
+    // and the tail has not changed, so neither the tail comparison nor the
+    // `inWindow` check on the memo can see it. This is the case the condition
+    // exists for and it was **untested**: deleting the condition left all 17 tests
+    // in this file passing, which is the shape of a guard nobody has watched fail.
+    //
+    // The state is reached by flagging the node in place, which is what the flag
+    // means and what admission does. Driving it through the public API instead
+    // would not reach it: admitting a key appends, and appending changes the tail.
+    const cache = new PowerCache({ maxEntries: 4000, windowSize: 100, admission: 'tinylfu' });
+    for (let i = 0; i < 3000; i += 1) cache.set(`k${i}`, i);
+    const mainKeys = [...cache._map.entries()].filter(([, n]) => !n.inWindow).map(([k]) => k);
+
+    cache.get(mainKeys[0]); // settle and memoise
+    const memo = cache._windowStartMemo;
+    expect(memo, 'the fixture must memoise').not.toBeNull();
+    expect(memo.prev, 'the memo needs a predecessor to test').not.toBeNull();
+    expect(memo.prev.inWindow, 'the predecessor starts outside the window').toBe(false);
+
+    const before = cache._windowOldest();
+    expect(before).toBe(memo);
+
+    // The window now extends one node earlier, with the tail untouched.
+    memo.prev.inWindow = true;
+
+    expect(cache._windowOldest(), 'the run start must move back a step').toBe(memo.prev);
+    // Deliberately **not** asserting `windowIntegrity` here. Flagging a node by
+    // hand puts 101 nodes in a 100-slot window, so the integrity check fails on
+    // its size bound — a property of the hand-built state, not of the memo. The
+    // memo's own claim is the single line above: it discarded a stale answer and
+    // returned the node a real walk would return.
+    cache.dispose();
+  });
+
+  it('discards the memo when the tail moves and no walk follows', () => {
+    // The `_windowTail` condition, and it is load-bearing — but only in a state
+    // the public API does not reach on its own, which is why deleting the
+    // condition left every test in this file passing.
+    //
+    // The condition is asking "is the list the same as it was when the memo was
+    // written?", and every ordinary way to move the tail also *triggers a walk*,
+    // which refreshes `_windowTail` and makes the two equal again. Admitting a
+    // key does exactly that: the tail advances to `zzz`, arbitration walks, and
+    // the stale comparison comes out false-negative. A working cache cannot reach
+    // a bad answer that way, which is the reassuring half.
+    //
+    // The other half is what the condition still costs: it discards a memo that
+    // would have been *correct*. Appending a flagged node extends the run at its
+    // far end and does not move its start, so the memo was never stale — it is
+    // thrown away and recomputed to the same answer. That is the price of a
+    // condition that cannot be wrong, paid on a path that is not hot.
+    const cache = new PowerCache({ maxEntries: 4000, windowSize: 100, admission: 'tinylfu' });
+    for (let i = 0; i < 3000; i += 1) cache.set(`k${i}`, i);
+    const mainKeys = [...cache._map.entries()].filter(([, n]) => !n.inWindow).map(([k]) => k);
+
+    cache.get(mainKeys[0]); // settle and memoise
+    const memo = cache._windowStartMemo;
+    expect(memo, 'the fixture must memoise').not.toBeNull();
+    // Computed by hand rather than by calling `_windowOldest`, which is the thing
+    // under test: calling it to ask what it *would* answer compares the memo
+    // against itself and asserts nothing.
+    const walkByHand = () => {
+      let n = cache._tail;
+      if (!n || !n.inWindow) return null;
+      while (n.prev && n.prev.inWindow) n = n.prev;
+      return n;
+    };
+
+    // Append a flagged node at the tail directly, leaving `_windowTail` behind —
+    // what an append that no arbitration walk followed would leave.
+    const extra = cache._allocNode('zzz', 1, 0, 0);
+    extra.inWindow = true;
+    cache._map.set('zzz', extra);
+    cache._append(extra);
+
+    expect(cache._tail, 'the tail really did move').not.toBe(cache._windowTail);
+    expect(memo.inWindow, 'the memo still looks flagged').toBe(true);
+    expect(memo.prev, 'and its predecessor still looks unflagged').toBeTruthy();
+    expect(!memo.prev.inWindow, 'so only the tail comparison can see this').toBe(true);
+    // **Compared by key, not by node.** `expect(node).toBe(otherNode)` makes
+    // vitest's differ walk the structure to explain itself, and a doubly-linked
+    // list of 3000 nodes has no end to that walk — the first draft of this
+    // assertion overflowed the stack rather than failing, which hid the real
+    // result behind a `RangeError`. A key comparison states the same claim and
+    // terminates.
+    //
+    // The claim is only that the walk wins, and the answer here is *the same node*.
+    // That is correct and was the point I got wrong when drafting it: appending a
+    // flagged node at the tail extends the run at its far end and does not move
+    // its start, so a memo written before the append was never stale. What the
+    // tail comparison buys is that the memo is **not trusted** across the append
+    // — it is discarded and recomputed to the same answer. Asserting the answers
+    // differ, as the first draft did, asserts a bug that does not exist.
+    const answered = cache._windowOldest();
+    expect(answered.key, 'the walk must win').toBe(walkByHand().key);
+    expect(cache._windowTail, 'and the memo was recomputed against the new tail').toBe(cache._tail);
     cache.dispose();
   });
 
@@ -345,21 +493,17 @@ describe('TEST-003: _windowOldest() call counter', () => {
     cache.dispose();
   });
 
-  it('a main-space get() walks once at every window size, not just the small one', () => {
-    // CACHE-006 asks for this counter at **several window sizes**, and the two
-    // tests above use 20. That single size is the gap: the cost is *linear in the
-    // window*, and `windowSize: null` — the documented recommended default at
-    // `ceil(maxEntries * 0.01)` — resolves to 40 on a 4000-entry cache, so a
-    // pointer fix that only held for a small window would pass everything above
-    // and still hand back the slow corner the row is about.
+  it('a main-space get() walks zero times at every window size', () => {
+    // CACHE-006 asks for this counter at **several window sizes**, and the
+    // original used a single one (20). That was the gap: the cost is *linear in
+    // the window* and `windowSize: null` — the documented recommended default at
+    // `ceil(maxEntries * 0.01)` — is 40 on a 4000-entry cache, so a fix holding
+    // only for a small window would pass everything above and still ship the slow
+    // corner the row is about.
     //
-    // The assertion is `1` at every non-zero size, not `0`, because the fix is not
-    // written; this is the flip the characterisation exists to make visible. It
-    // is discriminating: a fix that removes the walk fails it at 0 — verified by
-    // applying one, which is what caught the fact that the first draft of this
-    // test asserted `1` for `windowSize: 0` as well. There the walk branch is
-    // skipped entirely, so the count is genuinely 0 and the assertion was wrong
-    // rather than strict.
+    // Now 0 at every size, against a row that read 0.80. `windowSize: 0` has no
+    // window at all so it reads 0 trivially and is kept as the control: it must
+    // not be the only size that reaches 0.
     for (const windowSize of [0, 1, 10, 100, 1000]) {
       const cache = new PowerCache({
         maxEntries: 4000,
@@ -367,12 +511,17 @@ describe('TEST-003: _windowOldest() call counter', () => {
         admission: 'tinylfu',
       });
       for (let i = 0; i < 3000; i += 1) cache.set(`k${i}`, i);
+      const mainKeys = [...cache._map.entries()].filter(([, n]) => !n.inWindow).map(([k]) => k);
+      if (mainKeys.length < 10) {
+        cache.dispose();
+        continue; // the window covers the cache; there is no main-space read to measure
+      }
 
-      const mainKey = [...cache._map.entries()].find(([, node]) => !node.inWindow)?.[0];
-      cache.get(mainKey); // settle, uncounted
+      cache.get(mainKeys[0]); // settle, uncounted
       const counter = countWalks(cache);
-      cache.get(mainKey);
-      expect(counter.calls, `window ${windowSize} walks`).toBe(windowSize > 0 ? 1 : 0);
+      for (let i = 0; i < 50; i += 1) cache.get(mainKeys[i]);
+
+      expect(counter.calls, `window ${windowSize} walks`).toBe(0);
       cache.dispose();
     }
   });
@@ -391,17 +540,30 @@ describe('TEST-003: _windowOldest() call counter', () => {
 
     expect(withFilter._windowSize, 'filter on: window is real').toBe(100);
     expect(without._windowSize, 'filter off: window silently disabled').toBe(0);
+    // **This is what now distinguishes the two configurations.** With the memo a
+    // main-space read reads 0 walks *with* the filter too, so "0 walks" on its own
+    // no longer separates "fixed" from "measured a disabled feature" — which is
+    // the exact confusion that made this row look stale six times. What still
+    // separates them is the window actually holding nodes, and these two
+    // assertions are that. Before the fix the walk count did the work; now it
+    // cannot, so something else has to.
+    expect([...withFilter._map.values()].filter((n) => n.inWindow).length).toBe(100);
+    expect([...without._map.values()].filter((n) => n.inWindow).length).toBe(0);
 
-    const mainKey = [...withFilter._map.entries()].find(([, node]) => !node.inWindow)?.[0];
-    withFilter.get(mainKey);
-    without.get(mainKey);
+    const mainKeys = [...withFilter._map.entries()]
+      .filter(([, node]) => !node.inWindow)
+      .map(([k]) => k);
+    withFilter.get(mainKeys[0]);
+    without.get(mainKeys[0]);
 
     const enabled = countWalks(withFilter);
     const disabled = countWalks(without);
-    withFilter.get(mainKey);
-    without.get(mainKey);
+    for (let i = 0; i < 20; i += 1) {
+      withFilter.get(mainKeys[i]);
+      without.get(mainKeys[i]);
+    }
 
-    expect(enabled.calls).toBe(1);
+    expect(enabled.calls, 'a main-space read walks nothing with the filter on').toBe(0);
     expect(disabled.calls, 'a measurement without the filter measures nothing').toBe(0);
 
     withFilter.dispose();
