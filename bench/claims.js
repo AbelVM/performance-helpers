@@ -2910,8 +2910,45 @@ class TimedWorker {
  * `gate held (peak N <= cap M)` at the top is that check, run every time. A mode
  * that cannot trust its own gate says so and stops rather than printing a ratio.
  */
+/**
+ * POOL-012 — is `autoScale.policy` wired to anything, and would enforcing it help?
+ *
+ * The read-based answer is that `_adaptiveLimit` is written by
+ * `_updateAdaptiveLimit()` and read by `getStats()`, with no read on the dispatch
+ * path. This mode asks the behavioural question, because a read-based answer can
+ * be wrong and one probe of mine was.
+ *
+ * **Part 1** settles the wiring. **Part 2** settles the decision, which is a
+ * different question and needs a different bar.
+ *
+ * ## What this mode can support is narrow, and it checks that before printing
+ *
+ * Wall-clock throughput carries the 28 % median min/max spread BENCH-001
+ * measured, so a raw spread across policies means nothing on its own. Part 1
+ * therefore runs `ewma` **twice** — `ewma:a` and `ewma:b` are the same
+ * configuration, so their spread is this harness's noise floor *measured on this
+ * run*. A spread only counts as an effect if it clears both that floor and an
+ * absolute materiality threshold; the first version used `cross > floor * 1.5`
+ * alone and duly reported a 1.3 % spread, twenty-four admissions out of 1920, as
+ * "an effect larger than the noise floor".
+ *
+ * Part 2's bar is **the best hand-picked constant cap**, not "better than
+ * nothing" — the pool already has a limit of sorts, and a controller that only
+ * beats a badly-chosen constant has not earned a getter. So the control is a
+ * sweep of constants and the comparison is against the best of them.
+ *
+ * ## The gate claims its slot inside the admission decision
+ *
+ * The obvious shape — `await room(); pending += 1;` — is a check-then-act race:
+ * awaiting an already-resolved promise yields a microtask, so every racer
+ * evaluated `pending < cap` before any of them incremented it. Measured with
+ * that shape, `admitted == inflight` for every cap including 2, which is how two
+ * "enforced" arms came out 25x apart on a cap that was never applied. That is
+ * why the `adaptive` cap below is only trustworthy now, and why the gate is
+ * checked at the top of Part 1 before any ratio is printed.
+ */
 async function runConcurrencyWorkload() {
-  console.log('POOL-012 — is `autoScale.policy` wired to anything?\n');
+  console.log('POOL-012 — is `autoScale.policy` wired, and would enforcing it help?\n');
 
   const BUDGET_MS = Number(process.env.CLAIM_CONCURRENCY_BUDGET_MS || 2000);
   const REPEATS = Number(process.env.CLAIM_CONCURRENCY_REPEATS || 5);
@@ -2924,7 +2961,7 @@ async function runConcurrencyWorkload() {
   console.log(
     `  pool size ${POOL_SIZE}, ${INFLIGHT} submitted at a time, ${SERVICE_MS} ms service`
   );
-  console.log(`  an effect must clear both the noise floor and ${MATERIAL * 100} % to count\n`);
+  console.log(`  an effect must clear both the noise floor and ${MATERIAL * 100} %\n`);
 
   const runArm = async (policy, cap) => {
     const pool = new PowerPool(() => new TimedWorker(SERVICE_MS), {
@@ -2945,9 +2982,16 @@ async function runConcurrencyWorkload() {
     let pending = 0;
     let peak = 0;
     const waiters = [];
-    const capNow = () => (cap === null ? Infinity : cap);
+    // `adaptive` is what Part 2 exists to exercise: cap the window at whatever the
+    // controller published. `null` — what `ewma` reports — is not a cap, so it
+    // falls back to the pool's own size, which is a choice a real caller faces too.
+    const capNow = () => {
+      if (cap === null) return Infinity;
+      if (cap !== 'adaptive') return cap;
+      const l = pool.getStats().performance.concurrencyLimit;
+      return typeof l === 'number' && l >= 1 ? Math.round(l) : pool.size;
+    };
 
-    // Claim inside the decision — no `await` between the check and the increment.
     const acquire = () =>
       new Promise((resolve) => {
         if (pending < capNow()) {
@@ -2984,6 +3028,11 @@ async function runConcurrencyWorkload() {
   };
 
   const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+  const spread = (xs) => {
+    const hi = Math.max(...xs);
+    const lo = Math.min(...xs);
+    return hi === lo ? 0 : (hi - lo) / lo;
+  };
 
   const arm = async (label, policy, cap = null) => {
     const runs = [];
@@ -2996,71 +3045,109 @@ async function runConcurrencyWorkload() {
     };
   };
 
-  // --- The gate has to work before any ratio means anything. ---
+  // ---------------------------------------------------------------- Part 1 ---
+  console.log('  PART 1 — is the controller consulted at all?\n');
+
   const capUnderTest = Math.max(1, INFLIGHT / 2);
   const gated = await arm(`capped:${capUnderTest}`, 'ewma', capUnderTest);
   console.log(`  GATE SELF-CHECK — cap ${capUnderTest}, ${INFLIGHT} submitted at a time\n`);
   console.log(`    peak observed ${gated.peak}, cap ${capUnderTest}`);
   if (gated.peak > capUnderTest) {
     console.log('    THE GATE DID NOT HOLD, so every ratio below would be meaningless and this');
-    console.log('    mode is stopping rather than printing them. The slot has to be claimed');
-    console.log('    inside the admission decision — see the note above this function.');
+    console.log('    mode stops rather than printing them. The slot has to be claimed inside');
+    console.log('    the admission decision — see the note above this function.');
     return;
   }
   console.log('    gate held. Ratios below are meaningful.\n');
 
-  // --- Two identical arms give the noise floor for this run. ---
   const noiseA = await arm('ewma:a', 'ewma');
   const noiseB = await arm('ewma:b', 'ewma');
-  const others = [];
+  const policies = [];
   for (const policy of ['aimd', 'vegas', 'gradient2'])
-    others.push(await arm(`policy:${policy}`, policy));
-  const arms = [noiseA, noiseB, ...others];
+    policies.push(await arm(`policy:${policy}`, policy));
+  const part1 = [noiseA, noiseB, ...policies];
 
-  const header = ['arm', 'admitted', 'peak', 'concurrencyLimit'];
-  console.log(`  ${header[0].padEnd(18)}${header[1].padEnd(12)}${header[2].padEnd(8)}${header[3]}`);
+  console.log(`  ${'arm'.padEnd(18)}${'admitted'.padEnd(12)}${'peak'.padEnd(8)}concurrencyLimit`);
   console.log(`  ${'-'.repeat(66)}`);
-  for (const a of arms) {
+  for (const a of part1) {
     console.log(
       `  ${a.label.padEnd(18)}${String(a.admitted).padEnd(12)}${String(a.peak).padEnd(8)}${a.limits}`
     );
   }
-  console.log(`\n  raw medians: ${arms.map((a) => `${a.label}=${a.admitted}`).join(', ')}`);
+  console.log(`\n  raw medians: ${part1.map((a) => `${a.label}=${a.admitted}`).join(', ')}`);
 
-  const spread = (xs) => {
-    const hi = Math.max(...xs);
-    const lo = Math.min(...xs);
-    return hi === lo ? 0 : (hi - lo) / lo;
-  };
-  const floor = spread([noiseA.admitted, noiseB.admitted]);
-  const cross = spread(arms.map((a) => a.admitted));
-
-  console.log(`\n  noise floor  (ewma vs ewma, identical config) : ${(floor * 100).toFixed(1)} %`);
+  const floor1 = spread([noiseA.admitted, noiseB.admitted]);
+  const cross1 = spread(part1.map((a) => a.admitted));
+  console.log(`\n  noise floor  (ewma vs ewma, identical config) : ${(floor1 * 100).toFixed(1)} %`);
   console.log(
-    `  cross-policy (all ${arms.length} arms)                        : ${(cross * 100).toFixed(1)} %`
+    `  cross-policy (all ${part1.length} arms)                       : ${(cross1 * 100).toFixed(1)} %`
   );
   console.log(`  materiality threshold                       : ${(MATERIAL * 100).toFixed(1)} %`);
 
-  if (cross <= floor * 1.5 || cross < MATERIAL) {
-    console.log('\n  NO EFFECT WORTH REPORTING. The cross-policy spread clears neither the');
-    console.log('  noise floor nor the materiality threshold, so throughput on this workload');
-    console.log('  does not depend on which policy is configured. Note the last column:');
-    console.log('  `concurrencyLimit` differs per policy and is stable within each, so the');
-    console.log('  controller is running and its belief is changing — and nothing consumes it.');
-    console.log('  That is the signature of a controller that is not on the dispatch path, and');
-    console.log('  it agrees with the read: `_adaptiveLimit` is written by');
-    console.log('  `_updateAdaptiveLimit()` and read by `getStats()`.');
+  if (cross1 <= floor1 * 1.5 || cross1 < MATERIAL) {
+    console.log('\n  NOT WIRED. The cross-policy spread clears neither the noise floor nor the');
+    console.log('  materiality threshold, so throughput on this workload does not depend on');
+    console.log('  which policy is configured. The last column differs per policy and is');
+    console.log('  stable within each: the controller is running and its belief is changing,');
+    console.log('  and nothing consumes it. That agrees with the read — `_adaptiveLimit` is');
+    console.log('  written by `_updateAdaptiveLimit()` and read by `getStats()`.');
   } else {
-    console.log('\n  A spread above both thresholds is visible on this workload. That does NOT');
-    console.log('  show the controller caused it: `concurrencyLimit` is read by `getStats()`');
-    console.log('  only, so a difference here would mean some other path is sensitive to the');
-    console.log('  configured policy. Re-run before believing it, and check the gate line above.');
+    console.log('\n  A spread above both thresholds is visible. That does NOT show the controller');
+    console.log('  caused it: `concurrencyLimit` is read by `getStats()` only, so a difference');
+    console.log('  would mean some other path is sensitive to the configured policy.');
   }
 
-  console.log('\n  NOT MEASURED HERE: whether enforcing the limit would help. That needs the');
-  console.log('  same `aimd` controller with `concurrencyLimit` applied to a gate this mode');
-  console.log('  owns, against a hand-picked constant cap. The control is the point — a');
-  console.log('  controller that only beats a badly-chosen constant has not earned a getter.');
+  // ---------------------------------------------------------------- Part 2 ---
+  console.log('\n  PART 2 — would enforcing the limit beat the best constant?\n');
+
+  const shippedA = await arm('shipped:a', 'ewma');
+  const shippedB = await arm('shipped:b', 'ewma');
+  const enforced = [];
+  for (const policy of ['aimd', 'gradient2']) {
+    enforced.push(await arm(`enforced:${policy}`, policy, 'adaptive'));
+  }
+
+  // The control: a sweep, so "the constant" means the best one, not a convenient one.
+  const constants = [];
+  for (const c of [1, 2, 3, 4, 6, 8]) constants.push(await arm(`constant:${c}`, 'ewma', c));
+
+  const shipped = shippedA;
+  const rows = [shippedA, shippedB, ...enforced, ...constants];
+  console.log(`  ${'arm'.padEnd(20)}${'admitted'.padEnd(12)}${'peak'.padEnd(8)}vs shipped`);
+  console.log(`  ${'-'.repeat(60)}`);
+  for (const r of rows) {
+    console.log(
+      `  ${r.label.padEnd(20)}${String(r.admitted).padEnd(12)}${String(r.peak).padEnd(8)}` +
+        `${(r.admitted / shipped.admitted).toFixed(2)}x`
+    );
+  }
+
+  const bestConstant = constants.reduce((a, b) => (b.admitted > a.admitted ? b : a));
+  const bestEnforced = enforced.reduce((a, b) => (b.admitted > a.admitted ? b : a));
+  const floor2 = spread([shippedA.admitted, shippedB.admitted]);
+  const vsConstant = (bestEnforced.admitted - bestConstant.admitted) / bestConstant.admitted;
+
+  console.log(`\n  noise floor (shipped vs shipped)  ${(floor2 * 100).toFixed(1)} %`);
+  console.log(`  best constant  ${bestConstant.label.padEnd(16)} ${bestConstant.admitted}`);
+  console.log(`  best enforced  ${bestEnforced.label.padEnd(16)} ${bestEnforced.admitted}`);
+  console.log(
+    `  enforced vs the BEST constant: ${vsConstant >= 0 ? '+' : ''}${(vsConstant * 100).toFixed(1)} %`
+  );
+  console.log(`  raw: ${rows.map((r) => `${r.label}=${r.admitted}`).join(', ')}`);
+
+  if (vsConstant <= Math.max(floor2 * 1.5, MATERIAL)) {
+    console.log('\n  THE CONTROLLER DOES NOT EARN THE GETTER. The best it manages is within the');
+    console.log('  noise floor of, or behind, the best constant cap. Since `POOL-004` found');
+    console.log('  the pool has no public resize path, putting the limit on the dispatch path is');
+    console.log('  a change to how work is admitted, not one more field read — so a controller');
+    console.log('  that cannot beat a chosen constant does not justify that change. The honest');
+    console.log('  options are to document `policy` as reported-only, or to drop it.');
+  } else {
+    console.log('\n  THE CONTROLLER CLEARS BOTH BARS against the best constant, which is evidence');
+    console.log('  FOR wiring it to dispatch. It would still need the latency-distribution check:');
+    console.log('  `ALGO-005` records that this pool EWMA is end-to-end task latency rather than');
+    console.log('  the queueing delay Netflix controllers assume, and this workload is uniform.');
+  }
 }
 
 const MODES = {
