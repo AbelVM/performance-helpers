@@ -44,6 +44,8 @@ Everything above is a **heuristic**: one EWMA compared against a fixed `targetMs
 | `'vegas'`     | `limit * (1 - minRtt / currentRtt)` — an estimate of the bottleneck queue.              |
 | `'gradient2'` | Ratio of long-window to short-window RTT, held between `0.5` and `1`, plus queue depth. |
 
+**None of these is enforced.** The limit they compute is published as `getStats().performance.concurrencyLimit` and read by nothing on the dispatch path, so they change what that field _says_ and nothing else.
+
 ```js
 autoScale: { policy: 'gradient2', limitMin: 1, limitMax: 16, longWindowAlpha: 0.05 }
 ```
