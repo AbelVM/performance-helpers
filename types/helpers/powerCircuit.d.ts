@@ -112,11 +112,18 @@ export class PowerCircuit {
      */
     reset(): void;
     /**
-     * Release every resource this instance holds.
+     * Release the instance: reset it, then make it inert.
      *
      * Idempotent, and safe to call while the instance is idle. Exists so the
      * instance works with `using` / `await using` and gives callers an explicit
      * name to call.
+     *
+     * **A disposed circuit stays disposed** (RES-026). This used to replace only
+     * `reset`, while the comment claimed "a late call is a no-op" — so a late
+     * `call()` ran `fn` and put the circuit straight back to work. It was a phantom
+     * API: a `dispose()` that released nothing, on a class that holds no resource to
+     * release. Disposal here is a **state reset**, which is what a lazy helper owes
+     * its caller, and a state reset has to cover the only method that does work.
      *
      * @returns {void}
      */

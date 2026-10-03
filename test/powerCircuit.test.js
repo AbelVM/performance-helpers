@@ -71,4 +71,34 @@ describe('PowerCircuit', () => {
     expect(cb.failures).toBe(0);
     expect(cb.lastError).toBe(null);
   });
+
+  // RES-026. `dispose()` replaced only `reset`, while its own comment claimed "a
+  // late call is a no-op" — so a late `call()` ran `fn` and put the circuit back
+  // to work. A `dispose()` that released nothing, on a class holding no resource.
+  it('a disposed circuit stays disposed: call() refuses and does not run fn', async () => {
+    let ran = 0;
+    const cb = new PowerCircuit({ threshold: 1, timeout: 50 });
+    cb.dispose();
+
+    // The counter is the assertion that matters. A thrown error alone would be
+    // satisfied by a `call()` that ran `fn` and *then* failed, which is close to
+    // the old behaviour and would still have performed the work.
+    await expect(
+      cb.call(() => {
+        ran += 1;
+        return 'work';
+      })
+    ).rejects.toMatchObject({ code: 'ECIRCUITDISPOSED' });
+    expect(ran, 'the circuit must not run fn after disposal').toBe(0);
+  });
+
+  it('dispose is idempotent, and a live circuit is unaffected by any of it', async () => {
+    const live = new PowerCircuit({ threshold: 1, timeout: 50 });
+    expect(await live.call(() => 'work')).toBe('work');
+
+    const cb = new PowerCircuit({ threshold: 1, timeout: 50 });
+    cb.dispose();
+    expect(() => cb.dispose(), 'a second dispose is a no-op').not.toThrow();
+    expect(() => cb.reset(), 'and so is a late reset').not.toThrow();
+  });
 });

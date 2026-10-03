@@ -5012,6 +5012,35 @@ this project measures a 28.61% median min/max spread; the boundary that matters 
 `0`, which is exact. Mutation-checked: with the old validation restored, the new
 test fails.
 
+### `PowerCircuit`: `dispose()` now makes the circuit inert (patch)
+
+`PowerCircuit.dispose()` replaced only `reset`, while its own comment claimed "a late
+call is a no-op" — so a late `call()` ran `fn` and put the circuit straight back to
+work. It was a **phantom API**: a dispose that released nothing, on a class that
+holds no resource to release.
+
+The circuit is a lazy helper, so its `dispose()` is a state reset — and a state reset
+has to cover the only method that does work:
+
+```js
+const c = new PowerCircuit();
+c.dispose();
+await c.call(fn); // rejects with code ECIRCUITDISPOSED; fn is never run
+```
+
+**It throws rather than becoming a silent no-op.** Returning `undefined` would have
+satisfied the old comment while the caller read `undefined` as the result of work
+that never ran — the shape of a guard that reports success without checking anything.
+
+The replacement is `async`, deliberately. `call` was an async method, so it
+rejected; a synchronously-throwing replacement would break `call(fn).catch(...)`,
+which never gets to attach a handler. That was caught by running the suite rather
+than the file, after the test had been mutation-checked against the wrong version.
+
+Mutation-checked: with `call` left un-neutralised, the new test fails on its counter
+assertion rather than on the error, which is the assertion that matters — a thrown
+error alone would also be satisfied by a `call()` that ran `fn` and _then_ failed.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
@@ -7430,3 +7459,48 @@ cannot fail, and a guard whose subject is defeated by its own fixture.
 11 tests in `test/powerLogger.counterCap.test.js`. **Two mutants, both caught**: removing
 the recency refresh fails 2, and dropping `maxCounters` from the detection list fails the
 single-option case.
+
+## `WorkerAgnostic`: a throwing listener is isolated _and_ reported
+
+**Swallowing is right; swallowing silently is the defect (WRK-003).** `_dispatch` wraps
+every listener call in a `try/catch` whose body was a comment and nothing else — correct,
+so a throwing handler cannot break the worker event loop, and incorrect, because a handler
+that threw on every message left behind a worker that looked completely healthy: the events
+stopped arriving at that handler, nothing was logged, nothing was counted, and the only
+symptom was a feature quietly ceasing to work. Four sibling helpers had already grown an
+`onError` route for exactly this; this one was missed because it looked identical to a
+dozen deliberate `catch {}` blocks elsewhere in the tree.
+
+```js
+const worker = new WorkerAgnostic(() => new MyWorker(), {
+  onError: (err, { type, listener }) => metrics.increment('workerAgnostic.listenerError'),
+});
+```
+
+`_notifyError` mirrors `PowerScheduler._notifyError` deliberately — same guard, same
+refusal to let a throwing handler escape — because an error handler that throws would
+turn a swallowed listener error into an uncaught one, which is the failure the mechanism
+exists to prevent. The second argument is `{ type, listener }` since "a listener threw"
+is not actionable when a caller registered four.
+
+**The property pinned is the one that is easy to get backwards.** Routing the error is
+only half of it; the other half is that the _other_ handlers still run. An
+implementation that reported the error and then gave up would satisfy "onError was
+called" while turning one bad handler into a dead event loop. **Two mutants, both caught:**
+restoring the silent swallow fails 3 of 5 tests, and letting the error escape the loop
+fails 3.
+
+**`test/catchJustification.test.js` caught the first version of this**, correctly — my
+new `catch` carried `// ignore onError failures`, a bare dismissal. The fix was to write
+the reason rather than to allowlist the text: _the only thing left to do with an error
+that the error handler itself threw is to drop it, and letting it escape would convert a
+swallowed listener error into a crash inside the dispatch loop._ A guard written by a
+previous session refused a plausible-looking comment three sessions later.
+
+**One change here is deliberately untested and says so at the call site:** `onError` is
+stripped from the options bag before it reaches `new Worker(...)`, since it is this
+class's option and not the platform's. Both Node's `Worker` and the DOM's
+`WorkerOptions` ignore unknown members, and reaching the string-source path needs a
+stubbed global `Worker` — so a test would pass whether or not the strip existed. It is
+hygiene with no observable behaviour, and a test that cannot fail on the regression it
+names is decoration.

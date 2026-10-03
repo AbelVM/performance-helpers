@@ -45,6 +45,24 @@ function circuitOpenError() {
 }
 
 /**
+ * The rejection `PowerCircuit.call()` throws once the instance has been disposed.
+ *
+ * A **throw**, not a silent no-op, and that is the decision this replaced. A no-op
+ * returning `undefined` would satisfy a comment saying "a late call is a no-op"
+ * while the caller read `undefined` as the result of work that never ran — the
+ * same shape as a guard that reports success without checking anything. The
+ * circuit holds no resource, so disposal is a state reset, and a released object
+ * saying so plainly is more useful than one that quietly stops working.
+ *
+ * @returns {Error}
+ */
+function circuitDisposedError() {
+  return Object.assign(new Error('CircuitDisposed'), {
+    code: /** @type {const} */ ('ECIRCUITDISPOSED'),
+  });
+}
+
+/**
  * PowerCircuit
  *
  * Circuit-breaker primitive that short-circuits calls after repeated failures.
@@ -339,17 +357,30 @@ export class PowerCircuit {
   }
 
   /**
-   * Release every resource this instance holds.
+   * Release the instance: reset it, then make it inert.
    *
    * Idempotent, and safe to call while the instance is idle. Exists so the
    * instance works with `using` / `await using` and gives callers an explicit
    * name to call.
    *
+   * **A disposed circuit stays disposed** (RES-026). This used to replace only
+   * `reset`, while the comment claimed "a late call is a no-op" — so a late
+   * `call()` ran `fn` and put the circuit straight back to work. It was a phantom
+   * API: a `dispose()` that released nothing, on a class that holds no resource to
+   * release. Disposal here is a **state reset**, which is what a lazy helper owes
+   * its caller, and a state reset has to cover the only method that does work.
+   *
    * @returns {void}
    */
   dispose() {
     this.reset();
-    // Neutralise the cleanup so a second dispose (or a late call) is a no-op
+    // **Async, deliberately.** `call` was an `async` method, so it rejected;
+    // a synchronously-throwing replacement would break `call(fn).catch(...)`,
+    // which never gets to attach a handler. Caught by running the suite.
+    this.call = async () => {
+      throw circuitDisposedError();
+    };
+    // Neutralise the cleanup so a second dispose (or a late reset) is a no-op
     // rather than a second teardown pass.
     this.reset = () => {};
   }
