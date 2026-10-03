@@ -2655,12 +2655,16 @@ async function runCorrelationWorkload() {
 /**
  * BENCH-002g — does a closed loop beat a fixed flush size?
  *
- * `PowerServo` ships with no caller. The candidate is `PowerBatch`, whose sizing
- * is entirely open-loop today: `maxSize` is a constant and `add()` flushes when
- * the pending count reaches it. The question this mode answers is narrower than
- * "is a servo fast": it is **whether a controller has anything to correct**. If a
- * fixed `maxSize` already holds items-per-flush at its target on a bursty
- * producer, then wiring one in is pure cost.
+ * `PowerServo` shipped with no caller, which is what made this mode worth running.
+ * The candidate was `PowerBatch`, whose sizing is entirely open-loop today:
+ * `maxSize` is a constant and `add()` flushes when the pending count reaches it.
+ * The question this mode answers is narrower than "is a servo fast": it is
+ * **whether a controller has anything to correct**. If a fixed `maxSize` already
+ * holds items-per-flush at its target on a bursty producer, then wiring one in is
+ * pure cost.
+ *
+ * It found none: `maxSize` was already exact, so `PowerBatch` was left alone. The
+ * servo was later adopted by `PowerPool`'s step sizing instead — see `stepsize`.
  *
  * The workload is a real `PowerBatch` with real microtask flushing. The
  * controller is *external*, which is the only honest form of this experiment
