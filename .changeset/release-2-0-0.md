@@ -7769,3 +7769,39 @@ a browser deliberately does not expose `ping()`.
 **A case asserts the gap is still a gap today** (`stats().rtt` is `undefined`, `heartbeats`
 is 0), so that closing it during the extraction is a _visible_ change rather than a silent
 one — which is the whole reason to write a characterisation test before a refactor.
+
+## A guard for PERF-003's clock threading, and one cost it does not hide
+
+**PERF-003's first half shipped as a performance change with a measurement and no test.**
+The duplicate clock read it removed could have returned silently, and nothing in the suite
+counted clock reads at all. `test/powerCache.clockReads.test.js` pins ten of them.
+
+**No benchmark is involved, and that is the point.** `powerCache.js` wires
+`this._now = typeof now === 'function' ? now : nowMs`, so a counting clock measures reads
+rather than nanoseconds — every assertion is an integer, and none depends on this machine's
+speed or the harness's 28 % median spread. The row's figures are the _reason_ to do the
+change, not a way to prove it.
+
+**Every count was measured on both revisions before being asserted.** That is not
+process neatness: an earlier draft of this file reported a failing case as a _regression_
+in shipped code, and a clean re-measurement showed 0.00 reads per call on `HEAD` and
+`HEAD~2` alike. There was no regression. A missing measurement is not a measurement, and
+a test that has already failed on two of its own assumptions is not a trustworthy source
+for a claim about a released library.
+
+**The one count that moved the wrong way is pinned, not hidden.** `touch` now reads the
+clock _before_ its lookup, so a **miss spends a reading and returns `false` without needing
+it** — measured 0 on `HEAD~2`, 1 now. The change bought 141 ns on every `touch` hit (2
+reads to 1) and paid 141 ns on every miss: the same magnitude, so it is a trade rather than
+a regression. The alternative — looking the key up first — would add a `Map` lookup to
+every hit to save a clock read on a path that returns `false` immediately, which is the
+wrong direction for a cache whose hot path is the hit.
+
+Three counts are what a naive "pass `now` everywhere" version would break, and all three
+are asserted: **a miss reads nothing** on `get`, **an entry with no expiry reads nothing**,
+and **`getOrSet` on a miss reads 2** — that last one because a miss returns before the
+fetch's clock read, so the duplicate the row removed was never on that path and a later
+reader should not mistake 2 for unfinished work.
+
+**Two mutants, both caught:** un-threading `touch`'s reading fails the hit count, and
+un-threading `getOrSet`'s fails its own.
