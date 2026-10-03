@@ -1070,9 +1070,11 @@ export class PowerMemoizer {
      * as the empty object, which is not assignable from anything. That is a
      * declaration error in the published `.d.ts`, not a runtime one.
      *
-     * @param {Function} fn - Function to wrap.
      * @param {F} fn - Function to wrap.
-     * @param {Object} [options] - Per-wrapper overrides merged over the defaults.
+     * @param {{ttl?: number, weight?: number}} [options] Per-wrapper overrides merged
+     *   over the defaults. Documented here for the reader; the parameter is
+     *   destructured in the signature, so it is the inline cast on the default that
+     *   actually types it - a `@param` tag cannot bind to it.
      * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized wrapper.
      * @template {Function} F
      * @private

@@ -1,6 +1,6 @@
 {
-  "ceiling": 162,
+  "ceiling": 156,
   "minFilesWithDiagnostics": 12,
   "recordedAt": "2026-10-03",
-  "reason": "powerDeadline: retryOptions is now typed as the PowerRetryOptions it is passed to - the 4-property literal had four more attached conditionally, so inference omitted them - and the two hand-built deadline errors and the race-loser bookkeeping are cast, not annotated"
+  "reason": "powerCache _memoize: removed a duplicate @param {Function} fn that sat alongside @param {F} fn, and a stale @param [options] for a parameter that is destructured in the signature - the duplicate made TS bind the generic to the wrong parameter"
 }
