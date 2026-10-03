@@ -77,6 +77,10 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 > **handled**: `number` = `0`
 
+#### heartbeats
+
+> **heartbeats**: `number` = `0`
+
 #### heartbeatTimeouts
 
 > **heartbeatTimeouts**: `number` = `0`
@@ -270,6 +274,12 @@ A Node `ws` socket, a browser `WebSocket`, or a
 ### \_rateLimitAction
 
 > **\_rateLimitAction**: `string`
+
+***
+
+### \_rtt
+
+> **\_rtt**: [`PowerHistogram`](../../powerHistogram/classes/PowerHistogram.md)
 
 ***
 

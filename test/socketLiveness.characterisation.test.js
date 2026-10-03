@@ -94,14 +94,12 @@ describe('RT-016 characterisation: the adapter liveness path, as it is today', (
     expect(adapter._pingSentAt).toBeGreaterThan(0);
 
     ws.pong();
-    // **And it is never consumed — which is the sharper form of the finding.** The
-    // adapter does not clear it either: `_pingSentAt` is still the value the ping was
-    // sent at, long after the pong. So it is *write-only* here, where the client reads
-    // it and resets it to 0 in `_handlePong`. A first draft of this case asserted it
-    // was cleared to 0 after the pong and failed with the full timestamp still set,
-    // which is what turned "discards it" into the accurate "writes it and never reads
-    // it". Nothing consumes it either way; only the client can compute an RTT from it.
-    expect(adapter._pingSentAt).toBeGreaterThan(0);
+    // **Now consumed.** `_handlePong` reads `_pingSentAt` and resets it to 0, so the
+    // write-only field this case was written to pin is gone. A first draft asserted the
+    // opposite — that the value survived the pong — which is how "writes it and never
+    // reads it" became the accurate description of the gap. Closing it is a *visible*
+    // change, which is what this case exists for.
+    expect(adapter._pingSentAt).toBe(0);
     adapter.dispose?.();
   });
 
@@ -133,7 +131,7 @@ describe('RT-016 characterisation: the adapter liveness path, as it is today', (
     adapter.dispose?.();
   });
 
-  it('reports no RTT at all — the gap RT-016 closes', async () => {
+  it('reports RTT, in the same shape as the client', async () => {
     // **Today.** Not a claim that it should stay this way: the decision recorded on the
     // row is that RTT belongs to the shared contract, gated on `canPing`. This test
     // exists so that adding it is a *visible* change rather than a silent one.
@@ -144,18 +142,24 @@ describe('RT-016 characterisation: the adapter liveness path, as it is today', (
     ws.pong();
 
     const stats = adapter.stats();
-    expect(stats.rtt).toBeUndefined();
+    // **Now measured.** Same shape as `PowerWebSocketClient`, deliberately - `count`,
+    // `p50`/`p95`/`p99` and `canPing` - so a caller can read either without branching.
+    expect(stats.rtt.count).toBeGreaterThan(0);
+    expect(typeof stats.rtt.p50).toBe('number');
+    expect(stats.rtt.canPing).toBe(true);
     adapter.dispose?.();
   });
 
-  it('counts no heartbeats — the second half of the four-line gap', async () => {
+  it('counts heartbeats', async () => {
     const ws = new FakeWsSocket();
     const adapter = new PowerSocketAdapter(ws, { heartbeatIntervalMs: 5 });
     adapter.start?.();
     await vi.waitFor(() => expect(ws.pings).toBeGreaterThan(0));
     ws.pong();
 
-    expect(adapter.stats().heartbeats ?? 0).toBe(0);
+    // **Now counted**, and it counts *answered* probes - a socket whose `ping()` is never
+    // answered increments `heartbeatTimeouts` and never reaches this.
+    expect(adapter.stats().heartbeats).toBeGreaterThan(0);
     adapter.dispose?.();
   });
 });

@@ -89,6 +89,7 @@ export class PowerSocketAdapter {
     _drainTimer: ReturnType<typeof setTimeout> | null;
     _lastActivityAt: number;
     _pingSentAt: number;
+    _rtt: PowerHistogram;
     _pending: number;
     /** @type {Array<(ok: boolean) => void>} */
     _drainWaiters: Array<(ok: boolean) => void>;
@@ -113,6 +114,7 @@ export class PowerSocketAdapter {
         sendFailures: number;
         backpressureEvents: number;
         heartbeatTimeouts: number;
+        heartbeats: number;
         idleTimeouts: number;
         drained: number;
         drainTimeouts: number;
@@ -376,3 +378,4 @@ export type RateLimitAction = "drop" | "close";
 export type PowerSocketAdapterOptions = import("./jsdoc-types.js").PowerSocketAdapterOptions;
 export type SocketReadyState = any;
 import { PowerSlidingWindow } from './powerSlidingWindow.js';
+import { PowerHistogram } from './powerHistogram.js';

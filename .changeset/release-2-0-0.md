@@ -7830,3 +7830,38 @@ reader should not mistake 2 for unfinished work.
 
 **Two mutants, both caught:** un-threading `touch`'s reading fails the hit count, and
 un-threading `getOrSet`'s fails its own.
+
+## `PowerSocketAdapter` now measures the probes it was already sending
+
+RT-016, first behavioural step. The adapter's `_handlePong` was four lines: it cleared
+the probe deadline and stopped. It has been sending protocol-level pings all along —
+`_tickHeartbeat` sets `_pingSentAt` immediately before `socket.ping()` — and **nothing
+ever read the field.** `stats()` had no `rtt` and no `heartbeats`, so a caller could not
+tell a working heartbeat from one that was merely firing.
+
+**This is the adapter being brought up to an implementation that already exists, not a
+new feature.** `PowerWebSocketClient` has computed both since RT-003; the tick that sends
+a ping and the handler that receives its reply are the two halves of one measurement, and
+the adapter had only one of them. `stats().rtt` uses the **same shape** as the client's —
+`{ count, p50, p95, p99, canPing }` — so a caller can read either without branching, and
+`canPing` is `false` on a browser, where the `ping()` API is deliberately not exposed to
+script. The honest answer there is _unmeasured_, not a 0 ms the transport never earned.
+
+`heartbeats` counts **answered** probes, which is what distinguishes a working heartbeat
+from a firing one: a socket whose `ping()` is never answered increments `heartbeatTimeouts`
+and never reaches this counter. The RTT is a `PowerHistogram` rather than a mean, because
+the client's is one and a mean would hide exactly the outliers a liveness series exists
+to show.
+
+**The three characterisation cases that pinned the gap are what caught this landing**, and
+they did their job in both directions: they failed the moment the gap closed —
+`_pingSentAt` no longer survives the pong, `stats().rtt` is no longer `undefined`,
+`heartbeats` is no longer 0 — which is the _visible_ change those cases were written to
+produce. They now assert the closed state, with the history kept in their comments so the
+next reader can see what changed and why. The two shared properties are untouched and still
+passing: a pong clears the **probe deadline** and not the heartbeat, and a transport with
+no `ping()` reports liveness as unmeasured.
+
+The shared `livenessStateMachine` both classes will eventually use is still not written;
+this narrows the gap to the one thing an extraction cannot remove, which is the two
+copies of the deadline-arming logic and its comment about the orphaned timer.

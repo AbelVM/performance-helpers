@@ -32,6 +32,7 @@
  * @public
  */
 import { setSafeTimeout } from '../utils/timers.js';
+import { PowerHistogram } from './powerHistogram.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
@@ -306,6 +307,11 @@ export class PowerSocketAdapter {
     this._drainTimer = null;
     this._lastActivityAt = nowMs();
     this._pingSentAt = 0;
+    // RT-016. The RTT series for the probes this adapter already sends. `_pingSentAt`
+    // was written on every ping and read by nothing; `_handlePong` now closes that loop.
+    // A `PowerHistogram` rather than a mean, because the client's is one and a mean would
+    // hide exactly the outliers a liveness series exists to show.
+    this._rtt = new PowerHistogram({ relativeAccuracy: 0.02 });
     this._pending = 0;
     /** @type {Array<(ok: boolean) => void>} */
     this._drainWaiters = [];
@@ -331,6 +337,10 @@ export class PowerSocketAdapter {
       sendFailures: 0,
       backpressureEvents: 0,
       heartbeatTimeouts: 0,
+      // RT-016. `heartbeats` counts *answered* probes, which is what distinguishes a
+      // working heartbeat from one that is merely firing - a socket whose `ping()` is
+      // never answered increments `heartbeatTimeouts` and never gets here.
+      heartbeats: 0,
       idleTimeouts: 0,
       drained: 0,
       drainTimeouts: 0,
@@ -582,6 +592,17 @@ export class PowerSocketAdapter {
       kind: this.kind,
       state: this._state,
       canPing: this.canPing,
+      // RT-016. The adapter has always *sent* these probes; it now measures them. The
+      // shape matches `PowerWebSocketClient` deliberately - `rtt.canPing` is `false` on a
+      // browser, where the `ping()` API is deliberately not exposed to script, so the
+      // honest answer is "unmeasured" rather than a 0 ms the transport never earned.
+      rtt: {
+        count: this._rtt.count,
+        p50: this._rtt.count ? this._rtt.percentile(50) : undefined,
+        p95: this._rtt.count ? this._rtt.percentile(95) : undefined,
+        p99: this._rtt.count ? this._rtt.percentile(99) : undefined,
+        canPing: this.canPing,
+      },
       pending: this._pending,
       bufferedAmount: this.bufferedAmount,
       lastActivityAt: this._lastActivityAt,
@@ -890,10 +911,30 @@ export class PowerSocketAdapter {
    * @private
    */
   _handlePong() {
+    // **Only the deadline is cleared, not the whole heartbeat.** Clearing the timer too
+    // would stop the heartbeat after a single round trip - the same defect RT-003 fixed
+    // in `PowerWebSocketClient`, measured there as 1 ping for the life of the socket
+    // against 28 in 150 ms.
     if (this._heartbeatDeadline) {
       clearTimeout(this._heartbeatDeadline);
       this._heartbeatDeadline = null;
     }
+    // RT-016. This handler used to stop here: four lines that cleared the deadline and
+    // discarded the rest. `_tickHeartbeat` had already set `_pingSentAt` before calling
+    // `ping()`, so the measurement existed and nothing read it - `stats()` had no `rtt`
+    // and no `heartbeats`. The client has computed both since RT-003, so this is the
+    // adapter being brought up to the implementation that is already the superset, not a
+    // new feature: the tick that sends the ping and the handler that receives its reply
+    // are the two halves of one measurement.
+    const sentAt = this._pingSentAt;
+    this._pingSentAt = 0;
+    if (!sentAt) return;
+    const rtt = nowMs() - sentAt;
+    // A clock that went backwards is not a measurement. Same guard, same reason, as the
+    // client's - without it a single backwards step would be recorded as a negative RTT.
+    if (!(rtt >= 0)) return;
+    this._counters.heartbeats += 1;
+    this._rtt.record(rtt);
   }
 
   /**
