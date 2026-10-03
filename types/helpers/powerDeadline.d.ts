@@ -1,5 +1,6 @@
 /**
  * @typedef {import('./jsdoc-types.js').PowerDeadlineOptions} PowerDeadlineOptions
+ * @typedef {import('./jsdoc-types.js').PowerRetryOptions} PowerRetryOptions
  */
 /**
  * Deadline-aware async helper for timeout, retry budget, and abort metadata.
@@ -34,3 +35,4 @@ export class PowerDeadline {
 }
 export default PowerDeadline;
 export type PowerDeadlineOptions = import("./jsdoc-types.js").PowerDeadlineOptions;
+export type PowerRetryOptions = import("./jsdoc-types.js").PowerRetryOptions;

@@ -1,6 +1,6 @@
 {
-  "ceiling": 183,
+  "ceiling": 162,
   "minFilesWithDiagnostics": 12,
   "recordedAt": "2026-10-03",
-  "reason": "powerCache: _fetchValidNode is protected rather than private (PowerTimedCache reads it), its destructured options and the memoizer wrapper's @this are typed, and both needed an inline cast because a @param tag cannot bind to a destructured parameter"
+  "reason": "powerDeadline: retryOptions is now typed as the PowerRetryOptions it is passed to - the 4-property literal had four more attached conditionally, so inference omitted them - and the two hand-built deadline errors and the race-loser bookkeeping are cast, not annotated"
 }

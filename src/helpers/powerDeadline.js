@@ -4,6 +4,7 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /**
  * @typedef {import('./jsdoc-types.js').PowerDeadlineOptions} PowerDeadlineOptions
+ * @typedef {import('./jsdoc-types.js').PowerRetryOptions} PowerRetryOptions
  */
 
 /**
@@ -101,10 +102,16 @@ export class PowerDeadline {
       return { promise, cleanup };
     };
 
+    /**
+     * @param {number} attempt 1-based attempt number, as `PowerRetry` counts them.
+     * @param {AbortSignal|undefined} retrySignal
+     */
     const wrapAttempt = async (attempt, retrySignal) => {
       const attemptStarted = nowMs();
       if (deadlineAt !== null && attemptStarted >= deadlineAt) {
-        const err = new Error('Deadline exceeded');
+        const err = /** @type {Error & {code: string, attempts: number, elapsedMs: number}} */ (
+          new Error('Deadline exceeded')
+        );
         err.code = 'EDEADLINE';
         err.attempts = attempt;
         err.elapsedMs = nowMs() - startedAt;
@@ -175,7 +182,9 @@ export class PowerDeadline {
                 /* ignore */
               }
             }
-            const err = new Error('Deadline exceeded');
+            const err = /** @type {Error & {code: string, attempts: number, elapsedMs: number}} */ (
+              new Error('Deadline exceeded')
+            );
             err.code = 'EDEADLINE';
             err.attempts = attempt;
             err.elapsedMs = nowMs() - startedAt;
@@ -196,9 +205,16 @@ export class PowerDeadline {
         return await Promise.race(candidates);
       } catch (err) {
         if (err && typeof err === 'object') {
-          err.attempts = attempt;
-          err.attemptTimeout = perAttemptTimeout;
-          err.totalTimeout = deadlineMs;
+          // The guard narrows to `object`, which declares none of these. Whatever
+          // lost the race carries them as own properties, so the cast states what
+          // the code has just written rather than widening the guard.
+          const stamped =
+            /** @type {{attempts?: number, attemptTimeout?: number|null, totalTimeout?: number|null}} */ (
+              err
+            );
+          stamped.attempts = attempt;
+          stamped.attemptTimeout = perAttemptTimeout;
+          stamped.totalTimeout = deadlineMs;
         }
         throw err;
       } finally {
@@ -208,6 +224,15 @@ export class PowerDeadline {
       }
     };
 
+    // Typed as what it is handed to. The literal below carries four properties and
+    // four more are attached conditionally, so inference produced a shape without
+    // them and every `retryOptions.backoff = ...` was an error - including the
+    // argument passed to `PowerRetry` at the bottom. `PowerRetryOptions` is the
+    // type that call site already declares it to have, and importing it here is
+    // load-bearing: an unimported name in a `@type` is not an error, it is
+    // silently `any` - which cleared twenty errors while checking nothing, and
+    // would have published this object as untyped.
+    /** @type {PowerRetryOptions} */
     const retryOptions = {
       maxAttempts: attempts,
       attemptTimeout: perAttemptTimeout,
