@@ -132,11 +132,22 @@
  * @property {number} [backoffResetMs]
  * @property {number} [longWindowAlpha]
  * @property {number} [aimdBeta]
- * @property {number} [stepUp=1] - How many workers to add per scaling tick. Clamped to `>= 1` and
- *   floored, so `0` and negatives mean 1 rather than disabling growth.
- * @property {number} [stepDown=1] - How many workers to remove per scaling tick, clamped the same way.
- *   Both were read at construction and absent from this typedef, so every read was an error and a
- *   caller had no way to discover the options the pool actually honours.
+ * @property {number} [stepUp=1] - **Ceiling** on workers added per scaling tick, not a fixed
+ *   count. The step is sized by a PI controller on the relative error
+ *   (`ewma / targetMs` against a setpoint of 1), so a pool marginally over target
+ *   adds one worker and one far over adds more — up to this ceiling. Clamped to
+ *   `>= 1`, so `0` and negatives mean 1. **At the default of 1 this is exactly the
+ *   old fixed-step behaviour**, and the controller is not even constructed; raise it
+ *   above 1 to let the error decide.
+ * @property {number} [stepDown=1] - Ceiling on workers removed per scaling tick, sized the same
+ *   way. Clamped the same way. Both were read at construction and absent from this
+ *   typedef, so every read was an error and a caller had no way to discover the
+ *   options the pool actually honours.
+ *
+ * The controller's integral is dropped whenever a tick decides to do nothing, so a
+ * burst's accumulated error is not paid back during the next quiet period. It is
+ * also clamped to the ceiling, so a long overshoot cannot ask for more workers than
+ * `stepUp` allows.
  */
 
 /**

@@ -35,7 +35,32 @@ const pool = new PowerPool(WorkerScript, {
 
 ### Concurrency policies (`policy`)
 
-Everything above is a **heuristic**: one EWMA compared against a fixed `targetMs`, and a step of one worker. It guesses at a fleet size rather than measuring one. `autoScale.policy` swaps in a real feedback loop that treats the worker count as a congestion window:
+### How big a step
+
+The **direction** is a heuristic — one EWMA compared against a fixed `targetMs`,
+with a hysteresis band and a queue-pressure check. The **size** of the step is
+closed-loop. `PowerServo` runs a PI controller on the relative error
+(`ewma / targetMs`, against a setpoint of `1`), so the further over target the
+pool is, the more of `stepUp` it adds in one tick; and the integral term is what
+converges the last stretch, which a fixed step cannot do.
+
+Two consequences worth knowing:
+
+- **At the default `stepUp: 1` nothing changes.** A ceiling of one worker is one
+  worker whatever the controller says, and the controller is not even constructed.
+  Raise `stepUp` above `1` to let the error decide how much of that budget to use.
+- **The integral is dropped whenever a tick decides to do nothing**, so a burst's
+  accumulated error is not paid back during the next quiet period, and it is
+  clamped to the ceiling so a long overshoot cannot exceed `stepUp`.
+
+What the controller does _not_ do is change when the pool scales. The hysteresis
+band, the queue-pressure check, the cooldown and the backoff multiplier are all
+untouched — this sizes an action that has already been decided on, it does not
+decide one.
+
+`autoScale.policy` is a separate and different mechanism: it swaps in a
+concurrency-window controller whose limit is **reported and not enforced** (see
+below).
 
 | policy        | signal it steers on                                                                     |
 | ------------- | --------------------------------------------------------------------------------------- |
@@ -77,8 +102,8 @@ measure.
 
 ### New options (multi-step scaling & backoff)
 
-- `stepUp` (number, default `1`): add up to `stepUp` workers in a single autoscale tick when scaling up.
-- `stepDown` (number, default `1`): remove up to `stepDown` workers in a single autoscale tick when scaling down.
+- `stepUp` (number, default `1`): **ceiling** on workers added per tick. The step is sized by the controller above, so this is the most it will add in one tick, not what it always adds. `1` reproduces fixed-step behaviour.
+- `stepDown` (number, default `1`): ceiling on workers removed per tick, sized the same way.
 - `backoffFactor` (number, default `1`): multiplicative factor applied to the `cooldownMs` after each scale action to reduce oscillation. Values > 1 increase the cooldown multiplier.
 - `backoffMaxMultiplier` (number, default `8`): upper bound for the backoff multiplier.
 - `backoffResetMs` (ms, default `cooldownMs * 4`): time without scale actions after which the backoff multiplier resets to `1`.
@@ -92,7 +117,7 @@ measure.
 
 ### Multi-step scaling
 
-- Use `stepUp` / `stepDown` when you want the pool to more rapidly change capacity in response to sustained pressure. For example, `stepUp: 3` allows the autoscaler to add up to 3 workers in one tick (bounded by `maxSize`).
+- Use `stepUp` / `stepDown` when you want the pool to more rapidly change capacity in response to sustained pressure. `stepUp: 3` lets the autoscaler add **up to** 3 workers in one tick (bounded by `maxSize`); how many of those 3 it actually uses depends on how far over `targetMs` the pool is, so a marginal overshoot still adds one and a large one adds three.
 
 ### Backoff
 
