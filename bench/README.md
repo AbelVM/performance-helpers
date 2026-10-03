@@ -114,6 +114,95 @@ Two trace-design notes worth keeping, because both produced wrong numbers before
 
 Parameters: `CLAIM_SIEVE_CAPACITY`, `CLAIM_SIEVE_SEED`, `CLAIM_SIEVE_WORKING`, `CLAIM_SIEVE_SCAN_EVERY`, `CLAIM_SIEVE_SCAN_KEYS`, `CLAIM_SIEVE_ZIPF`.
 
+**`batcheservo` reports that a closed loop should not be added to `PowerBatch`, and
+that is the finding.** It drives a real `PowerBatch` with a bursty producer — 60
+bursts of 9, added synchronously, because awaiting each `add()` drains the
+microtask queue and makes every flush one item long — and compares a fixed
+`maxSize` against proportional, PI, and PI+feedforward resizing driven from the
+real pending count. **The fixed size is already exact: mean |err| 0.00 against a
+target of 12, 45 handler calls.** There is no error for a controller to reject,
+and the reason generalises past this helper: `PowerBatch` is already a closed
+system, `add()` flushes the moment the queue reaches `maxSize`, so the pending
+count is bounded by the size itself. Both controller failures are diagnostic —
+P undershoots (5.00) because proportional action tracks error instead of
+anticipating the burst, PI overshoots (21.60) because the integral winds past a
+target it was already hitting, and **feedforward is identical to PI** (same 21.60,
+same 25 handler calls) because the burst is already flushed by the time the
+controller resizes, so the open-loop term arrives after the event it was meant to
+anticipate.
+
+Three harness defects had to be fixed before that was a result rather than a
+number, and the first two both looked like findings. Awaiting each `add()` gave
+four identical `1.00x` rows — a degenerate experiment. Then feeding the
+controller a running tally of adds rather than the pending count made every policy
+see a permanent enormous error and collapse the batch to ~1 item per flush. A
+benchmark whose control prints `NaNx` is a broken benchmark, and that is how the
+zero-denominator case surfaced; the ratio column now distinguishes `exact` from
+`worse`.
+
+**`concurrency` reports that `autoScale.policy` is not wired, and that enforcing it
+would lose.** Two questions, in that order, because the first makes the second
+answerable.
+
+_Is the controller consulted?_ Four policies, identical workload, the pool exactly
+as it ships, 2000 ms per arm, 5 repeats, medians: `ewma:a=1720, ewma:b=1616,
+aimd=1720, vegas=1736, gradient2=1664` — **noise floor 6.4 %, cross-policy
+7.4 %**. `ewma:a` and `ewma:b` are the _same configuration_, so the spread between
+them is this run's own noise and is the same magnitude as the spread across all
+five policies. Meanwhile `concurrencyLimit` differs per policy and is stable
+within each (`null`, then 7.59–7.67, 7.91, 7.16–7.66): the controller runs, its
+belief changes, and nothing consumes it. That matches the read — `_adaptiveLimit`
+is written by `_updateAdaptiveLimit()` and read by `getStats()`.
+
+_Would enforcing it help?_ The bar is not "better than nothing" — the pool already
+has a limit of sorts — so the control is a **sweep of constants**, compared against
+the best of them. A controller that only beats a badly-chosen constant has not
+earned a getter. `shipped:a=1888, shipped:b=1896` (noise floor **0.4 %**),
+`enforced:aimd=1864` (0.99x, peak 8), `enforced:gradient2=1688` (0.89x, peak 4),
+constants `1=424, 2=864, 3=1184, 4=1760, 6=1936, 8=1936`. Best constant
+`constant:6 = 1936`, best enforced `enforced:aimd = 1864`, so **enforced is
+−3.7 % against the best constant** — far outside the noise floor, which makes it a
+result rather than an absence of one. The sweep shows why: throughput climbs
+steeply to a cap of 6 and is flat from 6 to 8, because the pool has 4 workers and
+anything at or above that keeps them busy. **A cap at or above the worker count is
+free; below it costs proportionally.**
+
+Read the row, not just the verdict. This shows the controller is not better _on
+this workload_, where the binding constraint is worker count and the correct limit
+is "do not constrain". It does not show it could never help: a limit only matters
+when queueing depth or memory is the constraint, and neither is under test. The
+honest options are to document `policy` as reported-only or to drop it — **not to
+keep tuning until the controller wins.**
+
+The noise-control arm is the load-bearing part, not a nicety. An earlier version
+reported a **0.0 %** cross-policy spread and looked conclusive; three consecutive
+runs of that same version gave **16.7 %, 5.7 % and 27.3 %**, because it had no
+same-policy control and its variance was the harness rather than the machine.
+Nothing in that version could have told a real effect from a noisy afternoon.
+
+Four defects had to be fixed before any of those numbers was real, and three were
+shapes guessed rather than read. A hand-rolled fake worker never satisfied the
+framed response protocol, so every awaited post hung — the envelope handling is
+now copied from `EchoWorker` verbatim, the same mistake having been made twice.
+`awaitResponseTimeout: 0` was read as "no timeout" when it means _time out
+immediately_, so every counted completion was a rejection. The gate was a
+check-then-act race — `await room(); pending += 1` yields a microtask, so every
+racer evaluated `pending < cap` before any of them incremented it; measured,
+`admitted == inflight` for every cap including 2, and two "enforced" arms came out
+25x apart on a cap that was never applied. The slot is now claimed inside the
+admission decision, and **the mode checks its own gate before printing any ratio**
+(`gate held (peak N <= cap M)`) and returns without printing if it did not hold.
+
+The conclusion rule needed an absolute materiality threshold, not just the noise
+comparison: `cross > floor * 1.5` duly reported a 1.3 % spread — twenty-four
+admissions out of 1920 — as "an effect larger than the noise floor". Raw medians
+are printed so a reader can judge rather than trust a threshold.
+
+Parameters: `CLAIM_CONCURRENCY_BUDGET_MS`, `CLAIM_CONCURRENCY_REPEATS`,
+`CLAIM_CONCURRENCY_SERVICE_MS`, `CLAIM_CONCURRENCY_INFLIGHT`, and for
+`batcheservo` `CLAIM_BATCH_SERVO_TARGET`, `CLAIM_BATCH_SERVO_BURSTS`,
+`CLAIM_BATCH_SERVO_BURST`.
+
 **`sketch` reports the hashing cost of the TinyLFU sketch, and one number that is not
 a timing.** The sketch now hashes a key once per `increment`/`estimate` rather than once
 per row, which was `depth` string coercions and `depth` FNV passes. It also prints a

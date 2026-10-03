@@ -158,12 +158,16 @@ export type PowerPoolOptions = {
 export type AutoScaleOptions = {
     /**
      * - Which
-     * concurrency controller computes the adaptive limit. **`'ewma'` — the
-     * default — runs no concurrency control at all**: it compares one EWMA
-     * against `targetMs` and adds or removes a worker, and `_adaptiveLimit` stays
-     * at its seed value, which is why `getStats().performance.concurrencyLimit`
-     * reports `null` for it. The other three are real feedback loops over a
-     * latency signal. See the pool guide's "Adaptive concurrency policies".
+     * concurrency controller computes the adaptive limit. **The computed limit is
+     * reported, not enforced**: nothing on the dispatch path reads it, so this
+     * changes `getStats().performance.concurrencyLimit` and nothing else.
+     * **`'ewma'` — the default — runs no concurrency control at all**: it compares
+     * one EWMA against `targetMs` and adds or removes a worker, and
+     * `_adaptiveLimit` stays at its seed value, which is why `concurrencyLimit`
+     * reports `null` for it. The other three are real feedback loops over a latency
+     * signal, but a measured one that caps concurrency lost by 3.7% to the best
+     * hand-picked constant, so treat this as a diagnostic. See the pool guide's
+     * "Adaptive concurrency policies".
      */
     policy?: "ewma" | "aimd" | "vegas" | "gradient2" | undefined;
     intervalMs?: number | undefined;

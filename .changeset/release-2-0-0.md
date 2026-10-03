@@ -4788,6 +4788,47 @@ Also in this release:
 
 `PowerServo` currently has **no caller inside the library** beyond its own tests. It is the closed-loop shape the other three loops are not, and `POOL-012`'s `bench/claims.js concurrency` mode is the first thing that would settle whether a controller earns its place here at all.
 
+### `autoScale.policy` is reported, not enforced — and measured (patch)
+
+`autoScale.policy` accepts `aimd`, `vegas` and `gradient2` alongside the default
+`ewma`, and all three run: they compute a limit, smooth it, and publish it as
+`getStats().performance.concurrencyLimit`. **Nothing on the dispatch path reads
+it.** No worker count derives from it and it caps nothing, so it is a reported
+diagnostic rather than a concurrency limit — which is not what the option's name
+and its position in the autoscale guide implied.
+
+Measured in `bench/claims.js concurrency`, 2000 ms per arm, 5 repeats, medians.
+Four policies on one workload: `ewma:a=1720, ewma:b=1616, aimd=1720,
+vegas=1736, gradient2=1664` — a **6.4 % noise floor** taken from two runs of the
+_same_ configuration, against a **7.4 %** cross-policy spread. Throughput does not
+depend on the policy; the reported limits do differ per policy and are stable
+within each (`null`, then 7.16–7.93).
+
+The decision question was whether to put the limit on the dispatch path, and the
+bar was **the best hand-picked constant cap**, since the pool already has a limit
+of sorts: `shipped:a=1888, shipped:b=1896` (noise floor 0.4 %),
+`enforced:aimd=1864`, `enforced:gradient2=1688`, and a constant sweep of
+`1=424, 2=864, 3=1184, 4=1760, 6=1936, 8=1936`. Best constant 1936, best
+enforced 1864 — **−3.7 %**, far outside the noise floor. The sweep also shows why
+the shape is flat above 6: the pool has 4 workers, so a cap at or above the worker
+count is free and one below it costs proportionally.
+
+So the limit is documented as reported-only rather than enforced, and the
+controller was not re-tuned until it won — that is the failure mode this project
+has already paid for four times. The other option is to drop `policy` in a future
+major; it is kept for now because the measurement is one workload, where the
+binding constraint is worker count and the correct limit is "do not constrain". A
+limit only matters when queueing depth or memory is the constraint, and neither is
+under test. `POOL-004` found there is no public `resize()`, so enforcing it would
+be a change to how work is admitted plus a migration for anyone reading
+`concurrencyLimit` — a design decision, not a ratio.
+
+`bench/claims.js batchservo` reached the parallel conclusion for
+`PowerBatch`: a fixed `maxSize` is already exact (mean |err| 0.00 against a target
+of 12), so **do not wire a controller into it**, which retires `PowerServo`'s only
+candidate caller. `PowerServo` itself ships as a helper with no caller in the
+library.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

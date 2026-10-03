@@ -54,6 +54,13 @@ Two things to know before choosing one:
   `concurrencyLimit` in `getStats().performance` is `null` for exactly that
   reason. Leaving the option alone gets you worker-count scaling and no
   concurrency control.
+- **None of the four is enforced, including the other three.** The limit they
+  compute is written and then read by `getStats()` — nothing on the dispatch path
+  reads it, so they change what `concurrencyLimit` _reports_ and nothing else.
+  Measured: indistinguishable throughput across the four policies, and applying
+  the limit to a real gate measured **−3.7 %** against the best hand-picked
+  constant cap. Treat `policy` as a reported diagnostic for now, not as a
+  concurrency limit.
 - **The signal is end-to-end task latency, while Netflix's controllers track
   queueing delay.** The two are the same only for a uniform workload. On a pool
   whose tasks vary in cost, a heavier task looks to `vegas` and `aimd` like
