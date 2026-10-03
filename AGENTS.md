@@ -49,6 +49,7 @@ npm run types:drift     # fails if types/ is out of date
 npm run docs            # regenerate docs/ — same trigger, and see the note below
 npm run docs:claims     # fails if a guide documents an option the types don't have
 npm run docs:drift      # fails if docs/ is out of date
+npm run mutants:servo   # 18 PowerServo mutants, each killed by a named test
 ```
 
 The gate is `scripts/verify.mjs`, and it is the **only** list of checks — ten
