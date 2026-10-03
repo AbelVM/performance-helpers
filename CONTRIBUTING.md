@@ -129,17 +129,28 @@ survives locally and every UMD test then asserts against yesterday's code.
 
 ## Type checking and type debt
 
-Two TypeScript projects exist, and both are wired into the release gate:
+Two TypeScript projects exist. They are gated **differently**, and the difference
+is the point:
 
-| Command                     | What it checks                                                                                                                                                                                |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run typecheck`         | `tsconfig.check.json` - the JSDoc in `src/`, with `checkJs` on. Internal quality.                                                                                                             |
-| `npm run test:types`        | `tsconfig.types.json` - the generated `types/*.d.ts` compiled the way a downstream TypeScript consumer would compile them, with no `@types/node`.                                             |
-| `npm run typecheck:ratchet` | Both of the above, as a gate on the **total** error count.                                                                                                                                    |
-| `npm run check:bundle`      | The built `dist/performance-helpers.cjs` exports everything `src/index.js` declares, and is not older than `src/`. Run by `verify` after `build`; must run _outside_ vitest to be meaningful. |
+| Command                     | What it checks                                                                                                                                                                                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm run typecheck`         | `tsconfig.check.json` - the JSDoc in `src/`, with `checkJs` on. Internal quality.                                                                                                                            |
+| `npm run test:types`        | `tsconfig.types.json` - the generated `types/*.d.ts` compiled the way a downstream TypeScript consumer would compile them, with no `@types/node`. **Runs directly in `verify`, not through the ratchet.**    |
+| `npm run typecheck:ratchet` | **`tsconfig.check.json` only** - the internal `checkJs` project, gated on the **total** error count.                                                                                                         |
+| `npm run check:bundle`      | The built `dist/performance-helpers.cjs` exports everything `src/index.js` declares, and is not older than anything under `src/`. Run by `verify` after `build`; must run _outside_ vitest to be meaningful. |
 
-Neither project is at zero, and neither can be fixed in one sitting, so the
-gate is on direction rather than on zero: **the count may fall, never rise.**
+Only `checkJs` is on the ratchet, and the reason is written down at the top of
+`scripts/typecheck-ratchet.cjs`: `tsconfig.types.json` **is at zero errors**, so
+there is nothing to ratchet and `verify` runs it directly as a hard gate. That
+check is the one that protects the declarations that actually ship.
+
+`checkJs` is not at zero — a few hundred pre-existing errors across every module,
+from JSDoc that was never type-checked — and cannot be fixed without a large
+unrelated change. Gating it on zero would mean the gate can never pass, and a gate
+that can never pass is the same as no gate. Dropping it would be worse: the debt
+would rot in silence, which is how BUG-002 (`frameEncodedJson` documented but never
+exported) shipped. So it gates on **direction** instead: **the count may fall,
+never rise.**
 
 ```bash
 npm run typecheck:ratchet              # the gate

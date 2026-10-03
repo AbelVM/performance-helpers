@@ -22,7 +22,7 @@
  * @module scripts/check-bundle-exports
  */
 
-import { readFileSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, statSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -71,6 +71,49 @@ function bundleTargets() {
   return out;
 }
 
+/**
+ * The newest `.js` file under `src/`, as a repo-relative path.
+ *
+ * GATE-013. The staleness check used to compare the bundle against exactly two
+ * files — the CJS bundle's counterpart and `src/index.js` — while printing
+ * "the bundle is not older than its **sources**". Those are not the same claim.
+ * The bundle is built from every module under `src/`, so a helper edited after the
+ * last build (`src/helpers/powerCache.js`, say) left the bundle stale and the
+ * check passed: the success message was describing a scan that did not happen, and
+ * the failure message named only `src/index.js` even when the CJS bundle was the
+ * older file.
+ *
+ * Walking the tree is the fix rather than reworded, because a message that admits
+ * what it checks would still be the wrong answer — the gate is supposed to catch a
+ * stale bundle, and a stale bundle is defined by *any* input being newer.
+ *
+ * @returns {{rel: string, mtimeMs: number}|null} The newest source, or `null`.
+ */
+function newestSourceFile() {
+  let newest = null;
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const abs = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs);
+      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+        const { mtimeMs } = statSync(abs);
+        if (!newest || mtimeMs > newest.mtimeMs) {
+          newest = { rel: path.relative(ROOT, abs), mtimeMs };
+        }
+      }
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  return newest;
+}
+
 const esmNames = esmExportNames();
 if (!esmNames.length) {
   console.error('check:bundle: could not read any export from src/index.js');
@@ -110,13 +153,23 @@ const sourceMtimes = [...bundleTargets(), { rel: 'src/index.js' }]
   .map(({ rel }) => path.join(ROOT, rel))
   .filter((abs) => existsSync(abs) && abs.endsWith('.js'))
   .map((abs) => statSync(abs).mtimeMs);
+const newestInSrc = newestSourceFile();
+if (newestInSrc) sourceMtimes.push(newestInSrc.mtimeMs);
 
 if (bundleMtimes.length && sourceMtimes.length) {
   const newestBundle = Math.max(...bundleMtimes);
   const newestSource = Math.max(...sourceMtimes);
   if (newestBundle < newestSource) {
+    // Name the file that is actually newest, so "run npm run build" is preceded by
+    // a statement about what was stale. Naming `src/index.js` unconditionally was
+    // wrong in the common case: the helper is usually the newer file, and the
+    // index has not been touched at all.
+    const culprit =
+      newestInSrc && newestInSrc.mtimeMs >= Math.max(...sourceMtimes)
+        ? newestInSrc.rel
+        : 'src/index.js';
     console.error(
-      '  ✗ the bundle is older than src/index.js. Every UMD test would be asserting' +
+      `  ✗ the bundle is older than ${culprit}. Every UMD test would be asserting` +
         '\n      against stale code. Run `npm run build`.'
     );
     failed = true;

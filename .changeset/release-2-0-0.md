@@ -7134,3 +7134,39 @@ something the surface cannot express.
 `broadcast`, `postMessageBatch` and `stopThePress` are **not** covered; a duplicate sent
 through them is still dispatched twice. `getStats().idempotency.enabled` is the first
 thing to check if a key looks ignored.
+
+## Three gates that reported something other than what they checked
+
+Each of these was a sentence a contributor would act on, and each turned out to be
+false in a way that cost nothing to fix and would have cost something to leave.
+
+**1. `npm run audit:exports > /tmp/exports.json` produced two JSON documents.** The
+script wrote the same object twice — a `process.stdout.write` immediately followed by
+a `console.log` of the identical value — so the redirection its own comment recommends
+yielded **368,288 bytes of two concatenated documents** and `JSON.parse` rejected it
+at position 184,144. The second write was almost certainly left behind when the output
+moved off a committed snapshot file. Nothing caught it because nothing in `verify`
+parses that output: it is only ever consumed by a human redirecting it to a file, so a
+diagnostic that cannot be loaded is a diagnostic nobody keeps. `test/staticAuditExports.test.js`
+now runs the real command and parses its real output, and counts the top-level key so
+the failure names _duplication_ rather than reporting it as a parse error. **Both
+mutants fail it**: re-adding the duplicate write fails both tests.
+
+**2. "The bundle is not older than its sources" checked two files.** `check:bundle`
+compared the built CJS bundle against `src/index.js` and itself, then printed a
+plural. The bundle is built from _every_ module under `src/`, so a helper edited after
+the last build left it stale and the check passed — verified: touching
+`src/helpers/powerChunking.js` with the old scan in place still reported `✓`. The
+check now walks `src/` for the newest `.js` file, and the **failure** message names
+that file rather than always blaming `src/index.js`, which in the common case has not
+been touched at all. **Mutation-checked**: with the scan disabled the stale nested
+helper passes; with it, the check fails naming the helper.
+
+**3. `CONTRIBUTING.md` contradicted the ratchet it documents.** It said the ratchet
+covers "both of the above" — `scripts/typecheck-ratchet.cjs:90` declares **one**
+project, `tsconfig.check.json` — and that "neither project is at zero", when
+`tsconfig.types.json` emits **no diagnostics at all**. Both claims were checkable in
+one command each and neither had been. The file now says what the script's own
+docblock has said all along: `test:types` is at zero and runs directly in `verify`,
+and only the internal `checkJs` project is on the ratchet, because gating a
+few-hundred-error project on zero would mean the gate can never pass.

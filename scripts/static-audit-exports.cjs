@@ -114,5 +114,13 @@ const out = { generatedAt: new Date().toISOString(), report };
 // and was never wired into any script, so nobody read it. A diagnostic that runs
 // on demand is worth more than a snapshot that silently rots. Use
 // `npm run audit:exports > /tmp/exports.json` when a snapshot is actually wanted.
+//
+// **One document, one write.** This used to emit the same JSON twice — a
+// `process.stdout.write` immediately followed by a `console.log` of the same
+// object — so the documented redirection produced 368,288 bytes of *two*
+// concatenated documents and `JSON.parse` rejected it at position 184,144. The
+// second line was almost certainly left behind when the output moved off the
+// committed file, and the cost was a snapshot nobody could load: a diagnostic
+// that cannot be parsed invites nobody to keep it. `test/staticAuditExports.test.js`
+// parses this output, so the duplication cannot come back unnoticed.
 process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
-console.log(JSON.stringify(out, null, 2));
