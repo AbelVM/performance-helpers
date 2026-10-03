@@ -604,10 +604,36 @@ export function encodeNative(value) {
 /**
  * The transfer list for a framed `Uint8Array`. Note that transferring detaches
  * the frame's `buffer`, so the frame must not be reused afterwards.
+ *
+ * Two inputs cannot be answered by handing back `frame.buffer`, and both were
+ * **wrong answers rather than slow ones** (RT-022):
+ *
+ * - A **SAB-backed** frame. A `SharedArrayBuffer` is not transferable, so naming
+ *   one here makes `postMessage` throw `DOMException: Found invalid value in
+ *   transferList` \u2014 measured \u2014 rather than post. It must also not be detached, so the
+ *   only correct answer is to leave it out and let the frame be copied.
+ * - A **view into a slab**. `frame.buffer` names the whole buffer, so a 6-byte
+ *   view into a 16-byte slab transferred all 16 and left the caller with a
+ *   detached slab \u2014 measured, `slab.byteLength === 0` afterwards \u2014 silently
+ *   destroying bytes that had nothing to do with this frame. There is no
+ *   transfer list that expresses "these six bytes", so this is rejected instead.
+ *
  * @param {Uint8Array} frame
  * @returns {ArrayBuffer[]}
+ * @throws {RangeError} When `frame` is a view into part of a larger buffer.
  */
 export function frameTransferList(frame) {
+  if (typeof SharedArrayBuffer !== 'undefined' && frame.buffer instanceof SharedArrayBuffer) {
+    return [];
+  }
+  if (frame.byteOffset !== 0 || frame.byteLength !== frame.buffer.byteLength) {
+    throw new RangeError(
+      `PowerMessageCodec: refusing to build a transfer list for a ${frame.byteLength}-byte view ` +
+        `at offset ${frame.byteOffset} of a ${frame.buffer.byteLength}-byte buffer \u2014 ` +
+        'transferring `frame.buffer` would detach the whole buffer, including bytes ' +
+        'outside this frame. Copy the view, or transfer the buffer it fills.'
+    );
+  }
   return [frame.buffer];
 }
 

@@ -5140,6 +5140,30 @@ behind leading whitespace, a bare number, a bare string, and a valid v1 frame.
 Mutation-checked: removing the guard fails the two frame tests while the legacy test still
 passes.
 
+### `frameTransferList` never hands back the wrong buffer (patch)
+
+It returned `[frame.buffer]` unconditionally, and two inputs made that a **wrong answer
+rather than a slow one**.
+
+A **SAB-backed frame** put the `SharedArrayBuffer` into the list, and a
+`SharedArrayBuffer` is not transferable — `postMessage` threw
+`DOMException: Found invalid value in transferList` instead of posting. A SAB must also
+not be detached, so the only correct answer was to leave it out and let the frame be
+copied.
+
+A **view into a slab** named the whole buffer: a 6-byte view into a 16-byte slab
+transferred all 16 bytes and left the caller with a detached slab (`slab.byteLength === 0`
+afterwards), silently destroying bytes that had nothing to do with the frame. No transfer
+list expresses "these six bytes", so this is now **rejected** with a `RangeError` that says
+what to do instead — copy the view, or transfer the buffer it fills.
+
+A frame that fills its own buffer still transfers as before. Note the guard checks
+`byteLength` as well as `byteOffset`: a partial view at offset **0** is the same hazard,
+and it is what a naive offset-only check would miss.
+
+Mutation-checked: removing both guards fails the two guard tests and leaves the
+still-transfers control passing.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

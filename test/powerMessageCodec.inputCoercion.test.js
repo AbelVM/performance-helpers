@@ -29,6 +29,7 @@ import {
   decodeMessage,
   decodeInbound,
   encodeMessage,
+  frameTransferList,
   isRawPayload,
 } from '../src/index.js';
 
@@ -125,5 +126,34 @@ describe('RT-024: decodeInbound names the frame fault instead of blaming JSON', 
       expect(decodeInbound(enc.encode(body)).codec, body.slice(0, 12)).toBe('legacy');
     }
     expect(decodeInbound(encodeMessage('hello')).value).toBe('hello');
+  });
+});
+
+describe('RT-022: frameTransferList never hands back the wrong buffer', () => {
+  // Both cases were wrong answers rather than slow ones. A SAB-backed frame put
+  // the SharedArrayBuffer in the list and `postMessage` threw DOMException:
+  // Found invalid value in transferList. A view into a slab named the whole
+  // buffer, so a 6-byte frame in a 16-byte slab transferred all 16 and left the
+  // caller with a detached slab — measured, slab.byteLength === 0 afterwards.
+  it('leaves a SAB-backed frame out of the list so the post succeeds', () => {
+    const frame = new Uint8Array(new SharedArrayBuffer(8));
+    const list = frameTransferList(frame);
+    expect(list, 'a SharedArrayBuffer is not transferable').toEqual([]);
+    // The post is the assertion: naming the SAB is what threw.
+    expect(() => structuredClone(frame, { transfer: list })).not.toThrow();
+  });
+
+  it('refuses a partial view rather than detaching the caller buffer', () => {
+    const slab = new Uint8Array(16);
+    expect(() => frameTransferList(slab.subarray(4, 10))).toThrow(/refusing to build/);
+    // Offset 0 is not sufficient on its own — a length shorter than the buffer is
+    // the same hazard, and it is the case a naive `byteOffset` check would miss.
+    expect(() => frameTransferList(new Uint8Array(slab.buffer, 0, 8))).toThrow(/refusing to build/);
+    expect(slab.byteLength, 'and nothing was detached').toBe(16);
+  });
+
+  it('still transfers a frame that fills its buffer', () => {
+    const frame = new Uint8Array(8);
+    expect(frameTransferList(frame)).toEqual([frame.buffer]);
   });
 });
