@@ -68,13 +68,13 @@ async function fetchJson(url) {
 const config = await PowerRetry.run(() => fetch('/api/config').then((r) => r.json()));
 ```
 
-### A throwing `retryIf` declines
+### A throwing `retryIf` declines, and an `async` one is awaited
 
-`retryIf` is your code, called from inside the retry loop's `catch` block. **A
-throw from it is caught and treated as `false`** — the run stops and you receive
-the error your operation actually failed with.
+`retryIf` is your code, called from inside the retry loop's `catch` block. Two
+things about how it is called are worth knowing, because both were silent.
 
-Two things follow from that, and both are deliberate:
+**A throw is caught and treated as `false`** — the run stops and you receive the
+error your operation actually failed with.
 
 - **You never receive the predicate's own error.** Without the guard, a throw
   escaped the `catch` entirely and became the rejection, so `PowerRetry.run`
@@ -86,9 +86,21 @@ Two things follow from that, and both are deliberate:
   this again?", and a predicate that cannot be evaluated has not said yes — so
   the fix does not repeat a possibly non-idempotent operation on your behalf.
 
-If you want a thrown predicate to be visible rather than absorbed, log it inside
-the predicate, or use `onRetry`, which is called for every attempt that is
-actually about to be retried and whose throws are ignored in the same way.
+**An `async` predicate works, and the result is awaited.** Writing
+`retryIf: async (err) => ...` used to do the exact opposite of what it said:
+the call was not awaited, so the result was a Promise, and `Boolean(promise)` is
+**always `true`** — on every attempt. A predicate matching nothing retried until
+`maxAttempts`, with nothing thrown and nothing logged. If you have one, it is now
+consulted properly:
+
+```javascript
+PowerRetry.run(loadConfig, {
+  retryIf: async (err) => (await isTransient(err)) && attemptsLeft(err),
+});
+```
+
+A predicate that **rejects** is treated exactly like one that throws: `false`,
+and your original error is what reaches you.
 
 ## Backoff
 

@@ -191,6 +191,112 @@ describe('RES-032: a throwing retryIf does not replace the error the caller need
 
     expect(observed, 'a declined attempt is never announced as a retry').toBe(0);
   });
+  it('consults an async predicate instead of coercing the Promise to true', async () => {
+    // **The defect this file did not catch.** `retryIf` was called without
+    // `await`, so an `async` predicate resolved to a Promise object and
+    // `Boolean(promise)` is **always `true`** — on every attempt. Nothing throws
+    // and nothing warns, so the mistake is completely silent, and the effect is
+    // the opposite of what was written: a predicate matching *nothing* retried
+    // all 3 attempts, where the identical synchronous predicate correctly stopped
+    // at 1.
+    //
+    // This is the gap between the throwing case and the async case. Guarding the
+    // call in `try`/`catch` does nothing for a value that resolves rather than
+    // throws, and the mutation that reintroduces it is a one-character deletion.
+    let calls = 0;
+    await expect(
+      PowerRetry.run(
+        async () => {
+          calls += 1;
+          throw realFailure();
+        },
+        {
+          ...fast,
+          // Deliberately `async`, and deliberately matching nothing.
+          retryIf: async (err) => err.message.includes('NEVER-MATCHES'),
+        }
+      )
+    ).rejects.toThrow('the real failure');
+
+    expect(calls, 'an async predicate that declines must stop the loop').toBe(1);
+  });
+
+  it('honours an async predicate that accepts', async () => {
+    // The other direction, so the fix cannot pass by making every async predicate
+    // decline — which would "fix" the first test by refusing to consult the
+    // caller's logic at all.
+    let calls = 0;
+    const result = await PowerRetry.run(
+      async () => {
+        calls += 1;
+        if (calls < 3) throw realFailure(`attempt ${calls}`);
+        return 'ok';
+      },
+      { ...fast, retryIf: async () => true }
+    );
+
+    expect(result).toBe('ok');
+    expect(calls, 'an async predicate that accepts still retries').toBe(3);
+  });
+
+  it('treats a rejected async predicate as declining, and preserves the real error', async () => {
+    // The two failure modes of an async predicate, and they must agree. A
+    // rejection has to be caught — an uncaught one would be an unhandled
+    // rejection rather than a declined retry — and it has to land on the same
+    // answer a synchronous throw does, because the predicate has not said yes
+    // either way.
+    const real = realFailure();
+    let calls = 0;
+
+    await expect(
+      PowerRetry.run(
+        async () => {
+          calls += 1;
+          throw real;
+        },
+        {
+          ...fast,
+          retryIf: async () => {
+            throw new Error('predicate rejected');
+          },
+        }
+      )
+    ).rejects.toBe(real);
+
+    expect(calls, 'one attempt: the predicate never consented').toBe(1);
+  });
+
+  it('does not leave an unhandled rejection behind', async () => {
+    // **A regression that is invisible without listening for it.** `await` inside
+    // the `try` is what makes a rejected predicate catchable at all; without it
+    // the rejection escapes as an *unhandled* one, which in Node prints a
+    // warning and can terminate the process under `--unhandled-rejections=strict`.
+    // Nothing else in this file would notice, because the caller still receives
+    // the right error either way.
+    const seen = [];
+    const listener = (reason) => seen.push(reason);
+    process.on('unhandledRejection', listener);
+    try {
+      await PowerRetry.run(
+        async () => {
+          throw realFailure();
+        },
+        {
+          ...fast,
+          retryIf: async () => {
+            throw new Error('predicate rejected');
+          },
+        }
+      ).catch(() => {});
+      // Let the microtask queue drain: an unhandled rejection surfaces on the
+      // next turn, not synchronously.
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+
+    expect(seen, 'the rejection was handled, not leaked').toEqual([]);
+  });
 });
 
 describe('RES-032: the PowerRetry constructor claims no metrics it does not have', () => {

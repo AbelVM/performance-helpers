@@ -751,9 +751,25 @@ export class PowerRetry {
         // still gets the error that actually happened.
         let should;
         try {
-          should = typeof retryIf === 'function' ? Boolean(retryIf(err)) : Boolean(retryIf);
+          // **Awaited, because `Boolean(promise)` is always `true`.** An `async`
+          // predicate — the natural mistake, and invisible because nothing throws —
+          // used to resolve to a Promise object, and coercing that gave `true` on
+          // every attempt. So a caller who wrote `retryIf: async (err) => ...`
+          // could never stop the loop: probed before fixing, an async predicate
+          // that matched nothing ran all 3 attempts where the identical
+          // synchronous one correctly stopped at 1. Awaiting is the fix rather
+          // than a warning, because the caller plainly *meant* the predicate to be
+          // consulted, and this is the only way to consult it.
+          //
+          // The cost is one microtask per failed attempt for a synchronous
+          // predicate, on a path that already awaits a backoff `sleepOrAbort`
+          // between attempts — nothing measurable next to that.
+          should = typeof retryIf === 'function' ? Boolean(await retryIf(err)) : Boolean(retryIf);
         } catch (e) {
-          /* a throwing predicate must not change the outcome either */
+          // **A rejected async predicate lands here too**, and is treated the
+          // same as a synchronous throw: declining. The predicate has not said
+          // yes, so the conservative reading still holds, and `lastErr` is what
+          // propagates rather than the rejection.
           should = false;
         }
         if (!should || attempt === attempts) break;

@@ -6163,3 +6163,48 @@ of both reading "reconnect failed".
 **Recorded as 🟡 rather than ✅ in the plan table**, so a partial row stays visible
 rather than being read as done. The remaining half is the 3.0 default change and
 nothing else.
+
+## `retryIf` may now be `async`, and the result is awaited
+
+**Found by a second audit (`review_03.md` ROB-001) as a gap in the fix that
+shipped in `077a540`, and it is worth stating plainly: RES-032 guarded
+`retryIf` against _throwing_, and this is the case guarding a throw cannot catch.**
+
+`retryIf` was called without `await`, so an `async` predicate resolved to a
+Promise object, and `Boolean(promise)` is **always `true`** — on every attempt.
+Nothing throws, nothing is logged, and the effect is the exact opposite of what
+the caller wrote:
+
+| `retryIf`                                              | attempts made |
+| ------------------------------------------------------ | ------------- |
+| `async (err) => err.message.includes('NEVER-MATCHES')` | **3**         |
+| `(err) => err.message.includes('NEVER-MATCHES')`       | 1             |
+
+A caller who wrote an async predicate to _stop_ retrying retried until
+`maxAttempts`, against a non-idempotent operation, with no signal that anything
+was wrong. `Boolean(Promise.resolve(false))` being `true` is the whole mechanism.
+
+**Awaited rather than rejected at the type level**, because the caller plainly
+meant the predicate to be consulted and awaiting is the only way to consult it.
+The cost is one microtask per failed attempt, on a path that already waits out a
+backoff `sleepOrAbort` between attempts — not measurable next to that. A
+predicate that **rejects** is treated exactly as one that throws: `false`, and
+the caller's original error is what propagates. The `await` sits inside the
+`try`/`catch` RES-032 added, so a rejection is caught rather than becoming an
+**unhandled** rejection — which would be invisible here and can terminate the
+process under `--unhandled-rejections=strict`.
+
+**4 new tests, and the mutation that reintroduces this is a one-character
+deletion.** Removing the `await` fails 3 of them, including one that attaches an
+`unhandledRejection` listener and asserts nothing leaked — a regression no other
+assertion in the file would notice, because the caller still receives the right
+error either way.
+
+**Why this was found by a second audit and not by RES-032's tests.** The tests
+written for the throwing case used a _synchronous_ throwing predicate, so they
+were correct and complete for what they named, and the async case was invisible
+from there. That is the gap this project's own rule warns about — a test that
+cannot fail on the regression it names — arriving from the other direction: the
+tests did fail on their regression, and the regression was simply wider than the
+tests. Worth remembering that a green, mutation-checked test is evidence about
+the mutation that was injected, not a proof that the row's subject is exhausted.

@@ -325,6 +325,14 @@ export type PowerRetryOptions = {
      * the conservative reading: this answers "is it safe to run this again?", and a
      * predicate that cannot be evaluated has not said yes. The same rule as the
      * non-throwing case applies — you receive the original error, not the throw.
+     *
+     * **`retryIf` may be `async`, and the result is awaited.** This is not
+     * decoration: an unawaited call coerces the returned Promise with `Boolean`,
+     * which is **always `true`**, so an `async` predicate that declined retried
+     * every attempt — the opposite of what it said, with nothing thrown and
+     * nothing warned. Awaiting costs one microtask per failed attempt on a path
+     * that already waits out a backoff between them. A predicate that **rejects**
+     * is treated exactly as one that throws: `false`, and the original error.
      */
     retryIf?: ((err: any) => boolean) | undefined;
     onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;
