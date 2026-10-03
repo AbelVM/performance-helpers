@@ -30,6 +30,7 @@
 - [helpers/powerRateLimit](helpers/powerRateLimit/README.md)
 - [helpers/powerScheduler](helpers/powerScheduler/README.md)
 - [helpers/powerSemaphore](helpers/powerSemaphore/README.md)
+- [helpers/powerServo](helpers/powerServo/README.md)
 - [helpers/powerSlidingWindow](helpers/powerSlidingWindow/README.md)
 - [helpers/powerSocketAdapter](helpers/powerSocketAdapter/README.md)
 - [helpers/powerSubscriberSet](helpers/powerSubscriberSet/README.md)

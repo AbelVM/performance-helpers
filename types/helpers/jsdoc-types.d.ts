@@ -1630,3 +1630,64 @@ export type RateLimiterLike = {
      */
     reset?: (() => void) | undefined;
 };
+/**
+ * Options for `PowerServo`, the closed-loop transfer function.
+ *
+ * Typed as a named typedef rather than a bare `Object` so every property the
+ * servo reads is checked where it reads it.
+ */
+export type PowerServoOptions = {
+    /**
+     * - The reference `r`. Change it at any time:
+     * the loop takes a setpoint step without a derivative spike, which is the
+     * point of taking the derivative on the measurement.
+     */
+    setpoint?: number | undefined;
+    /**
+     * - Proportional gain. The output's immediate
+     * response to error.
+     */
+    kp?: number | undefined;
+    /**
+     * - Integral gain. What removes the steady-state error
+     * proportional action alone cannot. `0` disables the integrator entirely.
+     */
+    ki?: number | undefined;
+    /**
+     * - Derivative gain, on the **measurement**. `0`
+     * disables the derivative path.
+     */
+    kd?: number | undefined;
+    /**
+     * - First-order low-pass coefficient on
+     * the derivative, in `[0, 0.999]`. `0` is raw numerical differentiation.
+     */
+    derivativeFilter?: number | undefined;
+    /**
+     * - Lower output bound. The integral is
+     * clamped so it can only push the output inside `[min, max]`, which is what
+     * makes windup impossible rather than merely unlikely.
+     */
+    min?: number | undefined;
+    /**
+     * - Upper output bound.
+     */
+    max?: number | undefined;
+    /**
+     * - The open-loop term,
+     * called as `feedforward({ measured, setpoint, disturbance, output })` and
+     * returning a number. Ignored when it returns a non-finite value, which
+     * throws rather than poisoning the integrator.
+     */
+    feedforward?: ((arg0: object) => number) | undefined;
+    /**
+     * - Static-gain form of the above:
+     * `feedforwardGain * disturbance`.
+     */
+    feedforwardGain?: number | undefined;
+    /**
+     * - Default elapsed time per {@link  *   PowerServo#step}, in the same unit as the gains. `1` suits a fixed-rate
+     * tick; a caller on a real clock should pass its own elapsed time to `step`.
+     */
+    dt?: number | undefined;
+};

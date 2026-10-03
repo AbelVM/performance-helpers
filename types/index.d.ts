@@ -19,6 +19,7 @@ export { PowerHistogram } from "./helpers/powerHistogram.js";
 export { PowerBackpressure } from "./helpers/powerBackpressure.js";
 export { PowerBulkhead } from "./helpers/powerBulkhead.js";
 export { PowerBatch } from "./helpers/powerBatch.js";
+export { PowerServo } from "./helpers/powerServo.js";
 export { PowerLatch } from "./helpers/powerLatch.js";
 export { PowerObserver } from "./helpers/powerObserver.js";
 export { PowerEventBus } from "./helpers/powerEventBus.js";

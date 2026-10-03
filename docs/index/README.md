@@ -372,6 +372,12 @@ Re-exports [PowerSemaphore](../helpers/powerSemaphore/classes/PowerSemaphore.md)
 
 ***
 
+### PowerServo
+
+Re-exports [PowerServo](../helpers/powerServo/classes/PowerServo.md)
+
+***
+
 ### PowerSlidingWindow
 
 Re-exports [PowerSlidingWindow](../helpers/powerSlidingWindow/classes/PowerSlidingWindow.md)
