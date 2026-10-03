@@ -34,6 +34,7 @@
 import { setSafeTimeout } from '../utils/timers.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { nowMs } from '../utils/now.js';
+import { settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { frameByteLength } from '../utils/frameSize.js';
@@ -911,30 +912,31 @@ export class PowerSocketAdapter {
    * @private
    */
   _handlePong() {
-    // **Only the deadline is cleared, not the whole heartbeat.** Clearing the timer too
-    // would stop the heartbeat after a single round trip - the same defect RT-003 fixed
-    // in `PowerWebSocketClient`, measured there as 1 ping for the life of the socket
-    // against 28 in 150 ms.
-    if (this._heartbeatDeadline) {
-      clearTimeout(this._heartbeatDeadline);
-      this._heartbeatDeadline = null;
-    }
-    // RT-016. This handler used to stop here: four lines that cleared the deadline and
-    // discarded the rest. `_tickHeartbeat` had already set `_pingSentAt` before calling
-    // `ping()`, so the measurement existed and nothing read it - `stats()` had no `rtt`
-    // and no `heartbeats`. The client has computed both since RT-003, so this is the
-    // adapter being brought up to the implementation that is already the superset, not a
-    // new feature: the tick that sends the ping and the handler that receives its reply
-    // are the two halves of one measurement.
-    const sentAt = this._pingSentAt;
-    this._pingSentAt = 0;
-    if (!sentAt) return;
-    const rtt = nowMs() - sentAt;
-    // A clock that went backwards is not a measurement. Same guard, same reason, as the
-    // client's - without it a single backwards step would be recorded as a negative RTT.
-    if (!(rtt >= 0)) return;
-    this._counters.heartbeats += 1;
-    this._rtt.record(rtt);
+    // RT-016. This body is now the shared helper both classes use - see
+    // `src/utils/liveness.js` for why the deadline clear and the RTT measurement are one
+    // function rather than two steps. It used to be four lines that cleared the deadline
+    // and discarded the rest, with `_pingSentAt` written on every ping and read by
+    // nothing.
+    settleHeartbeatProbe({
+      pingSentAt: this._pingSentAt,
+      now: nowMs(),
+      clearDeadline: () => {
+        // **Only the deadline, not the whole heartbeat.** Clearing `_heartbeatTimer` too
+        // would stop the heartbeat after a single round trip - the defect RT-003 fixed
+        // in the client, measured there as 1 ping for the life of the socket against 28
+        // in 150 ms.
+        if (this._heartbeatDeadline) {
+          clearTimeout(this._heartbeatDeadline);
+          this._heartbeatDeadline = null;
+        }
+        // Read-and-reset, so a second stray pong finds no outstanding probe.
+        this._pingSentAt = 0;
+      },
+      onHeartbeat: () => {
+        this._counters.heartbeats += 1;
+      },
+      record: (rtt) => this._rtt.record(rtt),
+    });
   }
 
   /**

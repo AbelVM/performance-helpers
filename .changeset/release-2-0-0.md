@@ -7865,3 +7865,39 @@ no `ping()` reports liveness as unmeasured.
 The shared `livenessStateMachine` both classes will eventually use is still not written;
 this narrows the gap to the one thing an extraction cannot remove, which is the two
 copies of the deadline-arming logic and its comment about the orphaned timer.
+
+## One heartbeat, two implementations, one shared function (RT-016)
+
+`PowerWebSocketClient` and `PowerSocketAdapter` now settle a heartbeat probe through the
+same code. `src/utils/liveness.js` exports `settleHeartbeatProbe` and both classes delegate
+to it; `_handlePong` in each is now a binding of its own deadline field, its own histogram,
+and its own counter.
+
+**Why the deadline clear and the RTT measurement are one function rather than two steps.**
+They are not independent. The clear settles _one outstanding probe_, and the measurement is
+the RTT of _that same probe_ — reading the timestamp is meaningless while the deadline
+that would fire on it is still armed, and clearing it is meaningless if the reading is
+dropped. Splitting them is how the two classes came to disagree in the first place.
+
+**Why `clearDeadline` is a callback and not a timer handle.** The helper does not own the
+timer, so it cannot null the field holding it; passing the handle would mean the caller
+cleared afterwards, putting the "one outstanding probe" rule back in two places. The
+callback keeps the clear and the read in one expression.
+
+The guards are the client's, verbatim, and each had been untested: `if (!sentAt)` for a
+stray pong, and `if (!(rtt >= 0))` for a clock that moved — written as a negated
+comparison so `NaN` fails it too, because a `NaN` in a histogram does not read as an
+outlier, it quietly corrupts every percentile.
+
+**A mutant survived the extraction, which is why `test/liveness.test.js` exists.** Removing
+the backwards-clock guard failed **no** test in the suite: both classes' fakes ping and pong
+in the same tick, so `rtt` is always non-negative and that branch is unreachable through
+them. The guard was inherited from RT-003 in the client, where it was equally untested. The
+helper is a pure function, so all four outcomes are now asserted directly — a round trip, a
+stray pong, a backwards clock, and a `NaN` clock — plus the case the negated comparison
+exists to protect: **a zero RTT is a real measurement and must not be mistaken for an absent
+one**, which is what a loopback transport produces routinely.
+
+The tick half — sending the probe and arming the deadline — is still duplicated. It is the
+same in both classes today, comment for comment, and extracting it is the remaining half of
+this row.

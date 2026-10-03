@@ -39,6 +39,7 @@ import { decodeMessage, encodeMessage } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
+import { settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
 import { READY_STATE } from './constants.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
@@ -1063,24 +1064,26 @@ export class PowerWebSocketClient {
    * @returns {void}
    */
   _handlePong() {
-    // **Only the deadline is cleared, not the whole heartbeat.** `_clearHeartbeat()`
-    // also cancels `_heartbeatTimer`, which is the heartbeat's own interval — so
-    // calling it here stopped the heartbeat after a single round trip, and
-    // `stats().heartbeats` froze at 1 forever. Measured with an async `pong`:
-    // 1 ping for the life of the socket, against 28 in 150 ms when the clear was
-    // missing. The reply settles one outstanding probe; it does not end the
-    // probing.
-    if (this._heartbeatDeadline) {
-      clearTimeout(this._heartbeatDeadline);
-      this._heartbeatDeadline = null;
-    }
-    const sentAt = this._pingSentAt;
-    this._pingSentAt = 0;
-    if (!sentAt) return;
-    const rtt = nowMs() - sentAt;
-    if (!(rtt >= 0)) return; // a clock that went backwards is not a measurement
-    this._counters.heartbeats += 1;
-    this.rtt.record(rtt);
+    // RT-016. Shared with `PowerSocketAdapter` via `src/utils/liveness.js`, which is why
+    // the guards and the deadline-only clear are unchanged from what RT-003 established
+    // here: clearing `_heartbeatTimer` as well stopped the heartbeat after one round trip
+    // (measured: 1 ping for the life of the socket against 28 in 150 ms), and a
+    // backwards or `NaN` clock must not be recorded as an RTT.
+    settleHeartbeatProbe({
+      pingSentAt: this._pingSentAt,
+      now: nowMs(),
+      clearDeadline: () => {
+        if (this._heartbeatDeadline) {
+          clearTimeout(this._heartbeatDeadline);
+          this._heartbeatDeadline = null;
+        }
+        this._pingSentAt = 0;
+      },
+      onHeartbeat: () => {
+        this._counters.heartbeats += 1;
+      },
+      record: (rtt) => this.rtt.record(rtt),
+    });
   }
 
   /**
