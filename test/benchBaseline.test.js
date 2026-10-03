@@ -161,6 +161,50 @@ describe('compare: an unjudgeable run is inconclusive, not a failure', () => {
   });
 });
 
+describe('compare: the machine noise floor', () => {
+  // A baseline whose aggregate p95 is derived from its bands *and* which records
+  // the median spread, since the floor reads it. Deriving only the p95 left the
+  // median at undefined and the floor inert.
+  const floored = (bands, medianSpreadPct) => ({
+    ...baselineOf(bands),
+    medianSpreadPct,
+  });
+
+  it('does not guard a site more tightly than the machine it was measured on', () => {
+    // The site recorded 14.4 while the machine's median was 17.63, so its own
+    // spread sets a 7.2% threshold - finer than this box can repeat itself. A
+    // +8% move is ordinary drift here and must not fail.
+    const before = [band('tight', 100, 14.4)];
+    const verdict = compare(report([band('tight', 108, 14.4)]), floored(before, 17.63));
+    expect(verdict.status).toBe('pass');
+  });
+
+  it('still fails that site on a move past the floor', () => {
+    // The floor must not become a blanket amnesty: the threshold is the floor
+    // (17.63 * 0.5 = 8.8), so +20% is well past it.
+    const before = [band('tight', 100, 14.4)];
+    const verdict = compare(report([band('tight', 120, 14.4)]), floored(before, 17.63));
+    expect(verdict.status).toBe('fail');
+  });
+
+  it('leaves a site that is already noisier than the machine alone', () => {
+    // 30.4 exceeds the 17.63 floor, so its own spread still governs: the
+    // threshold stays at 30.4 * 0.5 = 15.2%, and the floor changed nothing.
+    const before = [band('wide', 100, 30.4)];
+    expect(compare(report([band('wide', 114, 30.4)]), floored(before, 17.63)).status).toBe('pass');
+    expect(compare(report([band('wide', 117, 30.4)]), floored(before, 17.63)).status).toBe('fail');
+  });
+
+  it('an older baseline without a median spread keeps the old thresholds', () => {
+    // Baselines recorded before the floor existed have no `medianSpreadPct`.
+    // Reading it as 0 makes `Math.max` a no-op, so those files still judge by
+    // their own bands rather than silently re-basing on a missing field.
+    const before = [band('tight', 100, 14.4)];
+    const verdict = compare(report([band('tight', 108, 14.4)]), baselineOf(before));
+    expect(verdict.status).toBe('fail');
+  });
+});
+
 describe('machineKey', () => {
   it('is stable within a process', () => {
     expect(machineKey()).toBe(machineKey());
