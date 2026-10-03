@@ -52,6 +52,40 @@ function outage(c, elapsedMs = 0) {
   c._reconnectStartedAt = Date.now() - elapsedMs;
 }
 
+describe('RT-013: the reconnect bounds are validated, not coerced', () => {
+  // The gate is `this._reconnectAttempts >= this._maxReconnectAttempts`, and
+  // **every comparison with `NaN` is false**. So before this row,
+  // `maxReconnectAttempts: NaN` did not stop reconnects — it disabled the bound
+  // that stops them, and the client retried for ever. The other two were read
+  // with `Number(x) || default`, which maps `NaN` to the default *silently* and
+  // maps `0` to it too.
+  it('rejects a non-finite maxReconnectAttempts instead of retrying for ever', () => {
+    expect(() => client({ maxReconnectAttempts: NaN })).toThrow(/maxReconnectAttempts/);
+    expect(() => client({ maxReconnectAttempts: 'many' })).toThrow(/maxReconnectAttempts/);
+  });
+
+  it('keeps Infinity as the documented no-bound default', () => {
+    expect(client()._maxReconnectAttempts).toBe(Number.POSITIVE_INFINITY);
+    expect(client({ maxReconnectAttempts: Number.POSITIVE_INFINITY })._maxReconnectAttempts).toBe(
+      Number.POSITIVE_INFINITY
+    );
+    expect(client({ maxReconnectAttempts: 3 })._maxReconnectAttempts).toBe(3);
+  });
+
+  it('rejects a non-finite backoff rather than silently using the default', () => {
+    expect(() => client({ reconnectBaseMs: NaN })).toThrow(/reconnectBaseMs/);
+    expect(() => client({ reconnectMaxMs: NaN })).toThrow(/reconnectMaxMs/);
+  });
+
+  it('rejects a zero base delay, which was silently a 500ms hot-loop floor', () => {
+    // `Number(0) || 500` is 500, so a caller asking for no delay got 500ms and no
+    // diagnostic. Now it is an error — a zero base delay is a hot reconnect loop,
+    // which is what the old `Math.max(1, ...)` floor was quietly preventing.
+    expect(() => client({ reconnectBaseMs: 0 })).toThrow(/reconnectBaseMs/);
+    expect(client({ reconnectBaseMs: 1 })._reconnectBaseMs).toBe(1);
+  });
+});
+
 describe('GAP-010: maxReconnectElapsedMs bounds one reconnect run', () => {
   let c;
   beforeEach(() => {

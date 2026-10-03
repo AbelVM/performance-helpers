@@ -351,7 +351,22 @@ export class PowerWebSocketClient {
       min: 0,
       fallback: 0,
     });
-    this._maxReconnectAttempts = maxReconnectAttempts;
+    // RT-013. Validated rather than assigned, because the gate at the bottom of
+    // this class reads `this._reconnectAttempts >= this._maxReconnectAttempts`,
+    // and **every comparison with `NaN` is false**. So `maxReconnectAttempts: NaN`
+    // did not mean "no reconnects" — it meant the bound never trips and the client
+    // reconnects for ever. That is the `maxEntries: NaN` failure mode
+    // `utils/options.js` was written to kill, in a file carrying an essay about not
+    // doing it. `allowInfinity` because `Infinity` is the documented default and
+    // means "no attempt bound".
+    this._maxReconnectAttempts = assertLimitRequired(maxReconnectAttempts, {
+      name: 'maxReconnectAttempts',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      integer: true,
+      allowInfinity: true,
+      fallback: Number.POSITIVE_INFINITY,
+    });
     // GAP-010. `allowInfinity` because `Infinity` is the documented default and
     // means "no elapsed bound" — deliberately, since a finite default is a
     // behaviour change reserved for 3.0.
@@ -367,10 +382,29 @@ export class PowerWebSocketClient {
     // describe the same outage — one that stops because it ran out of attempts
     // and one that stops because it ran out of time are the same condition.
     this._reconnectStartedAt = null;
-    this._reconnectBaseMs = Math.max(1, Math.floor(Number(reconnectBaseMs) || 500));
+    // RT-013. These were `Number(x) || default`, which is not validation: it maps
+    // `NaN` to the default *silently*, and it maps `0` to the default too — so a
+    // caller who asked for a zero base delay got 500 ms and no diagnostic. `min: 1`
+    // keeps the old `Math.max(1, ...)` floor, because a zero base delay is a hot
+    // reconnect loop, and `integer` keeps the backoff arithmetic below whole.
+    this._reconnectBaseMs = assertLimitRequired(reconnectBaseMs, {
+      name: 'reconnectBaseMs',
+      className: 'PowerWebSocketClient',
+      min: 1,
+      integer: true,
+      fallback: 500,
+    });
+    // Still clamped up to the base, as before: a ceiling below the base would make
+    // the backoff non-monotonic, and that was true before this row as well.
     this._reconnectMaxMs = Math.max(
       this._reconnectBaseMs,
-      Math.floor(Number(reconnectMaxMs) || 30_000)
+      assertLimitRequired(reconnectMaxMs, {
+        name: 'reconnectMaxMs',
+        className: 'PowerWebSocketClient',
+        min: 1,
+        integer: true,
+        fallback: 30_000,
+      })
     );
     this._autoReconnect = autoReconnect !== false;
     this._reconnectOnHeartbeatTimeout = reconnectOnHeartbeatTimeout !== false;

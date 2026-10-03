@@ -4952,6 +4952,39 @@ one that crashes. The regression test drives the bucket through `forEach`, which
 is what `emit` uses, and was mutation-checked: with removal moved back into the
 `finally` it fails with that `RangeError`.
 
+### The reconnect bounds are validated instead of coerced (patch)
+
+`maxReconnectAttempts` was assigned straight through, and the gate that uses it reads
+`this._reconnectAttempts >= this._maxReconnectAttempts`. **Every comparison with
+`NaN` is false**, so `maxReconnectAttempts: NaN` did not stop reconnects — it
+disabled the bound that stops them, and the client retried for ever. That is the
+`maxEntries: NaN` failure mode `utils/options.js` exists to prevent, in a file that
+carries an essay about not doing it.
+
+All three bounds now go through `assertLimitRequired`, so `NaN` and nonsense
+strings throw at construction:
+
+```js
+new PowerWebSocketClient({ maxReconnectAttempts: NaN }); // now throws
+new PowerWebSocketClient({ maxReconnectAttempts: 'many' }); // now throws
+```
+
+`reconnectBaseMs` and `reconnectMaxMs` were read with `Number(x) || default`,
+which is not validation: it maps `NaN` to the default silently, and it maps `0` to
+the default too — a caller asking for no delay got 500 ms and no diagnostic.
+
+**One behaviour change beyond the throws:** `reconnectBaseMs: 0` now raises rather
+than becoming 500. `Number(0) || 500` is 500, so the old code quietly substituted a
+default; a zero base delay is a hot reconnect loop, which is what the `Math.max(1,
+…)` floor was preventing. `min: 1` keeps that floor as a diagnostic instead of a
+silent substitution.
+
+`Infinity` remains the documented default for `maxReconnectAttempts` — a finite
+default is a behaviour change reserved for 3.0, as GAP-010 recorded — and a ceiling
+below the base is still clamped up to it, as before.
+
+Mutation-checked: with the validation removed, three of the four new tests fail.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
