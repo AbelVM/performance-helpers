@@ -2378,11 +2378,17 @@ export class PowerPool {
             // Update counts and Welford streaming stats (O(1) memory/time)
             this._totalTasksCompleted = (this._totalTasksCompleted || 0) + 1;
             workerObj.completedTasks = (workerObj.completedTasks || 0) + 1;
-            const k = 1; // single sample
+            // POOL-011. This was `const k = 1; // single sample`, read twice below.
+            // A named constant for the literal 1 bought nothing: `k` had no second
+            // value it could ever take, so every reader had to look up what `k` was
+            // to learn it was one. The Welford recurrence is spelled with the literal
+            // because that is what it is - and QUAL-008, which the row credits with
+            // renaming it, left this one in place, so the row's premise was half
+            // right about the wrong thing.
             const prevCount = this._taskDurationsWelfordCount;
-            this._taskDurationsWelfordCount = prevCount + k;
+            this._taskDurationsWelfordCount = prevCount + 1;
             const delta = x - this._taskDurationsWelfordMean;
-            this._taskDurationsWelfordMean += (delta * k) / this._taskDurationsWelfordCount;
+            this._taskDurationsWelfordMean += delta / this._taskDurationsWelfordCount;
             const delta2 = x - this._taskDurationsWelfordMean;
             this._taskDurationsWelfordM2 += delta * delta2;
             if (x < this._taskDurationsMin) this._taskDurationsMin = x;

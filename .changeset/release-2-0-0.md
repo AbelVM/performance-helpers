@@ -7549,3 +7549,33 @@ class's option and not the platform's. Both Node's `Worker` and the DOM's
 stubbed global `Worker` — so a test would pass whether or not the strip existed. It is
 hygiene with no observable behaviour, and a test that cannot fail on the regression it
 names is decoration.
+
+## `PowerPool`: removed `const k = 1`, and corrected a comment whose reason had already changed
+
+Two XS cleanups from the audit, both found by reading the code rather than the rows —
+**and both rows had drifted.**
+
+**POOL-011.** `const k = 1; // single sample` sat in the middle of the Welford
+recurrence and was read twice. A named constant for the literal `1` buys nothing: `k`
+has no second value it could ever take, so a reader has to look up what `k` is in order
+to learn it is one. Spelled with the literal. The recurrence itself is byte-for-byte
+unchanged: `prevCount + 1` is `prevCount + k`, and `delta / count` is `(delta * k) /
+count`.
+
+**The row's premise was half right about the wrong thing.** It said _"`QUAL-008` renamed
+it rather than removing it"_ — and no `QUAL-008` reference exists anywhere in `src/`,
+and the constant was still named `k`. Whatever QUAL-008 renamed, it was not this. That
+is the second time in this session a row's stated cause did not survive contact with the
+code, and it is why each of these started by reading the site.
+
+**POOL-010 was closed without a change**, because its subject no longer says what the row
+says it says. The row claimed a comment asserting "that the rest of the handler still
+runs", which POOL-002 had invalidated. The comment at `powerPool.js:1536-1546` is about
+something else entirely and is **correct**: it explains why `tasksSettled` is set — that
+without it `_activeTasks` would be double-decremented, that the old
+`Math.max(0, ...)` clamp only protected the _per-worker_ count while the _global_ count
+was the thing being decremented twice, and that the consequence was `activeTasks`
+under-reporting, `_isIdle` flipping true with work outstanding, and `drain()` resolving
+early against a pool that was not idle. Every clause in it is a specific, checkable
+claim about a defect that actually happened. Rewriting it to match the row would have
+replaced a good explanation with a wrong one.
