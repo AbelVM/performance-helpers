@@ -251,7 +251,42 @@ export class SmallLfuSketch {
    */
   reset() {
     const c = this.counters;
-    for (let i = 0; i < c.length; i += 1) {
+    const len = c.length;
+    // **Four bytes per iteration, via a `Uint32Array` view.** The scalar loop
+    // below halves two 4-bit counters per byte, one byte at a time; lifted to a
+    // 32-bit word the same expression transforms all four bytes at once:
+    //
+    //   out = ((w >>> 1) & 0x07070707) | (((w >>> 5) & 0x07070707) << 4)
+    //
+    // The `0x07070707` masks are what keep it byte-local. `w >>> 1` leaves, for
+    // each byte position `p`, bits `8p+1..8p+3` — the low three bits of that byte
+    // shifted down, which is the halved low nibble. `w >>> 5` leaves bits
+    // `8p+5..8p+7`, the top three bits of the same byte, which is the halved high
+    // nibble and lands at `8p+4..8p+6` after the shift. Nothing crosses a byte
+    // boundary: the one bit that *would* cross (bit `8p-1`, shifting into
+    // `8p`) is masked away by `0x07`.
+    //
+    // **It is also endianness-agnostic, which is worth stating because it is not
+    // obvious.** The expression treats every byte of the word identically, so
+    // whichever byte order maps array index `p` to bits `8p..8p+7`, the output
+    // byte for index `p` is derived from input byte `p`. A big-endian host runs
+    // the same code and gets the same array.
+    //
+    // A counter is 4 bits, so halving 15 gives 7 and the result always fits the
+    // three bits the mask keeps — the same reason the original code masks `0x07`
+    // rather than `0x0F`.
+    if (len >= 4) {
+      const words = new Uint32Array(c.buffer, c.byteOffset, len >>> 2);
+      for (let i = 0; i < words.length; i += 1) {
+        const w = words[i];
+        words[i] = ((w >>> 1) & 0x07070707) | (((w >>> 5) & 0x07070707) << 4);
+      }
+    }
+    // **A tail, not an assumption.** `(width * depth) >>> 1` is a multiple of 4
+    // for every width this constructor accepts, so the tail is normally zero
+    // iterations — but "normally" is not a property a reset loop should depend
+    // on, and an out-of-range tail would silently skip counters. Cheap to carry.
+    for (let i = len & ~3; i < len; i += 1) {
       c[i] = ((c[i] >>> 1) & 0x07) | (((c[i] >>> 5) & 0x07) << 4);
     }
     this.resets += 1;
