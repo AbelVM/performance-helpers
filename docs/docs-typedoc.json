@@ -36003,7 +36003,135 @@
 											},
 											{
 												"kind": "text",
-												"text": ", because this\nis the *return* path and not the admission path. A count that cannot be\nread returns nothing, which is the safe direction: admitting a request you\ncannot price is how a limiter is bypassed, whereas returning nothing merely\nover-charges the caller."
+												"text": ", because this\nis the *return* path and not the admission path. A count that cannot be\nread returns nothing, which is the safe direction: admitting a request you\ncannot price is how a limiter is bypassed, whereas returning nothing merely\nover-charges the caller.\n\n**What a leg's "
+											},
+											{
+												"kind": "code",
+												"text": "`release`"
+											},
+											{
+												"kind": "text",
+												"text": " actually receives, which is a contract and not an\nimplementation detail.** There are two undo paths in this class and they hand\na leg different objects, deliberately:\n\n- **This one** passes the caller's "
+											},
+											{
+												"kind": "code",
+												"text": "`tokenOrN`"
+											},
+											{
+												"kind": "text",
+												"text": " through unchanged, so a leg\n  that implements "
+											},
+											{
+												"kind": "code",
+												"text": "`reserve`"
+											},
+											{
+												"kind": "text",
+												"text": " receives the **composer's** token — "
+											},
+											{
+												"kind": "code",
+												"text": "`{ n }`"
+											},
+											{
+												"kind": "text",
+												"text": " — not\n  the object the leg itself minted. The token is public API and two tests in\n  "
+											},
+											{
+												"kind": "code",
+												"text": "`powerRateLimit.extra.test.js`"
+											},
+											{
+												"kind": "text",
+												"text": " pin that shape, so it is not changing.\n- **"
+											},
+											{
+												"kind": "code",
+												"text": "`_undoCommit`"
+											},
+											{
+												"kind": "text",
+												"text": "** — the rollback taken when a later leg fails — passes the\n  **leg's own** token, because it has it in hand and the leg is the only thing\n  that could have minted it.\n\nA leg whose "
+											},
+											{
+												"kind": "code",
+												"text": "`release`"
+											},
+											{
+												"kind": "text",
+												"text": " only reads "
+											},
+											{
+												"kind": "code",
+												"text": "`.n`"
+											},
+											{
+												"kind": "text",
+												"text": " (as "
+											},
+											{
+												"kind": "code",
+												"text": "`PowerThrottle`"
+											},
+											{
+												"kind": "text",
+												"text": "'s does) cannot tell\nthe difference. **A leg that looks its token up in a "
+											},
+											{
+												"kind": "code",
+												"text": "`Map`"
+											},
+											{
+												"kind": "text",
+												"text": " it minted it into\ncan, and will miss.** So the requirement on a limiter used here is that its\n"
+											},
+											{
+												"kind": "code",
+												"text": "`release`"
+											},
+											{
+												"kind": "text",
+												"text": " accepts either shape — a "
+											},
+											{
+												"kind": "code",
+												"text": "`{ n }`"
+											},
+											{
+												"kind": "text",
+												"text": "-bearing object *or* a plain count —\nwhich is exactly what "
+											},
+											{
+												"kind": "code",
+												"text": "`PowerThrottle.release`"
+											},
+											{
+												"kind": "text",
+												"text": " already does. Where a leg's\n"
+											},
+											{
+												"kind": "code",
+												"text": "`release`"
+											},
+											{
+												"kind": "text",
+												"text": " throws on an unrecognised token, the fallback below reaches\n"
+											},
+											{
+												"kind": "code",
+												"text": "`rollback`"
+											},
+											{
+												"kind": "text",
+												"text": "/"
+											},
+											{
+												"kind": "code",
+												"text": "`addTokens`"
+											},
+											{
+												"kind": "text",
+												"text": " with the count instead, so the credit is not simply\nlost."
 											}
 										]
 									},
