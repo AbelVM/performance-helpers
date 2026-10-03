@@ -84,10 +84,27 @@ node bench/claims.js carrier     # message-carrier fidelity and encode cost
 node bench/claims.js payload     # why compression does not pay in-process
 node bench/claims.js permit      # what a SharedArrayBuffer permit pool would cost
 node bench/claims.js stream      # chunking against posting one message
+node bench/claims.js sieve       # SIEVE eviction policy, against what ships
+node bench/claims.js sketch      # TinyLFU sketch hashing cost, and its distribution
+node bench/claims.js window      # admission-window walks on the read path
+node bench/claims.js latency     # PowerHistogram quantile accuracy across 4 decades
+node bench/claims.js framedecode # incremental decoding against re-concatenating
+node bench/claims.js hubencode   # whether the hub's fan-out flush is encode-bound
+node bench/claims.js correlation # what awaiting a correlated reply costs
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
+
+That is **all thirteen** modes, not the six this file used to list: seven
+measurements were reachable only by reading `bench/claims.js`, and three of them
+were named in neither this file nor `bench/README.md`.
+
+The list above is still hand-maintained and can drift, so treat
+`bench/claims.js` as the authority on what exists: its unknown-mode error is
+now generated from the mode table, so running it with a nonsense mode prints
+every mode that actually works. If that list and this one disagree, this one is
+wrong.
 
 ## Working rules, and where they came from
 

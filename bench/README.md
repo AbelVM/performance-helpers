@@ -84,7 +84,17 @@ node bench/claims.js sieve     # SIEVE eviction policy, against what ships
 node bench/claims.js sketch    # TinyLFU sketch hashing cost, and its distribution
 node bench/claims.js window    # admission-window walks on the read path
 node bench/claims.js latency   # PowerHistogram quantile accuracy across 4 decades of scale
+node bench/claims.js framedecode # incremental decoding against re-concatenating
+node bench/claims.js hubencode   # whether the hub's fan-out flush is encode-bound
+node bench/claims.js correlation # what awaiting a correlated reply costs
 ```
+
+Those three were reachable only by reading `bench/claims.js`, which was the only
+place they were named. **The block above is a subset, not the full list** — this
+file writes up the modes whose results are worth arguing about, and the rest are
+covered in `AGENTS.md`. Run any mode with an unrecognised argument and the
+generated error lists every mode that actually exists, which is the reliable way
+to see them all.
 
 Both report **ratios over a whole run** — hit rate, and quantile relative error — rather than wall-clock. That is not a stylistic choice: `run.js` measures a 28% median min/max spread on a typical machine, so any timing comparison finer than that is noise, while a ratio computed over every operation is immune to how fast the machine is.
 

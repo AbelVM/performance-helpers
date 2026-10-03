@@ -2632,41 +2632,50 @@ async function runCorrelationWorkload() {
 
 // ─── Entry point ────────────────────────────────────────────────────────────
 
+/**
+ * The mode table, and the only copy of the list.
+ *
+ * This was a thirteen-branch `if`/`else` chain plus a hand-written sentence
+ * naming all thirteen, so the set of modes existed twice: once where it was
+ * dispatched and once where it was described. The second copy is only reached by
+ * misspelling a mode - the least-exercised path in the file - which is exactly
+ * how a list goes stale without anyone noticing. The two had already drifted in
+ * ordering, and a mode added to the chain but not the sentence would produce an
+ * error listing a mode that does not exist while omitting one that does.
+ *
+ * Keyed by the argument the caller types; the value is the workload. Adding a
+ * mode is now one line and cannot leave the message behind.
+ *
+ * Some runners are synchronous and some await, so every entry is awaited
+ * uniformly - `await` on a non-promise is a no-op, and the alternative is an
+ * `async` flag per mode, which is a second thing to keep correct.
+ */
+const MODES = {
+  zipf: runZipfWorkload,
+  latency: runScaledLatencyWorkload,
+  carrier: runCarrierWorkload,
+  coldstart: runColdStartWorkload,
+  payload: runPayloadWorkload,
+  permit: runPermitWorkload,
+  stream: runStreamWorkload,
+  sieve: runSieveWorkload,
+  sketch: runSketchWorkload,
+  window: runWindowWorkload,
+  framedecode: runFrameDecodeWorkload,
+  hubencode: runHubEncodeWorkload,
+  correlation: runCorrelationWorkload,
+};
+
 const mode = process.argv[2] || 'zipf';
 
 async function dispatch() {
-  if (mode === 'zipf') {
-    runZipfWorkload();
-  } else if (mode === 'latency') {
-    runScaledLatencyWorkload();
-  } else if (mode === 'carrier') {
-    runCarrierWorkload();
-  } else if (mode === 'coldstart') {
-    runColdStartWorkload();
-  } else if (mode === 'payload') {
-    await runPayloadWorkload();
-  } else if (mode === 'permit') {
-    await runPermitWorkload();
-  } else if (mode === 'stream') {
-    await runStreamWorkload();
-  } else if (mode === 'sieve') {
-    runSieveWorkload();
-  } else if (mode === 'sketch') {
-    runSketchWorkload();
-  } else if (mode === 'window') {
-    runWindowWorkload();
-  } else if (mode === 'framedecode') {
-    await runFrameDecodeWorkload();
-  } else if (mode === 'hubencode') {
-    await runHubEncodeWorkload();
-  } else if (mode === 'correlation') {
-    await runCorrelationWorkload();
-  } else {
-    console.error(
-      `Unknown mode: ${mode}. Use "zipf", "sieve", "sketch", "window", "framedecode", "hubencode", "correlation", "coldstart", "payload", "permit", "stream", "latency" or "carrier".`
-    );
+  // `Object.create(null)` semantics via hasOwn rather than truthiness of
+  // `MODES[mode]`, so an inherited property name cannot resolve to a runner.
+  if (!Object.hasOwn(MODES, mode)) {
+    console.error(`Unknown mode: ${mode}. Use one of: ${Object.keys(MODES).sort().join(', ')}.`);
     process.exit(1);
   }
+  await MODES[mode]();
 }
 
 dispatch();
