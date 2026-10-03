@@ -91,7 +91,7 @@ Limiter instances to compose. Each
 
 `string`
 
-###### token
+###### token?
 
 `any`
 

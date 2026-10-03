@@ -155,14 +155,14 @@ export class PowerRateLimit {
      */
     private _liveLimiters;
     /**
-     * @param {{l: RateLimiterLike, method: string, token: *}} entry
+     * @param {{l: RateLimiterLike, method: string, token?: *}} entry
      * @param {number} want
      * @returns {Promise<void>}
      */
     _undoCommit(entry: {
         l: RateLimiterLike;
         method: string;
-        token: any;
+        token?: any;
     }, want: number): Promise<void>;
     /**
      * Reset all underlying limiters where supported.

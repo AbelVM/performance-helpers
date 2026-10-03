@@ -506,7 +506,7 @@ export class PowerRateLimit {
   }
 
   /**
-   * @param {{l: RateLimiterLike, method: string, token: *}} entry
+   * @param {{l: RateLimiterLike, method: string, token?: *}} entry
    * @param {number} want
    * @returns {Promise<void>}
    */

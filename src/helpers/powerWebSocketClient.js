@@ -825,11 +825,11 @@ export class PowerWebSocketClient {
           // `connect()` is documented to "reject on a failed connect".
           if (typeof this._socket.addEventListener === 'function') {
             this._socket.addEventListener('open', () => this._handleOpen(done));
-            this._socket.addEventListener('error', (e) => {
+            this._socket.addEventListener('error', (/** @type {any} */ e) => {
               this._handleError(e);
               done(e);
             });
-            this._socket.addEventListener('close', (e) => {
+            this._socket.addEventListener('close', (/** @type {any} */ e) => {
               this._handleClose(e);
               done(e);
             });

@@ -256,6 +256,7 @@ export class PowerDeadline {
     }
 
     let attemptCounter = 0;
+    /** @param {AbortSignal|undefined} retrySignal */
     const attemptFn = async (retrySignal) => {
       attemptCounter += 1;
       return wrapAttempt(attemptCounter, retrySignal);
@@ -388,6 +389,7 @@ const combineSignals = (external, retry) => {
   }
 
   const controller = new AbortController();
+  /** @param {any} e The originating signal's reason, forwarded to the caller. */
   const onAbort = (e) => {
     // Forward the originating signal's reason so the caller can tell *which*
     // limit fired. `controller.abort()` with no argument would invent an

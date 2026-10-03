@@ -1,6 +1,6 @@
 {
-  "ceiling": 156,
+  "ceiling": 148,
   "minFilesWithDiagnostics": 12,
   "recordedAt": "2026-10-03",
-  "reason": "powerCache _memoize: removed a duplicate @param {Function} fn that sat alongside @param {F} fn, and a stale @param [options] for a parameter that is destructured in the signature - the duplicate made TS bind the generic to the wrong parameter"
+  "reason": "powerRateLimit _undoCommit entry.token is optional - the rollback variant has no token - and typed the remaining unannotated callback parameters in powerWebSocketClient and powerDeadline"
 }
