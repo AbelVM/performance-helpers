@@ -241,6 +241,7 @@
   "scripts": {
     "build": "vite build",
     "test": "vitest run",
+    "lock:sync": "npm ci --dry-run --ignore-scripts",
     "lint": "eslint \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"examples/**/*.mjs\"",
     "lint:fix": "eslint --fix \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\"",
     "format": "prettier --write \"src/**/*.{js,cjs,mjs}\" \"test/**/*.js\" \"bench/**/*.js\" \"scripts/**/*.{js,cjs,mjs}\" \"*.md\"",

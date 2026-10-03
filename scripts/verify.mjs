@@ -76,6 +76,17 @@ import { spawnSync } from 'node:child_process';
  * @type {string[]}
  */
 const STEPS = [
+  // The lock file and `package.json` agreeing is the one thing `verify` cannot
+  // assume, because everything below runs against an already-installed tree.
+  //
+  // `husky` and `lint-staged` were added to `package.json` in a5999eb and the
+  // lock file was never regenerated, so `npm ci` failed outright — 47 missing
+  // packages — and it stayed invisible here indefinitely, because the local
+  // `node_modules` had both installed and the pre-commit hook kept running. Only
+  // a clean checkout noticed. `npm ci --dry-run` is that same sync check: it
+  // resolves the tree without writing to it, needs no network, and finishes in
+  // well under a second.
+  'lock:sync',
   'lint',
   // Swappable. See the module docblock: the only intended difference between
   // the local gate and CI.
