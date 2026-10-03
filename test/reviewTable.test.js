@@ -90,26 +90,40 @@ const COLUMNS = 8;
 const UNESCAPED_PIPE = /(?<!\\)\|/;
 
 /**
- * How many columns a markdown row has.
+ * How many columns a markdown row has, **and whether it is in canonical form**.
  *
- * Two ways to get this wrong, and this file has now done both.
+ * Three ways to get this wrong, and this file has now done all three.
  *
- * A trailing pipe is optional, so counting separators without accounting for
- * it is off by one for half the file.
- *
- * And an **escaped** `\|` is content, not a separator — it is how a cell holds a
+ * An **escaped** `\|` is content, not a separator — it is how a cell holds a
  * literal pipe. Splitting on every `|` counted those too, so five correctly
- * written rows were reported as having 9 and 10 columns. That is the same
- * failure as the one this file exists to catch, pointing the other way: the
- * guard flagged good rows, which is how a guard earns the mute button.
+ * written rows were reported as having 9 and 10 columns. That is the same failure
+ * as the one this file exists to catch, pointing the other way: the guard flagged
+ * good rows, which is how a guard earns the mute button.
  * `scripts/review-row.mjs` has had the negative-lookbehind split all along; the
  * two are kept in step deliberately rather than by coincidence.
+ *
+ * A trailing pipe was, until now, treated as **optional** — the reasoning being
+ * that markdown permits its absence, so counting separators without accounting for
+ * it would be off by one for half the file. That is true of markdown and false of
+ * *this table*, and the difference is the whole point:
+ * `scripts/review-row.mjs`'s `splitRow` is `.split(UNESCAPED_PIPE).slice(1, -1)`,
+ * so it **requires** both a leading and a trailing pipe and reports one fewer cell
+ * without the trailing one.
+ *
+ * **The two components disagreed, and the guard was the lenient one — which is the
+ * worst way round.** Found by doing it: a row was filed with eight separators and no
+ * closing pipe, `cellCount` called it a well-formed 8 columns, the whole table check
+ * passed 8/8, and `close-review-row` then refused to edit it with *"RES-039 has 7
+ * cells, expected 8"*. A guard that accepts rows the writer rejects is not a weaker
+ * guard, it is a guard pointed the other way. All 208 plan rows carry the trailing
+ * pipe — every one is script-built, so the leniency protected nothing and cost the
+ * check its last line of defence.
  *
  * @param {string} line
  * @returns {number}
  */
 function cellCount(line) {
-  return line.split(UNESCAPED_PIPE).length - 1 - (line.trimEnd().endsWith('|') ? 1 : 0);
+  return line.split(UNESCAPED_PIPE).length - 1 - 1;
 }
 
 describe('review.md availability', () => {
@@ -162,6 +176,29 @@ describe.skipIf(!reviewPresent)('review.md plan table', () => {
       bad,
       'a literal `|` inside a cell splits it; the row still renders, so nothing ' +
         'else will catch this. Escape it as `\\|` or use another separator.'
+    ).toEqual([]);
+  });
+
+  it('every plan row is in canonical form: leading and trailing pipe', () => {
+    // A **separate** assertion from the column count above, and it has to be
+    // separate. The count alone cannot express "8 columns is right *and* the row
+    // is written the way the writer writes them", so a row missing its closing pipe
+    // was counted as correct and then rejected by `scripts/review-row.mjs`.
+    //
+    // Both ends, because `splitRow` is `.slice(1, -1)`: it drops the field before
+    // the leading pipe and the field after the trailing one. A row missing either
+    // loses a cell there.
+    const bad = [];
+    for (const line of table) {
+      if (!PLAN_ROW.test(line)) continue;
+      const trailing = line.trimEnd().endsWith('|');
+      if (!trailing) bad.push(`${line.slice(2, 16).trim()} -> no trailing pipe`);
+    }
+    expect(
+      [...new Set(bad)],
+      'a plan row lost its trailing `|`. `scripts/review-row.mjs` splits rows with ' +
+        '`.slice(1, -1)`, so it reads that row as one column short and refuses to ' +
+        'edit it — while the column-count check called it well formed.'
     ).toEqual([]);
   });
 

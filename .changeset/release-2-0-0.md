@@ -7324,3 +7324,42 @@ place, because a shared slot refunded twice is indistinguishable from a correct
 single-slot refund. `A` and `B` land in buckets 0 and 1 of 2, asserted in the test so a
 future change to the hashing cannot quietly neuter it. **Mutation-checked**: restoring
 the slot-wide refund fails that test.
+
+## The review-table guard was weaker than the tool that maintains the table
+
+**`test/reviewTable.test.js` passed 8/8 on a row that `scripts/review-row.mjs`
+refused to edit.** Found by doing it: a newly filed row was written with eight
+separators and no closing pipe. The guard called it a well-formed 8 columns, the whole
+table check passed, and `close-review-row` then reported _"RES-039 has 7 cells, expected
+8"_.
+
+The cause is a disagreement between two components about the same file, resolved in
+the wrong direction:
+
+- `scripts/review-row.mjs` splits a row with `.split(UNESCAPED_PIPE).slice(1, -1)`, so it
+  **requires** a leading and a trailing pipe.
+- `cellCount()` in the guard subtracted the trailing pipe **only if present**, on the
+  reasoning — recorded in its own docblock — that "a trailing pipe is optional" in
+  markdown.
+
+True of markdown, false of this table. **All 208 plan rows carry the trailing pipe**,
+because every one is script-built, so the leniency protected nothing and cost the check
+its last line of defence. A guard that accepts rows the writer rejects is not a weaker
+guard; it is a guard pointed the other way.
+
+Both are now aligned on the canonical form, and the column count and canonical form are
+**separate assertions** — because a count alone cannot express "8 columns is right _and_
+the row is written the way the writer writes them", which is precisely the gap.
+
+**Mutation-checked, and the evidence is the interesting part:** dropping the trailing
+pipe from a real row is caught by **2** tests. Running the _old_ `cellCount` against
+that same mutated row returns **8** — it passes — while the new one returns 7. That is
+the demonstration that the guard was not merely incomplete but actively crediting a
+malformed row, and it is the reason the fix is in the counting formula rather than only
+in a new assertion bolted alongside it.
+
+This is the second time this guard has been caught on the wrong side of a real
+malformation: its docblock already records the first, where it flagged five
+_correctly written_ rows as having 9 and 10 columns because it split on escaped `\|`.
+Both directions have now happened, which is the argument for treating "the guard and
+the writer disagree" as the hazard rather than either side alone.
