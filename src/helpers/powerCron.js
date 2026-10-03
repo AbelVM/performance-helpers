@@ -23,7 +23,13 @@ import { assertFunction, assertLimitRequired, assertKnownOptions } from '../util
  *   rejects. Errors are swallowed by default so one bad run does not kill the
  *   schedule.
  * @property {(info:Object)=>void} [onFire] - Called after each successful run
- *   with `{ scheduledFor, ranAt, driftMs, missed }`.
+ *   with `{ scheduledFor, ranAt, driftMs, missed }`. **`missed` is the number of
+ *   missed periods *this run* stands in for**, and it was always `0` before 2.0 —
+ *   in the one payload a caller would use to see catch-up working. Under `catch-up`
+ *   each replay reports `1` (it is that period being run) and the run that follows
+ *   reports `0`, because the replays have already accounted for them. Under `skip`
+ *   and `run-once` the single run reports how many periods were dropped or folded
+ *   into it.
  * @property {boolean} [unref=true] - Whether the pending timer is `unref`'d, so
  *   a running cron does not by itself keep a Node process alive.
  */
@@ -264,7 +270,9 @@ export class PowerCron {
       // counted so `fireCount` reflects the work actually done.
       for (let i = 0; i < missedPeriods; i += 1) {
         this._fireCount += 1;
-        this._run(target + i * this._intervalMs);
+        // Each replay stands in for exactly one missed period - it *is* that
+        // period being run - so it reports `missed: 1` rather than `0`.
+        this._run(target + i * this._intervalMs, 1);
       }
     } else if (this._catchUp === 'run-once' && missedPeriods > 0) {
       // Coalesce: one run stands in for all of them.
@@ -272,7 +280,11 @@ export class PowerCron {
     }
 
     this._fireCount += 1;
-    this._run(target);
+    // Under `catch-up` the replays above have already accounted for every missed
+    // period, so this run stands in for none of them. Under `skip` they were dropped
+    // and under `run-once` they were folded into this run; either way the number the
+    // caller needs is how many there were, which is what `_onTimer` already knows.
+    this._run(target, this._catchUp === 'catch-up' ? 0 : missedPeriods);
 
     // Advance the target by whole intervals, never from `now`. Anchoring here
     // rather than at the run is what makes the schedule drift-free.
@@ -291,9 +303,14 @@ export class PowerCron {
    *
    * @private
    * @param {number} [scheduledFor] - The timestamp this run was aimed at.
+   * @param {number} [missed=0] - How many missed periods **this run stands in
+   *   for**, reported as `onFire`'s `missed`. RES-036: the field was hardcoded to `0`
+   *   at both call sites, so a caller could not see catch-up working — which is the
+   *   one thing that payload exists to show. The count was always known at the only
+   *   place that matters: `_onTimer` had already computed it.
    * @returns {void}
    */
-  _run(scheduledFor = nowMs()) {
+  _run(scheduledFor = nowMs(), missed = 0) {
     const ranAt = nowMs();
     const driftMs = Math.max(0, ranAt - scheduledFor);
     this._totalDriftMs += driftMs;
@@ -304,7 +321,7 @@ export class PowerCron {
           () => {
             if (this._onFire) {
               try {
-                this._onFire({ scheduledFor, ranAt, driftMs, missed: 0 });
+                this._onFire({ scheduledFor, ranAt, driftMs, missed });
               } catch (e) {
                 this._report(e, 'onFire');
               }
@@ -314,7 +331,7 @@ export class PowerCron {
         );
       } else if (this._onFire) {
         try {
-          this._onFire({ scheduledFor, ranAt, driftMs, missed: 0 });
+          this._onFire({ scheduledFor, ranAt, driftMs, missed });
         } catch (e) {
           this._report(e, 'onFire');
         }

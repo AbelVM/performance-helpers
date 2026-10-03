@@ -7594,3 +7594,36 @@ under-reporting, `_isIdle` flipping true with work outstanding, and `drain()` re
 early against a pool that was not idle. Every clause in it is a specific, checkable
 claim about a defect that actually happened. Rewriting it to match the row would have
 replaced a good explanation with a wrong one.
+
+## `PowerCron.onFire`'s `missed` field finally carries a number
+
+It was hardcoded to `0` at both `onFire` call sites — a documented field that was a
+constant, in the one payload a caller would use to see catch-up working. `_onTimer` had
+already computed `missedPeriods`, the count of missed fires beyond the one being handled,
+and discarded it before the run that needed it.
+
+**`missed` is now the number of missed periods _this run_ stands in for**, and the answer
+differs by policy because the question does:
+
+| `catchUp`  | `missed`                                                                                                                         |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `catch-up` | `1` per replay — it _is_ that period being run; the run that follows reports `0`, because the replays already accounted for them |
+| `skip`     | how many were dropped — the run did not stand in for them, but the caller still needs to know they happened                      |
+| `run-once` | how many were folded into it — the case where the field is the whole point                                                       |
+
+The alternative, one meaning for all three, would have had `catch-up` report `0`
+throughout — the defect again with extra steps.
+
+**The test fixture is the mechanism, not a shortcut round it, and the first draft got
+that wrong.** `_onTimer` derives `missedPeriods` from `floor((now - target) /
+intervalMs)`, so a period is missed only if the loop was unavailable when its timer came
+due. Stopping and restarting the cron does **not** do it — `start()` re-aims `_nextAt` —
+and the first version of this test did exactly that, reporting `0` for all three
+policies while appearing to test them. The fixture now runs a task that **blocks the loop
+for longer than its own interval**, which is what a missed period actually is. Measured
+before writing the assertions: `skip` → `[0,2,2,2]`, `catch-up` → `[0,1,0,1,1,1,1,1,1,0]`,
+`run-once` → `[0,1,3,2]`.
+
+**Mutation-checked:** restoring `missed: 0` at both sites fails 3 of 6 tests. A control
+case pins `0` for a cron that keeps up, so the other three cannot pass against a field
+that is always zero.

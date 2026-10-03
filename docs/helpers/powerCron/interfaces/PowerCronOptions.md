@@ -65,7 +65,13 @@ Called when the task throws or
 > `optional` **onFire?**: (`info`) => `void`
 
 Called after each successful run
-  with `{ scheduledFor, ranAt, driftMs, missed }`.
+  with `{ scheduledFor, ranAt, driftMs, missed }`. **`missed` is the number of
+  missed periods *this run* stands in for**, and it was always `0` before 2.0 —
+  in the one payload a caller would use to see catch-up working. Under `catch-up`
+  each replay reports `1` (it is that period being run) and the run that follows
+  reports `0`, because the replays have already accounted for them. Under `skip`
+  and `run-once` the single run reports how many periods were dropped or folded
+  into it.
 
 #### Parameters
 
