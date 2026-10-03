@@ -94,13 +94,14 @@ node bench/claims.js hubencode   # whether the hub's fan-out flush is encode-bou
 node bench/claims.js correlation # what awaiting a correlated reply costs
 node bench/claims.js batchservo   # does a closed loop beat a fixed flush size
 node bench/claims.js concurrency # is `autoScale.policy` wired to anything
+node bench/claims.js stepsize    # does the autoscale step controller beat a fixed step
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all fifteen** modes, not the six this file used to list: nine
-measurements were reachable only by reading `bench/claims.js`, and five of them
+That is **all sixteen** modes, not the six this file used to list: ten
+measurements were reachable only by reading `bench/claims.js`, and six of them
 were named in neither this file nor `bench/README.md`.
 
 The list above is still hand-maintained and can drift, so treat

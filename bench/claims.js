@@ -3197,6 +3197,19 @@ async function runStepSizingWorkload() {
   );
   console.log(`  servo vs fixed, ticks to settle: ${servoArm.settledAt} vs ${control0.settledAt}`);
 
+  if (servoArm.settledAt < 0 || control0.settledAt < 0) {
+    console.log('\n  CAVEAT 1 of 2 — neither arm ever stopped moving, so "ticks to settle" is');
+    console.log('  uninformative here and only overshoot discriminates. With `cooldownMs: 0`');
+    console.log('  and a modelled signal the fleet hunts rather than resting, which is why the');
+    console.log('  fixed arm ends at 1 after peaking at 5: it overshoots on the way up and all');
+    console.log('  the way back down. A real deployment has a cooldown and a real queue, and');
+    console.log('  this mode makes no claim about settling.');
+  }
+  console.log('\n  CAVEAT 2 of 2 — the latency signal is MODELLED from the fleet size');
+  console.log('  (`base + load/fleet x slope x 4`), not measured from a dispatch loop. That');
+  console.log('  narrows the claim to the decision rule given a latency reading, which is the');
+  console.log('  variable under test, but it is not a whole-pool measurement.');
+
   if (Math.abs(delta) < MATERIAL || cross <= noise * 1.5) {
     console.log('\n  NO DIFFERENCE WORTH REPORTING. The overshoot spread clears neither the');
     console.log('  noise floor nor materiality, so on this workload the controller is not');

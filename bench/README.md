@@ -89,6 +89,7 @@ node bench/claims.js hubencode   # whether the hub's fan-out flush is encode-bou
 node bench/claims.js correlation # what awaiting a correlated reply costs
 node bench/claims.js batchservo   # does a closed loop beat a fixed flush size
 node bench/claims.js concurrency  # is `autoScale.policy` wired to anything
+node bench/claims.js stepsize     # does the autoscale step controller beat a fixed step
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only
@@ -197,6 +198,45 @@ The conclusion rule needed an absolute materiality threshold, not just the noise
 comparison: `cross > floor * 1.5` duly reported a 1.3 % spread — twenty-four
 admissions out of 1920 — as "an effect larger than the noise floor". Raw medians
 are printed so a reader can judge rather than trust a threshold.
+
+**`stepsize` reports that the autoscale step controller eliminates overshoot.**
+`2498c7d` made `stepUp`/`stepDown` a ceiling and let `PowerServo` choose the step
+within it; nothing measured whether that was an improvement until this mode. It
+compares the shipped `_autoscaleSteps` against the pre-`2498c7d` rule
+**reconstructed in the bench file** — the same reason `sieve` implements its policy
+here rather than in `src/`: the claim under test is whether the shipped thing beats
+what it replaced, so the thing it replaced has to exist. Monkey-patching one method
+is also the narrowest possible difference; the two arms share every line of pool
+code except the step rule.
+
+Step ceiling 4, fleet 1..16, three identical `fixed` arms against one `servo` arm:
+peak / final / overshoot of **5 / 1 / 4** against **3 / 3 / 0**. The noise floor,
+taken from three runs of the _same_ configuration, is **0.0 %** — they agree
+exactly — against a cross-arm spread of 100 %. **Overshoot is eliminated.**
+
+Throughput is deliberately **not** the metric. A fixed step of 4 reaches a large
+fleet in fewer ticks by arithmetic rather than merit; what it cannot do is avoid
+overshooting when one worker was needed, and that is what separates them.
+
+**Two caveats, and both are printed by the mode itself rather than only here.**
+Neither arm ever stopped moving, so "ticks to settle" is uninformative — with
+`cooldownMs: 0` and a modelled signal the fleet hunts rather than rests, and the
+fixed arm ends at 1 after peaking at 5 because it overshoots on the way up _and_
+all the way back down. And the latency signal is **modelled from the fleet size**
+(`base + load/fleet x slope x 4`) rather than measured from a dispatch loop, which
+narrows the claim to the decision rule given a latency reading — the variable under
+test — rather than to the whole pool.
+
+The self-check earned its place immediately. An earlier version planted work in
+`pool.queue` and called `_autoScaleTick()` directly, which never completed a task:
+`_ewmaLatency` stayed null, both arms short-circuited on the `ewma == null` guard,
+and the mode reported `servo: [4]  fixed: [4]` — a treatment identical to its
+control. That is precisely what a self-check exists to catch, and it is why the
+mode stops rather than printing a null result dressed as a finding.
+
+Parameters: `CLAIM_STEP_ARMS`, `CLAIM_STEP_REPEATS`, `CLAIM_STEP_TICKS`,
+`CLAIM_STEP_BASE_MS`, `CLAIM_STEP_SLOPE_MS`, `CLAIM_STEP_TARGET_MS`,
+`CLAIM_STEP_LOAD`.
 
 Parameters: `CLAIM_CONCURRENCY_BUDGET_MS`, `CLAIM_CONCURRENCY_REPEATS`,
 `CLAIM_CONCURRENCY_SERVICE_MS`, `CLAIM_CONCURRENCY_INFLIGHT`, and for
