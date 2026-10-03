@@ -64,19 +64,33 @@ describe('PowerMemoizer.memoize', () => {
   });
 
   it('honors per-wrapper ttl and weight options', async () => {
-    // TTL override
+    // TTL override, on an injected clock rather than a sleep.
+    //
+    // This was `await setTimeout(10)` against a 5 ms TTL, which passed 12 times
+    // in isolation and then failed inside the full suite as `expected 2 to be 1`
+    // — the entry had not expired. Wall-clock expiry is a duration assertion,
+    // and this harness measures a ~28 % median spread, so it is noise dressed as
+    // a check: under load the sleep and the cache's idea of "now" disagree. The
+    // property being tested is that a TTL is *consulted*, which a mutable clock
+    // settles exactly and instantly.
     let calls = 0;
     const fn = (x) => {
       calls++;
       return x;
     };
-    const pm = new PowerMemoizer();
+    let t = 1000;
+    const pm = new PowerMemoizer(undefined, { cacheOptions: { now: () => t } });
     const memo = pm.memoize(fn, { ttl: 5 });
     expect(memo(1)).toBe(1);
     expect(calls).toBe(1);
     expect(memo(1)).toBe(1);
     expect(calls).toBe(1);
-    await new Promise((r) => setTimeout(r, 10));
+    // Still inside the 5 ms window, one tick before expiry.
+    t += 4;
+    expect(memo(1)).toBe(1);
+    expect(calls).toBe(1);
+    // Past it.
+    t += 2;
     expect(memo(1)).toBe(1);
     expect(calls).toBe(2);
 
@@ -101,8 +115,12 @@ describe('PowerMemoizer.memoize', () => {
   });
 
   it('uses constructor default memoize options when per-call ttl/weight are omitted', async () => {
+    // Same injected clock as above, for the same reason: this was a 10 ms sleep
+    // against a 5 ms constructor TTL, and it is the assertion that failed under
+    // suite load.
     let calls = 0;
-    const pm = new PowerMemoizer(undefined, { ttl: 5 });
+    let t = 1000;
+    const pm = new PowerMemoizer(undefined, { ttl: 5, cacheOptions: { now: () => t } });
     const memo = pm.memoize((value) => {
       calls += 1;
       return value;
@@ -112,7 +130,7 @@ describe('PowerMemoizer.memoize', () => {
     expect(memo('x')).toBe('x');
     expect(calls).toBe(1);
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    t += 6;
 
     expect(memo('x')).toBe('x');
     expect(calls).toBe(2);
