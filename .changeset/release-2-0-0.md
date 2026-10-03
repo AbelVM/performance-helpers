@@ -7363,3 +7363,43 @@ malformation: its docblock already records the first, where it flagged five
 _correctly written_ rows as having 9 and 10 columns because it split on escaped `\|`.
 Both directions have now happened, which is the argument for treating "the guard and
 the writer disagree" as the hazard rather than either side alone.
+
+## `PowerLogger` counters are capped, and eviction is by use rather than by age
+
+**`incrementCounter` had no cap and no eviction.** A per-request key —
+`logger.incrementCounter(\`req-${id}\`)`— grew the map for the life of the logger, and
+a logger is usually held for the life of the process, so the map was still growing when
+anyone thought to read it.`maxCounters`now bounds it at **1000** by default, with`0`to disable. **The default is a bound rather than`Infinity`** because the failure mode is
+the caller who never heard of the option, and that caller is the one who was affected.
+
+**Eviction takes the key longest _without being incremented_, not the oldest inserted —
+and the obvious version is wrong in the worst direction.** The counter you increment most
+is usually the one you inserted _first_, so age-based eviction discards the signal and
+keeps the churn. Verified rather than argued: the first implementation used plain
+insertion order and the test asserting the hot counter survived failed with `expected
+undefined to be 50`. The fix is `delete`-then-`set` on a `Map`, still O(1), and it is
+why the backing store changed from a null-prototype object: insertion order is free on a
+`Map`, and a cap whose eviction scanned for a victim would scan on _every new key_ — the
+path the cap exists to protect.
+
+**`getDebugCountersDropped()` is new**, because a silent cap is a cap nobody can trust: a
+logger quietly discarding keys is indistinguishable from a logger nobody incremented,
+and the snapshot does not say which keys went missing. It is a plain number rather than a
+field on the snapshot, because the snapshot is `Record<string, number>` and a reserved key
+would collide with a counter a caller legitimately named `dropped`. `resetDebugCounters()`
+resets it with the rest — a counter that survives a reset while everything else does not
+reports on a previous life, which is the `PowerCache._rejectedAdmission` shape.
+
+**A defect this option shipped with in its first minute, caught by mutation check.**
+`PowerLogger`'s constructor recognises an options object only when it carries a known
+key, and the list doing the recognising omitted `maxCounters` — so
+`new PowerLogger({ maxCounters: 500 })` took the numeric path and the cap was silently
+ignored. That is the failure mode of an option that appears to work. **The test written to
+catch it did not**, because it passed `level` alongside, which defeats the check entirely:
+the mutant survived all 11 tests. The test now passes the option **alone** and enables
+debug afterwards, and the mutant is caught. Worth recording as a pair — a guard that
+cannot fail, and a guard whose subject is defeated by its own fixture.
+
+11 tests in `test/powerLogger.counterCap.test.js`. **Two mutants, both caught**: removing
+the recency refresh fails 2, and dropping `maxCounters` from the detection list fails the
+single-option case.

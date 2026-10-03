@@ -39,7 +39,13 @@ The `PowerLoggerOptions` typedef
 
 ### \_counters
 
-> **\_counters**: `any`
+> **\_counters**: `Map`\<`any`, `any`\>
+
+***
+
+### \_countersDropped
+
+> **\_countersDropped**: `number`
 
 ***
 
@@ -58,6 +64,12 @@ The `PowerLoggerOptions` typedef
 ### \_formatter
 
 > **\_formatter**: ((`payload`) => `string` \| `PowerLoggerPayload` \| `null`) \| `null`
+
+***
+
+### \_maxCounters
+
+> **\_maxCounters**: `number`
 
 ***
 
@@ -169,6 +181,25 @@ Read counters as a plain object snapshot.
 
 ***
 
+### getDebugCountersDropped()
+
+> **getDebugCountersDropped**(): `number`
+
+How many counters have been dropped because the cap was reached.
+
+Exists because a silent cap is a cap nobody can trust: a logger quietly
+discarding keys looks identical to a logger nobody incremented, and the
+difference matters when you are reading the snapshot to work out what happened.
+A plain number rather than a field on the snapshot, because the snapshot is
+`Record<string, number>` and a reserved key would collide with a counter a
+caller legitimately named `dropped`.
+
+#### Returns
+
+`number`
+
+***
+
 ### getDebugLevel()
 
 > **getDebugLevel**(): `number`
@@ -273,6 +304,11 @@ Log a verbose message when debug level is >= 3.
 > **resetDebugCounters**(): `void`
 
 Reset all internal counters (test helper).
+
+The drop count is reset with them. Leaving it would mean a fresh
+`getDebugCountersDropped()` reported drops from a previous life, which is the
+"counter that is not reset when everything else is" bug this repo has hit
+before on `PowerCache._rejectedAdmission`.
 
 #### Returns
 

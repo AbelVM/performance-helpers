@@ -173,7 +173,7 @@ export class PowerLogger {
     if (
       level &&
       typeof level === 'object' &&
-      ['level', 'format', 'name', 'formatter', 'output'].some(
+      ['level', 'format', 'name', 'formatter', 'output', 'maxCounters'].some(
         (k) => k in /** @type {object} */ (level)
       )
     ) {
@@ -181,9 +181,27 @@ export class PowerLogger {
       options = /** @type {PowerLoggerOptions} */ (carried);
       level = undefined;
     }
-    assertKnownOptions(options, ['level', 'format', 'name', 'formatter', 'output'], 'PowerLogger');
+    assertKnownOptions(
+      options,
+      ['level', 'format', 'name', 'formatter', 'output', 'maxCounters'],
+      'PowerLogger'
+    );
     this._debugLevel = 0;
-    this._counters = Object.create(null);
+    this._counters = new Map();
+    this._countersDropped = 0;
+    // OBS-012. A `Map` rather than a null-prototype object, and that is not
+    // tidiness — it is what makes eviction O(1). A cap whose eviction scans for a
+    // victim would scan on *every new key*, and the whole point of the cap is a
+    // workload with a new key per request, so a linear scan would put an O(cap)
+    // cost on the path the cap exists to protect. Insertion order is free on a
+    // `Map`, so "the oldest key" is the first entry the iterator yields.
+    const maxCounters = Number(options?.maxCounters);
+    // `0` disables the cap, which is the escape hatch for a caller who has
+    // deliberately chosen unbounded counters. It is not the default: the default
+    // exists because the failure mode is a logger that grows for the life of the
+    // process and is never read until something is already wrong.
+    this._maxCounters =
+      Number.isFinite(maxCounters) && maxCounters >= 0 ? Math.floor(maxCounters) : 1000;
     this._format = options?.format || 'text';
     this.name = options?.name || null;
     this._formatter = typeof options?.formatter === 'function' ? options.formatter : null;
@@ -490,7 +508,37 @@ export class PowerLogger {
     if (!this.isDebug()) return;
     const k = String(name || '');
     if (!k) return;
-    this._counters[k] = (this._counters[k] || 0) + 1;
+    const existing = this._counters.get(k);
+    if (existing !== undefined) {
+      // Delete-then-set, and that is the whole eviction policy in one line.
+      //
+      // **The obvious version of this cap is wrong, and wrong in the worst
+      // direction.** Evicting the *oldest inserted* key on a plain `Map` throws away
+      // whichever counter has been incremented most: it was inserted first, and a
+      // `set` on an existing key does not move it. Under a per-request-key workload
+      // that is exactly backwards — the cap would delete the signal and keep the
+      // churn. Verified rather than argued: the first version of this did that, and
+      // a test asserting the hot counter survived failed with `expected undefined to
+      // be 50`.
+      //
+      // Deleting first puts the key at the end of the iteration order, so "oldest"
+      // becomes **longest without being seen** rather than longest-lived, and a hot
+      // counter stays hot. Still O(1): it is one `delete` and one `set` on a `Map`.
+      this._counters.delete(k);
+      this._counters.set(k, existing + 1);
+      return;
+    }
+    if (this._maxCounters > 0 && this._counters.size >= this._maxCounters) {
+      // Evict the oldest. `[...map.keys()][0]` is O(1) here because `Map` iterates
+      // in insertion order; it is written as the iterator's first entry so that
+      // stays obvious.
+      const oldest = this._counters.keys().next();
+      if (!oldest.done) {
+        this._counters.delete(oldest.value);
+        this._countersDropped += 1;
+      }
+    }
+    this._counters.set(k, 1);
   }
 
   /**
@@ -498,14 +546,41 @@ export class PowerLogger {
    * @returns {Record<string,number>}
    */
   getDebugCounters() {
-    return Object.assign({}, this._counters);
+    // `Object.fromEntries` rather than `Object.assign` over a spread, because the
+    // backing store is a `Map` now. Same shape, same insertion order, and — worth
+    // noting because it is the reason the cap is observable — a fresh object, so a
+    // caller mutating the snapshot cannot corrupt the ledger.
+    return Object.fromEntries(this._counters);
+  }
+
+  /**
+   * How many counters have been dropped because the cap was reached.
+   *
+   * Exists because a silent cap is a cap nobody can trust: a logger quietly
+   * discarding keys looks identical to a logger nobody incremented, and the
+   * difference matters when you are reading the snapshot to work out what happened.
+   * A plain number rather than a field on the snapshot, because the snapshot is
+   * `Record<string, number>` and a reserved key would collide with a counter a
+   * caller legitimately named `dropped`.
+   *
+   * @returns {number}
+   */
+  getDebugCountersDropped() {
+    return this._countersDropped;
   }
 
   /**
    * Reset all internal counters (test helper).
+   *
+   * The drop count is reset with them. Leaving it would mean a fresh
+   * `getDebugCountersDropped()` reported drops from a previous life, which is the
+   * "counter that is not reset when everything else is" bug this repo has hit
+   * before on `PowerCache._rejectedAdmission`.
+   *
    * @returns {void}
    */
   resetDebugCounters() {
-    this._counters = Object.create(null);
+    this._counters = new Map();
+    this._countersDropped = 0;
   }
 }

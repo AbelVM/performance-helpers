@@ -74,7 +74,28 @@ Two consequences worth stating:
 
 - `getDebugCounters()` — Return a snapshot object `{ [name]: count }` of internal counters.
 
-- `resetDebugCounters()` — Reset all internal counters to zero.
+- `getDebugCountersDropped()` — Return how many counters have been evicted because the cap was reached. New in 2.0; see below.
+
+- `resetDebugCounters()` — Reset all internal counters to zero, including the dropped count.
+
+### Counters are capped, and eviction is by use rather than by age
+
+`incrementCounter` keeps at most **`maxCounters` distinct keys**, default **1000**; pass `maxCounters: 0` to disable the cap.
+
+**The cap exists because the default usage is the leaky one.** A per-request key — `logger.incrementCounter(\`req-${id}\`)`— grows the map for the life of the logger, and a logger is usually held for the life of the process, so the map was still growing when anyone thought to read it.`maxCounters`therefore defaults to a bound rather than to`Infinity`: a caller who never heard of the option is exactly the one who was affected.
+
+**Eviction takes the key longest _without being incremented_, not the oldest inserted.** That distinction is the whole design, and the obvious version is wrong in the worst direction: the counter you increment most is usually the one you inserted _first_, so age-based eviction would discard the signal and keep the churn. `logger.incrementCounter('cacheHit')` on every request stays; the one-off request ids go.
+
+```js
+const logger = new PowerLogger({ maxCounters: 4 });
+for (let i = 0; i < 50; i += 1) logger.incrementCounter(`req-${i}`);
+Object.keys(logger.getDebugCounters()).length; // 4 — the newest four
+logger.getDebugCountersDropped(); // 46 — and this is how you know
+```
+
+`getDebugCountersDropped()` is what separates a capped logger from an idle one. Without it, a logger quietly discarding keys is indistinguishable from a logger nobody incremented — and the snapshot alone does not tell you which keys went missing.
+
+Note the whole feature is a no-op below debug level 1, since `incrementCounter` is too, so an off-by-default logger costs nothing here.
 
 ### A sink that throws
 

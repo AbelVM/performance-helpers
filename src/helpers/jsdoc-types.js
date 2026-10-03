@@ -646,7 +646,16 @@ export {};
  *   `options.level` and listed in `assertKnownOptions`, so it is a real option
  *   that the typedef did not describe — which is the same gap
  *   {@link PowerGCRAOptions} and the `autoScale` knobs had, and it made every
- *   read of it an error.
+ * *   read of it an error.
+ * @property {number} [maxCounters=1000] OBS-012. How many distinct keys
+ *   {@link PowerLogger#incrementCounter} keeps before evicting one. `0` disables
+ *   the cap. The default exists because the failure mode is a logger held for the
+ *   life of the process accumulating a key per request, never read until something
+ *   is already wrong — so a caller who never heard of the option is the one who was
+ *   affected. Eviction takes the key **longest without being incremented**, not the
+ *   oldest inserted: the hot counter is usually the first one inserted, and evicting
+ *   by age would throw away exactly what the cap exists to keep. Read
+ *   `getDebugCountersDropped()` to tell a capped logger from an idle one.
  */
 
 /**
