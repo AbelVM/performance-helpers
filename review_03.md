@@ -527,6 +527,24 @@ keyword overlap, and these two rows are worded differently enough to score below
 `powerCache.js`’s comment cites CACHE-006 by name, which is direct evidence and would not have
 been missed by reading the code the finding is about. Re-run any cross-plan comparison by grepping
 the **source** for row identifiers, not the prose for similar words.
+
+**And that advice needs its own caveat, found by running it.** Of the 55 row IDs cited
+in `src/`, only 3 resolve to rows that are still open — and all 3 are **false
+positives caused by ID reuse across review cycles**. `powerCache.js` cites
+`PERF-004` and `PERF-005` as the rationale for its width budget and its
+`simpleArgsKey` default; `review.md`'s `PERF-004` and `PERF-005` are **codec**
+items (`u82o`'s `TextDecoder` fallback, `o2u8`'s non-string `JSON.stringify`).
+`powerMessageCodec.js` cites neither. So a bare ID in a comment is **not** a durable
+citation — the same string names different work in different files, and a reader
+following it lands on the wrong row.
+
+**Two things follow, and they point in opposite directions.** A grep of the source
+is still better than a keyword comparison — it is how the CACHE-006 link was found
+at all — but **every hit needs its file checked against the row's subject**, and
+an open hit is not evidence of stale work until it is. And the source itself has a
+fix available: qualify the citations (`PERF-004 (cache width budget)`), or cite the
+subject rather than the ID. Both are cheap; neither is urgent, and both would have
+prevented a wrong conclusion here.
 `PowerRealtimeHub` adapter. They are different transports on different runtimes;
 the pairing is spurious.
 
