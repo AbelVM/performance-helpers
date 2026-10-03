@@ -37,46 +37,58 @@ const execFileAsync = promisify(execFile);
 
 const CHUNKER = '/data/projects/performance-helpers/src/helpers/powerChunking.js';
 
-/** Run a snippet in a child, resolving to `{ ok }` — `ok: false` on timeout. */
+/** Run a snippet in a child, resolving to `{ ok, timedOut, stdout }`. */
 async function probeWithTimeout(source, timeoutMs = 4000) {
   try {
-    await execFileAsync(process.execPath, ['--input-type=module', '-e', source], {
-      timeout: timeoutMs,
-      cwd: '/data/projects/performance-helpers',
-    });
-    return { ok: true, timedOut: false };
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ['--input-type=module', '-e', source],
+      {
+        timeout: timeoutMs,
+        cwd: '/data/projects/performance-helpers',
+      }
+    );
+    return { ok: true, timedOut: false, stdout };
   } catch (err) {
-    return { ok: false, timedOut: err.killed === true || err.signal === 'SIGTERM' };
+    return {
+      ok: false,
+      timedOut: err.killed === true || err.signal === 'SIGTERM',
+      stdout: err.stdout ?? '',
+    };
   }
 }
 
-describe('RT-010: streaming mode drains inside the constructor', () => {
-  it.skip('does not hang the constructor on an infinite generator', async () => {
-    // **Skipped, and failing when run — that is the point of it.** This is the
-    // defect written as a test: it fails today and passes when RT-010 lands. It
-    // cannot be committed enabled, because a permanently red gate is not
-    // shippable and `npm run verify` is the project's exit condition. So it sits
-    // here, skipped, and the three enabled cases below pin everything about the
-    // defect that *can* be asserted without hanging: that the iterable is not
-    // materialised, and that there is no cancellation surface for the fix to use.
+describe('RT-010: streaming mode returns the pool before the iterable is exhausted', () => {
+  it('does not hang the constructor on an infinite generator', async () => {
+    // **Enabled, and it was mutation-checked in both directions** rather than
+    // merely unskipped: against the pre-fix source this test fails with
+    // `the constructor hung on an infinite generator`, and against the fix the
+    // constructor returns in ~2 ms.
     //
-    // Unskip it the day the pump lands. `npx vitest run
-    // test/powerChunker.streamingLiveness.test.js -t infinite` is the command,
-    // and it should then pass.
+    // The child terminates the pump before exiting, and that is the contract
+    // rather than a convenience. An unbounded iterable is pumped until the pool is
+    // terminated, so a child that constructs and then waits for the event loop to
+    // drain would wait for ever — the pump is a `setImmediate` chain, and an
+    // endless chain of those keeps Node alive. Terminating is also the only way to
+    // assert the property the fix actually adds, because before it there was no
+    // pool to terminate: the constructor never returned one.
     //
-    // The defect, as a test. This fails today and passes when the row is
-    // fixed. That inversion is deliberate and is the only way to say anything
-    // about a hang: the thing being asserted is that control returns.
+    // Asserting a hang is not possible in-process — the test would hang with it —
+    // so the probe is a child process with a timeout, and the assertion is on that
+    // timeout elapsing. `stdout` is checked as well as the exit status, so
+    // "returned and then exited" is distinguishable from "exited some other way".
     const source = `
       import { PowerChunker } from '${CHUNKER}';
       function* forever() { let i = 0; while (true) yield i++; }
+      const t0 = Date.now();
       const chunker = new PowerChunker(forever(), async () => 1, {
         poolOptions: { size: 1 },
         chunkSize: 8,
       });
-      console.log('constructed', chunker !== undefined);
+      console.log('constructed', chunker !== undefined, Date.now() - t0);
+      chunker.terminate();
     `;
-    const { ok, timedOut } = await probeWithTimeout(source);
+    const { ok, timedOut, stdout } = await probeWithTimeout(source);
 
     // A timeout is the failure. `ok: false` for any other reason (a thrown error,
     // a bad option) is also a failure, and distinguished by `timedOut` so the
@@ -84,6 +96,7 @@ describe('RT-010: streaming mode drains inside the constructor', () => {
     // the bug it was meant to detect.
     expect(timedOut, 'the constructor hung on an infinite generator').toBe(false);
     expect(ok, 'the child exited cleanly, so it neither hung nor threw').toBe(true);
+    expect(stdout, 'the constructor returned a pool to terminate').toContain('constructed true');
   });
 
   // **There is deliberately no heap-measurement test here.** Two attempts were
@@ -156,6 +169,69 @@ describe('RT-010: streaming mode drains inside the constructor', () => {
     // No chunker-shaped handle on the pool: there is no pump-cancellation surface
     // today, and this assertion is what would fail if one appeared silently.
     expect(typeof returned.cancelPump, 'no pump cancellation exists yet').toBe('undefined');
+    returned.terminate?.();
+  });
+
+  it('stops pulling the iterable once the pool is terminated', async () => {
+    // The property the fix buys, and the reason it needs no new API: the pump's
+    // lifetime is the pool's. Before it, an unbounded iterable could not be
+    // stopped at all — the constructor never returned the pool that stops it.
+    //
+    // Asserted in-process with a counter rather than by timing, because the thing
+    // being checked is a *count that stops increasing*, which a duration cannot
+    // distinguish from a pump that is merely slow.
+    const { PowerChunker: Chunker } = await import(
+      /* @vite-ignore */ '/data/projects/performance-helpers/src/helpers/powerChunking.js'
+    );
+    let pulled = 0;
+    function* counted() {
+      while (true) {
+        pulled += 1;
+        yield pulled;
+      }
+    }
+    const returned = new Chunker(counted(), async () => 1, {
+      poolOptions: { size: 1 },
+      chunkSize: 8,
+    });
+    returned.terminate();
+    const atTerminate = pulled;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    // Equal, not greater: the pump may already have run a window before the
+    // terminate() landed, so the assertion is that the count *stops*, not that it
+    // was zero at the moment of the call.
+    expect(pulled, 'the pump stopped pulling when the pool terminated').toBe(atTerminate);
+  });
+
+  it('drain() waits for the iterable, not merely for an empty queue', async () => {
+    // The subtle half of the fix, and the one that fails silently.
+    // `PowerPool.drain()` resolves immediately when the queue is empty and nothing
+    // is active, so a pool handed back *before* its pump has run would satisfy
+    // `await pool.drain()` before a single chunk had been read — the documented
+    // usage returning early and looking like it worked. Nothing else in the suite
+    // distinguishes that from success.
+    //
+    // `fn` is called once per element (`fn(item, index, chunk)`), so the counter
+    // is the item count rather than the chunk count.
+    const { PowerChunker: Chunker } = await import(
+      /* @vite-ignore */ '/data/projects/performance-helpers/src/helpers/powerChunking.js'
+    );
+    let processed = 0;
+    function* many() {
+      for (let i = 0; i < 2000; i += 1) yield i;
+    }
+    const returned = new Chunker(
+      many(),
+      async () => {
+        processed += 1;
+        return 1;
+      },
+      { poolOptions: { size: 2 }, chunkSize: 16 }
+    );
+
+    await returned.drain();
+    expect(processed, 'every item ran before drain() resolved').toBe(2000);
     returned.terminate?.();
   });
 });

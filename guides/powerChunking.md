@@ -8,12 +8,12 @@ boilerplate yourself.
 
 ## Constructor
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `poolOptions` | `Object` | `{}` | Options forwarded to the `PowerPool` constructor (e.g. `size`, `minSize`, `maxSize`, `idleTimeout`). |
-| `postOptions` | `Object` | `{}` | Options forwarded to `PowerPool.postMessageBatch` (for example `awaitResponse`, `workerId`, `timeout`). |
-| `chunkSize` | `number` | `heuristic` | Explicit chunk size. When omitted the helper computes a conservative chunk size derived from `iterable.length` and pool size (aiming for roughly `poolSize * 4` in-flight chunks). |
-| `fnComplexity` | `'light'\|'medium'\|'heavy'` | `auto` | Hint about per-item work complexity that biases the computed `chunkSize`. When omitted the helper will attempt to analyze `fn`'s source to infer complexity (`'light'\|'medium'\|'heavy'`) and use that to bias chunking; falls back to `'medium'` on failure. |
+| option         |                         type |     default | description                                                                                                                                                                                                                                                    |
+| -------------- | ---------------------------: | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `poolOptions`  |                     `Object` |        `{}` | Options forwarded to the `PowerPool` constructor (e.g. `size`, `minSize`, `maxSize`, `idleTimeout`).                                                                                                                                                           |
+| `postOptions`  |                     `Object` |        `{}` | Options forwarded to `PowerPool.postMessageBatch` (for example `awaitResponse`, `workerId`, `timeout`).                                                                                                                                                        |
+| `chunkSize`    |                     `number` | `heuristic` | Explicit chunk size. When omitted the helper computes a conservative chunk size derived from `iterable.length` and pool size (aiming for roughly `poolSize * 4` in-flight chunks).                                                                             |
+| `fnComplexity` | `'light'\|'medium'\|'heavy'` |      `auto` | Hint about per-item work complexity that biases the computed `chunkSize`. When omitted the helper will attempt to analyze `fn`'s source to infer complexity (`'light'\|'medium'\|'heavy'`) and use that to bias chunking; falls back to `'medium'` on failure. |
 
 ## API
 
@@ -23,10 +23,9 @@ boilerplate yourself.
 
 - `postMessageBatch(items, options)` — The helper uses the underlying pool's `postMessageBatch` for array-mode enqueues; when using streaming mode the helper internally calls `postMessage({ chunk })` for each chunk. The return value mirrors `PowerPool.postMessageBatch` (array of booleans or Promises when awaiting responses).
 
-- `drain()` — Await until all queued and inflight chunk tasks have completed. (Inherited from returned `PowerPool` instance.)
+- `drain()` — Await until all queued and inflight chunk tasks have completed. (Inherited from returned `PowerPool` instance.) **In streaming mode it also waits for the iterable to finish**, which is not a change of meaning but a restoration of it: the iterable is pulled on macrotasks, so a pool handed back before its pump has run would otherwise satisfy `drain()` on an empty queue and resolve before the first chunk was read. An already-aborted `signal` still rejects immediately rather than queueing behind the iterable.
 
-- `terminate()` / `shutdown()` — Terminate or shutdown the underlying pool; see `PowerPool` semantics for differences.
-
+- `terminate()` / `shutdown()` — Terminate or shutdown the underlying pool; see `PowerPool` semantics for differences. **In streaming mode this also stops the iterable being pulled**, so an infinite or lazy generator can be consumed and then stopped. That is the reason streaming mode is safe to use at all: the constructor returns as soon as the pool exists rather than after the last item.
 
 ## Example
 
@@ -90,7 +89,7 @@ async function transformRow(row) {
 const pool = new PowerChunker(rows, transformRow, {
   poolOptions: { size: 4 },
   chunkSize: 500,
-  postOptions: { awaitResponse: false }
+  postOptions: { awaitResponse: false },
 });
 
 const errors = [];
@@ -120,10 +119,10 @@ pool.terminate();
 - The helper returns what `PowerPool.postMessageBatch` returns: an array of
   per-chunk results (`true|false`) or Promises when `awaitResponse` is used.
 - When `fnComplexity` is not provided the helper will examine the source of `fn` and attempt
- - When `fnComplexity` is not provided the helper uses a lightweight heuristic to infer complexity:
-   it treats `AsyncFunction` or `GeneratorFunction` as `heavy` and uses the function's declared
-   arity (number of formal parameters) as a signal; otherwise it defaults to `medium`.
-   This approach avoids fragile source-parsing while providing a sensible bias for chunk sizing.
+- When `fnComplexity` is not provided the helper uses a lightweight heuristic to infer complexity:
+  it treats `AsyncFunction` or `GeneratorFunction` as `heavy` and uses the function's declared
+  arity (number of formal parameters) as a signal; otherwise it defaults to `medium`.
+  This approach avoids fragile source-parsing while providing a sensible bias for chunk sizing.
 - Each `message` event `data` includes:
   - `processed`: number of items processed in the chunk
   - `results`: array of per-item return values (or error objects `{ error: true, code, message, stack }`)

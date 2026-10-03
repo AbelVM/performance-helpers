@@ -132,8 +132,36 @@ export class PowerChunker {
       return pool;
     }
 
-    // Streaming mode: iterate lazily and post each chunk immediately.
-    streamIterableIntoPool(pool, iterable, chunkSize);
+    // Streaming mode: pull the iterable in bounded windows, one window per
+    // macrotask, so the constructor returns before an unbounded iterable is
+    // exhausted. An infinite or lazy generator used to hang here forever and
+    // never hand back a pool to terminate (RT-010).
+    //
+    // `drain()` is wrapped because calling it straight after construction used to
+    // be safe: every chunk was queued before the constructor returned, so
+    // `drain()` could not resolve early. `PowerPool.drain()` resolves on an empty
+    // queue, so a pool handed back with an empty one and a pump still to run would
+    // resolve before the first chunk was read — which would silently break the
+    // documented `await pool.drain()` usage above. Waiting for the pump keeps that
+    // promise meaning what its callers already take it to mean.
+    const streamed = streamIterableIntoPool(
+      pool,
+      iterable,
+      chunkSize,
+      Math.max(1, Math.max(1, poolSize ?? 1) * CHUNK_WINDOW_MULTIPLIER)
+    );
+    const drainPool = pool.drain.bind(pool);
+    /**
+     * @param {any} options
+     * @returns {Promise<any>}
+     */
+    const drainStreamed = (options) => {
+      // An already-aborted signal must still reject, rather than queue behind a
+      // pump that an unbounded iterable may never finish.
+      if (options?.signal?.aborted) return drainPool(options);
+      return streamed.then(() => drainPool(options));
+    };
+    /** @type {any} */ (pool).drain = drainStreamed;
 
     return pool;
   }
@@ -376,48 +404,101 @@ function dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions
 }
 
 /**
+ * Pull `it` in bounded windows, posting each chunk as it fills, and resolve when
+ * the iterable is exhausted or the pool terminates.
+ *
+ * RT-010. The pump's lifetime is the pool's, and that is the whole design. The
+ * constructor returns a `PowerPool` and not a cancellable handle, so "pump on a
+ * macrotask" on its own trades a constructor that hangs for a pump that runs for
+ * ever — an infinite generator would keep pulling with nothing to stop it. Checking
+ * `_terminated` (set by `shutdown()` / `terminate()`) makes `terminate()` mean what
+ * the caller expects: the generator stops being pulled. That is why this needs no
+ * new public API and no cancellation surface.
+ *
+ * The windows bound how much of the iterable one turn of the event loop consumes,
+ * which is what keeps an unbounded generator from starving the loop rather than
+ * merely unblocking it.
+ *
  * @param {any} pool
  * @param {Iterable<any>} it
  * @param {number} csize
+ * @param {number} windowChunks - Chunks posted per macrotask.
+ * @returns {Promise<void>} Never rejects; iteration failures are reported on the
+ *   pool's error bus, as they were when this ran synchronously.
  */
-function streamIterableIntoPool(pool, it, csize) {
+function streamIterableIntoPool(pool, it, csize, windowChunks) {
   let chunkIndex = 0;
-  try {
-    const iterator = it[Symbol.iterator]();
-    let cur = [];
-    for (let r = iterator.next(); !r.done; r = iterator.next()) {
-      cur.push(r.value);
-      if (cur.length >= csize) {
-        try {
-          const accepted = pool.postMessage({ chunk: cur });
-          if (accepted === false) {
-            notifyChunkDispatchFailure(pool, [chunkIndex], 'stream');
-          }
-        } catch (e) {
-          notifyChunkDispatchFailure(pool, [chunkIndex], 'stream', e);
-        }
-        cur = [];
-        chunkIndex++;
-      }
-    }
-    if (cur.length) {
-      try {
-        const accepted = pool.postMessage({ chunk: cur });
-        if (accepted === false) {
-          notifyChunkDispatchFailure(pool, [chunkIndex], 'stream');
-        }
-      } catch (e) {
-        notifyChunkDispatchFailure(pool, [chunkIndex], 'stream', e);
-      }
-    }
-  } catch (err) {
+  /** @type {any[]} */
+  let cur = [];
+  let exhausted = false;
+
+  /**
+   * @param {*} err
+   * @returns {void}
+   */
+  const reportIterateFailure = (err) => {
     notifyChunkDispatchFailure(pool, [chunkIndex], 'stream-iterate', err);
     try {
       pool?._logger?.error?.(err, 'PowerChunker: failed while streaming iterable');
     } catch (e) {
       /* ignore */
     }
+  };
+
+  const postChunk = () => {
+    try {
+      const accepted = pool.postMessage({ chunk: cur });
+      if (accepted === false) {
+        notifyChunkDispatchFailure(pool, [chunkIndex], 'stream');
+      }
+    } catch (e) {
+      notifyChunkDispatchFailure(pool, [chunkIndex], 'stream', e);
+    }
+    cur = [];
+    chunkIndex++;
+  };
+
+  /** @type {Iterator<any>} */
+  let iterator;
+  try {
+    iterator = it[Symbol.iterator]();
+  } catch (err) {
+    reportIterateFailure(err);
+    return Promise.resolve();
   }
+
+  return new Promise((resolve) => {
+    const pumpWindow = () => {
+      if (pool?._terminated) {
+        resolve();
+        return;
+      }
+      let posted = 0;
+      try {
+        while (!exhausted && posted < windowChunks) {
+          const r = iterator.next();
+          if (r.done) {
+            exhausted = true;
+            break;
+          }
+          cur.push(r.value);
+          if (cur.length >= csize) {
+            postChunk();
+            posted += 1;
+          }
+        }
+        if (exhausted && cur.length) postChunk();
+      } catch (err) {
+        reportIterateFailure(err);
+        resolve();
+        return;
+      }
+      if (exhausted) resolve();
+      else deferToMacrotask(pumpWindow);
+    };
+
+    deferToMacrotask(pumpWindow);
+  });
 }
 
 /**
