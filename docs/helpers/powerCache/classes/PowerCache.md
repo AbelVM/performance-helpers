@@ -212,6 +212,12 @@ promotes a node to the tail. `null` when the list is empty.
 
 ***
 
+### \_refreshesSkipped
+
+> **\_refreshesSkipped**: `number`
+
+***
+
 ### \_rejected
 
 > **\_rejected**: `number`
@@ -300,6 +306,12 @@ option - it only stops it being the default.
 ### maxEntries
 
 > **maxEntries**: `number`
+
+***
+
+### maxInflightRefreshes
+
+> **maxInflightRefreshes**: `number`
 
 ***
 

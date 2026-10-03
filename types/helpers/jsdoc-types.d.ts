@@ -156,6 +156,15 @@ export type PowerPoolOptions = {
  * pool reads are checked where it reads them.
  */
 export type AutoScaleOptions = {
+    /**
+     * - Which
+     * concurrency controller computes the adaptive limit. **`'ewma'` — the
+     * default — runs no concurrency control at all**: it compares one EWMA
+     * against `targetMs` and adds or removes a worker, and `_adaptiveLimit` stays
+     * at its seed value, which is why `getStats().performance.concurrencyLimit`
+     * reports `null` for it. The other three are real feedback loops over a
+     * latency signal. See the pool guide's "Adaptive concurrency policies".
+     */
     policy?: "ewma" | "aimd" | "vegas" | "gradient2" | undefined;
     intervalMs?: number | undefined;
     targetMs?: number | undefined;
@@ -1121,6 +1130,16 @@ export type CacheNode = {
  */
 export type PowerCacheOptions = {
     maxEntries?: number | undefined;
+    /**
+     * Maximum background refreshes in
+     * flight at once. Defaults to `maxEntries` — *at most one per cacheable key* —
+     * or to a fixed `1024` when `maxEntries` is `Infinity`, since an infinite cache
+     * size derives no ceiling. Reaching it **skips** the refresh and counts it in
+     * `stats().refreshesSkipped`; it never evicts one, because an eviction would
+     * abort a fetch `getOrSetAsync` may already have handed out. `0` means never
+     * refresh in the background.
+     */
+    maxInflightRefreshes?: number | undefined;
     maxWeight?: number | undefined;
     weightFn?: ((arg0: any) => number) | null | undefined;
     defaultTTL?: number | undefined;

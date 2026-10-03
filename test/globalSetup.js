@@ -26,6 +26,7 @@ import path from 'node:path';
  * @returns {void}
  */
 export function setup() {
+  chooseFastCheckSeed();
   const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
   // Delete rather than overwrite: `vite build` leaves stale artifacts behind
   // when an entry is renamed, and the loader would happily read them.
@@ -35,6 +36,34 @@ export function setup() {
   if (!existsSync(distFile)) {
     throw new Error(`globalSetup: \`npm run build\` did not produce ${distFile}`);
   }
+}
+
+/**
+ * Pick one fast-check seed for the whole run and announce it.
+ *
+ * Eleven test files generate properties and, before this, none pinned a seed -
+ * so a property that failed once could not be reproduced. Replaying the failing
+ * file by hand is only useful with the seed, which is why it is printed.
+ *
+ * Decided here rather than in the per-worker setup file for two reasons: this
+ * runs exactly once, so the line is printed once instead of once per worker, and
+ * setting `process.env` here means every worker inherits the *same* seed, so a
+ * failure can be replayed in isolation and still match what CI saw.
+ *
+ * Chosen per run rather than fixed. A fixed seed would make every run cover the
+ * same ground and let a rare counterexample go unexercised indefinitely; a
+ * random one would be irreproducible. This varies and is announced.
+ *
+ * @returns {void}
+ */
+function chooseFastCheckSeed() {
+  if (process.env.FAST_CHECK_SEED === undefined)
+    process.env.FAST_CHECK_SEED = String(Date.now() % 2 ** 31);
+  // `process.stdout` rather than `console`: vitest does not surface console
+  // output from a setup file, and this line is worthless if it never appears.
+  process.stdout.write(
+    `[fast-check] seed=${process.env.FAST_CHECK_SEED} (replay with FAST_CHECK_SEED=<n>)\n`
+  );
 }
 
 /**
