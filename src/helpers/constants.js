@@ -198,6 +198,21 @@ export const ENCODE_CACHE_LARGE_KEY_LENGTH = 2048;
 export const DEFAULT_POOL_IDLE_TIMEOUT_MS = 60 * MS_PER_SEC; // 60000
 
 /**
+ * How many idempotency-ledger entries one post may examine while expiring.
+ *
+ * The sweep runs on the post path, so its cost has to be bounded by something
+ * other than the size of the ledger — an unbounded scan would make opting in
+ * cost more the longer the process runs, which is the opposite of what the
+ * option is for. A rotating pass over the keys means the ledger drains at a
+ * bounded rate instead of never draining at all.
+ *
+ * 32 is roughly one cache line's worth of `Map` entries: large enough that a
+ * busy pool clears its ledger in a few posts, small enough to stay invisible
+ * against a `postMessage` that already encodes and transfers.
+ */
+export const DEFAULT_IDEMPOTENCY_SWEEP_BATCH = 32;
+
+/**
  * Ceiling on how many `PowerPool.drain()` calls may be *waiting* at once.
  *
  * `drain()` registers an `idle` listener, so N concurrent drains are N

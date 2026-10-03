@@ -22,6 +22,78 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 | `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                                                                                                                                     |
 | `options.weakListeners`                                 |                                           `boolean` |                                        `false` | When `true` the pool stores listeners as weak references (when supported by the runtime). This avoids retaining large closures but requires `FinalizationRegistry`/`WeakRef` support; you can call `pool._bus.cleanup()` to force cleanup of dead weak refs in environments without deterministic GC (primarily useful for tests).                                                                                                       |
 | `options.autoScale`                                     |                                 `boolean \| Object` |                                        `false` | When provided (or `true`), enables autoscaling. Supply `true` to use defaults, or an object to tune behavior. See the **Autoscaling** section below for properties and tuning recommendations.                                                                                                                                                                                                                                           |
+| `options.idempotencyTtlMs`                              |                                            `number` |                                            `0` | Enables the idempotency ledger: `postMessage(msg, transfer, { idempotencyKey })` refuses to dispatch the same key twice. `0` means off and costs nothing. See [Idempotency keys](#idempotency-keys-idempotencyttlms).                                                                                                                                                                                                                    |
+
+### Idempotency keys (`idempotencyTtlMs`)
+
+**A retried task can be dispatched twice, and nothing on the path can tell you
+so.** `PowerRetry` retries operations that may already have taken effect, and pool
+messages are exactly-once only _from the pool's side_: when a caller retries across
+a timeout, the first attempt may still be running. `ALGO-006` defers request
+hedging for exactly this reason — there was no idempotency story.
+
+Opt in with a retention window, then pass a key per post:
+
+```js
+const pool = new PowerPool(workerFactory, { idempotencyTtlMs: 60_000 });
+
+pool.postMessage({ task: 'charge', n: 1 }, undefined, { idempotencyKey: 'inv-1' });
+// -> true
+pool.postMessage({ task: 'charge', n: 1 }, undefined, { idempotencyKey: 'inv-1' });
+// -> false   refused; the worker never saw it twice
+```
+
+`false` is the pool's existing "refused" answer, so a call site already handles it.
+Keys are coerced with `String()`, so `42` and `'42'` are one task.
+
+**It is opt-in because it costs a lookup per posted message, and that has to be
+earned.** `idempotencyTtlMs: 0` — the default — allocates no Map and takes no
+branch; `getStats().idempotency.lookups` stays `0`. With it on, `lookups` counts
+**every** post, keyed or not, because the cost being paid is a lookup per post and
+the only honest way to report it is lookups ÷ posts. A pool that passed no keys
+would otherwise make the feature look free for most of its traffic.
+
+**Why a TTL and not a boolean.** A boolean would need a default retention window
+invented for it, and a ledger that outlives its usefulness is a leak. Settled keys
+are forgotten after `idempotencyTtlMs`, so it must exceed the longest window in
+which a caller might retry — a caller that retries after the TTL is refused by
+nothing and applies its side effect twice, exactly as it would with no ledger at
+all. Expiry runs a **bounded** sweep (32 entries per post) off the back of the next
+post, so opting in does not make each post cost more the longer the process runs.
+
+#### In-flight versus settled
+
+The ledger has two states, and the difference is the whole design:
+
+| state       | means                                         | a repeat is                |
+| ----------- | --------------------------------------------- | -------------------------- |
+| `in-flight` | claimed, not yet dispatched — nothing has run | a **concurrent duplicate** |
+| `settled`   | dispatched; may already have applied          | a **retry**                |
+
+Both are refused, and both are counted separately in
+`getStats().idempotency.duplicatesInFlight` / `duplicatesSettled`. Conflating them
+into one `seen` set — the usual shape — loses the ability to say which happened,
+and loses the release below.
+
+A key moves to `settled` when the post is **accepted for dispatch**, including when
+it returns an `awaitResponse` promise. That is deliberate: a promise that later
+times out means the task was very likely running, and refusing the retry is the
+entire point of the feature.
+
+**A post the pool _refused_ releases its claim instead of settling it.** The task
+never ran, so leaving the key claimed would turn a transient queue-full into a
+permanent one — every retry of a task that never happened would be blocked until
+the TTL expired. In-flight claims are never expired by the sweep, for the same
+reason in the other direction: expiring one would let a still-running task be
+posted twice.
+
+#### What this does not cover
+
+`postMessage` only. `broadcast`, `postMessageBatch` and `stopThePress` have their
+own paths and do not consult the ledger, so a duplicate sent through `broadcast` is
+still dispatched twice. `getStats().idempotency` reports `enabled: false` on a pool
+that has not opted in, which is the first thing to check if a key appears to be
+ignored.
 
 ## API
 

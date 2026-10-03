@@ -7048,3 +7048,89 @@ would have printed "19 of 19 past their threshold" above one line.
 tests; pointing the verdict at `regressions` instead of the shift-filtered list fails
 3, including the pre-existing machine-shift test; reverting `deltaOfReason` fails the
 ranking test. 30 tests in `test/benchBaseline.test.js`, up from 19.
+
+## `PowerPool`: an idempotency ledger, so a retried task is dispatched once
+
+**`ALGO-006` defers request hedging because it "needs an idempotency story", and nothing
+implemented one.** `PowerRetry` retries operations that may already have taken effect,
+and pool messages are exactly-once only _from the pool's side_ — a caller retrying
+across a timeout applies its side effect twice, and nothing on the path can tell it
+not to.
+
+```js
+const pool = new PowerPool(workerFactory, { idempotencyTtlMs: 60_000 });
+
+pool.postMessage({ task: 'charge', n: 1 }, undefined, { idempotencyKey: 'inv-1' }); // true
+pool.postMessage({ task: 'charge', n: 1 }, undefined, { idempotencyKey: 'inv-1' }); // false
+```
+
+`false` is the pool's existing "refused" answer, so a call site already handles it.
+Keys are coerced with `String()`, so `42` and `'42'` are one task.
+
+**Opt-in, because a lookup per post has to be earned.** `idempotencyTtlMs: 0` — the
+default — allocates no Map and takes no branch. On, it costs one lookup per posted
+message **whether or not that message carries a key**, which is the row's counter to
+assert: counting only keyed posts would make the feature look free for the traffic
+that passes a pool but no keys, which is most of it.
+
+**A TTL rather than a boolean, because a ledger that outlives its usefulness is a
+leak.** A boolean would need a default retention window invented for it. Settled keys
+are forgotten after the TTL, so it must exceed the longest window in which a caller
+might retry — a caller that retries after it has elapsed is refused by nothing and
+applies its side effect twice, exactly as with no ledger at all. Expiry is a
+**bounded** sweep, 32 entries per post, so opting in does not make each post cost more
+the longer the process runs.
+
+### In-flight versus settled
+
+The decision the row asks to have written down, and it is load-bearing:
+
+| state       | means                                         | a repeat is                |
+| ----------- | --------------------------------------------- | -------------------------- |
+| `in-flight` | claimed, not yet dispatched — nothing has run | a **concurrent duplicate** |
+| `settled`   | dispatched; may already have applied          | a **retry**                |
+
+Both are refused and counted separately (`duplicatesInFlight` / `duplicatesSettled`).
+One `seen` set — the usual shape — loses which of the two happened, and loses the
+release below. A key settles when the post is **accepted for dispatch**, _including_
+when it returns an `awaitResponse` promise: a promise that later times out means the
+task was very likely running, and refusing that retry is the whole point.
+
+**A post the pool _refused_ releases its claim instead of settling it.** Without that,
+a transient queue-full would become permanent — every retry of a task that never ran
+blocked until the TTL expired. In-flight claims are never expired by the sweep, for
+the same reason in the other direction.
+
+### `postMessage` split in two
+
+The ledger is consulted by a thin public `postMessage` wrapping `_postMessageInner`,
+so the settle/release pair sees **one** accept-or-refuse decision rather than the eight
+it is otherwise spread across. That is a structural choice, not a refactor: a
+settle/release pair maintained across eight return paths is one forgotten path away
+from a key stuck `in-flight`, blocking every retry of a task that never ran.
+
+### Tests
+
+12 tests in `test/powerPool.idempotency.test.js`, all driven through the real
+`postMessage` and asserting on `false` and on `getStats().idempotency` — not on the
+`Map`, which would pass on an implementation that never consulted it. Two of the
+row's required mutants: **removing the settled transition fails 4 tests**, and
+**treating a duplicate as fresh fails 4**, including the one asserting the worker
+sees a single message.
+
+**The in-flight state is only reachable through a re-entrant post**, because a key is
+claimed and settled inside one synchronous call — no other caller on the same thread
+can observe the window. The re-entrant worker in the test is therefore the only way to
+reach a state the design has, and a suite that never reached it would be asserting the
+distinction is untested rather than testing it.
+
+**One test asserts on the ledger rather than the public path, deliberately.** "An
+in-flight claim is never expired" cannot be expressed through `postMessage` at all: the
+window is synchronous, so no TTL can elapse inside it. The sweep is called directly and
+both claims asserted together — at the same instant and past the same TTL a settled key
+goes and an in-flight one stays. Asserting it through `postMessage` would be asserting
+something the surface cannot express.
+
+`broadcast`, `postMessageBatch` and `stopThePress` are **not** covered; a duplicate sent
+through them is still dispatched twice. `getStats().idempotency.enabled` is the first
+thing to check if a key looks ignored.

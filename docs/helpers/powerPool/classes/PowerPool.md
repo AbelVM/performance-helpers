@@ -152,6 +152,48 @@ loop from accumulating listeners without limit. See
 
 ***
 
+### \_idempotency
+
+> **\_idempotency**: `Map`\<`any`, `any`\> \| `null`
+
+***
+
+### \_idempotencyDuplicatesInFlight
+
+> **\_idempotencyDuplicatesInFlight**: `number`
+
+***
+
+### \_idempotencyDuplicatesSettled
+
+> **\_idempotencyDuplicatesSettled**: `number`
+
+***
+
+### \_idempotencyExpired
+
+> **\_idempotencyExpired**: `number`
+
+***
+
+### \_idempotencyLookups
+
+> **\_idempotencyLookups**: `number`
+
+***
+
+### \_idempotencySize
+
+> **\_idempotencySize**: `number`
+
+***
+
+### \_idempotencyTtlMs
+
+> **\_idempotencyTtlMs**: `number`
+
+***
+
 ### \_isIdle
 
 > **\_isIdle**: `boolean`

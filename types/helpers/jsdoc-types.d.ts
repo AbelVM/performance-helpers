@@ -26,6 +26,17 @@ export type PostMessageOptions = {
      * per-item ids unique.
      */
     correlationId?: string | number | undefined;
+    /**
+     * - POOL-013. Refuses to dispatch this message twice
+     * under the same key. Requires the pool's `{ idempotencyTtlMs }`; without it the option is
+     * inert, so a pool that has not opted in pays a Map lookup and nothing else. The key is claimed
+     * `in-flight` before dispatch and marked `settled` once the task is on its way, which is what
+     * separates a concurrent duplicate (nothing has run yet) from a retry across a timeout
+     * (something almost certainly has). A post the pool *refuses* releases the claim instead of
+     * settling it, so a rejected post can be retried. `string|number` because the pool coerces with
+     * `String()`.
+     */
+    idempotencyKey?: string | number | undefined;
 };
 /**
  * Entry used to track pending responses for `awaitResponse` callers.
@@ -148,6 +159,21 @@ export type PowerPoolOptions = {
      * which disables the byte bound and preserves the count-only behaviour.
      */
     encodeCacheByteLimit?: number | undefined;
+    /**
+     * POOL-013. Enables the idempotency
+     * ledger, which makes `postMessage(msg, transfer, { idempotencyKey })` refuse to
+     * dispatch the same key twice. **Opt-in, and `0` means off** — a boolean would
+     * need a default retention window invented for it, and a ledger that outlives
+     * its usefulness is a leak, so the terminal state is a TTL like every other
+     * piece of state here. Off costs nothing at all: no Map, no allocation, and
+     * `getStats().idempotency.lookups` stays `0`. On, it costs one Map lookup per
+     * posted message whether or not that message carries a key, which is why the
+     * counter counts both. A settled key is remembered for this long, so it must
+     * exceed the longest window in which a caller might retry — a caller that
+     * retries after the TTL has elapsed is refused by nothing and will apply its
+     * side effect twice, exactly as it would with no ledger at all.
+     */
+    idempotencyTtlMs?: number | undefined;
 };
 /**
  * Adaptive-concurrency configuration for `PowerPool` (`autoScale`).

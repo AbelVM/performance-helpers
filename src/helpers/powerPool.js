@@ -40,6 +40,7 @@ import {
   DEFAULT_HARDWARE_CONCURRENCY,
   DEFAULT_POOL_SIZE,
   DEFAULT_REAPER_MIN_INTERVAL_MS,
+  DEFAULT_IDEMPOTENCY_SWEEP_BATCH,
   ENCODE_CACHE_LARGE_KEY_LENGTH,
   DEFAULT_MAX_DRAIN_WAITERS,
   DEFAULT_POOL_IDLE_TIMEOUT_MS,
@@ -419,6 +420,7 @@ export class PowerPool {
         'messageCodec',
         'encodeCacheLimit',
         'encodeCacheByteLimit',
+        'idempotencyTtlMs',
       ],
       'PowerPool'
     );
@@ -694,6 +696,27 @@ export class PowerPool {
       : Infinity;
     // Running total of bytes stored in `_encodeCache` (Uint8Array.byteLength)
     this._encodeCacheBytes = 0;
+
+    // POOL-013 — the idempotency ledger, opt-in.
+    //
+    // `null` means off, and off must cost *nothing*: no Map, no allocation, and no
+    // branch that a caller who never asked for the feature is paying for. That is
+    // why this is a TTL rather than a boolean. A boolean `idempotency: true` would
+    // need a default retention window invented for it, and the row is explicit that
+    // the terminal state has to be a TTL like every other piece of state here —
+    // a ledger that outlives its process is a leak. `0` therefore means off, and a
+    // caller who wants the ledger has to say how long a settled key is remembered.
+    const idempotencyTtl = Number(options?.idempotencyTtlMs);
+    this._idempotencyTtlMs =
+      Number.isFinite(idempotencyTtl) && idempotencyTtl > 0 ? idempotencyTtl : 0;
+    this._idempotency = this._idempotencyTtlMs > 0 ? new Map() : null;
+    // Counters. `lookups` is the one the row asks for — it is the cost, and it is
+    // the number that has to be zero when the feature is off.
+    this._idempotencyLookups = 0;
+    this._idempotencyDuplicatesInFlight = 0;
+    this._idempotencyDuplicatesSettled = 0;
+    this._idempotencyExpired = 0;
+    this._idempotencySize = 0;
 
     // configure optional autoscaling
     if (options?.autoScale) {
@@ -2625,6 +2648,127 @@ export class PowerPool {
    * @returns {boolean}
    */
   /**
+   * Claim an idempotency key, or report that it is already claimed.
+   *
+   * **In-flight versus settled is the decision this ledger exists to get right.**
+   * A key is marked `in-flight` when the post is accepted for dispatch and moves
+   * to `settled` once the task is on its way — so the two cases are
+   * distinguishable, and both are refusals with different meanings:
+   *
+   * - `in-flight` means a **concurrent duplicate**: the first post has not been
+   *   sent yet, so refusing is free and nothing has been applied twice.
+   * - `settled` means a **retry**: the task was dispatched, may already have run,
+   *   and refusing is the only thing standing between a caller retrying across a
+   *   timeout and applying a side effect twice.
+   *
+   * Collapsing the two — one `seen` set, the usual shape — loses the ability to
+   * say which happened, and it also loses the ability to release the key when a
+   * post is refused before dispatch. `settled` carries a timestamp so the ledger
+   * can expire it; `in-flight` does not, because an in-flight claim is released
+   * by the post's own outcome rather than by time.
+   *
+   * @private
+   * @param {string|number|undefined} key - `undefined` disables the ledger for
+   *   this post.
+   * @param {number} now - From `nowMs()`, so one post reads one clock.
+   * @returns {boolean} `true` to proceed, `false` if the key is already claimed.
+   */
+  _idempotencyBegin(key, now) {
+    // One lookup per posted message, counted whether or not a key was supplied.
+    this._idempotencyLookups += 1;
+    const ledger = this._idempotency;
+    if (key === undefined || key === null || !ledger) return true;
+    const k = String(key);
+    // Bounded incremental expiry, run off the back of the lookup. Lazy expiry
+    // alone would only ever clean keys that are looked up *again*, so a workload
+    // of unique keys would grow the ledger without bound — and a ledger that
+    // outlives its usefulness is a leak, which is why the settled state is a TTL
+    // rather than a permanent mark.
+    this._idempotencySweep(now);
+    const existing = ledger.get(k);
+    if (existing !== undefined) {
+      if (existing.settledAt === null) this._idempotencyDuplicatesInFlight += 1;
+      else this._idempotencyDuplicatesSettled += 1;
+      return false;
+    }
+    // `settledAt: null` is the in-flight marker.
+    ledger.set(k, { settledAt: null });
+    this._idempotencySize = ledger.size;
+    return true;
+  }
+
+  /**
+   * Move a claimed key from in-flight to settled.
+   *
+   * @private
+   * @param {string|number|undefined} key - Coerced with `String()`, as the pool
+   *   coerces every idempotency key.
+   * @param {number} now
+   */
+  _idempotencySettle(key, now) {
+    if (key === undefined || key === null) return;
+    // Narrowed into a local: `this._idempotency` is `Map | null` and `tsc` does
+    // not carry a property-guard on `this` across statements, so every use below
+    // would be a "possibly null" error. The guard is real — a settled key cannot
+    // exist without a ledger — it just has to be expressed where the compiler can
+    // see it.
+    const ledger = this._idempotency;
+    if (!ledger) return;
+    const k = String(key);
+    const entry = ledger.get(k);
+    if (entry === undefined) return;
+    entry.settledAt = now;
+    this._idempotencySize = ledger.size;
+  }
+
+  /**
+   * Drop a claim for a post that was never dispatched.
+   *
+   * @private
+   * @param {string|number|undefined} key
+   */
+  _idempotencyRelease(key) {
+    if (key === undefined || key === null) return;
+    const ledger = this._idempotency;
+    if (!ledger) return;
+    ledger.delete(String(key));
+    this._idempotencySize = ledger.size;
+  }
+
+  /**
+   * Expire settled keys older than the TTL, examining a bounded slice per call.
+   *
+   * Bounded on purpose: an unbounded scan on the post path would make the cost of
+   * opting in proportional to the size of the ledger, which is the opposite of
+   * what the option is for. A rotating cursor means every entry is eventually
+   * reached — the ledger drains at a bounded rate rather than never.
+   *
+   * `in-flight` entries are never expired. They are released by their post's own
+   * outcome, and expiring one would let a still-running task be posted a second
+   * time — the exact double-apply this feature is for.
+   *
+   * @private
+   * @param {number} now
+   */
+  _idempotencySweep(now) {
+    const ledger = this._idempotency;
+    if (!ledger || ledger.size === 0) return;
+    const ttl = this._idempotencyTtlMs;
+    let examined = 0;
+    for (const k of [...ledger.keys()]) {
+      if (examined >= DEFAULT_IDEMPOTENCY_SWEEP_BATCH) break;
+      examined += 1;
+      const entry = ledger.get(k);
+      if (entry && entry.settledAt !== null && now - entry.settledAt >= ttl) {
+        ledger.delete(k);
+        this._idempotencyExpired += 1;
+      }
+      if (examined >= ledger.size) break;
+    }
+    this._idempotencySize = ledger.size;
+  }
+
+  /**
    * Post a message to a worker in the pool.
    * The pool will try to reuse an idle/least-loaded worker, grow the pool
    * (up to `maxSize`), or queue the task if configured.
@@ -2639,6 +2783,59 @@ export class PowerPool {
    * @throws {Error} When `options.awaitResponse` is used but the provided `message` is not a plain object.
    */
   postMessage(message, transfer, options) {
+    // POOL-013. The ledger is consulted *outside* `_postMessageInner` rather than
+    // inside it, so this wrapper sees exactly one thing the inner method cannot
+    // tell it: whether the task was accepted. Every one of the inner method's
+    // return paths — dispatched, queued, grown-into, `false`, a pending response
+    // promise — funnels through here, so the settle/release pair cannot be missed
+    // on one of them. That matters: a key left `in-flight` by a rejected post
+    // would block every retry of a task that never ran.
+    //
+    // The counter is incremented even when the post carries no key, and that is
+    // deliberate. The cost being paid for is *a Map lookup per posted message*,
+    // and the only honest way to report it is lookups ÷ posts — which requires the
+    // no-key case to be counted too. A counter that only moved for keyed posts
+    // would make the feature look free for the traffic that opts out of it.
+    if (!this._idempotency) return this._postMessageInner(message, transfer, options);
+    const now = nowMs();
+    const key = options?.idempotencyKey;
+    if (!this._idempotencyBegin(key, now)) return false;
+    let result;
+    try {
+      result = this._postMessageInner(message, transfer, options);
+    } catch (err) {
+      this._idempotencyRelease(key);
+      throw err;
+    }
+    // `false` is the inner method's "refused" answer: the pool is shut down, a
+    // targeted worker is missing or busy, the queue is full and `drop-oldest`
+    // dropped it, or `rejectOversized` rejected it. None of those ran the task,
+    // so the key must not stay in the ledger — a caller retrying after a
+    // rejection has to be allowed to try again.
+    if (result === false) this._idempotencyRelease(key);
+    // Anything else was accepted: dispatched, queued, or a pending-response
+    // promise for a task already on its way. Settled, including for the promise,
+    // because that is precisely the case this ledger exists for — a caller that
+    // timed out waiting for a response and retried. The task is very likely
+    // running; refusing the retry is the whole point.
+    else this._idempotencySettle(key, now);
+    return result;
+  }
+
+  /**
+   * `postMessage` without the POOL-013 ledger wrapper.
+   *
+   * Split out so the ledger sees one return value per post rather than the eight
+   * the decision is spread across, and so the settled/release pair cannot be
+   * forgotten on one path.
+   *
+   * @private
+   * @param {*} message
+   * @param {Transferable[]=} transfer
+   * @param {PostMessageOptions=} options
+   * @returns {boolean|Promise<any>}
+   */
+  _postMessageInner(message, transfer, options) {
     // A shut-down pool is final: refuse to dispatch rather than silently
     // re-growing the pool (which previously created a worker with no reaper
     // interval, pinning the Node.js process forever).
@@ -4105,6 +4302,20 @@ export class PowerPool {
       },
       // Silent batch drops were invisible; this makes them countable.
       postFailures: this._postFailures,
+      // POOL-013. The cost is `lookups`, and it must read as zero on a pool that
+      // never opted in — that is the number the row asks for and the one an
+      // operator checking "what did this cost me" needs first. `size` is the live
+      // ledger; a ledger that only ever grows is a leak, so `expired` says whether
+      // the TTL is actually reclaiming it.
+      idempotency: {
+        enabled: this._idempotency !== null,
+        ttlMs: this._idempotencyTtlMs,
+        lookups: this._idempotencyLookups,
+        duplicatesInFlight: this._idempotencyDuplicatesInFlight,
+        duplicatesSettled: this._idempotencyDuplicatesSettled,
+        expired: this._idempotencyExpired,
+        size: this._idempotencySize,
+      },
       queueLength: this.queue.length,
       activeTasks: this._activeTasks,
       workerCount: this.workers.length,

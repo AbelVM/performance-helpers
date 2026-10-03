@@ -204,6 +204,13 @@ export class PowerPool {
     _encodeCacheLimit: number;
     _encodeCacheByteLimit: number;
     _encodeCacheBytes: number;
+    _idempotencyTtlMs: number;
+    _idempotency: Map<any, any> | null;
+    _idempotencyLookups: number;
+    _idempotencyDuplicatesInFlight: number;
+    _idempotencyDuplicatesSettled: number;
+    _idempotencyExpired: number;
+    _idempotencySize: number;
     _autoScaleBackoffMultiplier: number | undefined;
     _adaptiveLimit: number | undefined;
     _longEwmaLatency: any;
@@ -704,6 +711,65 @@ export class PowerPool {
      * @returns {boolean}
      */
     /**
+     * Claim an idempotency key, or report that it is already claimed.
+     *
+     * **In-flight versus settled is the decision this ledger exists to get right.**
+     * A key is marked `in-flight` when the post is accepted for dispatch and moves
+     * to `settled` once the task is on its way — so the two cases are
+     * distinguishable, and both are refusals with different meanings:
+     *
+     * - `in-flight` means a **concurrent duplicate**: the first post has not been
+     *   sent yet, so refusing is free and nothing has been applied twice.
+     * - `settled` means a **retry**: the task was dispatched, may already have run,
+     *   and refusing is the only thing standing between a caller retrying across a
+     *   timeout and applying a side effect twice.
+     *
+     * Collapsing the two — one `seen` set, the usual shape — loses the ability to
+     * say which happened, and it also loses the ability to release the key when a
+     * post is refused before dispatch. `settled` carries a timestamp so the ledger
+     * can expire it; `in-flight` does not, because an in-flight claim is released
+     * by the post's own outcome rather than by time.
+     *
+     * @private
+     * @param {string|number|undefined} key - `undefined` disables the ledger for
+     *   this post.
+     * @param {number} now - From `nowMs()`, so one post reads one clock.
+     * @returns {boolean} `true` to proceed, `false` if the key is already claimed.
+     */
+    private _idempotencyBegin;
+    /**
+     * Move a claimed key from in-flight to settled.
+     *
+     * @private
+     * @param {string|number|undefined} key - Coerced with `String()`, as the pool
+     *   coerces every idempotency key.
+     * @param {number} now
+     */
+    private _idempotencySettle;
+    /**
+     * Drop a claim for a post that was never dispatched.
+     *
+     * @private
+     * @param {string|number|undefined} key
+     */
+    private _idempotencyRelease;
+    /**
+     * Expire settled keys older than the TTL, examining a bounded slice per call.
+     *
+     * Bounded on purpose: an unbounded scan on the post path would make the cost of
+     * opting in proportional to the size of the ledger, which is the opposite of
+     * what the option is for. A rotating cursor means every entry is eventually
+     * reached — the ledger drains at a bounded rate rather than never.
+     *
+     * `in-flight` entries are never expired. They are released by their post's own
+     * outcome, and expiring one would let a still-running task be posted a second
+     * time — the exact double-apply this feature is for.
+     *
+     * @private
+     * @param {number} now
+     */
+    private _idempotencySweep;
+    /**
      * Post a message to a worker in the pool.
      * The pool will try to reuse an idle/least-loaded worker, grow the pool
      * (up to `maxSize`), or queue the task if configured.
@@ -718,6 +784,20 @@ export class PowerPool {
      * @throws {Error} When `options.awaitResponse` is used but the provided `message` is not a plain object.
      */
     postMessage(message: any, transfer?: Transferable[] | undefined, options?: PostMessageOptions | undefined): boolean | Promise<any>;
+    /**
+     * `postMessage` without the POOL-013 ledger wrapper.
+     *
+     * Split out so the ledger sees one return value per post rather than the eight
+     * the decision is spread across, and so the settled/release pair cannot be
+     * forgotten on one path.
+     *
+     * @private
+     * @param {*} message
+     * @param {Transferable[]=} transfer
+     * @param {PostMessageOptions=} options
+     * @returns {boolean|Promise<any>}
+     */
+    private _postMessageInner;
     /**
      * Generate a correlation id for a pending response.
      *
