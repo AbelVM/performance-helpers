@@ -94,15 +94,34 @@ The output is clamped to `[min, max]` on every step, and the integral is clamped
 so it can only ever push the output _within_ those bounds. The clamp does not
 consult the gains for its bounds — only for which part of the window the
 integral may occupy. Measured across a sweep of `kp` from 0.2 to 6, `ki` and `kd`
-on and off, and sample intervals from 100 ms to 1 ms, against a first-order lag
-with 300 ms of transport delay: the loop converged every time and the integral
-stayed bounded.
+on and off, and sample intervals from 100 ms to 1 ms, against a 200 ms lag with
+300 ms of transport delay: the output stayed inside its bounds and the integral
+stayed bounded in all 90 combinations.
+
+**The loop did not converge in all 90, and the difference matters.** It converges
+for `kp` up to 1.5 at every sample interval. Past that it limit-cycles — `kp: 3` at
+`dt: 100`, and `kp: 6` at `dt: 10` and `dt: 1`, swing the full 0→100 every two
+seconds for as long as you leave them running. That is your plant's dead time and
+not this arithmetic: 300 ms of pure delay caps the loop gain near `tau / delay`, so
+those gains are unstable on that plant and any PI would oscillate. What the clamp
+buys you is that such a tuning stays _bounded_ instead of divergent, and
+`saturated` reads `true` throughout — so it fails loudly rather than quietly.
+
+Counting the 90 three ways, over a simulated 20 s each: **50 settle on target,
+16 sit at a steady offset, 24 limit-cycle.** All 16 offset cases are `ki: 0` —
+that is what proportional-only control does, and it is the whole reason the
+integral term exists. All 24 cycling cases have a non-zero `ki` and a `kp` above
+the stability band. 78 of the 90 report `saturated` at some point, so the flag is
+not a rare event and should not be read as one.
+
+If your plant has transport delay, that delay is the first number to measure and
+it sets the ceiling on `kp` before any tuning starts.
 
 What bounds the _rate_ of change is the same arithmetic — the output can move by
 at most `|kp·Δmeasured| + |ki·error|·dt + |kd·Δmeasured|/dt` in one step, and
 each term is yours.
 
-Two failure modes that are **not** divergence, and are therefore your problem
+Three failure modes that are **not** divergence, and are therefore your problem
 rather than the helper's:
 
 - **A sample interval far finer than the gains were tuned for.** The loop still
@@ -110,7 +129,16 @@ rather than the helper's:
   output is rewritten far more often — measured as 128 output changes at
   `dt = 100` against 5997 at `dt = 1` for one set of gains. Those moves were
   small (peak 0.5 on a 100-wide output), so this is not thrash; it is a sign the
-  gains do not match `dt`, and the fix is `dt` or the gains.
+  gains do not match `dt`, and the fix is `dt` or the gains. Note that the peak
+  figure is a _tail_ figure: measured over the whole run including the setpoint
+  step, the largest single move is `kp × error` on the first sample — 60 at
+  `kp: 0.6` against a 100-unit error — and counting that as chatter is how the
+  metric below was misused the first time.
+- **`dt: 0`, or a per-step `dt` of 0.** Not a coarse tick: it asserts that no time
+  passes between samples, so there is no slope to take. The derivative holds
+  rather than dividing by a zero-length span, which is what the integrator does
+  too. Before that, `dt: 0` divided by zero and the derivative reached `NaN`
+  within two steps and stayed there permanently.
 - **A `NaN` anywhere.** `measured`, a `feedforward` return, `setpoint`, `min` and
   `max` all throw rather than propagate one, because `NaN` is neither `<` nor `>`
   anything and so survives a bounds clamp while poisoning the integral
@@ -128,11 +156,17 @@ the loop moving. There was no thrash to fix. If you need a plant protected from
 steps, limit the step where you apply the output — `pool.resize()` is the right
 place, not the controller.
 
+If you re-measure this, state your window. Counting the setpoint step as part of
+the run inverts the conclusion: over the whole run at `kp: 0.6` the limit
+_cuts_ total variation (149 → 100) by capping the first-sample response, while
+over the settled tail it raises it (0.4 → 8.0). The honest form of the claim is
+about the tail, because that is where "chatter" would live.
+
 ## Tuning
 
 There is no magic here and this library will not pretend otherwise.
 
-- **Start with `ki: 0`.** Pick `kp` so the output moves most of the way to the answer on the first sample. Then add `ki` for whatever error is left over. Proportional action alone always leaves a steady-state offset; that is the integral term's whole job, and it is why a proportional controller settles at `disturbance / kp` and stops.
+- **Start with `ki: 0`.** Pick `kp` so the output moves most of the way to the answer on the first sample. Then add `ki` for whatever error is left over. Proportional action alone always leaves a steady-state offset; that is the integral term's whole job, and it is why a proportional controller settles at `disturbance / kp` and stops. **On a plant with transport delay, measure that delay first** — it caps `kp` near `tau / delay`, and past the cap the loop limit-cycles at full scale rather than converging, which reads as a broken controller and is not one.
 - **Match the gains to `dt`, not just to the units.** Gains are only meaningful for the sample rate they were tuned at; see [It cannot diverge](#it-cannot-diverge) for the measured cost of running them finer than that.
 - **Set `dt` to real elapsed time** if you are on a clock. `dt: 1` suits a fixed-rate tick and silently integrates at the wrong scale otherwise, which looks like bad tuning rather than a bad default.
 - **Set real bounds.** A bound is a constraint — a worker count, a byte ceiling. An arbitrary bound turns the integral clamp into a wall the loop hits and rests against, which is safe but means the loop is not controlling anything.

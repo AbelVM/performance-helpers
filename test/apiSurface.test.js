@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import * as index from '../src/index.js';
 import * as constants from '../src/helpers/constants.js';
 
@@ -182,16 +182,66 @@ describe('API surface', () => {
     ]);
   });
 
+  it('every exported helper has a package.json subpath, not just the reverse', () => {
+    // The gate above walks `package.json`, so it can only ever prove that a
+    // declared subpath resolves. It says nothing about a helper that has *no*
+    // subpath — which is how `PowerServo` shipped without one and every check in
+    // this file stayed green. Tree shaking is the reason the subpaths exist, and
+    // a consumer who cannot `import { PowerServo } from
+    // 'performance-helpers/powerServo'` cannot tree-shake it, so the mapping has
+    // to be checked in both directions.
+    const p = pkg();
+    // Named, not "anything without an export": both of these are internal and
+    // neither is reachable from `src/index.js`, so a subpath would advertise a
+    // module the public API does not include.
+    const INTERNAL = new Set(['constants', 'jsdoc-types']);
+    // `./now` and `./errors` mirror `src/utils/`. They are here because the
+    // count below cannot be satisfied without them, so a future `src/utils/`
+    // file forces a decision rather than quietly going missing.
+    const UTIL_SUBPATHS = ['./now', './errors'];
+    const helpers = readdirSync(new URL('../src/helpers/', import.meta.url))
+      .filter((f) => f.endsWith('.js'))
+      .map((f) => f.slice(0, -3))
+      .filter((name) => !INTERNAL.has(name))
+      .sort();
+
+    const missing = helpers.filter((name) => !p.exports[`./${name}`]);
+    expect(
+      missing,
+      'every helper needs its own subpath export so a consumer can tree-shake it.\n' +
+        'Add to package.json "exports", alphabetically:\n' +
+        missing
+          .map(
+            (n) =>
+              `    "./${n}": {\n      "types": "./types/helpers/${n}.d.ts",\n` +
+              `      "import": "./src/helpers/${n}.js",\n` +
+              `      "default": "./src/helpers/${n}.js"\n    },`
+          )
+          .join('\n')
+    ).toEqual([]);
+
+    // And the counts have to move with it: a new helper is now two edits
+    // (index.js and package.json) plus one number, rather than one edit that
+    // nothing checked. The `src/utils/` subpaths are named rather than counted,
+    // because they are the same tree-shaking contract for code that is not a
+    // helper and would otherwise be a silent hole in this assertion.
+    expect(Object.keys(p.exports).filter((k) => k !== './package.json').length).toBe(
+      helpers.length + 1 + UTIL_SUBPATHS.length
+    );
+    for (const sub of UTIL_SUBPATHS) expect(p.exports[sub], sub).toBeTruthy();
+  });
+
   it('every package.json subpath resolves to a real file with the types it promises', () => {
     const p = pkg();
     const subpaths = Object.keys(p.exports).filter((k) => k !== './package.json');
     // The pre-existing test covered 3 of these. If this count changes, a
     // subpath was added or removed and this file needs updating deliberately -
     // the count is here so that cannot happen by accident.
-    // 37 after `./metrics` (FEAT-007). The comment above is the point: this
+    // 38 after `./powerServo`, which is the subpath the gate above could not
+    // ask for. 37 was after `./metrics` (FEAT-007). The comment above is the point: this
     // number is here so a subpath cannot be added or removed by accident, and
     // the only legitimate way past it is to edit this line on purpose.
-    expect(subpaths.length).toBe(37);
+    expect(subpaths.length).toBe(38);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];
