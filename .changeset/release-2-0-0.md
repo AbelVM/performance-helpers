@@ -6861,3 +6861,85 @@ regression it names is decoration.
 - **`guides/powerCache.md` documented 8 of the 12 `stats()` fields**, omitted
   `getStats()`, and its `onEvict` row had three unescaped `|` characters inside a
   table cell — one row rendered as four columns.
+
+## `bench/claims.js bcfanout` — BC-001's numbers are now reproducible, and they are different
+
+**The row carried `[measured]` figures and no way to re-run them.** `bench/claims.js`
+had no `bcfanout` mode, so BC-001's claim — that one `BroadcastChannel` beats K
+explicit `MessagePort` posts of the same 4 kB envelope — sat in the plan table as a
+number from a private harness. That is the shape AGENTS.md records for the TinyLFU
+window sweep, where a private harness disagreed with the real one and had to be
+discarded.
+
+Measured against the shipped path: median of 9 rounds, round 0 dropped, 4 kB
+**string** envelope. A string on purpose — a `Buffer` transfers through a port and
+copies through a channel, which is a different comparison in both directions and
+would have measured the wrong thing.
+
+| peers |  sender ratio `ports/bc` | previously recorded |
+| ----: | -----------------------: | ------------------: |
+|     1 |               0.27–0.39× |               0.57× |
+|     4 |               2.01–3.75× |               4.62× |
+|    16 |             15.19–22.47× |               9.65× |
+|    32 | 5.94–24.09× _(unusable)_ |              13.27× |
+|    64 |             23.44–50.70× |                   — |
+
+Ranges are **six runs of the same command**, not a spread computed from one. Quoting
+a single run here was itself the mistake this section warns about elsewhere, and it
+took a sixth run to establish which rows are quotable at all:
+
+- **1 peer: below 1 in 6 runs out of 6** (0.27–0.39×). The channel is _slower_ when
+  there is nothing to amortise, paying per-send overhead against a port that is
+  already point-to-point. This is the control, and it is decisive.
+- **4 peers: above 1 in 6 runs out of 6** (2.01–3.75×), so the crossover is at or
+  below four subscribers rather than at some larger N.
+- **16 peers and above: an order of magnitude, not a measurement.** 16 spread
+  15.19–22.47×, 32 spread 5.94–24.09×, 64 spread 23.44–50.70×, with no
+  configuration change. 32 peers is the worst — a 4× spread _between_ two noisy
+  neighbours — and nothing in the claim depends on any of them.
+
+**An earlier draft of this entry claimed 16 and 64 peers were stable at ±10 % and
+±25 %.** Five runs said so; the sixth, at 23.44× for 64 peers, refuted it. The
+stability claim was the error, and it is corrected here rather than left in place
+because it was written down.
+
+**The conclusion is narrower than the table looks.** It rests entirely on the 1-peer
+control and the 4-peer crossover, both unanimous across six runs. The multiplier at
+any particular peer count is not a result.
+
+**A median of 9 rounds inside one process is not enough at high peer counts**, which
+is a finding about the harness rather than about `BroadcastChannel`: a reader who ran
+this once would not have known. The mode now prints the spread in its own output.
+
+**The originally recorded figures sit below the measured band at every point from
+4 peers up**, so the private harness understated the effect rather than inventing
+it: the conclusion was right and the numbers were not reproducible.
+
+**The claim holds and is sender-side**: the channel serialises once where the
+explicit loop serialises N times, and each receiver deserialises its own copy either
+way, so the receiving half cannot win and is unchanged by construction.
+
+**The old "~3.4 µs per 4 kB delivery" is not measurable in-process, and the first
+version of this mode got it wrong in a way worth recording.** It presumed a
+callback-side timer can see deserialisation. `structuredClone` runs inside the
+platform's delivery step, _before_ the receiver callback is entered, so the mode
+timed the callback and reported **53 ns** — 64× under the recorded figure, presented
+as though it were the same quantity. Reporting it would have been a measurement
+error wearing a measurement's clothes. The mode now reports wall time per delivery
+(sender and receiver on one thread, so an upper bound rather than a delivery cost)
+and prints what it cannot measure:
+
+- **Deserialisation cost** — inside the platform step, not observable from a callback.
+- **Receiver parallelism** — every receiver is on this thread. That is what keeps the
+  two sender arms comparable, and the sender conclusion does not depend on core
+  count, but nothing here predicts behaviour when a receiver is genuinely busy.
+
+**A missing `port2.close()` would have hung the harness at exit** rather than
+failing, because an unclosed `MessagePort` keeps the Node event loop alive. The
+first run failed on a `TypeError` from closing a destructured `port1` that was never
+stored, which is what exposed it. Both ends are closed now — the same
+started-handle behaviour BC-004 records for `BroadcastChannel` itself.
+
+`AGENTS.md` and the `claims.js` usage block now list the mode. `MODES` holds
+**17**, verified against the table rather than against the prose lists, which
+AGENTS.md warns drift.

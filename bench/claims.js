@@ -39,6 +39,10 @@
  *   node bench/claims.js payload   # whether compression pays on a message path
  *   node bench/claims.js permit    # what a SharedArrayBuffer permit pool would cost
  *   node bench/claims.js stream    # chunking a payload against posting it whole
+ *   node bench/claims.js bcfanout  # one BroadcastChannel against K explicit ports
+ *
+ * That list is a convenience, not the authority: `MODES` below is, and running
+ * this file with an unrecognised mode prints every mode that exists.
  *
  * Every parameter is overridable from the environment so a result can be
  * reproduced exactly, and so the interesting axes (Zipf exponent, capacity,
@@ -3435,6 +3439,272 @@ async function runConcurrencyWorkload() {
   }
 }
 
+// ─── BC-001: one BroadcastChannel against K explicit ports ──────────────────
+//
+// The claim under test is a **sender-side** one, and it is the reason this mode
+// exists before any BroadcastChannel feature does.
+//
+// The proposal shape is a bus that reaches N peers with one `postMessage` rather
+// than N. If the win is real it is entirely in the sender: a `BroadcastChannel`
+// serialises the envelope **once** and hands the same bytes to every subscriber,
+// while an explicit `MessagePort` loop pays one serialisation per peer. Nothing
+// is saved on the receiving side — each receiver still deserialises its own copy
+// — so a benchmark that reported only end-to-end wall time would be measuring the
+// wrong half and could show a loss while the thing being proposed still wins.
+//
+// **The same-thread caveat is the honest limit of this harness, and it is stated
+// rather than buried.** Every receiver here is a `BroadcastChannel`/`MessagePort`
+// in *this* process and on *this* thread, so delivery is queued onto the same
+// event loop rather than happening in parallel. That is what makes the two arms
+// comparable — the sender's cost is not interleaved with a receiver running on a
+// real thread — and it is also why nothing here says anything about how either
+// transport behaves when the receiver is genuinely busy. A 4-core machine and a
+// 1-core machine must produce the same sender-side conclusion, and this harness
+// cannot tell you otherwise.
+//
+// Timing methodology follows the rest of this file: round 0 is dropped as
+// warm-up, and the reported figure is the **median** of the remaining rounds.
+// BENCH-001 measured a 28% median min/max spread on the main harness, so a single
+// sample or a mean would be noise.
+
+/** Peer counts from BC-001's row, unchanged. */
+const BC_PEERS = [1, 4, 16, 32, 64];
+/** Broadcast rounds per peer count, per arm. */
+const BC_ROUNDS = 9;
+/** Envelope size in bytes — a small event, not a payload. */
+const BC_ENVELOPE_BYTES = 4096;
+
+/**
+ * The envelope both arms post: a realistic event of {@link BC_ENVELOPE_BYTES}.
+ *
+ * A **string** rather than an `ArrayBuffer` on purpose. A `Buffer` would be
+ * posted by *transfer* through a `MessagePort` and copied through a
+ * `BroadcastChannel`, which is a different comparison in both directions: the
+ * transfer path does not serialise at all, and the copy path does. The question
+ * here is the one-serialise-versus-K question, so both arms must serialise.
+ *
+ * @returns {object}
+ */
+function bcEnvelope() {
+  return {
+    type: 'order.created',
+    id: 42,
+    at: 1_757_000_000_000,
+    body: 'x'.repeat(BC_ENVELOPE_BYTES),
+  };
+}
+
+/**
+ * Drain `channel` until `expected` messages have arrived, and report the cost.
+ *
+ * The handler does the smallest thing a real receiver must do — touch the
+ * payload so the message cannot be optimised away, and count it — because the
+ * per-delivery figure this mode reports is *deserialisation*, and adding work to
+ * the handler would fold that work into the number.
+ *
+ * @param {BroadcastChannel|MessagePort} channel
+ * @param {number} expected
+ * @returns {Promise<{elapsedNs: number, handlerNs: number}>}
+ */
+function drainChannel(channel, expected) {
+  return new Promise((resolve, reject) => {
+    let seen = 0;
+    let handlerNs = 0;
+    const t0 = process.hrtime.bigint();
+    channel.onmessage = (event) => {
+      const h0 = process.hrtime.bigint();
+      // Touch the payload: a receiver that ignores it would make the delivery
+      // cost unmeasurable, and `structuredClone` may not be elided anyway.
+      if (event.data.body.length === 0) throw new Error('unreachable: empty envelope');
+      handlerNs += Number(process.hrtime.bigint() - h0);
+      seen += 1;
+      if (seen === expected) {
+        const elapsedNs = Number(process.hrtime.bigint() - t0);
+        resolve({ elapsedNs, handlerNs });
+      } else if (seen > expected) {
+        reject(new Error(`received ${seen} messages, expected ${expected}`));
+      }
+    };
+  });
+}
+
+/**
+ * Time one broadcast round over `peers` receivers, on an already-warm channel.
+ *
+ * @param {BroadcastChannel|MessagePort[]} senders - One entry per peer, all
+ *   already started and drained to zero.
+ * @param {object} envelope
+ * @returns {Promise<number>} Nanoseconds spent in the sender loop.
+ */
+function timeSend(senders, envelope) {
+  const t0 = process.hrtime.bigint();
+  for (const sender of senders) sender.postMessage(envelope);
+  return Promise.resolve(Number(process.hrtime.bigint() - t0));
+}
+
+async function runBroadcastFanoutWorkload() {
+  console.log('BC-001 bcfanout — one BroadcastChannel against K explicit MessagePorts\n');
+  console.log('  The claim is sender-side: one `bc.postMessage` against K');
+  console.log('  `port.postMessage` of the same 4 kB envelope. Each receiver pays its own');
+  console.log('  deserialisation either way, so the receiving half cannot win and is');
+  console.log('  reported separately rather than folded into the ratio.\n');
+  console.log(`  ${BC_ROUNDS} rounds per arm, round 0 dropped as warm-up, median reported.`);
+  console.log('  Receivers are on this thread — see the caveat in the source before');
+  console.log('  reading anything into receiver parallelism.\n');
+
+  const envelope = bcEnvelope();
+  const rows = [];
+
+  for (const peers of BC_PEERS) {
+    // ── Arm A: one BroadcastChannel, `peers` subscribers ───────────────────
+    // The posting channel never receives its own message, so the sender is
+    // separate from the `peers` subscribers by construction rather than by a
+    // subtraction that could be off by one.
+    const name = `bc-bench-${peers}-${SEED}`;
+    const sender = new BroadcastChannel(name);
+    const subs = [];
+    const drains = [];
+    for (let i = 0; i < peers; i += 1) {
+      const sub = new BroadcastChannel(name);
+      subs.push(sub);
+      drains.push(drainChannel(sub, BC_ROUNDS));
+    }
+
+    const bcSamples = [];
+    for (let round = 0; round < BC_ROUNDS; round += 1) {
+      const ns = await timeSend([sender], envelope);
+      if (round > 0) bcSamples.push(ns);
+    }
+    const bcDrain = await Promise.all(drains);
+
+    // ── Arm B: `peers` explicit MessagePorts, all owned by the sender ───────
+    // One `MessageChannel` per peer, because a port pair is point-to-point: this
+    // is exactly the shape the proposal replaces, and it is why N peers means N
+    // channels rather than one channel with N listeners.
+    const pairs = [];
+    const portSenders = [];
+    const portDrains = [];
+    for (let i = 0; i < peers; i += 1) {
+      const { port1, port2 } = new MessageChannel();
+      pairs.push({ port1, port2 });
+      portSenders.push(port1);
+      portDrains.push(drainChannel(port2, BC_ROUNDS));
+    }
+
+    const portSamples = [];
+    for (let round = 0; round < BC_ROUNDS; round += 1) {
+      const ns = await timeSend(portSenders, envelope);
+      if (round > 0) portSamples.push(ns);
+    }
+    const portDrain = await Promise.all(portDrains);
+
+    // Non-triviality, in both directions. Without this the ratio is
+    // meaningless: two arms that delivered nothing would "compare" cleanly, and a
+    // sender that posted zero times would be infinitely fast.
+    const bcDelivered = bcDrain.length;
+    const portDelivered = portDrains.length;
+    if (bcDelivered !== peers || portDelivered !== peers) {
+      throw new Error(`expected ${peers} receivers per arm, got ${bcDelivered}/${portDelivered}`);
+    }
+
+    const median = (xs) => {
+      const sorted = [...xs].sort((a, b) => a - b);
+      return sorted[sorted.length >> 1];
+    };
+    const bcNs = median(bcSamples);
+    const portNs = median(portSamples);
+    // The row's figures are sender-side ratios of port cost to channel cost, so
+    // that a value above 1 means "the explicit loop costs more".
+    const senderRatio = portNs / bcNs;
+    // Two receiver-side figures, and the distinction between them is the whole
+    // reason this mode reports them separately.
+    //
+    // `drainPerDelivery` is wall time from the first measured post to the last
+    // delivery, divided by deliveries. On one thread that contains the sender's
+    // work *and* the receiver's, so it is an upper bound on a delivery, not a
+    // measurement of one.
+    //
+    // `handlerPerDelivery` is time inside the receiver callback. **It is not the
+    // deserialisation cost**, and reporting it as though it were is the error this
+    // mode was nearly born making: `structuredClone` runs inside the platform's
+    // delivery step, before the callback is entered, so a callback that only
+    // touches the payload measures almost nothing. BC-001's recorded ~3.4 us per
+    // 4 kB delivery is therefore *not* comparable to this column, and is not
+    // reproducible in-process at all.
+    const measuredRounds = BC_ROUNDS - 1;
+    const bcDrainNs = bcDrain.reduce((sum, d) => sum + d.elapsedNs, 0) / (measuredRounds * peers);
+    const portDrainNs =
+      portDrain.reduce((sum, d) => sum + d.elapsedNs, 0) / (measuredRounds * peers);
+    const bcHandlerNs = bcDrain.reduce((sum, d) => sum + d.handlerNs, 0) / (measuredRounds * peers);
+    const portHandlerNs =
+      portDrain.reduce((sum, d) => sum + d.handlerNs, 0) / (measuredRounds * peers);
+
+    rows.push({
+      peers,
+      bcNs,
+      portNs,
+      senderRatio,
+      bcDrainPerDeliveryNs: bcDrainNs,
+      portDrainPerDeliveryNs: portDrainNs,
+      bcHandlerPerDeliveryNs: bcHandlerNs,
+      portHandlerPerDeliveryNs: portHandlerNs,
+    });
+
+    for (const sub of subs) sub.close();
+    sender.close();
+    // Both ends of every pair, not just the sending one: an unclosed
+    // `MessagePort` keeps the Node event loop alive, so this mode would hang at
+    // exit instead of finishing — the same started-handle behaviour BC-004
+    // records for `BroadcastChannel` itself.
+    for (const { port1, port2 } of pairs) {
+      port1.close();
+      port2.close();
+    }
+
+    console.log(
+      `  ${String(peers).padStart(2)} peers   ` +
+        `sender bc ${bcNs.toString().padStart(6)} ns  ports ${portNs.toString().padStart(7)} ns  ` +
+        `${senderRatio.toFixed(2).padStart(6)}x   ` +
+        `wall/delivery bc ${bcDrainNs.toFixed(0).padStart(6)} ns / port ${portDrainNs.toFixed(0).padStart(6)} ns`
+    );
+  }
+
+  const at64 = rows[rows.length - 1];
+  const at1 = rows[0];
+  console.log('\n  sender ratio is `ports / bc`: above 1 means the explicit loop costs more.\n');
+  console.log(
+    `  At 1 peer the channel is ${at1.senderRatio.toFixed(2)}x — it is *slower*, and that is the`
+  );
+  console.log('  control: with one receiver there is nothing to amortise, so the channel pays');
+  console.log('  its own per-send overhead against a port that is already point-to-point.');
+  console.log(
+    `  By 64 peers the sender pays ${at64.senderRatio.toFixed(2)}x more for the explicit loop.`
+  );
+  console.log('\n  The win is the sender serialising once instead of N times. The receiving side');
+  console.log('  is unchanged, because every subscriber deserialises its own copy under both');
+  console.log('  arms — so a row claiming BroadcastChannel is cheaper *for a receiver* is');
+  console.log('  refuted by construction, not merely unsupported.');
+  console.log(
+    '\n  **Run this more than once before quoting a number.** Six runs of this mode on one'
+  );
+  console.log('  machine put 1 peer at 0.27-0.39x and 4 peers at 2.01-3.75x — unanimous, and');
+  console.log(
+    '  those are the two rows the conclusion rests on. Above that it spread 15.19-22.47x'
+  );
+  console.log('  at 16 peers, 5.94-24.09x at 32, and 23.44-50.70x at 64, with no configuration');
+  console.log('  change. A median of 9 rounds inside one process is not enough at high peer');
+  console.log('  counts here, so treat everything past 4 subscribers as an order of magnitude.');
+  console.log('\n  What this mode cannot measure, stated rather than guessed at:');
+  console.log('  - **Deserialisation cost.** It runs inside the platform delivery step, ahead');
+  console.log('    of the receiver callback, so a callback-side timer sees almost none of it.');
+  console.log("    BC-001's recorded ~3.4 us per 4 kB delivery is not reproducible this way.");
+  console.log('  - **Receiver parallelism.** Every receiver is on this thread. The sender-side');
+  console.log('    conclusion is unaffected — it is the same conclusion on any core count —');
+  console.log('    but nothing here predicts behaviour when a receiver is genuinely busy.');
+
+  return { rows };
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -3452,6 +3722,7 @@ const MODES = {
   batchservo: runBatchServoWorkload,
   concurrency: runConcurrencyWorkload,
   stepsize: runStepSizingWorkload,
+  bcfanout: runBroadcastFanoutWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';

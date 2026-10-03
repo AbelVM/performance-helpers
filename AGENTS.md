@@ -95,12 +95,13 @@ node bench/claims.js correlation # what awaiting a correlated reply costs
 node bench/claims.js batchservo   # does a closed loop beat a fixed flush size
 node bench/claims.js concurrency # is `autoScale.policy` wired to anything
 node bench/claims.js stepsize    # does the autoscale step controller beat a fixed step
+node bench/claims.js bcfanout    # one BroadcastChannel against K explicit MessagePorts
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all sixteen** modes, not the six this file used to list: ten
+That is **all seventeen** modes, not the six this file used to list: eleven
 measurements were reachable only by reading `bench/claims.js`, and six of them
 were named in neither this file nor `bench/README.md`.
 
