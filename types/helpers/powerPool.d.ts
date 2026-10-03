@@ -891,7 +891,40 @@ export class PowerPool {
      * @returns {number} The updated limit.
      * @private
      */
-    private _updateAdaptiveLimit;
+    /**
+     * How many workers this tick's scale action should move, given how far
+     * latency currently sits from `targetMs`.
+     *
+     * **The thresholds in `_autoScaleTick` still decide the direction.** This only
+     * sets the magnitude, inside the caller's existing `stepUp` / `stepDown`
+     * ceiling — which is why nothing changes at the default `stepUp: 1`: a ceiling
+     * of one worker is one worker, whatever the controller says.
+     *
+     * Before this, the step was a fixed count. A pool that was 20 % over target
+     * added as many workers as one that was 300 % over, so the badly-over case
+     * converged no faster than the marginal one. A PI controller on the relative
+     * error scales the step by how far off the setpoint actually is, and its
+     * integral term is what removes the residual: this is a *discrete* stepper, so
+     * proportional action alone leaves a standing offset, which is exactly the
+     * property `PowerServo`'s "converges to a setpoint a fixed gain cannot" test
+     * pins.
+     *
+     * Normalised, not absolute: `measured` is `ewma / targetMs` against a setpoint
+     * of `1`, so the gains are dimensionless and do not have to be retuned when
+     * `targetMs` changes. Only `|output|` is used — the sign is already settled by
+     * the hysteresis band and the queue-pressure check.
+     *
+     * `PowerServo` owns no timer, so `dt` is passed in; the tick's own
+     * `intervalMs` is the right unit because that is the interval this runs on.
+     *
+     * @param {number} ewma - Current latency EWMA in ms.
+     * @param {number} targetMs - Configured target.
+     * @param {number} ceiling - `stepUp` or `stepDown`; the caller's hard limit.
+     * @param {number} dtSeconds - Tick interval in seconds, for the integral.
+     * @returns {number} A worker count in `[1, ceiling]`.
+     */
+    _autoscaleSteps(ewma: number, targetMs: number, ceiling: number, dtSeconds: number): number;
+    _updateAdaptiveLimit(): number | undefined;
     /**
      * Autoscale tick: simple policy that grows/shrinks by one worker based on
      * pool-level EWMA latency and queue pressure. Runs only when `autoScale`
@@ -902,6 +935,8 @@ export class PowerPool {
      * @private
      */
     private _autoScaleTick;
+    /** @type {PowerServo|null} */
+    _autoscaleServo: PowerServo | null | undefined;
     /**
      * Emit the pool-idle synthetic message to `onmessage` and listeners.
      *
@@ -1142,3 +1177,4 @@ export type PowerPoolOptions = import("./jsdoc-types.js").PowerPoolOptions;
 import { PowerQueue } from './powerQueue.js';
 import { PowerEventBus } from './powerEventBus.js';
 import { PowerLogger } from './powerLogger.js';
+import { PowerServo } from './powerServo.js';

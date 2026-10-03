@@ -22,6 +22,7 @@ import { setSafeInterval } from '../utils/timers.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerLogger } from './powerLogger.js';
 import { PowerEventBus } from './powerEventBus.js';
+import { PowerServo } from './powerServo.js';
 import {
   frameEncodedJson,
   decodeMessage,
@@ -3545,6 +3546,67 @@ export class PowerPool {
    * @returns {number} The updated limit.
    * @private
    */
+  /**
+   * How many workers this tick's scale action should move, given how far
+   * latency currently sits from `targetMs`.
+   *
+   * **The thresholds in `_autoScaleTick` still decide the direction.** This only
+   * sets the magnitude, inside the caller's existing `stepUp` / `stepDown`
+   * ceiling — which is why nothing changes at the default `stepUp: 1`: a ceiling
+   * of one worker is one worker, whatever the controller says.
+   *
+   * Before this, the step was a fixed count. A pool that was 20 % over target
+   * added as many workers as one that was 300 % over, so the badly-over case
+   * converged no faster than the marginal one. A PI controller on the relative
+   * error scales the step by how far off the setpoint actually is, and its
+   * integral term is what removes the residual: this is a *discrete* stepper, so
+   * proportional action alone leaves a standing offset, which is exactly the
+   * property `PowerServo`'s "converges to a setpoint a fixed gain cannot" test
+   * pins.
+   *
+   * Normalised, not absolute: `measured` is `ewma / targetMs` against a setpoint
+   * of `1`, so the gains are dimensionless and do not have to be retuned when
+   * `targetMs` changes. Only `|output|` is used — the sign is already settled by
+   * the hysteresis band and the queue-pressure check.
+   *
+   * `PowerServo` owns no timer, so `dt` is passed in; the tick's own
+   * `intervalMs` is the right unit because that is the interval this runs on.
+   *
+   * @param {number} ewma - Current latency EWMA in ms.
+   * @param {number} targetMs - Configured target.
+   * @param {number} ceiling - `stepUp` or `stepDown`; the caller's hard limit.
+   * @param {number} dtSeconds - Tick interval in seconds, for the integral.
+   * @returns {number} A worker count in `[1, ceiling]`.
+   */
+  _autoscaleSteps(ewma, targetMs, ceiling, dtSeconds) {
+    if (!(ceiling > 1) || ewma == null || !(targetMs > 0)) return Math.max(1, ceiling || 1);
+    // **`min` is negative on purpose.** Only `|output|` is used, so the servo has
+    // to be able to represent a negative command — and with `min: 0` the clamp
+    // collapsed every overshoot to exactly 0 before the absolute value was taken,
+    // so the step was permanently one worker and the controller did nothing at
+    // all. That is the same class of bug as the anti-windup sign: the arithmetic
+    // was right and the bound was on the wrong side of it.
+    this._autoscaleServo ??= new PowerServo({
+      setpoint: 1,
+      kp: 1,
+      ki: 0.25,
+      min: -ceiling,
+      max: ceiling,
+    });
+    // The servo holds no timer and no listener, so its dispose is a state reset;
+    // recreating it when the ceiling shrinks keeps its integral inside the new
+    // window rather than letting it unwind through a bound it no longer has.
+    if (this._autoscaleServo.max !== ceiling) {
+      this._autoscaleServo.max = ceiling;
+      this._autoscaleServo.min = -ceiling;
+      this._autoscaleServo.reset();
+    }
+    const relative = ewma / targetMs;
+    const output = Math.abs(this._autoscaleServo.step(relative, dtSeconds));
+    if (!Number.isFinite(output)) return 1;
+    return Math.max(1, Math.min(ceiling, Math.round(output)));
+  }
+
   _updateAdaptiveLimit() {
     const cfg = this._autoScale;
     if (!cfg || cfg.policy === 'ewma') return this._adaptiveLimit;
@@ -3637,6 +3699,12 @@ export class PowerPool {
         now - this._lastAutoScaleAt > cfg.backoffResetMs
       ) {
         this._autoScaleBackoffMultiplier = 1;
+        // Declared here rather than only at its `??=` in `_autoscaleSteps`: a field
+        // TS cannot see is a field it reports as absent, which cost 8 `TS2551`s the
+        // first time round. The same lesson as `PowerServo._setpoint`, and the same
+        // fix — and the same reminder that `??=` is invisible to a checkJs project.
+        /** @type {PowerServo|null} */
+        this._autoscaleServo = null;
       }
 
       // enforce effective cooldown between scale actions (taking backoff into account)
@@ -3662,7 +3730,9 @@ export class PowerPool {
       if (needScaleUp || queuePressure) {
         if (workers < this.maxSize) {
           try {
-            const maxAdd = Math.min(this.maxSize - workers, cfg.stepUp || 1);
+            const stepCeiling = cfg.stepUp || 1;
+            const steps = this._autoscaleSteps(ewma, target, stepCeiling, cfg.intervalMs / 1000);
+            const maxAdd = Math.min(this.maxSize - workers, steps);
             for (let i = 0; i < maxAdd; i++) {
               try {
                 const before = this.workers.length;
@@ -3695,10 +3765,26 @@ export class PowerPool {
       // scale-down heuristics: require EWMA to be below target by hysteresis
       const downThreshold = target * Math.max(0, 1 - hysteresis);
       const needScaleDown = ewma != null ? ewma < downThreshold : false;
+      // The step servo is state like the backoff multiplier is, and it is dropped
+      // when the pool is **quiet** — meaning this tick decided to do nothing. Not
+      // when the cooldown expired: an earlier version reset on
+      // `now - lastAutoScaleAt > cooldownMs`, which is the exact complement of the
+      // cooldown guard above, so it fired on every tick that guard let through and
+      // the integral could never survive a single interval.
+      if (!needScaleUp && !queuePressure && !needScaleDown && this._autoscaleServo) {
+        this._autoscaleServo.reset();
+      }
       if (needScaleDown && this.queue.length === 0) {
         if (workers > this.minSize) {
           try {
-            const maxRemove = Math.min(workers - this.minSize, cfg.stepDown || 1);
+            const stepCeilingDown = cfg.stepDown || 1;
+            const stepsDown = this._autoscaleSteps(
+              ewma,
+              target,
+              stepCeilingDown,
+              cfg.intervalMs / 1000
+            );
+            const maxRemove = Math.min(workers - this.minSize, stepsDown);
             let removed = 0;
             // Prefer removing idle workers only (tasks === 0). Iterate from newest to oldest.
             for (let idx = this.workers.length - 1; idx >= 0 && removed < maxRemove; idx--) {

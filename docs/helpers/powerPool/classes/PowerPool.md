@@ -81,6 +81,12 @@ number of currently active (dispatched) tasks across all workers
 
 ***
 
+### \_autoscaleServo
+
+> **\_autoscaleServo**: [`PowerServo`](../../powerServo/classes/PowerServo.md) \| `null` \| `undefined`
+
+***
+
 ### \_bus
 
 > **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md)
@@ -579,6 +585,69 @@ Whether queued dispatch is currently paused.
 
 ## Methods
 
+### \_autoscaleSteps()
+
+> **\_autoscaleSteps**(`ewma`, `targetMs`, `ceiling`, `dtSeconds`): `number`
+
+How many workers this tick's scale action should move, given how far
+latency currently sits from `targetMs`.
+
+**The thresholds in `_autoScaleTick` still decide the direction.** This only
+sets the magnitude, inside the caller's existing `stepUp` / `stepDown`
+ceiling — which is why nothing changes at the default `stepUp: 1`: a ceiling
+of one worker is one worker, whatever the controller says.
+
+Before this, the step was a fixed count. A pool that was 20 % over target
+added as many workers as one that was 300 % over, so the badly-over case
+converged no faster than the marginal one. A PI controller on the relative
+error scales the step by how far off the setpoint actually is, and its
+integral term is what removes the residual: this is a *discrete* stepper, so
+proportional action alone leaves a standing offset, which is exactly the
+property `PowerServo`'s "converges to a setpoint a fixed gain cannot" test
+pins.
+
+Normalised, not absolute: `measured` is `ewma / targetMs` against a setpoint
+of `1`, so the gains are dimensionless and do not have to be retuned when
+`targetMs` changes. Only `|output|` is used — the sign is already settled by
+the hysteresis band and the queue-pressure check.
+
+`PowerServo` owns no timer, so `dt` is passed in; the tick's own
+`intervalMs` is the right unit because that is the interval this runs on.
+
+#### Parameters
+
+##### ewma
+
+`number`
+
+Current latency EWMA in ms.
+
+##### targetMs
+
+`number`
+
+Configured target.
+
+##### ceiling
+
+`number`
+
+`stepUp` or `stepDown`; the caller's hard limit.
+
+##### dtSeconds
+
+`number`
+
+Tick interval in seconds, for the integral.
+
+#### Returns
+
+`number`
+
+A worker count in `[1, ceiling]`.
+
+***
+
 ### \_createPendingResponsePromise()
 
 > **\_createPendingResponsePromise**(`correlationId`, `options`): `object`
@@ -630,6 +699,16 @@ Whether queued dispatch is currently paused.
 #### Returns
 
 `void`
+
+***
+
+### \_updateAdaptiveLimit()
+
+> **\_updateAdaptiveLimit**(): `number` \| `undefined`
+
+#### Returns
+
+`number` \| `undefined`
 
 ***
 
