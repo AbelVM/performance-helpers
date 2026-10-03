@@ -117,6 +117,41 @@ const RESOURCE_OWNERS = [
   ['WorkerAgnostic', () => new WorkerAgnostic(() => new EventTargetWorker())],
 ];
 
+describe('the RESOURCE_OWNERS list itself', () => {
+  it('holds exactly the 20 classes it claims to', () => {
+    // This assertion exists because **two different wrong counts** reached the
+    // record inside one session, and neither was caught. WRK-002's note said the
+    // list held 19 classes; the changeset entry for the same work said it held 16
+    // and that `WorkerAgnostic` became the 17th entry. Checked against git rather
+    // than believed: `13d781b^` really does hold **19**, and `13d781b` **20**. So
+    // the row was right and the changeset was wrong twice over — and `it.each`
+    // over the list cannot notice either, because every assertion in the file
+    // still passes at 16 or at 25 entries.
+    //
+    // The number is a real guard rather than a snapshot of a moment: it is
+    // asserted so that adding or removing an entry is a **deliberate edit** that
+    // fails loudly. Growing the list is the good direction, so whoever does it
+    // updates this line in the same commit — which is the intent, not an
+    // inconvenience.
+    expect(RESOURCE_OWNERS).toHaveLength(20);
+  });
+
+  it('has no duplicate class names', () => {
+    // A duplicate would silently double every `it.each` case while reporting a
+    // green suite, and the count assertion above would then be the only thing
+    // complaining — about a number nobody would think to re-derive.
+    const names = RESOURCE_OWNERS.map(([name]) => name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('ends at WorkerAgnostic, the class WRK-002 added', () => {
+    // Position is the part worth pinning: WRK-002's note claimed the class was
+    // "absent from the 19-entry list", so the list's length is the row's own
+    // evidence and the name has to still be in it.
+    expect(RESOURCE_OWNERS.at(-1)?.[0]).toBe('WorkerAgnostic');
+  });
+});
+
 describe('every resource-owning class supports explicit disposal', () => {
   it.each(RESOURCE_OWNERS)('%s implements dispose() and [Symbol.dispose]', (_name, make) => {
     const instance = make();

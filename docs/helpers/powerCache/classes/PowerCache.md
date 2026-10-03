@@ -258,7 +258,10 @@ caller's side it was served.
 > **\_weightErrors**: `number`
 
 number of times `weightFn` threw; a non-zero value means `maxWeight`
- could not be enforced and should be surfaced by the caller.
+ could not be enforced. It used to say "should be surfaced by the caller"
+ and could not be, because nothing in `stats()` carried it (CACHE-011);
+ `stats().weightErrors` is where a caller reads it now, and `attach()`
+ flattens that into a metric series.
 
 ***
 
@@ -836,6 +839,10 @@ which is the property a consumer relies on.
 
 > **rejected**: `number`
 
+##### rejectedAdmission
+
+> **rejectedAdmission**: `number`
+
 ##### size
 
 > **size**: `number`
@@ -847,6 +854,10 @@ which is the property a consumer relies on.
 ##### weight
 
 > **weight**: `number`
+
+##### weightErrors
+
+> **weightErrors**: `number`
 
 ***
 
@@ -1104,6 +1115,22 @@ Cleanup interval in ms, or an options object. Written as one type expression rat
 
 Return runtime statistics for the cache.
 
+Two of these counters were unreachable until CACHE-011, and both are read
+for opposite reasons. `rejectedAdmission` is the *policy working*: non-zero
+under `admission: 'tinylfu'` is what makes a scan-resistant cache
+scan-resistant, so a benchmark that reports zero rejections has measured
+nothing and a monitoring dashboard that expects a non-zero floor after a
+traffic shift should be told the filter stopped running.
+`weightErrors` is the opposite — a swallowed failure. `weightFn` threw, the
+throw was routed to `onError` if one exists, and the entry was skipped; a
+cache silently under-weighting itself will evict too much, or too little, and
+nothing else in this object moves when it does.
+
+Both were private fields with tests reading them directly, which is the tell
+that they were meant to be public: `PowerCache` publishes the rest of its
+counters here and lets `attach()` flatten them into metric series, so a
+field missing from `stats()` is a field no collector can ever see.
+
 #### Returns
 
 `object`
@@ -1136,6 +1163,10 @@ Return runtime statistics for the cache.
 
 > **rejected**: `number`
 
+##### rejectedAdmission
+
+> **rejectedAdmission**: `number`
+
 ##### size
 
 > **size**: `number`
@@ -1147,6 +1178,10 @@ Return runtime statistics for the cache.
 ##### weight
 
 > **weight**: `number`
+
+##### weightErrors
+
+> **weightErrors**: `number`
 
 ***
 

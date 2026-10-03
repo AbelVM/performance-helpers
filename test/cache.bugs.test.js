@@ -84,7 +84,13 @@ describe('PowerCache error reporting (BUG-013, BUG-014, QUAL-006)', () => {
     c.set('a', 1);
     expect(onError).toHaveBeenCalled();
     expect(onError.mock.calls[0][1]).toMatch(/weightFn/);
-    expect(c._weightErrors).toBe(1);
+    // Public surface since CACHE-011. This assertion used to read
+    // `c._weightErrors`, which is the tell that the counter was never meant to be
+    // private: a `weightFn` that throws voids the `maxWeight` budget for every
+    // entry it is asked about, and a caller watching the cache had no way to see
+    // it. `attach()` flattens `stats()` into metric series, so a counter missing
+    // from here is a counter no collector can ever see.
+    expect(c.stats().weightErrors).toBe(1);
   });
 
   it('routes a throwing onEvict from set() to onError (previously silent)', () => {

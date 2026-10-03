@@ -196,6 +196,34 @@ export function assertCount(value: any, { name, className, method }: {
  */
 export function normalizeTtl(ttl: any, className: string): number;
 /**
+ * Validate a hash seed: a whole number in the int32 range, or nothing at all.
+ *
+ * Lives here for the reason {@link normalizeTtl} does (BUG-024): the knowledge
+ * about what a seed may be belongs to the thing that *consumes* it, and the
+ * consumer here is `SmallLfuSketch`, which is a leaf module nothing else may
+ * depend on. A validator next to the sketch would be one `PowerCache` could not
+ * use, and the option would be unvalidated at the public surface — which is how
+ * `ttl: '1e3'` reached the cache and produced an immortal entry (CACHE-003).
+ *
+ * The int32 bound is not pedantry, it is the contract the sketch already
+ * implements: `smallLfu.js:138` ends with `| 0`, so `seed: 4294967296` and
+ * `seed: 1.5` both arrive as `0`. Silently substituting a different seed is
+ * precisely the failure this option exists to prevent — a caller who passed a
+ * seed to make admission reproducible would get a reproducible *wrong* one,
+ * with nothing to say so.
+ *
+ * `undefined` passes through and means "random", which is the sketch's own
+ * documented default. `null` is treated the same way rather than rejected: the
+ * constructor destructures before validating everywhere else in this library, so
+ * `null` is what an explicitly-absent option collapses to.
+ *
+ * @param {*} seed
+ * @param {string} className - For the message prefix.
+ * @returns {number|undefined}
+ * @private
+ */
+export function assertSeed(seed: any, className: string): number | undefined;
+/**
  * Validate an option that must be a function (or explicitly null/undefined).
  * @param {any} value
  * @param {object} spec

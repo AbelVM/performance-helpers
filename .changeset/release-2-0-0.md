@@ -6639,9 +6639,22 @@ a real `EventTarget` the same mutation fails 2. The same mislabelling was fixed 
 `test/disposal.test.js`. **A test that claims to cover a branch it never enters
 is worse than no test**, because it is counted as coverage.
 
-`WorkerAgnostic` is now the 17th entry in `RESOURCE_OWNERS`. That list held
-**16**, not the 19 the row claimed, so the row's own count needed re-verifying
-too — which is the second half of what it asked for.
+`WorkerAgnostic` is now the 20th entry in `RESOURCE_OWNERS`. That list held
+**19**, not the 17 recorded here before — so this paragraph, and WRK-002's own
+note, had the counts the wrong way round between them.
+
+**Corrected against git rather than believed.** `git show 13d781b^:test/disposal.test.js`
+holds **19** entries and `13d781b` holds **20**, with `WorkerAgnostic` last. Both
+numbers in the paragraph this replaces were wrong, and nothing could have caught
+either: every assertion in `test/disposal.test.js` is an `it.each` **over** the
+list, so the suite is fully green at 16 entries, at 20, and at 25 — a list that had
+silently lost half its classes would have reported the same twenty-two passing tests.
+
+The row WRK-002 asked for was right and was not re-verified anyway, which is the
+same shape as the defect: a count asserted nowhere cannot be wrong loudly. The list
+now carries `expect(RESOURCE_OWNERS).toHaveLength(20)`, a no-duplicates check, and
+an assertion that the last entry is still `WorkerAgnostic` — the three mutants that
+had to fail were the count, a duplicated name, and `WorkerAgnostic` removed.
 
 ## `PowerCache` rejects unknown options
 
@@ -6773,3 +6786,78 @@ types were needed and absent:
 
 **The ratchet now reads 144 against a ceiling of 148** — below the baseline that
 preceded the work, not merely back at it. 54 tests green, lint 0 errors.
+
+## `PowerCache`: a seed you can pin, and two counters you can read
+
+**The TinyLFU sketch has taken a `seed` since it was written, and the cache never
+passed one.** `SmallLfuSketch`'s own option is documented as "per-cache seed, so two
+caches do not share a hash pattern" — and `powerCache.js` constructed it with
+`width` and `sampleSize` only, so `smallLfu.js:138` drew the seed from
+`Math.random()` on every construction. Two caches built from byte-identical options
+therefore hashed differently.
+
+That is the right default for two caches sharing a process and the wrong one when
+you are measuring. An admission-sensitive result could not be attributed to its own
+configuration, and a regression that moved admission could not be reproduced from
+its options — the sketch's hash is part of every admission decision, so the options
+alone did not determine the outcome.
+
+`new PowerCache({ seed: 12345 })` now pins it. Three details:
+
+- **It only applies to `'tinylfu'`.** `'none'` and `policy: 'slru'` build no sketch.
+  It is still validated when admission is off, because an option that cannot be
+  honoured should say so rather than sit there doing nothing.
+- **A whole number in the int32 range, or it throws.** The sketch ends its seed
+  handling with `| 0`, so `1.5` and `4294967296` both arrive as `0` — silently.
+  A caller who passed a seed to make admission reproducible would get a reproducible
+  _wrong_ one, which is the exact failure the option exists to remove.
+- **It costs nothing on the read path.** It decides which counter a key maps to
+  once, at construction.
+
+### Two counters that existed and could not be read
+
+`stats()` was missing fields the class had been counting all along, and the
+constructor's own comment told the caller to watch one of them:
+
+| Counter             | Meaning                                                    | Was                |
+| ------------------- | ---------------------------------------------------------- | ------------------ |
+| `rejectedAdmission` | Inserts the TinyLFU filter refused                         | private field only |
+| `weightErrors`      | `weightFn` calls that threw, so `maxWeight` was unenforced | private field only |
+
+`weightErrors` is the more consequential one. A throwing `weightFn` returns a weight
+of `0` for the entry, which silently voids the `maxWeight` budget — the entry looks
+weightless, so nothing is evicted on its account. The comment at the assignment read
+_"should be surfaced by the caller"_, and there was no way for a caller to surface
+it.
+
+`rejectedAdmission` is the other direction: non-zero means **the policy is working**,
+so a run that reports zero rejections has measured nothing. Admission is only
+consulted at capacity, so a cache that never filled never consulted it, and a filter
+that silently discards is indistinguishable from one that is broken.
+
+Both landed as public `stats()` fields, and `attach()` flattens `stats()` into metric
+series, so they are observable wherever the other eleven counters already were.
+
+### The tests are a property, and the mutant that proves it
+
+`test/powerCache.admissionSeed.test.js` asserts that two identically seeded caches
+make **identical admission decisions** — compared as eviction-order traces and
+rejection counts, not as a value read back off `_sketch.seed`. Deleting the
+`seed:` line from the `SmallLfuSketch` construction fails 3 of its 6 cases; the
+property test and the cross-construction test are among them.
+
+The non-triviality assertion is the part that matters: every case checks
+`stats().rejectedAdmission > 0` first, because two caches that rejected nothing would
+agree no matter how they hashed, and a property test that cannot fail on the
+regression it names is decoration.
+
+### Also fixed in the same pass, and not part of any row
+
+- **`PowerCacheOptions` had a malformed `@property` line.** `allowStale`'s tag had
+  been swallowed onto the `policy` line, so `tsc` recovered the property but emitted
+  `policy`'s description ending in a stray `*` and lost `allowStale`'s first line.
+- **`observability` was declared twice** in the same typedef. The duplicate was
+  silently dropped from the emitted declaration; the richer description is kept.
+- **`guides/powerCache.md` documented 8 of the 12 `stats()` fields**, omitted
+  `getStats()`, and its `onEvict` row had three unescaped `|` characters inside a
+  table cell — one row rendered as four columns.

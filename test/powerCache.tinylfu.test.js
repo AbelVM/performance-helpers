@@ -102,12 +102,14 @@ describe('PowerCache { admission: tinylfu }', () => {
 
   it('counts the insertions it refused', () => {
     // A filter that silently discards is indistinguishable from one that is
-    // broken; the count is how a caller finds out.
+    // broken; the count is how a caller finds out. Public surface since
+    // CACHE-011 - this used to read `cache._rejectedAdmission`, which is why a
+    // benchmark could not report it without reaching past the API.
     const cache = new PowerCache({ maxEntries: 5, policy: 'lru', admission: 'tinylfu' });
     for (let i = 0; i < 5; i += 1) cache.set(`hot-${i}`, i);
     for (let i = 0; i < 5; i += 1) for (let r = 0; r < 3; r += 1) cache.get(`hot-${i}`);
     for (let i = 0; i < 200; i += 1) cache.set(`scan-${i}`, i);
-    expect(cache._rejectedAdmission).toBeGreaterThan(0);
+    expect(cache.stats().rejectedAdmission).toBeGreaterThan(0);
   });
 
   it('builds a sketch under LRU and **not** under SLRU', () => {

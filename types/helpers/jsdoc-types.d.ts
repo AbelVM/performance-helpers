@@ -1204,9 +1204,23 @@ export type PowerCacheOptions = {
     /**
      * - Eviction policy. `'slru'` (opt-in) splits
      * the list into probation and protected segments and promotes on access, which
-     * resists a one-off sequential scan. Defaults to `'lru'`. *
+     * resists a one-off sequential scan. Defaults to `'lru'`.
      */
     policy?: "lru" | "slru" | undefined;
+    /**
+     * - Hash seed for the TinyLFU sketch behind
+     * `{ admission: 'tinylfu' }`, and **only** for it: `'none'` and `'slru'` never
+     * build a sketch, so the option has no effect there. Must be a whole number in
+     * the int32 range, because the sketch mixes it into each row's hash and
+     * truncates it to 32 bits; a fractional or oversized value would be silently
+     * turned into a different seed, which is the reproducibility the option exists
+     * to provide. Omitted means **random** — every cache hashes differently, which
+     * is the right default for two caches sharing a process and the wrong one when
+     * you need an admission-sensitive result to be attributable to a run. Pass it
+     * when you want a benchmark or a regression to reproduce; see
+     * `guides/powerCache.md`.
+     */
+    seed?: number | undefined;
     /**
      * Serve a stale value on
      * `getOrSet`/`getOrSetAsync` **by default**, so the flag is not repeated at
@@ -1236,11 +1250,12 @@ export type PowerCacheOptions = {
      */
     fetchMethod?: (() => (Promise<any> | any)) | null | undefined;
     /**
-     * `true` to register
-     * with the shared `MetricsCollector`; a collector instance registers with that
-     * one instead. Absent from this typedef until a pass checking for unknown
-     * options found the constructor reading it via `attach()` and the type not
-     * saying so — a TypeScript caller could not pass it.
+     * - Opt in
+     * to metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Read by the constructor via `attach()` in
+     * `src/helpers/metrics.js`, and absent from this typedef until a pass checking
+     * for unknown options found the mismatch — a TypeScript caller could not pass
+     * it at all. Every other `attach()` caller declared it.
      */
     observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
 };

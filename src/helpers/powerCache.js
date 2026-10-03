@@ -110,6 +110,7 @@ import { attach, detach } from './metrics.js';
 import {
   assertFunction,
   assertLimitRequired,
+  assertSeed,
   normalizeTtl,
   assertKnownOptions,
 } from '../utils/options.js';
@@ -189,6 +190,7 @@ export class PowerCache {
         'onError',
         'admission',
         'windowSize',
+        'seed',
         'policy',
         'allowStale',
         'staleTtl',
@@ -236,6 +238,17 @@ export class PowerCache {
       policy = 'lru',
       admission = 'none',
       windowSize = 0,
+      // CACHE-020. The sketch has taken a `seed` since it was written, and
+      // documented it as "per-cache seed, so two caches do not share a hash
+      // pattern" — but the cache never passed one, so `smallLfu.js:138` drew it
+      // from `Math.random()` on every construction. That is the right default for
+      // two caches sharing a process and the wrong one for anyone trying to
+      // attribute an admission-sensitive result to a run: two caches built with
+      // identical options hash differently, so a regression that moves admission
+      // cannot be reproduced from its configuration. Validated even when
+      // `admission` is off, because "the option I passed was silently ignored"
+      // is the failure mode this library's option pass exists to remove.
+      seed,
       /**
        * Injected clock in milliseconds, matching the limiters (PERF-007) and
        * `PowerTTLMap`. Expiry is the one behaviour in this class that cannot be
@@ -378,7 +391,10 @@ export class PowerCache {
     this.onEvict = typeof onEvict === 'function' ? onEvict : null;
     this.onError = typeof onError === 'function' ? onError : null;
     /** number of times `weightFn` threw; a non-zero value means `maxWeight`
-     *  could not be enforced and should be surfaced by the caller. */
+     *  could not be enforced. It used to say "should be surfaced by the caller"
+     *  and could not be, because nothing in `stats()` carried it (CACHE-011);
+     *  `stats().weightErrors` is where a caller reads it now, and `attach()`
+     *  flattens that into a metric series. */
     this._weightErrors = 0;
     this.onExpire = typeof onExpire === 'function' ? onExpire : null;
     this.maxCleanupPerTick = Number.isFinite(+maxCleanupPerTick)
@@ -449,6 +465,10 @@ export class PowerCache {
     // `_rejectedAdmission` beside it.
     this._refreshesSkipped = 0;
     this._rejected = 0; // rejected oversized insert attempts
+    // Public since CACHE-011 as `stats().rejectedAdmission`. Note that `clear()`
+    // zeroes it along with the sketch: the refusals counted so far were decisions
+    // about entries that no longer exist, and carrying them across a clear would
+    // make the next admission look like it refused nothing.
     this._rejectedAdmission = 0; // insert attempts refused by the TinyLFU filter
     this._expirations = 0;
 
@@ -490,6 +510,19 @@ export class PowerCache {
      * resistant to a one-off sequential scan evicting the working set.
      */
     this._policy = policy === 'slru' ? 'slru' : 'lru';
+
+    // CACHE-020. Validated here, ahead of the sketch branch below rather than
+    // inside it, so a bad `seed` is rejected even when no sketch is built. `seed`
+    // under `admission: 'none'` or `policy: 'slru'` has no effect, and "the option
+    // I passed was silently ignored" is the exact failure the unknown-option pass
+    // was added to remove (`assertKnownOptions`, five helper classes) — a value
+    // that cannot be honoured should say so rather than sit there doing nothing.
+    //
+    // Kept out of the `/** … @private */` block below on purpose: a declaration
+    // between that JSDoc and `this._sketch` steals it, and the field stops being
+    // emitted as `private` with its description attached. That is not cosmetic —
+    // it is how `_sketch` lost both in this pass before the ordering was fixed.
+    const sketchSeed = assertSeed(seed, 'PowerCache');
 
     /**
      * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
@@ -544,6 +577,10 @@ export class PowerCache {
             // scan-resistance benchmark, exactly as plain LRU does. TinyLFU's own
             // guidance is roughly 10x the distinct-key count.
             sampleSize: Math.max(1, ADMISSION_SAMPLE_MULTIPLE * Math.min(this.maxEntries, 1e6)),
+            // CACHE-020. Undefined means the sketch draws its own random seed,
+            // which is the shipped default and stays it — this costs nothing on
+            // the read path, it decides which counter a key maps to once.
+            seed: sketchSeed,
           })
         : null;
     /**
@@ -2372,8 +2409,26 @@ export class PowerCache {
 
   /**
    * Return runtime statistics for the cache.
+   *
+   * Two of these counters were unreachable until CACHE-011, and both are read
+   * for opposite reasons. `rejectedAdmission` is the *policy working*: non-zero
+   * under `admission: 'tinylfu'` is what makes a scan-resistant cache
+   * scan-resistant, so a benchmark that reports zero rejections has measured
+   * nothing and a monitoring dashboard that expects a non-zero floor after a
+   * traffic shift should be told the filter stopped running.
+   * `weightErrors` is the opposite — a swallowed failure. `weightFn` threw, the
+   * throw was routed to `onError` if one exists, and the entry was skipped; a
+   * cache silently under-weighting itself will evict too much, or too little, and
+   * nothing else in this object moves when it does.
+   *
+   * Both were private fields with tests reading them directly, which is the tell
+   * that they were meant to be public: `PowerCache` publishes the rest of its
+   * counters here and lets `attach()` flatten them into metric series, so a
+   * field missing from `stats()` is a field no collector can ever see.
+   *
    * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
-   *   evictions:number, expirations:number, rejected:number, refreshesSkipped:number, poolSize:number}}
+   *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
+   *   weightErrors:number, refreshesSkipped:number, poolSize:number}}
    */
   stats() {
     return {
@@ -2386,6 +2441,12 @@ export class PowerCache {
       evictions: this._evictions,
       expirations: this._expirations,
       rejected: this._rejected,
+      // Inserts the TinyLFU filter refused. Always `0` unless
+      // `admission: 'tinylfu'` is on *and* the policy is `'lru'`, because
+      // `'slru'` builds no sketch at all.
+      rejectedAdmission: this._rejectedAdmission,
+      // `weightFn` throws that were swallowed and reported to `onError`.
+      weightErrors: this._weightErrors,
       // MEM-001. Non-zero means background refreshes are being *dropped* because
       // `maxInflightRefreshes` was reached — the cache still serves, but it is
       // not refreshing those keys. Worth alerting on separately from `size`: a

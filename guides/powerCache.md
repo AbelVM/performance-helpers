@@ -13,13 +13,14 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 | `defaultTTL`           |                     `number` |                                         `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                                                                                                                                                                                                            |
 | `maxPoolSize`          |                     `number` |                                          `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                                                                                                                                                                                                                      |
 | `rejectOversized`      |                    `boolean` |                                         `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                                                                                                                                                                                                                  |
-| `onEvict`              | `function(key,value,reason)` |                                          `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                                                                                                                                                                                                                  | 'deleted' | 'rejected-oversized'`. |
+| `onEvict`              | `function(key,value,reason)` |                                          `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'`, `'deleted'` or `'rejected-oversized'`.                                                                                                                                                                         |
 | `onExpire`             |        `function(key,value)` |                                          `null` | Callback invoked when an entry expires due to TTL.                                                                                                                                                                                                                                             |
 | `now`                  |               `() => number` |                                       `nowMs()` | Injected clock in milliseconds, matching the limiters and `PowerTTLMap`. Expiry is the one behaviour here that cannot be observed synchronously, so this turns "assert it expired after 100 ms" from a sleep into an exact assertion — see [Testing expiry](#testing-expiry-without-sleeping). |
 | `initialPoolSize`      |                     `number` |                                             `0` | Prefill the internal node pool to reduce early allocations.                                                                                                                                                                                                                                    |
 | `maxCleanupPerTick`    |                     `number` |                                           `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                                                                                                                                                                                                       |
 | `policy`               |              `'lru'\|'slru'` |                                         `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`.                                                                                                                                                                                        |
-| `admission`            |                     `'none'` |                                        `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan).                                                                                                       |
+| `admission`            |          `'none'\|'tinylfu'` |                                        `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan).                                                                                                       |
+| `seed`                 |                     `number` |                                          random | Hash seed for the `'tinylfu'` sketch, and only for it — pin it when an admission-sensitive measurement has to be attributable to a run. See [making admission reproducible](#making-admission-reproducible-seed).                                                                              |
 
 ### API
 
@@ -177,7 +178,7 @@ const stale = cache.getOrSet('user:1', () => fetchUser(1), {
 
 - `touch(key, ttl?)` — Refresh recency and optionally TTL for an existing key; returns `true` when the key existed and was not expired.
 
-- `stats()` — Return runtime statistics object: `{ size, weight, hits, misses, evictions, rejected, poolSize, expirations }`.
+- `stats()` — Return runtime statistics object: `{ size, weight, hits, misses, staleServes, evictions, rejected, rejectedAdmission, weightErrors, poolSize, expirations, refreshesSkipped }`. `getStats()` is an alias returning the same object. Two of these counters were **new in 2.0**: `rejectedAdmission` counts inserts the TinyLFU filter refused ([the counter to read alongside `admission`](#making-admission-reproducible-seed)) and `weightErrors` counts `weightFn` calls that threw. Both used to be private fields with no way to reach them, which meant a swallowed `weightFn` failure — the case where `maxWeight` cannot be enforced and every affected entry looks weightless — was invisible to the caller the constructor's own comment told to watch for it.
 
 - `hitRate` (getter) — Convenience fraction `hits / (hits + misses)` (0 when no samples).
 
@@ -605,6 +606,50 @@ Independent of the admission defect, these hold and are worth keeping:
 - **Reads count towards frequency**, not just writes, so a read-mostly cache is
   not judged on a history it never had. `clear()` drops the history with the
   entries.
+
+#### Making admission reproducible: `seed`
+
+The sketch has taken a `seed` since it was written, documented as "per-cache
+seed, so two caches do not share a hash pattern" — and `PowerCache` never passed
+one, so every cache drew its own from `Math.random()`. Two caches built from
+byte-identical options therefore hashed differently.
+
+That is the right default for two caches sharing a process and the wrong one when
+you are measuring: an admission-sensitive result could not be attributed to its
+configuration, and a regression that moved admission could not be reproduced from
+its own options. Pass `seed` to pin it:
+
+```js
+// Same options, same decisions - every run.
+const cache = new PowerCache({ maxEntries: 16, admission: 'tinylfu', seed: 12345 });
+```
+
+Three things to know:
+
+- **It only applies to `'tinylfu'`.** `'none'` and `policy: 'slru'` build no
+  sketch, so the option has no effect there. It is still **validated** when
+  admission is off — a value that cannot be honoured should say so rather than
+  sit there doing nothing.
+- **It must be a whole number in the int32 range.** The sketch mixes the seed
+  into each hash row and truncates it to 32 bits, so `1.5` and `4294967296` both
+  arrive as `0`. Silently substituting a different seed is precisely the failure
+  the option exists to prevent — a reproducible _wrong_ one — so those throw
+  instead of becoming seed 0.
+- **It costs nothing on the read path.** It decides which counter a key maps to
+  once, at construction.
+
+`stats().rejectedAdmission` is the counter to read alongside it. It is public as
+of 2.0 — it used to be a private field, so a benchmark could not report whether
+the filter had run at all without reaching past the API. **A run that reports
+zero rejections has measured nothing**: admission is only consulted at capacity,
+so a cache that never filled never consulted it, and a filter that silently
+discards is indistinguishable from one that is broken.
+
+```js
+const cache = new PowerCache({ maxEntries: 16, admission: 'tinylfu', seed: 12345 });
+for (const key of keys) cache.set(key, 1);
+cache.stats().rejectedAdmission; // > 0, or admission never ran
+```
 
 #### A note on how this was diagnosed
 

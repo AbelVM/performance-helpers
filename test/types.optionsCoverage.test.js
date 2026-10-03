@@ -141,13 +141,28 @@ function splitKeys(raw) {
  * @returns {string} The destructuring pattern body, or ''.
  */
 function readBodyDestructuring(lines, ctorIndex, param) {
-  const body = lines.slice(ctorIndex, ctorIndex + 80).join('\n');
+  // Bounded by the constructor's own closing brace, and deliberately *not* by a
+  // fixed line count. A constructor that validates its options lists every name
+  // in an `assertKnownOptions` array *before* it destructures, so where the
+  // destructuring statement lands depends on how many option names the class
+  // accepts. `PowerCache`'s terminator sat at line 257 against an 80-line window
+  // ending at 252; adding `seed` moved it to 259, one line further out, and this
+  // function began returning '' for a constructor it had been reading correctly
+  // the week before.
+  //
+  // That is the worst failure mode a guard has: it does not report a missing
+  // declaration, it stops looking. `PowerCache` then vanished from
+  // `surfacesChecked` and the two tripwires at the bottom of this file fired at
+  // 19 and at `undefined` — which is the only reason this was caught rather than
+  // absorbed as a quieter count. A loosened tripwire would have hidden it, so
+  // the cap was removed instead of raised.
+  const rest = lines.slice(ctorIndex).join('\n');
   // A class member's closing brace is the first `\n  }`; anything nested deeper
   // is indented further, so this lands on the constructor's own end and not
   // before it. Deliberately *not* `indexOf('  }')`, which matches the two inner
   // spaces of a 4-space-indented `    } = options` and truncates mid-pattern.
-  const stop = body.search(/\n {2}\}/);
-  const scope = stop < 0 ? body : body.slice(0, stop);
+  const stop = rest.search(/\n {2}\}/);
+  const scope = stop < 0 ? rest : rest.slice(0, stop);
   const m = scope.match(new RegExp(`const\\s*\\{([\\s\\S]*?)\\}\\s*=\\s*${param}\\b`));
   return m ? m[1] : '';
 }

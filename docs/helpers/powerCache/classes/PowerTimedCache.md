@@ -236,6 +236,10 @@ which is the property a consumer relies on.
 
 > **rejected**: `number`
 
+##### rejectedAdmission
+
+> **rejectedAdmission**: `number`
+
 ##### size
 
 > **size**: `number`
@@ -247,6 +251,10 @@ which is the property a consumer relies on.
 ##### weight
 
 > **weight**: `number`
+
+##### weightErrors
+
+> **weightErrors**: `number`
 
 ***
 
@@ -383,6 +391,10 @@ Per-entry TTL in ms and
 
 > **rejected**: `number`
 
+##### rejectedAdmission
+
+> **rejectedAdmission**: `number`
+
 ##### size
 
 > **size**: `number`
@@ -394,6 +406,10 @@ Per-entry TTL in ms and
 ##### weight
 
 > **weight**: `number`
+
+##### weightErrors
+
+> **weightErrors**: `number`
 
 ***
 
