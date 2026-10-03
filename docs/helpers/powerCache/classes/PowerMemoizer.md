@@ -52,6 +52,14 @@ Optional function to memoize immediately.
 
 > **\_defaultMemoizeOptions**: `object`
 
+#### ttl?
+
+> `optional` **ttl?**: `number`
+
+#### weight?
+
+> `optional` **weight?**: `number`
+
 ***
 
 ### \_fnWrapper

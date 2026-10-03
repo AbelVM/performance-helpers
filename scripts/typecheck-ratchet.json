@@ -1,6 +1,6 @@
 {
-  "ceiling": 186,
+  "ceiling": 183,
   "minFilesWithDiagnostics": 12,
   "recordedAt": "2026-10-03",
-  "reason": "powerCache memoizer: gave _defaultMemoizeOptions its option shape, and typed the destructured _memoize options with an inline cast - a @param tag cannot bind to a destructured parameter, so the qualified options.ttl tags were inert and every read was an error"
+  "reason": "powerCache: _fetchValidNode is protected rather than private (PowerTimedCache reads it), its destructured options and the memoizer wrapper's @this are typed, and both needed an inline cast because a @param tag cannot bind to a destructured parameter"
 }

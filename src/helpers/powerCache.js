@@ -764,7 +764,7 @@ export class PowerCache {
 
   /**
    * Fetch a node and validate expiry.
-   * @private
+   * @protected
    * @param {*} key
    * @param {Object} [options]
    * @param {boolean} [options.ignoreExpiry=false]
@@ -775,7 +775,17 @@ export class PowerCache {
    *   was missing from the declared options type.
    * @returns {CacheNode|null}
    */
-  _fetchValidNode(key, { ignoreExpiry = false, countMiss = false, allowExpired = false } = {}) {
+  _fetchValidNode(
+    key,
+    // Inline cast, not a `@param [options]` tag: this is destructured in the
+    // signature, so there is no parameter named `options` for a tag to bind
+    // to and TS rejects the tag with TS8024.
+    /** @type {{ignoreExpiry?: boolean, countMiss?: boolean, allowExpired?: boolean}} */ {
+      ignoreExpiry = false,
+      countMiss = false,
+      allowExpired = false,
+    } = {}
+  ) {
     const node = this._map.get(key);
     if (!node) {
       if (countMiss) this._misses++;
@@ -3002,7 +3012,17 @@ export class PowerMemoizer {
     // and an unannotated one in a bare function expression is implicitly `any` -
     // which would make the null check below untypeable and hide the very case it
     // exists for.
-    return function memoized(/** @type {...any} */ ...args) {
+    //
+    // `@this` rather than a cast on the rest parameter: a rest-parameter cast
+    // types `args` only, and leaves `this` implicitly `any` in a bare function
+    // expression - which is exactly the value the receiver logic below reads.
+    // Typed `object|null` because a plain `fn(1)` call has no meaningful
+    // receiver and the wrapper falls back to the argument-only key space.
+    /**
+     * @this {object|null}
+     * @param {...any} args
+     */
+    return function memoized(...args) {
       // Memoizing a *method* must not lose the receiver. The wrapper is a
       // plain `function` (not an arrow) precisely so `this` is observable.
       // Two things follow from that:

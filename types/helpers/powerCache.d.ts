@@ -239,7 +239,7 @@ export class PowerCache {
     private _removeExpiredNode;
     /**
      * Fetch a node and validate expiry.
-     * @private
+     * @protected
      * @param {*} key
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExpiry=false]
@@ -250,7 +250,11 @@ export class PowerCache {
      *   was missing from the declared options type.
      * @returns {CacheNode|null}
      */
-    private _fetchValidNode;
+    protected _fetchValidNode(key: any, { ignoreExpiry, countMiss, allowExpired, }?: {
+        ignoreExpiry?: boolean;
+        countMiss?: boolean;
+        allowExpired?: boolean;
+    }): CacheNode | null;
     /**
      * Whether an expired node may still be served at `now`.
      *

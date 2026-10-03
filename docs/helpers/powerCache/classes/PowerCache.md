@@ -391,6 +391,43 @@ Current number of entries in cache.
 
 ## Methods
 
+### \_fetchValidNode()
+
+> `protected` **\_fetchValidNode**(`key`, `options?`): `CacheNode` \| `null`
+
+Fetch a node and validate expiry.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### options?
+
+###### allowExpired?
+
+`boolean` = `false`
+
+Return an expired node instead
+  of `null`. Read by `_fetchValidNode` and passed by `getOrSet` when
+  `staleWhileRevalidate` is on; previously read but never documented, so it
+  was missing from the declared options type.
+
+###### countMiss?
+
+`boolean` = `false`
+
+###### ignoreExpiry?
+
+`boolean` = `false`
+
+#### Returns
+
+`CacheNode` \| `null`
+
+***
+
 ### \[asyncDispose\]()
 
 > **\[asyncDispose\]**(): `Promise`\<`void`\>
