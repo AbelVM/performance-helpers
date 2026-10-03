@@ -28,12 +28,10 @@ const pool = new PowerPool(WorkerScript, {
 ## How it works
 
 - The pool maintains a pool-level EWMA (exponentially-weighted moving average) of recent task durations.
-- Every `intervalMs` the pool evaluates whether to `add` or `remove` a single worker:
+- Every `intervalMs` the pool evaluates whether to `add` or `remove` workers:
   - Scale up when EWMA > `targetMs * (1 + hysteresis)` or when queue length indicates sustained pressure.
   - Scale down when EWMA < `targetMs * (1 - hysteresis)` and the queue is empty.
 - `cooldownMs` prevents repeated scaling decisions in rapid succession (debounce).
-
-### Concurrency policies (`policy`)
 
 ### How big a step
 
@@ -57,6 +55,8 @@ What the controller does _not_ do is change when the pool scales. The hysteresis
 band, the queue-pressure check, the cooldown and the backoff multiplier are all
 untouched — this sizes an action that has already been decided on, it does not
 decide one.
+
+### Concurrency policies (`policy`)
 
 `autoScale.policy` is a separate and different mechanism: it swaps in a
 concurrency-window controller whose limit is **reported and not enforced** (see

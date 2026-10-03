@@ -8,6 +8,22 @@ u = feedforward(disturbance) + C(s) · (setpoint − measured)
 
 where the controller term C(s) is PI by default. You supply both terms of the error; the helper supplies the arithmetic. That is the whole design constraint, and it is the line [ADR 0005](../adr/0005-feedback-signal-picks-the-controller.md) draws — see [Why not one shared controller](#why-not-one-shared-controller).
 
+## Where it is used
+
+`PowerPool`'s `targetMs` autoscale sizes its **worker step** with it. The direction
+of a scale action is still the latency EWMA against `targetMs` with a hysteresis
+band; the _size_ of the step is chosen by this controller on the relative error, up
+to the caller's `stepUp`/`stepDown` ceiling. Measured by
+`bench/claims.js stepsize`: peak/final/overshoot of **5/1/4** for the old fixed
+step against **3/3/0**. At the default `stepUp: 1` nothing changes, because a
+ceiling of one worker is one worker — see the [autoscale
+guide](autoscale.md#how-big-a-step).
+
+The two places it is _not_ used are as instructive. `PowerBatch` was measured and
+refused: a fixed `maxSize` is already exact, so there is no error to correct. And
+`autoScale.policy`'s concurrency limit was measured and refused too — enforcing it
+**loses 3.7 %** to the best hand-picked constant cap.
+
 ## When you want this
 
 You have a number you are holding steady: a queue depth, a byte ceiling, a pool size, a duty cycle, a latency target. Today you would hold it with a fixed number and a threshold, and the threshold is a guess about where the fixed number should be.

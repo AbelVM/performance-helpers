@@ -4786,7 +4786,13 @@ Also in this release:
 
 - **`POOL-012` opened, P1.** `_adaptiveLimit` is written by the controller and read by `getStats()`, and by nothing on the dispatch path — so all three real `autoScale.policy` values move a number the pool does not act on. `POOL-007` found this while scoping and deferred it; it is recorded under Consequences in `adr/0005` so the deferral is visible in committed decision history. **No controller in this library has been measured against a fixed limit**, and `bench/claims.js` has no mode that would compare one.
 
-`PowerServo` currently has **no caller inside the library** beyond its own tests. It is the closed-loop shape the other three loops are not, and `POOL-012`'s `bench/claims.js concurrency` mode is the first thing that would settle whether a controller earns its place here at all.
+**`PowerServo` had no caller inside the library when this was written**, which was the
+honest position at the time: it is the closed-loop shape the other three loops are
+not, and nothing yet justified one. It found one shortly after — `PowerPool`'s
+`targetMs` autoscale, see the step-sizing entry below. The row text here is left as
+it was written because the sequence is the point: the helper was published
+unwired, the candidates were measured rather than assumed, and two of the three
+were refused on evidence before the third was adopted.
 
 ### `autoScale.policy` is reported, not enforced — and measured (patch)
 
@@ -4825,9 +4831,11 @@ be a change to how work is admitted plus a migration for anyone reading
 
 `bench/claims.js batchservo` reached the parallel conclusion for
 `PowerBatch`: a fixed `maxSize` is already exact (mean |err| 0.00 against a target
-of 12), so **do not wire a controller into it**, which retires `PowerServo`'s only
-candidate caller. `PowerServo` itself ships as a helper with no caller in the
-library.
+of 12), so **do not wire a controller into it**. That retired `PowerServo`'s then
+only candidate caller. `PowerServo` did not stay callerless — it is now used by
+`PowerPool`'s autoscale step sizing, which is a third thing these two measurements
+did not cover, and the reason a helper with no caller was worth keeping long enough
+to find one.
 
 ### Autoscale step sizing is closed-loop, inside the existing ceiling (minor)
 

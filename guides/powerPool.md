@@ -151,6 +151,7 @@ Behavior summary:
   - Scale up when EWMA exceeds `targetMs * (1 + hysteresis)` or when queue pressure is high.
   - Scale down when EWMA falls below `targetMs * (1 - hysteresis)` and the queue is empty.
 - `cooldownMs` prevents rapid oscillation by requiring a minimum delay between scale actions.
+- The **direction** of a scale action is that latency EWMA against `targetMs`; its **size** is closed-loop. `stepUp` / `stepDown` (default `1`) are _ceilings_ on workers changed per tick, and a [`PowerServo`](powerServo.md) PI controller on the relative error picks how much of that budget to use. At the default ceiling of 1 nothing changes. See [How big a step](autoscale.md#how-big-a-step).
 
 Tuning tips:
 
