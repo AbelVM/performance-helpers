@@ -156,11 +156,17 @@ the loop moving. There was no thrash to fix. If you need a plant protected from
 steps, limit the step where you apply the output — `pool.resize()` is the right
 place, not the controller.
 
-If you re-measure this, state your window. Counting the setpoint step as part of
-the run inverts the conclusion: over the whole run at `kp: 0.6` the limit
-_cuts_ total variation (149 → 100) by capping the first-sample response, while
-over the settled tail it raises it (0.4 → 8.0). The honest form of the claim is
-about the tail, because that is where "chatter" would live.
+If you re-measure this, state your window **and your gains**, because both change
+the answer. Counting the setpoint step as part of the run inverts the conclusion:
+over the whole run at `kp: 0.6` the limit _cuts_ total variation (149 → 100) by
+capping the first-sample response, while over the settled tail it raises it
+(0.36 → 8.0). The 0.5 / 40 / 98 figures above come from an earlier run whose gain
+set was not recorded, so they are indicative rather than reproducible; at
+`kp: 0.6, ki: 0.02, kd: 0`, output `[0, 100]`, setpoint 100, the settled tail
+gives **0.161** and **0.36** against **8.0** with the limit — the same direction, at
+a scale an order of magnitude smaller. The durable claim is the direction and the
+metric that was wrong, not the exact numbers: the change count was measuring
+float-level jitter at `dt = 1`, not motion.
 
 ## Tuning
 

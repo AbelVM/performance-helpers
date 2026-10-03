@@ -76,15 +76,22 @@
  * the failure `AGENTS.md` calls decoration. Recorded rather than deleted so the
  * next proposal does not re-derive it from the same bad metric.
  *
- * **These figures only hold for the tail, and measuring the whole run gives the
- * opposite answer.** Re-measured at `kp: 0.6, ki: 0.02` on the plant above, the
- * largest single move over the run including the setpoint step is 60 — because the
- * first sample answers a 100-unit error with `kp × 100`, which is the correct
- * response and not chatter — and `maxDelta: 2` *lowers* total variation there
- * (149 → 100) by capping exactly that step. Excluding the transient reproduces the
- * recorded direction: largest move 0.161 and variation 0.4 without the limit
- * against 8.0 with it. Anyone re-measuring this must state which window they
- * counted, because the two windows disagree about whether the limit helps.
+ * **Those figures are indicative, not reproducible — the gain set behind them was
+ * not recorded, and the conclusion is the durable part rather than the numbers.**
+ * Re-measured on the plant above at `kp: 0.6, ki: 0.02, kd: 0`, output `[0, 100]`,
+ * setpoint 100: over the settled tail the largest single move is **0.161** and
+ * total variation **0.36**, against **8.0** with `maxDelta: 2` — the same direction
+ * the retraction rests on, at a scale an order of magnitude below the 0.5 above.
+ * A figure nobody can regenerate is not evidence, so treat 0.5 / 40 / 98 as
+ * "some well-tuned configuration" and 0.161 / 0.36 / 8.0 as the reproducible one.
+ *
+ * **The window matters as much as the gains.** Measured over the *whole* run at
+ * that same configuration, the largest single move is 60 — because the first
+ * sample answers a 100-unit error with `kp × 100`, which is the correct response
+ * and not chatter — and `maxDelta: 2` *lowers* total variation there (149 → 100)
+ * by capping exactly that step, inverting the conclusion. Anyone re-measuring this
+ * must state which window they counted and at what gains, because the two
+ * windows disagree about whether the limit helps.
  *
  * The genuinely unrecoverable input was a non-finite number reaching the loop,
  * and every route to one is closed: `measured` and a `feedforward` return throw,
