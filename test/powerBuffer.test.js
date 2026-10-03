@@ -132,3 +132,67 @@ describe('powerBuffer', () => {
     }
   });
 });
+
+describe('PERF-005: o2u8 refuses what JSON cannot represent, and knows a SAB', () => {
+  // `JSON.stringify` returns **undefined** for `undefined`, a function and a
+  // Symbol, and `TextEncoder.encode` has a WebIDL default that turns that into a
+  // **zero-byte** frame. The value crossed the wire as nothing and surfaced at the
+  // far end as `SyntaxError: Unexpected end of JSON input`, naming neither the value
+  // nor the encoder. Asserted on the byte count because that is the whole defect:
+  // the old answer was a valid Uint8Array of length 0, which is why nothing threw
+  // here at all.
+  it('throws instead of encoding a zero-byte frame', async () => {
+    const { o2u8 } = await import('../src/helpers/powerBuffer.js');
+    for (const [label, value] of [
+      ['undefined', undefined],
+      ['a function', () => {}],
+      ['a Symbol', Symbol('s')],
+    ]) {
+      expect(() => o2u8(value), label).toThrow(TypeError);
+    }
+  });
+
+  it('encodes a SharedArrayBuffer as its bytes, not as {}', async () => {
+    const { o2u8, u82o } = await import('../src/helpers/powerBuffer.js');
+    // A SharedArrayBuffer is deliberately not an ArrayBuffer, so it fell through
+    // to JSON.stringify and became the two bytes `{}` - a value the caller
+    // certainly did not mean, with nothing to say so.
+    const sab = new SharedArrayBuffer(4);
+    new Uint8Array(sab).set([1, 2, 3, 4]);
+    expect(Array.from(o2u8(sab))).toEqual([1, 2, 3, 4]);
+    expect(u82o(new TextEncoder().encode(JSON.stringify([1, 2, 3, 4])))).toEqual([1, 2, 3, 4]);
+  });
+
+  it('still encodes ordinary values and the pre-stringified path', async () => {
+    const { o2u8, u82o } = await import('../src/helpers/powerBuffer.js');
+    expect(u82o(o2u8({ a: 1 }))).toEqual({ a: 1 });
+    expect(u82o(o2u8({ a: 1 }, '{"a":2}'))).toEqual({ a: 2 });
+  });
+});
+
+describe('the encoder/decoder verdict is not cached as permanently unavailable', () => {
+  // Found while adding PERF-005: `getEncoder()` cached absence as
+  // `_encoder = false`, so once any caller saw no encoder, every later call was
+  // told `No TextEncoder or Buffer available` for the rest of the process. In this
+  // file that was visible as cross-test pollution - a test that stubs
+  // `TextEncoder` away poisoned the cache for every test after it. In production
+  // the same shape is a host that gains a `TextEncoder` later (a polyfill loaded
+  // after first use, or a module instance shared across `vm` contexts) being
+  // permanently denied.
+  //
+  // The positive result is still cached, so this asserts recoverability only.
+  it('recovers once an encoder exists again', async () => {
+    // A fresh module instance, because the *positive* result is still cached —
+    // which is the other half of the contract, and without a reset this test
+    // would pass for the wrong reason: an encoder cached by an earlier test is
+    // returned without consulting the stubbed globals at all.
+    vi.resetModules();
+    vi.stubGlobal('TextEncoder', undefined);
+    vi.stubGlobal('Buffer', undefined);
+    const { o2u8, u82o } = await import('../src/helpers/powerBuffer.js');
+    expect(() => o2u8({ a: 1 }), 'no encoder available').toThrow(/No TextEncoder or Buffer/);
+    vi.unstubAllGlobals();
+    expect(u82o(o2u8({ a: 1 })), 'and recovers once one exists').toEqual({ a: 1 });
+    vi.resetModules();
+  });
+});

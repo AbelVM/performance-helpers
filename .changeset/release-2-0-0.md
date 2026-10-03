@@ -5164,6 +5164,31 @@ and it is what a naive offset-only check would miss.
 Mutation-checked: removing both guards fails the two guard tests and leaves the
 still-transfers control passing.
 
+### `o2u8` refuses what JSON cannot represent, and a missing encoder is no longer permanent (patch)
+
+Three defects in one helper, all producing a wrong answer rather than an error.
+
+**`JSON.stringify` returns `undefined`** — not a string, not a throw — for `undefined`, a function and a
+Symbol, and `TextEncoder.encode` has a WebIDL default that turns that into a **valid
+zero-byte** `Uint8Array`. Nothing threw at the boundary; the value crossed the wire as
+nothing and surfaced at the far end as `SyntaxError: Unexpected end of JSON input`, naming
+neither the value nor the encoder. It now throws where the value is still in hand.
+
+**A `SharedArrayBuffer` encoded as the two bytes `{}`.** A SAB is deliberately not an
+`ArrayBuffer`, so it fell through to `JSON.stringify` and travelled as an empty object
+with nothing to say so. `o2u8` and `u82o` each accept one now, zero-copy.
+
+**A missing encoder was cached as permanently unavailable.** `getEncoder()` and
+`getDecoder()` cached absence as `false`, so once any caller saw no encoder, every later
+call was told `No TextEncoder or Buffer available` for the rest of the process — a host
+that gains a `TextEncoder` later (a polyfill loaded after first use, or a module instance
+shared across `vm` contexts) is permanently denied. Absence is no longer cached; the
+positive result still is, so the common path is unchanged.
+
+That last one was found by accident and is the most consequential: it surfaced as
+cross-test pollution, where one test stubbing `TextEncoder` away poisoned every later
+test in the file. Mutation-checked both ways.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
