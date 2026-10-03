@@ -2619,7 +2619,11 @@ function deepEqual(a, b, state, depth = 0) {
     // Fall back to reference equality when we've recursed too deep.
     return a === b;
   }
-  // Width budget, not just depth (PERF-004). `MAX_DEEP_EQUAL_DEPTH` bounds how
+  // Width budget, not just depth (PERF-004, an earlier review's width-budget
+  // row — NOT `review.md`'s PERF-004, which is a `powerMessageCodec` item about
+  // `u82o`'s `TextDecoder` fallback). Row IDs were reused across review cycles,
+  // so a bare one is ambiguous; this subject is the only thing that disambiguates
+  // it. `MAX_DEEP_EQUAL_DEPTH` bounds how
   // *deep* a comparison goes and says nothing about how *wide* it is: a
   // one-million-element array of scalars recurses at depth 2 and never trips
   // the depth limit, and comparing two of them measured 37 ms. `hasEqual` is a
@@ -2892,7 +2896,9 @@ export class PowerMemoizer {
       'PowerCache'
     );
     const { keyResolver = simpleArgsKey, cacheOptions = {}, ttl, weight } = options;
-    // `simpleArgsKey` is the default rather than `JSON.stringify` (PERF-005). It
+    // `simpleArgsKey` is the default rather than `JSON.stringify` (PERF-005, an
+    // earlier review's memoizer-key row — NOT `review.md`'s PERF-005, which is a
+    // `powerMessageCodec` item about `o2u8` returning a non-string). It
     // is ~35% cheaper for the scalar arguments memoizers are actually called
     // with, and it falls back to `JSON.stringify` the moment it meets a
     // non-scalar, so behaviour is unchanged for anything it cannot encode
@@ -3608,7 +3614,8 @@ export function simpleArgsKey(...args) {
   // same text, so distinct calls shared a cache entry.
   //
   // The scalar codes are unchanged, so the key format for scalar-only calls —
-  // the overwhelmingly common case, and the one PERF-005 measured — is
+  // the overwhelmingly common case, and the one the memoizer-key PERF-005 above
+  // measured — is
   // byte-identical to before. Only calls that previously hit the fallback
   // change, which is precisely the set that was broken.
   const seen = new Set();
