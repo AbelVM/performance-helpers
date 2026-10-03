@@ -555,7 +555,16 @@ export class PowerWebSocketClient {
         this._emit('error', e);
       }
     }
-    this._setPaused(false);
+    // RT-015. `_setPaused(false)` emits `resume`, and closing is terminal: a
+    // producer wired as `onResume: () => feed.resume()` would restart feeding a
+    // socket that is CLOSED on the very next line. Measured: closing a paused
+    // client emitted one `resume` with `readyState` already 3. The state is set
+    // directly here, so the teardown is silent.
+    //
+    // `_lastPollInterval` is deliberately left alone. Polling was already stopped
+    // by `_clearTimers()` above, and `_handleOpen` resets it for the next
+    // connection, so there is nothing to reset that is not already handled.
+    this._paused = false;
     this._state = READY_STATE.CLOSED;
   }
 

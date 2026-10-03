@@ -5086,6 +5086,21 @@ change to the delay _handed out_ within an outage — only to where the next one
 Mutation-checked: with the reset removed, the new test fails (`expected 30000 to be
 null`).
 
+### `close()` no longer emits a spurious `resume` (patch)
+
+`close()` called `_setPaused(false)`, which emits `resume`. Closing is terminal, and a
+producer wired the way the guide shows — `onResume: () => feed.resume()` — would restart
+feeding a socket that is `CLOSED` on the very next line. Measured before the fix:
+closing a paused client emitted one `resume` with `readyState` already 3.
+
+The state is now set directly, so teardown is silent. `_lastPollInterval` is left alone
+on purpose: polling was already stopped by `_clearTimers()`, and `_handleOpen` resets it
+for the next connection.
+
+**Unpausing a live client still emits `resume`**, and a test pins that separately — otherwise
+“stop emitting resume at close” and “stop emitting resume” look identical from the failure.
+Mutation-checked: restoring `_setPaused(false)` fails the test.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

@@ -554,3 +554,39 @@ describe('PowerWebSocketClient invariants', () => {
     );
   });
 });
+
+describe('RT-015: closing does not emit a spurious resume', () => {
+  // `close()` called `_setPaused(false)`, which emits `resume`. Closing is
+  // terminal, and a producer wired as `onResume: () => feed.resume()` restarted
+  // feeding a socket that was CLOSED on the next line. Measured before the fix:
+  // one `resume` with `readyState` already 3.
+  //
+  // Driven through `_setPaused` because backpressure is the only thing that pauses
+  // this client — there is no public `pause()` — and the assertion that matters is
+  // the *absence* of an event, which only a producer-shaped listener can catch.
+  it('emits no resume, and leaves the client unpaused', () => {
+    const events = [];
+    const { client } = mkClient({
+      onPause: () => events.push('pause'),
+      onResume: () => events.push('resume'),
+    });
+    client._setPaused(true);
+    expect(events).toEqual(['pause']);
+
+    client.close();
+
+    expect(events, 'close() must not emit resume').toEqual(['pause']);
+    expect(client.paused, 'and the client is left unpaused').toBe(false);
+  });
+
+  it('still emits resume when unpausing a live client', () => {
+    // The control for the test above: suppressing the event at close must not
+    // suppress it everywhere, or the fix would be 'stop emitting resume' rather
+    // than 'stop emitting it during teardown'.
+    const events = [];
+    const { client } = mkClient({ onResume: () => events.push('resume') });
+    client._setPaused(true);
+    client._setPaused(false);
+    expect(events).toEqual(['resume']);
+  });
+});
