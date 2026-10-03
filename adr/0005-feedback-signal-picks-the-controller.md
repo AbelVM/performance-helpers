@@ -136,6 +136,30 @@ caller ignores — the same trade ADR 0004 made for
   limit**, so "the controller beats the heuristic" is currently an untested
   premise, and `bench/claims.js` has no mode that would test it.
 
+  **Since this was written, the reported-only claim has been measured rather than
+  only read.** A protocol-correct worker (emitting `{ duration, ok: true }`, unlike
+  the first probe whose promises never settled), driving the pool through
+  `postMessage(msg, transfer, { awaitResponse: true })`:
+
+  | configuration                     | `concurrencyLimit` reported | peak `activeTasks` |
+  | --------------------------------- | --------------------------- | ------------------ |
+  | `{ policy: 'aimd', limitMax: 1 }` | 1                           | **4**              |
+  | `{ policy: 'aimd', limitMax: 2 }` | 2                           | **4**              |
+  | no `autoScale`                    | `null`                      | **4**              |
+
+  **All three peaks are identical.** That is stronger than the read above: a limit
+  that were merely _under_-enforced would still show some relationship between the
+  reported number and observed concurrency, and this shows none. So the field is
+  reported-only, and the three policies move a number the pool does not act on.
+
+  **The decision is still open and is not taken here.** The measurement above
+  settles _what the code does_; it says nothing about _whether the policies are worth
+  having_, which needs the comparison this ADR already says is missing — a
+  saturating workload against fixed-limit / AIMD / gradient-AIMD on throughput and
+  p99. The honest alternative on current evidence is to document the policies as
+  reported-only, and that documentation should not be written until the comparison
+  exists, or it will ossify a claim nothing has tested.
+
 ## Alternatives considered
 
 **One `PowerController` with `{ beta, additiveIncrease, min, max }` and a signal
