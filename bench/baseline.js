@@ -218,6 +218,18 @@ export function compare(report, baseline, options = {}) {
   const baselineP95 = Number(baseline?.p95SpreadPct ?? 0);
   const noiseWorse = baselineP95 > 0 && currentP95 > baselineP95 * noiseTolerance;
 
+  // The machine's own *median* recorded spread, used as a floor below. A site is
+  // not a quieter machine than the machine it was measured on: a site that
+  // happened to record 14.4% while the median site recorded 17.63% is not
+  // capable of being held to 14.4%, it just got lucky once. Without the floor
+  // such a site gets a threshold *finer* than the demonstrated noise floor of
+  // the box, and then fires on ordinary run-to-run drift - which is the same
+  // failure as the `* 100` bug documented below, in the opposite direction:
+  // that one made the gate incapable of failing, this one makes it fail without
+  // anything having changed. A gate that cries wolf gets ignored, and an ignored
+  // gate is the same as no gate.
+  const machineSpreadPct = Number(baseline?.medianSpreadPct ?? 0);
+
   let checked = 0;
   const regressions = [];
   for (const band of current) {
@@ -239,7 +251,7 @@ export function compare(report, baseline, options = {}) {
     // passed a deliberate 64% regression in `PowerCache.get` and reported
     // `PASS`. The mutation check below is the only reason that was caught, and
     // it is the reason a gate is mutation-checked before it is trusted.
-    const thresholdPct = before.spreadPct * (slowdownTolerance - 1);
+    const thresholdPct = Math.max(before.spreadPct, machineSpreadPct) * (slowdownTolerance - 1);
     if (before.median > 0 && band.median > before.median * (1 + thresholdPct / 100)) {
       regressions.push({
         label: band.label,
