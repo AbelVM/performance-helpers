@@ -20,8 +20,25 @@ import {
   PowerRealtimeHub,
   PowerWebSocketClient,
   PowerSocketAdapter,
+  WorkerAgnostic,
   preloadNode,
 } from '../src/index.js';
+
+/**
+ * A worker-like for the `WorkerAgnostic` entry.
+ *
+ * **Extends `EventTarget`, not `EventEmitter`, and that is load-bearing rather than
+ * stylistic.** Node `EventEmitter` has no `addEventListener`, so an
+ * `EventEmitter`-based worker silently takes `_wireEvents`' *emitter* branch —
+ * this entry would then exercise a different code path from the one a browser
+ * Web Worker takes, while appearing to cover it. Caught by a mutation that stored
+ * a different function from the one it registered and passed 7/7.
+ */
+class EventTargetWorker extends EventTarget {
+  terminate() {
+    this.terminated = true;
+  }
+}
 
 beforeAll(async () => {
   await preloadNode();
@@ -91,6 +108,13 @@ const RESOURCE_OWNERS = [
         { size: 1, minSize: 1, maxSize: 1, lazy: false }
       ),
   ],
+  // WRK-002. This one needs a worker source, and it is here rather than
+  // elsewhere because it is the class that could not be added before: `_wireEvents`
+  // passed anonymous arrow functions straight to `addEventListener`, so nothing
+  // held a reference and `dispose()` had no handle to remove. Fixed by storing the
+  // handlers per native model — see `workerAgnostic.dispose.test.js`, which counts
+  // listeners on a real `EventTarget` rather than a stub.
+  ['WorkerAgnostic', () => new WorkerAgnostic(() => new EventTargetWorker())],
 ];
 
 describe('every resource-owning class supports explicit disposal', () => {

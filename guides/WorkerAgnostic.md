@@ -97,6 +97,23 @@ const worker = await WorkerAgnostic.create('./worker.js');
 
 `addEventListener(type, handler)` / `removeEventListener`, or the `on` / `off` aliases. Supported types are `message`, `error` and `messageerror`. A throwing handler is isolated and reported through the logger rather than being allowed to break the dispatcher.
 
+## Disposal
+
+`dispose()` / `[Symbol.dispose]` detach everything the wrapper attached and drop its own listener registry, so it takes part in `using` / `await using` like every other resource-owning helper here:
+
+```javascript
+{
+  using worker = new WorkerAgnostic(() => new MyWorker());
+  worker.addEventListener('message', onMessage);
+} // native listeners detached, registry cleared
+```
+
+**It does not terminate the worker.** This class wraps a worker handed to it by a caller; `PowerPool` owns the lifecycle of its workers and drives termination itself. So `dispose()` releases what _this object_ attached and leaves the worker running — terminating it would be a lifecycle decision the wrapper has no mandate to make. If you created the worker and you own it, terminate it yourself.
+
+That split is also why the handlers are now stored rather than passed inline. They used to be anonymous arrow functions handed straight to `addEventListener`, so **nothing held a reference and `dispose()` could not have been written against them** — there was no handle to remove. All three native models are covered: `addEventListener`/`removeEventListener`, `on`/`off`, and the `onmessage`/`onerror` property assignment, where a pre-existing handler is restored rather than clobbered.
+
+Idempotent, and safe on an instance whose wiring bailed early.
+
 ## Notes
 
 - In a web worker, `detectEnv()` resolves `'webworker'`, and the `new Function('import(...)')` probe never runs — so a strict CSP without `unsafe-eval` is fine.

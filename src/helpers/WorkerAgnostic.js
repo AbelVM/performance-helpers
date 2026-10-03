@@ -391,22 +391,100 @@ class WorkerAgnostic {
   _wireEvents() {
     const w = this.worker;
     if (!w) return;
+    // **The handlers are stored, not thrown away.** They used to be anonymous
+    // arrow functions passed straight to `addEventListener`, which wires them
+    // permanently: nothing held a reference, so nothing could remove them. That is
+    // what made this class the one resource-owning helper in the library with no
+    // release path — `dispose()` could not have been written against it, because
+    // there was no handle to remove. Recorded per type so `dispose()` can detach
+    // exactly what it attached, on all three native models.
+    /** @type {Array<[string, Function]>} */
+    const wired = [];
     if (typeof w.addEventListener === 'function') {
       this._nativeModel = 'listener';
       for (const type of SUPPORTED_EVENTS) {
-        w.addEventListener(type, (...args) => this._dispatch(type, ...args));
+        const handler = (...args) => this._dispatch(type, ...args);
+        w.addEventListener(type, handler);
+        wired.push([type, handler]);
       }
     } else if (typeof w.on === 'function') {
       this._nativeModel = 'emitter';
       for (const type of SUPPORTED_EVENTS) {
-        w.on(type, (...args) => this._dispatch(type, ...args));
+        const handler = (...args) => this._dispatch(type, ...args);
+        w.on(type, handler);
+        wired.push([type, handler]);
       }
     } else {
       this._nativeModel = 'property';
-      w.onmessage = (...args) => this._dispatch('message', ...args);
-      w.onerror = (...args) => this._dispatch('error', ...args);
-      w.onmessageerror = (...args) => this._dispatch('messageerror', ...args);
+      // The property model assigns rather than registers, so detaching means
+      // putting the properties back the way they were found.
+      const saved = [];
+      for (const type of SUPPORTED_EVENTS) {
+        const prop =
+          type === 'message' ? 'onmessage' : type === 'error' ? 'onerror' : 'onmessageerror';
+        const handler = (...args) => this._dispatch(type, ...args);
+        saved.push([prop, w[prop]]);
+        w[prop] = handler;
+        wired.push([type, handler]);
+      }
+      this._wiredProperties = saved;
     }
+    this._wired = wired;
+  }
+
+  /**
+   * Release every resource this instance holds.
+   *
+   * This wrapper owns the underlying worker and the native listeners it attached
+   * to it, and both were previously unreleasable: the listeners were anonymous
+   * arrow functions passed straight to `addEventListener`, so no handle existed to
+   * remove them.
+   *
+   * **It does not terminate the worker.** `WorkerAgnostic` wraps a worker handed
+   * to it by a caller, and terminating it would be a decision this class has no
+   * mandate to make — `PowerPool` owns the lifecycle of its workers and drives
+   * termination itself. So this detaches everything it attached and drops its own
+   * listener registry; it leaves the worker alone. A caller that does own the
+   * worker should terminate it, which is what the owning helper is for.
+   *
+   * Idempotent, and safe on an instance whose `_wireEvents` bailed early.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    const w = this.worker;
+    if (w) {
+      for (const [type, handler] of this._wired ?? []) {
+        try {
+          if (this._nativeModel === 'listener' && typeof w.removeEventListener === 'function') {
+            w.removeEventListener(type, handler);
+          } else if (this._nativeModel === 'emitter' && typeof w.off === 'function') {
+            w.off(type, handler);
+          }
+        } catch (e) {
+          // Detaching must not throw: `dispose()` runs inside `using` teardown and
+          // inside `finally`, where an exception replaces the outcome the caller
+          // actually cares about with a message about a listener.
+        }
+      }
+      if (this._nativeModel === 'property') {
+        for (const [prop, previous] of this._wiredProperties ?? []) {
+          if (w[prop] !== undefined || previous !== undefined) w[prop] = previous;
+        }
+      }
+    }
+    // Drop our own registry too, so the wrappers become collectable rather than
+    // keeping their closures alive from the Map.
+    this._listeners.clear();
+    this._wired = [];
+    this._wiredProperties = [];
+  }
+
+  /** @returns {void} */
+  [Symbol.dispose]() {
+    this.dispose();
   }
 
   /**

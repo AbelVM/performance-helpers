@@ -6560,3 +6560,38 @@ The passing path is tested too, because a guard that refuses everything is an
 obstacle rather than a guard — and that has been the recurring failure mode of
 every guard added in this project, including the digest check before it had a
 test for the case where the digest still matches.
+
+## `WorkerAgnostic` can finally be disposed
+
+**It owned a worker plus its native listeners with no release path — and the
+missing `dispose()` was the smaller half.** `_wireEvents` passed anonymous arrow
+functions straight to `addEventListener`/`on`, so nothing held a reference to
+them. `dispose()` could not have been written against that: there was no handle
+to remove. Measured before the fix: one native `error` and one `message` listener
+on the underlying worker, no `dispose`, no `[Symbol.dispose]`, no way to detach
+either.
+
+The handlers are now stored per native model and `dispose()` / `[Symbol.dispose]`
+detach them, clear the instance's own listener registry, and are idempotent. All
+three `_wireEvents` branches are covered — `addEventListener`/`removeEventListener`,
+`on`/`off`, and the `onmessage`/`onerror` property assignment, where a
+pre-existing handler is **restored rather than clobbered**.
+
+**`dispose()` deliberately does not terminate the worker.** This class wraps a
+worker handed to it by a caller; `PowerPool` owns worker lifecycles and drives
+termination itself. Terminating would be a lifecycle decision the wrapper has no
+mandate to make, and it is what makes `dispose()` safe to call from `using`.
+
+**A mutation caught a mislabelled test, and the thing it caught was worth more
+than the fix.** The test class was named `ListenerWorker` and extended
+`EventEmitter` — which has **no `addEventListener`**, so it silently took
+`_wireEvents`' _emitter_ branch. The listener model, the one a browser Web Worker
+takes, was never tested: a mutation that stored a _different_ function from the
+one it registered passed 7/7 because it only touched the branch never taken. With
+a real `EventTarget` the same mutation fails 2. The same mislabelling was fixed in
+`test/disposal.test.js`. **A test that claims to cover a branch it never enters
+is worse than no test**, because it is counted as coverage.
+
+`WorkerAgnostic` is now the 17th entry in `RESOURCE_OWNERS`. That list held
+**16**, not the 19 the row claimed, so the row's own count needed re-verifying
+too — which is the second half of what it asked for.

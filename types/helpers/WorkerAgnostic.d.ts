@@ -54,6 +54,29 @@ declare class WorkerAgnostic {
      */
     private _wireEvents;
     _nativeModel: string | undefined;
+    _wiredProperties: any[] | (string | ((...arg0: any[]) => void) | undefined)[][] | undefined;
+    _wired: any[] | [string, Function][] | undefined;
+    /**
+     * Release every resource this instance holds.
+     *
+     * This wrapper owns the underlying worker and the native listeners it attached
+     * to it, and both were previously unreleasable: the listeners were anonymous
+     * arrow functions passed straight to `addEventListener`, so no handle existed to
+     * remove them.
+     *
+     * **It does not terminate the worker.** `WorkerAgnostic` wraps a worker handed
+     * to it by a caller, and terminating it would be a decision this class has no
+     * mandate to make — `PowerPool` owns the lifecycle of its workers and drives
+     * termination itself. So this detaches everything it attached and drops its own
+     * listener registry; it leaves the worker alone. A caller that does own the
+     * worker should terminate it, which is what the owning helper is for.
+     *
+     * Idempotent, and safe on an instance whose `_wireEvents` bailed early.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    _disposed: boolean | undefined;
     /**
      * Dispatch a native event to all registered unified listeners, normalizing
      * the payload shape so consumers see a consistent `{ data }` for `message`
@@ -104,5 +127,7 @@ declare class WorkerAgnostic {
      * @returns {Promise<void>|void}
      */
     terminate(): Promise<void> | void;
+    /** @returns {void} */
+    [Symbol.dispose](): void;
 }
 export function detectEnv(): "browser" | "webworker" | "node" | "unknown";
