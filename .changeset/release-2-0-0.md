@@ -7281,3 +7281,46 @@ hands either path something the throttle cannot read fails on the real helper.
 **Mutation-checked:** changing `release()` to hand each leg the count instead — the
 "unification" the row asked for — fails 2 of the existing tests, which is the evidence
 that the current shape is deliberate rather than accidental.
+
+## `PowerRateLimit.release()` no longer hands a refund to every tenant
+
+**Found while closing RES-035, and it is a cross-tenant allowance inflation rather
+than a tidy-up.** `release()` iterated `_liveLimiters()`, which under `keyFn` is
+_every built slot_, while `reserve()`/`tryConsume` debit _one_ slot via
+`_slotFor(key)`. So a refund for one tenant's spend was applied to all of them.
+
+Reproduced with real limiters at capacity 5: tenant A spends 4, tenant B spends 1, and
+`release(4)` left **both at 5** — B fully refunded for a spend it never made.
+`PowerThrottle.release` clamps at `capacity`, which bounds the damage but points it
+the wrong way: a _fully drained_ tenant is topped back up to full by another tenant's
+refund, which is precisely the tenant a noisy neighbour starves. Any caller that
+refunds on a failed request hands out free allowance as a side effect.
+
+`release(tokenOrN, options)` now takes `options.key` and routes to one slot, matching
+what `tryConsume` and `available()` already do.
+
+**The fix is a per-call argument and deliberately not a `slot` field on the token.**
+The token is public API, `toEqual({ n: 1 })` is pinned by a test in
+`powerRateLimit.extra.test.js`, and a previous attempt to add a field for testing's
+benefit broke that and was reverted — see the comment on `reserve()`. `limitersFor()`
+already exposes the slot, so nothing observable changes for a caller.
+
+**`reset()` still uses `_liveLimiters()`, and that one stays.** Its own comment says
+every built slot is reset rather than the factory list, specifically so that evicting
+a tenant is not a way to reset its budget. Routing `release()` through the same helper
+would have turned a refund into a cross-tenant reset; the comment now says so at the
+call site, because the two methods sitting on adjacent lines with the same helper name
+is exactly the shape that gets "simplified" later.
+
+Omitting `key` is **not** "refund everything" — it routes to the same shared slot
+`tryConsume` without a key debits, which is the degradation `_slotFor` already
+documents. Unkeyed composers are unaffected, and `release(0)` still returns before any
+routing so it cannot build a slot for an absent key.
+
+**The test's keys are chosen not to collide, and that is the fixture's whole point.**
+Two keys sharing a bucket is _not_ this bug — it is the documented design of a bucketed
+keyed limiter, and a test using a colliding pair would pass with the defect still in
+place, because a shared slot refunded twice is indistinguishable from a correct
+single-slot refund. `A` and `B` land in buckets 0 and 1 of 2, asserted in the test so a
+future change to the hashing cannot quietly neuter it. **Mutation-checked**: restoring
+the slot-wide refund fails that test.

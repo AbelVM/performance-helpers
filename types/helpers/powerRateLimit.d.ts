@@ -158,8 +158,26 @@ export class PowerRateLimit {
      * lost.
      *
      * @param {object|number} tokenOrN
+     * @param {PowerRateLimitCallOptions} [options] - **With `keyFn`, `options.key`
+     *   selects the slot to refund** — the same per-call convention `tryConsume` and
+     *   `available()` already use. Without it a keyed composer credits **every
+     *   built slot**, which is what this parameter exists to stop (RES-039):
+     *   `reserve()`/`tryConsume` debit one slot, so a slot-wide refund hands a tenant
+     *   an allowance it never spent away, and because `PowerThrottle.release` clamps
+     *   at `capacity` the victim ends up *fully* topped up rather than merely
+     *   nudged. Reproduced at capacity 5: tenant A spends 4, tenant B spends 1, and
+     *   `release(4)` left both at 5.
+     *
+     *   Omitting `key` is not "refund everything" — it routes to the same shared
+     *   slot that `tryConsume` without a key debits, which is the honest degradation
+     *   and the one `_slotFor` already documents.
+     *
+     *   Note this is deliberately **not** solved by putting a `slot` field on the
+     *   token: the token is public API, `toEqual({ n: 1 })` is pinned by a test, and
+     *   `limitersFor(key)` already exposes the slot. A per-call argument matches the
+     *   rest of the class and changes nothing a caller can already observe.
      */
-    release(tokenOrN: object | number): void;
+    release(tokenOrN: object | number, options?: PowerRateLimitCallOptions): void;
     /**
      * @param {number|{n?: number}} [nOrToken] Same argument shape as `release`.
      * @returns {Promise<void>|void}
