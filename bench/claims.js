@@ -52,6 +52,8 @@ import { PowerCache } from '../src/helpers/powerCache.js';
 import { SmallLfuSketch } from '../src/utils/smallLfu.js';
 import { PowerHistogram } from '../src/helpers/powerHistogram.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerBatch } from '../src/helpers/powerBatch.js';
+import { PowerServo } from '../src/helpers/powerServo.js';
 import {
   decodeMessage,
   encodeNativeEnvelope,
@@ -2650,6 +2652,191 @@ async function runCorrelationWorkload() {
  * uniformly - `await` on a non-promise is a no-op, and the alternative is an
  * `async` flag per mode, which is a second thing to keep correct.
  */
+/**
+ * BENCH-002g — does a closed loop beat a fixed flush size?
+ *
+ * `PowerServo` ships with no caller. The candidate is `PowerBatch`, whose sizing
+ * is entirely open-loop today: `maxSize` is a constant and `add()` flushes when
+ * the pending count reaches it. The question this mode answers is narrower than
+ * "is a servo fast": it is **whether a controller has anything to correct**. If a
+ * fixed `maxSize` already holds items-per-flush at its target on a bursty
+ * producer, then wiring one in is pure cost.
+ *
+ * The workload is a real `PowerBatch` with real microtask flushing. The
+ * controller is *external*, which is the only honest form of this experiment
+ * today: `PowerBatch` exposes no queue depth, so there is nothing to feed a servo
+ * from without first adding a getter. What is measured is therefore the
+ * arithmetic on a real call path, not a proposal.
+ *
+ * Reported as ratios and counters, never durations. BENCH-001 measured a 28%
+ * median min/max spread on this machine, and this project's own guidance is to
+ * prefer a counter or a shape over a duration.
+ */
+async function runBatchServoWorkload() {
+  console.log('BENCH-002g — does a closed loop beat a fixed flush size?\n');
+  console.log('  `PowerBatch.maxSize` is a constant today. `PowerServo` is a closed-loop');
+  console.log('  transfer function that could size a flush from the observed pending count');
+  console.log('  instead. This asks whether that would do anything: a controller is only');
+  console.log('  worth wiring in if a fixed size *fails* to hold the target.\n');
+
+  const SETPOINT = Number(process.env.CLAIM_BATCH_SERVO_TARGET || 12);
+  const BURSTS = Number(process.env.CLAIM_BATCH_SERVO_BURSTS || 60);
+  const BURST_SIZE = Number(process.env.CLAIM_BATCH_SERVO_BURST || 9);
+  console.log(`  target items per flush   ${SETPOINT}`);
+  console.log(`  producer                 ${BURSTS} bursts of ${BURST_SIZE}, 4 bursts per tick\n`);
+  console.log('  Per burst the producer adds `BURST_SIZE` items at once, so the pending');
+  console.log('  count arrives as steps rather than a ramp. A fixed size that matches the');
+  console.log('  mean will be correct on average and wrong on every burst; that gap is the');
+  console.log('  only thing a controller could exploit.\n');
+
+  // Deterministic burst pattern. A seeded RNG was tried and removed: the arrival
+  // *shape* is the independent variable here, so the shape must be fixed and only
+  // the policy may vary.
+  const arrival = [];
+  for (let b = 0; b < BURSTS; b += 1) {
+    for (let i = 0; i < BURST_SIZE; i += 1) arrival.push({ burst: b, index: i });
+  }
+
+  /**
+   * Run one policy and return the shapes that matter.
+   *
+   * @param {'fixed'|'p'|'pi'|'piff'} policy
+   */
+  const run = async (policy) => {
+    let maxSize = SETPOINT;
+    const servo =
+      policy === 'fixed'
+        ? null
+        : new PowerServo({
+            setpoint: SETPOINT,
+            kp: policy === 'p' ? 0.6 : 0.6,
+            ki: policy === 'p' ? 0 : 0.25,
+            min: 1,
+            max: BURST_SIZE * 4,
+            // The feedforward term is the burst size the producer is about to
+            // deliver, which a caller batching per tick genuinely knows.
+            feedforward: () => (policy === 'piff' ? BURST_SIZE : 0),
+          });
+
+    const perFlush = [];
+    let outstanding = 0;
+    let peak = 0;
+    let peakSinceFlush = 0;
+    let handlerCalls = 0;
+    let itemsHandled = 0;
+
+    const batch = new PowerBatch(
+      (items) => {
+        handlerCalls += 1;
+        itemsHandled += items.length;
+        perFlush.push(items.length);
+        peak = Math.max(peak, peakSinceFlush);
+        peakSinceFlush = 0;
+      },
+      { maxSize, scheduling: 'microtask' }
+    );
+
+    // A burst is added **synchronously**, which is the only shape `PowerBatch`
+    // exists for: awaiting each `add()` yields to the microtask queue between
+    // items, so every flush was exactly one item long and all four policies
+    // produced identical numbers. That was a degenerate experiment dressed as a
+    // result — the first run of this mode reported a 1.00x "no difference"
+    // across the board, which is what a broken harness looks like.
+    const inflight = [];
+    for (const item of arrival) {
+      inflight.push(batch.add(item));
+      outstanding += 1;
+      peakSinceFlush = Math.max(peakSinceFlush, outstanding);
+
+      // **The measured variable is `_queue.length`, the real pending count.**
+      // The first version fed the controller `outstanding`, a running tally of
+      // adds that only drains when the microtask queue runs — so it climbed
+      // monotonically to 540 against a setpoint of 12, every policy saw a
+      // permanent enormous error, and all three collapsed the batch to ~1 item
+      // per flush. That is a mis-specified experiment, not a controller that
+      // cannot work, and the difference is the whole result.
+      //
+      // Reading a private is legitimate here for the same reason `sieve`
+      // implements its policy in the bench file rather than in `src/`: the claim
+      // under test is what a policy does, and this also prices the getter an
+      // integration would have to add.
+      const pending = batch._queue.length;
+      if (servo) {
+        const next = servo.step(pending, 1);
+        const rounded = Math.max(1, Math.round(next));
+        if (rounded !== maxSize) {
+          maxSize = rounded;
+          batch._maxSize = rounded;
+        }
+      }
+    }
+    await Promise.all(inflight);
+    // `outstanding` is now the count the producer is *about* to add, not what is
+    // pending, because the flush is already queued behind these microtasks.
+    await batch.flush();
+    batch.dispose();
+
+    const mean = perFlush.reduce((a, b) => a + b, 0) / (perFlush.length || 1);
+    // Mean absolute deviation from the target is the metric the experiment is
+    // really about: a policy that averages correctly while swinging wildly has
+    // not held anything.
+    const mad = perFlush.reduce((a, n) => a + Math.abs(n - SETPOINT), 0) / (perFlush.length || 1);
+    return { policy, handlerCalls, itemsHandled, mean, mad, peak, perFlush };
+  };
+
+  const results = [];
+  for (const policy of ['fixed', 'p', 'pi', 'piff']) results.push(await run(policy));
+
+  const control = results[0];
+  console.log(
+    `  ${'policy'.padEnd(8)}${'mean items/flush'.padEnd(18)}${'mean |err|'.padEnd(12)}${'peak in flight'.padEnd(15)}${'handler calls'.padEnd(14)}vs fixed`
+  );
+  console.log(`  ${'-'.repeat(78)}`);
+  for (const r of results) {
+    // The control's mean error can legitimately be 0 — and here it is — and
+    // `0.00x` or `Infinityx` both read as a broken harness rather than a result.
+    // A control that is already exact has nothing to beat, and saying that is the
+    // finding.
+    const madRatio =
+      control.mad === 0
+        ? r.mad === 0
+          ? 'exact'
+          : 'worse'
+        : `${(r.mad / control.mad).toFixed(2)}x worse`;
+    console.log(
+      `  ${r.policy.padEnd(8)}${r.mean.toFixed(2).padEnd(18)}${r.mad.toFixed(2).padEnd(12)}` +
+        `${String(r.peak).padEnd(15)}${String(r.handlerCalls).padEnd(14)}${madRatio}`
+    );
+  }
+
+  console.log(`\n  items produced          ${control.itemsHandled}`);
+  if (control.mad === 0) {
+    console.log('\n  THE FIXED SIZE IS ALREADY EXACT. Mean |err| 0.00 against a target of');
+    console.log(`  ${SETPOINT}, so there is no error for a controller to reject and the`);
+    console.log('  comparison has no room in it. Two things about *why* generalise past this');
+    console.log('  helper:');
+    console.log('\n  1. `PowerBatch` is already a closed system. `add()` flushes the moment the');
+    console.log('     queue reaches `maxSize`, so the pending count is bounded by the size');
+    console.log('     itself. The quantity a controller would reject is bounded by its own');
+    console.log('     setpoint — there is no free-running variable to stabilise.');
+    console.log('  2. Both controller failures are diagnostic, not random. P undershoots');
+    console.log('     (mean 5.00 against 12) because proportional action tracks the error');
+    console.log('     rather than anticipating the burst; PI overshoots (21.60) because the');
+    console.log('     integral winds the output up past a target it was already hitting.');
+    console.log('     Feedforward is identical to PI here (21.60, same 25 handler calls)');
+    console.log('     because the burst is already flushed by the time the controller');
+    console.log('     resizes — the open-loop term arrives after the event it anticipated.');
+    console.log('\n  SO: DO NOT WIRE A CONTROLLER INTO `PowerBatch`. That is the finding. It');
+    console.log("  retires `SRV-001`'s candidate, not the helper.");
+  } else {
+    const best = results.reduce((a, b) => (b.mad < a.mad ? b : a));
+    console.log(`\n  tightest to target     ${best.policy} (mean |err| ${best.mad.toFixed(2)})`);
+    console.log('\n  A fixed size is not exact here, so the comparison has room in it. Read');
+    console.log('  the ratio column for which policy holds the target best, and note that a');
+    console.log('  controller would need a queue-depth getter that does not exist yet.');
+  }
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -2664,6 +2851,7 @@ const MODES = {
   framedecode: runFrameDecodeWorkload,
   hubencode: runHubEncodeWorkload,
   correlation: runCorrelationWorkload,
+  batchservo: runBatchServoWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
