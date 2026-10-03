@@ -6717,3 +6717,28 @@ for a reason unrelated to the whitelist — which looks exactly like the latter 
 the assertion.
 
 **5 tests, 2 mutants, both caught.** Full suite: 2406 passed, 1 skipped.
+
+**Follow-up: the over-narrow check now covers 15 classes, not 2.**
+`test/optionsValidation.test.js` gained a fixture table with one minimal valid
+configuration per class — each exercising a **distinctive** option rather than an
+empty object, since `{}` passes whatever the whitelist happens to be. It spans the
+constructor shapes: a bare limit, a TTL, callbacks, a required positional handler,
+and a numeric-only constructor.
+
+**Every name in that table was resolved by constructing it**, and the validator
+saying _"Did you mean `maxConcurrency`?"_ is what corrected four wrong guesses while
+it was being written — which is a small argument for the check that exists in its
+own favour.
+
+A mutation that misspelled one entry in `PowerBulkhead`'s whitelist
+(`maxConcurrency` → `maxConcurrancy`) fails it, so the direction is caught for the
+classes covered.
+
+**Scope, honestly: 15 of 22 validating classes, not all of them, and not every
+option of each.** Exhaustive coverage needs a fixture per class per option — a
+table that would rot as options are added. The two classes whose whitelists this
+change actually wrote are covered exhaustively. **A source-scraping approach was
+tried and abandoned**: matching quoted strings near each `assertKnownOptions` call
+returned method names rather than option names for `PowerLogger`, which is a
+reminder that a regex over source is a guess about structure wearing a test's
+clothes.

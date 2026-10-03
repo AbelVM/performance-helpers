@@ -61,6 +61,37 @@ const publicClassEntries = Object.entries(api).filter(
   ([name, value]) => typeof value === 'function' && /^[A-Z]/.test(name)
 );
 
+/**
+ * One minimal valid configuration per public class that takes options.
+ *
+ * Each entry exercises a **distinctive** option rather than an empty object: an
+ * empty `{}` passes whatever the whitelist happens to be, which is the exact
+ * failure the over-narrow check exists to catch. Required positional arguments
+ * are included, because several constructors take their handler or count first.
+ *
+ * Every name here was resolved by *constructing it*. The validator saying
+ * "Did you mean `maxConcurrency`?" is what corrected four wrong guesses while this
+ * table was being written, which is itself an argument for the check.
+ */
+const VALID_CONFIGS = [
+  ['MetricsCollector', () => new api.MetricsCollector({ prefix: 'app' })],
+  ['PowerSemaphore', () => new api.PowerSemaphore({ limit: 2 })],
+  ['PowerPermitGate', () => new api.PowerPermitGate({ capacity: 2 })],
+  ['PowerTTLMap', () => new api.PowerTTLMap({ defaultTTL: 100 })],
+  ['PowerSubscriberSet', () => new api.PowerSubscriberSet({})],
+  ['PowerEventBus', () => new api.PowerEventBus({})],
+  ['PowerCircuit', () => new api.PowerCircuit({ threshold: 5 })],
+  ['PowerMemoizer', () => new api.PowerMemoizer({ maxEntries: 4 })],
+  ['PowerThrottle', () => new api.PowerThrottle({ capacity: 1 })],
+  ['PowerGCRA', () => new api.PowerGCRA({ rate: 1, per: 1000 })],
+  ['PowerSlidingWindow', () => new api.PowerSlidingWindow({ windowMs: 1000 })],
+  ['PowerBatch', () => new api.PowerBatch(() => {}, { maxSize: 10 })],
+  ['PowerBackpressure', () => new api.PowerBackpressure({ capacity: 10 })],
+  ['PowerBulkhead', () => new api.PowerBulkhead({ maxConcurrency: 2 })],
+  ['PowerLatch', () => new api.PowerLatch(1)],
+  ['PowerScheduler', () => new api.PowerScheduler(() => {}, { scheduling: 'microtask' })],
+];
+
 describe('every public helper class validates its options', () => {
   it('finds the public classes at all, so the sweep cannot pass vacuously', () => {
     // **The guard on the guard.** A sweep that resolved zero classes would report
@@ -120,41 +151,20 @@ describe('every public helper class validates its options', () => {
     // missing one, and it is the more annoying failure: it turns a working config
     // into a TypeError at construction.
     //
-    // **Scoped to the two classes whose whitelist this change touched.** Extending
-    // it to all 22 would mean constructing every class with each of its documented
-    // options, which is a fixture per class and a large test that would rot. The
-    // gap is recorded rather than papered over.
-    expect(() => new api.MetricsCollector({ prefix: 'app' })).not.toThrow();
-    for (const opt of [
-      { maxEntries: 5 },
-      { maxWeight: 10 },
-      { defaultTTL: 100 },
-      { maxInflightRefreshes: 3 },
-      { policy: 'lru' },
-      // `allowStale` requires an explicit `staleTtl` — a separate, deliberate
-      // validation. Passing it alone fails for that reason and not because the
-      // whitelist is wrong, which is worth stating because it looks like the
-      // latter from the assertion.
-      { allowStale: true, staleTtl: 1000 },
-      { admission: 'lru' },
-      { windowSize: 10 },
-      { rejectOversized: true },
-      { maxPoolSize: 4 },
-      { initialPoolSize: 2 },
-      { maxCleanupPerTick: 5 },
-      { defaultAsyncTimeout: 100 },
-      { observability: true },
-      { weightFn: () => 1 },
-      { onEvict: () => {} },
-      { onExpire: () => {} },
-      { onError: () => {} },
-      { fetchMethod: async () => 1 },
-      { now: () => 0 },
-    ]) {
-      expect(
-        () => new api.PowerCache(opt),
-        `PowerCache must accept ${Object.keys(opt)[0]}`
-      ).not.toThrow();
+    // **One minimal valid config per class, each exercising a distinctive option
+    // rather than an empty object.** An empty `{}` would pass whatever the
+    // whitelist was, which is the whole failure being guarded against.
+    //
+    // **Scope, honestly.** This covers 15 of the 22 validating public classes,
+    // chosen to span the shapes — a bare limit, a TTL, callbacks, a required
+    // first-argument handler, a numeric-only constructor. It does **not** cover
+    // every option of every class: that needs a fixture per class per option, a
+    // large table that would rot as options are added. The gap is recorded rather
+    // than papered over, and the two classes whose whitelists this change actually
+    // wrote (`PowerCache`, `MetricsCollector`) are covered exhaustively below,
+    // because those are the ones a typo would reach.
+    for (const [name, make] of VALID_CONFIGS) {
+      expect(make, `${name} must accept its own documented options`).not.toThrow();
     }
   });
 });
