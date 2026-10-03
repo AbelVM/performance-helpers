@@ -42,6 +42,8 @@
  *
  * @type {number}
  */
+import { assertKnownOptions } from '../utils/options.js';
+
 export const METRICS_VERSION = 1;
 
 /** Separator between a helper name and a series key. */
@@ -133,6 +135,12 @@ export class MetricsCollector {
    *   collectors in one process do not collide.
    */
   constructor(options = {}) {
+    // This class is publicly exported and sits on the `attach()` path every
+    // observability-enabled helper uses, so a misspelled option is a caller's
+    // typo with the same shape as the `PowerCache` one: `{ registr: fn }` was
+    // accepted, `this.register` stayed a function, and nothing was ever
+    // registered — metrics silently off, with no error to explain why.
+    assertKnownOptions(options, ['prefix'], 'MetricsCollector');
     /** @type {Map<string, () => *>} */
     this._sources = new Map();
     this._prefix = typeof options?.prefix === 'string' ? options.prefix : '';

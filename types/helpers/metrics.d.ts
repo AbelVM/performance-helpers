@@ -61,50 +61,7 @@ export function detach(receipt: {
     unregister: () => boolean;
     name: string;
 } | null): boolean;
-/**
- * FEAT-007, part one of two: a stable shape over the numbers that already exist.
- *
- * Every helper that reports anything does it through its own `stats()`, and
- * those shapes are not merely different — they are *different kinds of thing*.
- * `PowerCache.stats()` is counters. `PowerGCRA.stats()` is largely
- * *configuration* (`rate`, `per`, `burst`) plus one state variable (`tat`).
- * `PowerEventLoopMonitor.stats()` is measurements. `PowerPool.getStats()`
- * contains a *nested array* of per-worker objects. A dashboard that wants to
- * plot "cache hit rate" beside "event-loop p99" currently has to know all of
- * that, and re-learn it whenever a helper's internals move.
- *
- * The fix is not more counters. Every number reported here already exists; the
- * job is a **stable shape** over them, so a second source of truth — the thing
- * that would drift — is never introduced.
- *
- * ## What this deliberately is not
- *
- * It is not an `observability: true` option on the helpers. That is the second
- * half, and it is nine helpers in one commit: shipping it for one helper would
- * make `observability: true` mean three different things across nine, which is
- * worse than not having it. What lands here is the part that is complete and
- * useful on its own — take any helper's `stats()`, get a flat, versioned,
- * point-in-time snapshot.
- *
- * ## The flat-series tradeoff
- *
- * `series` is a flat map of scalars, not the helpers' nested objects. That is
- * what makes it flat: `cache.hitRate` and `loop.p99` become addressable without
- * knowing which helper produced them. The cost is that a nested object is
- * either absent from the series or appears as one joined key — a caller that
- * wants per-worker detail must keep using `getStats()`. Both are supported;
- * `snapshot()` does the flattening, and the original is always one call away.
- */
-/**
- * The snapshot format version.
- *
- * Bumped when the *shape* changes, not when a helper adds a field: adding a
- * key is additive and does not break a consumer that reads named series. A
- * consumer pins this to detect a shape change it was not written for.
- *
- * @type {number}
- */
-export const METRICS_VERSION: number;
+export const METRICS_VERSION: 1;
 /**
  * Collects point-in-time snapshots from one or more helpers.
  *

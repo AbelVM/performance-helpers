@@ -4829,6 +4829,45 @@ of 12), so **do not wire a controller into it**, which retires `PowerServo`'s on
 candidate caller. `PowerServo` itself ships as a helper with no caller in the
 library.
 
+### Autoscale step sizing is closed-loop, inside the existing ceiling (minor)
+
+`autoScale.stepUp` and `stepDown` are now **ceilings** rather than fixed counts.
+The direction of a scale action is unchanged — the same EWMA-against-`targetMs`
+hysteresis band, the same queue-pressure check, the same cooldown and backoff —
+but the _size_ of the step is chosen by `PowerServo`, a PI controller on the
+relative error (`ewma / targetMs` against a setpoint of `1`).
+
+Before, a pool 20 % over target added as many workers as one 300 % over, so the
+badly-over case converged no faster than the marginal one. Now the further over
+target the pool is, the more of `stepUp` it uses in a single tick, and the integral
+term converges the last stretch — which a fixed step cannot do, because
+proportional action alone leaves a standing offset on a discrete stepper.
+
+**At the default `stepUp: 1` behaviour is identical.** A ceiling of one worker is
+one worker whatever the controller says, and on that path the controller is not
+even constructed — a test asserts exactly that, first, because it is the property
+that protects every existing user. Raising `stepUp` above `1` is what opts in.
+
+The controller's integral is dropped whenever a tick decides to do nothing, so a
+burst's accumulated error is not paid back during the next quiet period, and it is
+clamped to the ceiling so a long overshoot cannot ask for more than `stepUp`
+allows.
+
+This gives `PowerServo` the caller it shipped without. It is worth being explicit
+about why the other two candidates were refused rather than overlooked:
+`bench/claims.js batchservo` measured that a fixed `maxSize` in `PowerBatch` is
+already exact, so a controller there has nothing to correct; and
+`bench/claims.js concurrency` measured that enforcing `autoScale.policy`'s
+concurrency limit **loses 3.7 %** to the best hand-picked constant cap. The
+`targetMs` step is a third thing, and the only one of the three where a setpoint
+and a measurement already exist.
+
+The inherited caveat is unchanged and worth stating: this reuses the end-to-end
+task-latency EWMA that `ALGO-005` records is not the queueing delay Netflix's
+controllers assume. Sizing an already-bounded action is more forgiving than
+gating admission with that signal, but the gap is inherited rather than fixed. No
+benchmark yet compares this against the fixed step it replaces.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
@@ -6635,3 +6674,46 @@ deleted**, both in the same shape:
   option forever, which is how `maxEntriess` went unnoticed.
 
 Removing the validation fails both, so neither inversion is decorative.
+
+## `MetricsCollector` validates its options, and a meta-test keeps the whole surface honest
+
+**The `PowerCache` fix was one class of a pattern, so the pattern is now tested.**
+A sweep of every class taking an options object found **23, of which 21 already
+validated** — which is why `PowerCache` read as an oversight rather than a gap, and
+survived review after review. The second holdout was **`MetricsCollector`**, which
+is publicly exported and sits on the `attach()` path every observability-enabled
+helper uses: `{ registr: fn }` was accepted, `register` stayed a function, and
+nothing was ever registered. Metrics silently off, same shape as `maxEntriess`
+leaving `maxEntries` at `Infinity`.
+
+The one remaining holdout is `SmallLfuSketch`, which does **not** validate and is
+**not** publicly exported — it is constructed only by `powerCache.js`, so a typo
+there is a library bug the cache's own tests would catch, not a caller's. Requiring
+validation there would be a rule with no failure behind it.
+
+**`test/optionsValidation.test.js` makes the sweep a standing check** rather than a
+one-off, and it caught two things about itself:
+
+- **It passed vacuously on its first run.** The filter tested `/^[A-Z]/` against the
+  _function's_ string form — which begins `class`, never `Power…` — so it resolved
+  **zero** entries and reported "0 gaps" while checking nothing. The assertion that
+  the population is non-empty is what caught it.
+- **Its regex missed a public class.** `WorkerAgnostic` is declared `class X` with
+  `export default X` at the bottom, not `export class X`, so the sweep could not
+  see it. A second assertion — every public class must be findable in some source
+  file — caught the omission.
+
+**A mutation showed the meta-test only covered half the failure, and the missing
+half is the worse one.** Narrowing `MetricsCollector`'s list from `['prefix']` to
+`['prefx']` passed 6/6: every other assertion proves a class _rejects_ nonsense,
+and none notices a class that rejects something **valid**. A misspelt entry in a
+hand-written whitelist is as likely as a missing one and is the more annoying
+failure — it turns a working config into a `TypeError` at construction. There is now
+an assertion that every option the two whitelists claim is accepted.
+
+That assertion immediately caught **a mistake in my own test**: `allowStale` requires
+an explicit `staleTtl`, a separate deliberate validation, so passing it alone fails
+for a reason unrelated to the whitelist — which looks exactly like the latter from
+the assertion.
+
+**5 tests, 2 mutants, both caught.** Full suite: 2406 passed, 1 skipped.

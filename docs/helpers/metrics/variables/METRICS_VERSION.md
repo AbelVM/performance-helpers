@@ -6,10 +6,4 @@
 
 # Variable: METRICS\_VERSION
 
-> `const` **METRICS\_VERSION**: `number` = `1`
-
-The snapshot format version.
-
-Bumped when the *shape* changes, not when a helper adds a field: adding a
-key is additive and does not break a consumer that reads named series. A
-consumer pins this to detect a shape change it was not written for.
+> `const` **METRICS\_VERSION**: `1` = `1`
