@@ -1,6 +1,6 @@
 {
-  "ceiling": 188,
+  "ceiling": 186,
   "minFilesWithDiagnostics": 12,
   "recordedAt": "2026-10-03",
-  "reason": "WorkerAgnostic: declared the node:module require that is assigned inside a promise chain, typed the dynamic import's namespace, read self.importScripts and document.currentScript.src off narrowed globals (the DOM lib types self as Window and currentScript as HTMLOrSVGScriptElement, neither of which has them), and gave normalizeTransfer the same transfer union WorkerLike already accepts"
+  "reason": "powerCache memoizer: gave _defaultMemoizeOptions its option shape, and typed the destructured _memoize options with an inline cast - a @param tag cannot bind to a destructured parameter, so the qualified options.ttl tags were inert and every read was an error"
 }

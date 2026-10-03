@@ -2893,6 +2893,7 @@ export class PowerMemoizer {
     this.cache = new PowerCache(cacheOptions);
     // track inflight Promises to deduplicate concurrent calls
     this._inflight = new Map();
+    /** @type {{ttl?: number, weight?: number}} */
     this._defaultMemoizeOptions = {};
     if (ttl !== undefined) this._defaultMemoizeOptions.ttl = ttl;
     if (weight !== undefined) this._defaultMemoizeOptions.weight = weight;
@@ -2982,16 +2983,26 @@ export class PowerMemoizer {
    * @param {Function} fn - Function to wrap.
    * @param {F} fn - Function to wrap.
    * @param {Object} [options] - Per-wrapper overrides merged over the defaults.
-   * @param {number} [options.ttl]
-   * @param {number} [options.weight]
    * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized wrapper.
    * @template {Function} F
    * @private
    */
-  _memoize(fn, { ttl, weight } = {}) {
+  _memoize(
+    fn,
+    // The cast is what types `ttl`/`weight`. A JSDoc `@param [options]` cannot:
+    // this parameter is destructured in the signature, so there is no parameter
+    // *named* options for the tag to bind to and TS rejects it with TS8024. The
+    // qualified `@param {number} [options.ttl]` tags above are inert for the same
+    // reason, which is why reading `ttl` off this used to be an error.
+    { ttl, weight } = /** @type {{ttl?: number, weight?: number}} */ ({})
+  ) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
     const self = this;
-    return function memoized(...args) {
+    // `this` is annotated because the wrapper deliberately inspects its receiver,
+    // and an unannotated one in a bare function expression is implicitly `any` -
+    // which would make the null check below untypeable and hide the very case it
+    // exists for.
+    return function memoized(/** @type {...any} */ ...args) {
       // Memoizing a *method* must not lose the receiver. The wrapper is a
       // plain `function` (not an arrow) precisely so `this` is observable.
       // Two things follow from that:

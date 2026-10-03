@@ -1022,7 +1022,11 @@ export class PowerMemoizer {
     keyResolver: (...arg0: any[]) => string;
     cache: PowerCache;
     _inflight: Map<any, any>;
-    _defaultMemoizeOptions: {};
+    /** @type {{ttl?: number, weight?: number}} */
+    _defaultMemoizeOptions: {
+        ttl?: number;
+        weight?: number;
+    };
     run: (...args: any[]) => any;
     _originalFn: Function | null;
     _receiverIds: WeakMap<WeakKey, any>;
@@ -1065,8 +1069,6 @@ export class PowerMemoizer {
      * @param {Function} fn - Function to wrap.
      * @param {F} fn - Function to wrap.
      * @param {Object} [options] - Per-wrapper overrides merged over the defaults.
-     * @param {number} [options.ttl]
-     * @param {number} [options.weight]
      * @returns {import('./jsdoc-types.js').MemoizedFunction<F>} The memoized wrapper.
      * @template {Function} F
      * @private
