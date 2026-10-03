@@ -41,6 +41,7 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 | [0004](./0004-permit-capacity-ceiling-or-pool.md)         | `capacity` is a ceiling on some gates and a pool size on others      | Accepted |
 | [0005](./0005-feedback-signal-picks-the-controller.md)    | A loop's signal picks the controller, not the other way round        | Accepted |
 | [0006](./0006-sequence-in-the-envelope-not-the-header.md) | A resume sequence rides in the envelope, not the frame header        | Proposed |
+| [0007](./0007-object-keys-in-the-admission-filter.md)     | What an object key means to the admission filter                     | Proposed |
 
 ## Status values
 
