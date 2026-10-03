@@ -34,6 +34,11 @@
  * @typedef {function(string): *} NodeRequire
  */
 
+/**
+ * @type {NodeRequire|null} The dynamic-imported `node:module` require, or null
+ *   until that resolves. Declared because the initialiser is `null` and the only
+ *   assignment happens inside a promise chain, so neither position can infer it.
+ */
 let _nodeRequire = null;
 /** @type {Promise<NodeRequire>|null} */
 let _nodeRequirePromise = null;
@@ -47,20 +52,22 @@ function _loadNodeRequire() {
   if (!_nodeRequirePromise) {
     // Opaque dynamic import so bundlers do not try to resolve the Node
     // builtin at build time. Only ever runs in a Node environment.
-    _nodeRequirePromise = new Function('return import("node:module")')().then((m) => {
-      let base;
-      try {
-        // Dynamic access so bundlers (CJS/UMD) don't statically parse
-        // `import.meta` and emit EMPTY_IMPORT_META warnings. In pure ESM Node
-        // this yields the module URL; in CJS/UMD `import.meta` is replaced with
-        // `{}` and we fall back to the current working directory.
-        base = new Function('return import.meta?.url')() || process.cwd() + '/';
-      } catch (e) {
-        base = process.cwd() + '/';
+    _nodeRequirePromise = new Function('return import("node:module")')().then(
+      (/** @type {any} */ m) => {
+        let base;
+        try {
+          // Dynamic access so bundlers (CJS/UMD) don't statically parse
+          // `import.meta` and emit EMPTY_IMPORT_META warnings. In pure ESM Node
+          // this yields the module URL; in CJS/UMD `import.meta` is replaced with
+          // `{}` and we fall back to the current working directory.
+          base = new Function('return import.meta?.url')() || process.cwd() + '/';
+        } catch (e) {
+          base = process.cwd() + '/';
+        }
+        _nodeRequire = m.createRequire(base);
+        return _nodeRequire;
       }
-      _nodeRequire = m.createRequire(base);
-      return _nodeRequire;
-    });
+    );
   }
   return _nodeRequirePromise;
 }
@@ -98,7 +105,11 @@ function getNodeWorkerCtor() {
 
 function detectEnv() {
   if (typeof window !== 'undefined' && typeof window.document !== 'undefined') return 'browser';
-  if (typeof self !== 'undefined' && typeof self.importScripts === 'function') return 'webworker';
+  if (
+    typeof self !== 'undefined' &&
+    typeof (/** @type {any} */ (self).importScripts) === 'function'
+  )
+    return 'webworker';
   if (typeof process !== 'undefined' && process.versions?.node) return 'node';
   return 'unknown';
 }
@@ -296,7 +307,10 @@ function createWebWorkerFromString(workerSource, options) {
   let baseUrl = typeof explicitBase === 'string' ? explicitBase : undefined;
 
   if (!baseUrl && typeof document !== 'undefined') {
-    const cs = document.currentScript;
+    // `currentScript` is typed `HTMLOrSVGScriptElement | null` and `src` exists
+    // only on the HTML side of that union, so reading it is an error even though a
+    // `document` is the one place this can be a script at all.
+    const cs = /** @type {HTMLScriptElement|null} */ (document.currentScript);
     if (cs?.src) baseUrl = cs.src;
   }
   if (!baseUrl && typeof location !== 'undefined' && location.href) {
@@ -317,6 +331,13 @@ function createWebWorkerFromString(workerSource, options) {
  * Normalize a transfer argument (array or `{ transfer }` options object) into
  * an array of Transferables (or undefined).
  * @private
+ */
+/**
+ * @param {(ArrayBuffer[]|ArrayBufferView[]|Object)|undefined} transfer Either the
+ *   list itself or a `postMessage`-style bag carrying one, which is the same
+ *   union `WorkerLike.postMessage` accepts. `Transferable` was too narrow: the
+ *   DOM's own definition does not admit a bare `Object`, and callers pass one.
+ * @returns {Array<Transferable>|undefined}
  */
 function normalizeTransfer(transfer) {
   if (Array.isArray(transfer)) return transfer;
