@@ -112,18 +112,34 @@ export class PowerSubscriberSet {
     // symbol so a caller holding the wrapper can recover what it wraps.
     const wrapped = /** @type {((...args:any[])=>any) & {[ORIGINAL]?: SubscriberListener}} */ (
       (...args) => {
-        try {
-          // Returned, and that is load-bearing rather than tidy. Dropping it made
-          // an `async` once-listener unobservable: the promise was discarded
-          // inside this wrapper, so whatever called it had nothing to attach a
-          // rejection handler to, and a listener that rejected reached the
-          // process. `PowerEventBus.emit` is the caller that cares, and it
-          // swallows rejections on purpose — but it can only do that if the
-          // promise survives this frame.
-          return fn(...args);
-        } finally {
-          this.delete(fn);
-        }
+        // **Removed before the call, not after it.** `EventEmitter.once` removes
+        // the wrapper first, and that ordering is load-bearing for re-entrancy: an
+        // async handler runs synchronously up to its first `await`, so a listener
+        // that emits the same event inside its own body — before any await — would
+        // still be registered, be invoked again, and recurse. Measured on the
+        // pre-fix code:
+        //
+        //     bus.once('e', async () => { bus.emit('e'); });  bus.emit('e');
+        //     -> RangeError: Maximum call stack size exceeded
+        //
+        // Deleting in a `finally` was wrong in the other direction too, and for the
+        // same reason: `finally` runs when `fn(...)` *returns* its promise, so for
+        // any handler that awaits, the listener was gone while the handler was
+        // still running. Keying removal to the call rather than to the moment
+        // before it is the whole defect. (OBS-009)
+        //
+        // `delete` resolves the wrapper through `_onceMap` and removes by wrapper
+        // identity, so this cannot disturb a separate `add(fn)` registration of
+        // the same function.
+        this.delete(fn);
+        // Returned, and that is load-bearing rather than tidy. Dropping it made
+        // an `async` once-listener unobservable: the promise was discarded
+        // inside this wrapper, so whatever called it had nothing to attach a
+        // rejection handler to, and a listener that rejected reached the
+        // process. `PowerEventBus.emit` is the caller that cares, and it
+        // swallows rejections on purpose — but it can only do that if the
+        // promise survives this frame. (OBS-003)
+        return fn(...args);
       }
     );
     try {

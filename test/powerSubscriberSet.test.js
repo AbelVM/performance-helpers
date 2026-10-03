@@ -17,6 +17,31 @@ describe('PowerSubscriberSet', () => {
     expect(Array.from(subs)).toEqual([fn]);
   });
 
+  it('a once listener is removed before it is invoked, not after', () => {
+    // The defect this pins: removal ran in a `finally`, so it happened when
+    // `fn(...)` *returned* — after an async handler had already run
+    // synchronously up to its first `await`. A handler that emits the same event
+    // inside its own body therefore found itself still registered, was invoked
+    // again, and recursed:
+    //
+    //     subs.addOnce(async () => { drive(); });  drive();
+    //     -> RangeError: Maximum call stack size exceeded
+    //
+    // `forEach` is what `PowerEventBus.emit` drives the bucket with, so this is
+    // the emit path, one layer down. Asserted on a counter rather than on the
+    // throw, because the recursion is only survivable at all if the listener is
+    // gone first — which is the property under test.
+    const subs = new PowerSubscriberSet();
+    let calls = 0;
+    const drive = () => subs.forEach((listener) => listener());
+    subs.addOnce(async () => {
+      calls += 1;
+      drive();
+    });
+    drive();
+    expect(calls, 'a re-entrant emit must not re-invoke a once listener').toBe(1);
+  });
+
   it('supports once listeners and removes them after invocation', () => {
     const subs = new PowerSubscriberSet();
     let called = 0;

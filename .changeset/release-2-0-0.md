@@ -4914,6 +4914,44 @@ silent early return that looks like success. `drain()` on a streamed pool waits 
 the iterable to finish first; an already-aborted `signal` still rejects at once
 rather than queueing behind a pump that may never end.
 
+### A `once` listener is now removed before it runs, not after (patch)
+
+`PowerSubscriberSet.addOnce` removed its wrapper in a `finally`, so removal
+happened when the handler **returned** rather than before it was called. For a
+synchronous handler that is indistinguishable from correct. For an `async` one it
+is not: the body runs synchronously up to its first `await`, so a handler that
+emits the same event inside its own body found **itself still registered**, was
+invoked again, and recursed.
+
+```js
+bus.once('e', async () => {
+  bus.emit('e');
+});
+bus.emit('e');
+// before: RangeError: Maximum call stack size exceeded
+// after:  one invocation
+```
+
+`EventEmitter.once` removes the wrapper _before_ invoking it, and that ordering is
+what makes a re-entrant emit safe. Removal is now keyed to the moment before the
+call. A synchronous throw behaves as it did — the listener was already gone by the
+time the `finally` ran, and now it is gone slightly earlier.
+
+Two things were checked rather than assumed. `delete(fn)` resolves the wrapper
+through `_onceMap` and removes it by **wrapper identity**, so a separate `add(fn)`
+registration of the same function is untouched. And the `return fn(...)` that
+`OBS-003` put there is preserved: it is what lets `PowerEventBus.emit` observe a
+thenable return, and dropping it made a rejecting `async` listener reach the
+process.
+
+This was found by probing `OBS-009`'s claims rather than reading them. Its
+"unobserved rejection" half was **already fixed** by `OBS-003` and verified so
+here; its "removed while still running" half had the causality backwards — the
+listener was still registered while running, which is the opposite failure and the
+one that crashes. The regression test drives the bucket through `forEach`, which
+is what `emit` uses, and was mutation-checked: with removal moved back into the
+`finally` it fails with that `RangeError`.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
