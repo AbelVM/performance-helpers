@@ -16,18 +16,43 @@ A sliding-window rate limiter that allows up to `capacity` events per `windowMs`
 
 - `available()` — Return the current number of available slots in the window. This performs a prune of stale timestamps before reporting.
 
-- `reset()` — Clear internal state and timestamp queue, effectively refilling the window.
+- `reset()` — Clear internal state and timestamp queue, effectively refilling the window. **The ring buffer is kept**, so this is cheap enough for a hot path; see [reset versus dispose](#reset-versus-dispose).
+
+- `dispose()` — Release everything the instance holds, including the ring buffer. Use at teardown, including `using` / `await using` scope exit.
+
+## Reset versus dispose
+
+Both empty the window; they differ in what happens to the memory.
+
+|             | `reset()`                    | `dispose()`                          |
+| ----------- | ---------------------------- | ------------------------------------ |
+| history     | dropped                      | dropped                              |
+| ring buffer | **kept** at its current size | **released** to its initial capacity |
+| clock       | untouched                    | untouched                            |
+| for         | a live window being cleared  | an instance you have finished with   |
+
+The window keeps one timestamp per admitted request in a `PowerQueue`, and that
+queue **grows**: a window that admits 5000 requests holds a ring of 8192 slots.
+`dispose()` returns it, so a helper you have finished with is not still holding
+its largest allocation. `reset()` deliberately does not, because it puts a
+_live_ window back to empty — a caller clearing a per-tenant window between
+requests would then reallocate the ring on every call, trading a retained buffer
+for repeated allocation on a path that is already hot.
+
+Neither touches the clock. A clock you injected with `now:` is **your** function,
+and `dispose()` releasing resources is not a licence to swap out caller
+configuration underneath it.
 
 ## Request counts
 
-`tryConsume` **validates** its count argument rather than coercing it. It used to run it through `Math.max(0, Math.floor(n) || 0)`, which turns `NaN` into `0` — and `0` is the *admit* case, so `tryConsume(NaN)` returned `true` having recorded nothing at all.
+`tryConsume` **validates** its count argument rather than coercing it. It used to run it through `Math.max(0, Math.floor(n) || 0)`, which turns `NaN` into `0` — and `0` is the _admit_ case, so `tryConsume(NaN)` returned `true` having recorded nothing at all.
 
-| Input                           | Behaviour      |
-| ------------------------------- | -------------- |
-| non-finite (`NaN`, `±Infinity`) | throws `TypeError` |
-| not a number (`'many'`)         | throws `TypeError` |
-| fractional (`3.9`)              | floors to `3`   |
-| numeric string (`'3'`)          | read as `3`     |
+| Input                           | Behaviour             |
+| ------------------------------- | --------------------- |
+| non-finite (`NaN`, `±Infinity`) | throws `TypeError`    |
+| not a number (`'many'`)         | throws `TypeError`    |
+| fractional (`3.9`)              | floors to `3`         |
+| numeric string (`'3'`)          | read as `3`           |
 | `0` or negative                 | no-op, returns `true` |
 
 A fractional count floors rather than throwing, unlike a fractional **option**: a fractional `capacity` would be rounded up by its first consumer and over-admit, while a request count rounds down and can only under-charge.

@@ -6208,3 +6208,50 @@ cannot fail on the regression it names — arriving from the other direction: th
 tests did fail on their regression, and the regression was simply wider than the
 tests. Worth remembering that a green, mutation-checked test is evidence about
 the mutation that was injected, not a proof that the row's subject is exhausted.
+
+## `PowerSlidingWindow.dispose()` releases the ring buffer it grew
+
+**A disposed window was still holding its largest allocation.** The timestamp
+queue grows as a window admits requests, and `dispose()` emptied it without ever
+shrinking it. Measured with `capacity: 8192` and 5000 recorded timestamps:
+**8192 slots retained** after teardown. Not an unreachable object — the instance
+is still there if you kept a reference — but the whole point of `dispose()` is
+that a caller who has finished with a helper is not still holding its buffers.
+
+**Two defects, and two false comments, in one 4-line method.**
+
+- **The drain was O(n) where an O(1) existed.** `dispose()` ran
+  `while (length > 0) shift()`, so a window holding a full `capacity` paid for
+  every entry on teardown. `PowerQueue.clear()` has existed alongside `reset()`
+  since the class did.
+- **The comment said there was no `clear`.** It read _"`PowerQueue` exposes
+  `length` and `shift`; there is no `clear`, and the optional-call dance that
+  would paper over that is worse than a drain."_ That is simply false, and it is
+  the whole reason the slow path survived: a stale note read as a constraint.
+- **No `shrink()` anywhere** — the half that actually retained memory.
+- **The docblock promised a clock re-seed it never performed**, saying `dispose()`
+  "clears the recorded history **and re-seeds the clock**". It should not: `_now`
+  is the _caller's_ injected clock and `_nowExplicit` records that it was
+  injected, so writing either would discard caller configuration rather than
+  release a resource. A comment describing work that is not happening is the same
+  defect as the one this project already removed from `PowerRetry`'s constructor.
+
+**`reset()` is deliberately NOT changed, and that needed a judgement rather than
+the mechanical fix.** The finding's suggested remedy — `clear(); shrink()` —
+would apply to `reset()` too, and would be wrong there. `reset()` puts a _live_
+window back to empty, and may sit on a hot path (clearing a per-tenant window
+between requests), where reallocating the ring on every call is worse than
+holding it. `dispose()` is teardown. So the two now differ on purpose: both drop
+history, only `dispose()` releases the ring, and a test fails if `reset()` ever
+grows a shrink of its own. `guides/powerSlidingWindow.md` gains a **Reset versus
+dispose** table, because "does reset leak?" is now a question with two different
+right answers depending on which method you meant.
+
+**7 tests, 2 mutants, both caught.** Dropping the `shrink()` fails 3 — the
+capacity assertions, which a `length === 0` assertion would have sailed past,
+since the queue was already empty before the fix. Restoring the `shift()` drain
+fails 1: the cost is asserted **structurally**, by instrumenting the queue to
+count `clear()` versus `shift()` calls rather than by timing, because the harness
+measures a 28.61 % median min/max spread and anything finer is noise. The clock
+is pinned too, since a test cannot assert a comment: `dispose()` leaves `_now` and
+`_nowExplicit` exactly as the caller supplied them.

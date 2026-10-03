@@ -37826,7 +37826,7 @@
 											},
 											{
 												"kind": "text",
-												"text": " of timestamps and a clock reference. Neither\nis a timer or a subscription, so this clears the recorded history and\nre-seeds the clock rather than cancelling anything — a half-elapsed window\nis dropped rather than left to keep admitting what it had already counted.\n\nPresent so this helper can take part in "
+												"text": " of timestamps and a clock reference. Neither\nis a timer or a subscription, so this clears the recorded history rather than\ncancelling anything — a half-elapsed window is dropped rather than left to\nkeep admitting what it had already counted.\n\nPresent so this helper can take part in "
 											},
 											{
 												"kind": "code",
@@ -37842,7 +37842,95 @@
 											},
 											{
 												"kind": "text",
-												"text": " and DI\nteardown like every other long-lived helper in the library."
+												"text": " and DI\nteardown like every other long-lived helper in the library.\n\n**"
+											},
+											{
+												"kind": "code",
+												"text": "`clear()`"
+											},
+											{
+												"kind": "text",
+												"text": " then "
+											},
+											{
+												"kind": "code",
+												"text": "`shrink()`"
+											},
+											{
+												"kind": "text",
+												"text": ", and both matter.** "
+											},
+											{
+												"kind": "code",
+												"text": "`clear()`"
+											},
+											{
+												"kind": "text",
+												"text": " is O(1) where the\ndrain this used to do — "
+											},
+											{
+												"kind": "code",
+												"text": "`while (length > 0) shift()`"
+											},
+											{
+												"kind": "text",
+												"text": " — is O(n) in the number\nof timestamps, so a window holding a full "
+											},
+											{
+												"kind": "code",
+												"text": "`capacity`"
+											},
+											{
+												"kind": "text",
+												"text": " of entries paid for\nevery one of them on teardown. "
+											},
+											{
+												"kind": "code",
+												"text": "`shrink()`"
+											},
+											{
+												"kind": "text",
+												"text": " is the half that was missing\nentirely: without it the ring stayed allocated at its grown capacity for the\nlife of the instance, which defeats the point of a dispose. Measured with\n"
+											},
+											{
+												"kind": "code",
+												"text": "`capacity: 8192`"
+											},
+											{
+												"kind": "text",
+												"text": " and 5000 recorded timestamps, "
+											},
+											{
+												"kind": "code",
+												"text": "`dispose()`"
+											},
+											{
+												"kind": "text",
+												"text": " left **8192 slots\nretained**; it now returns the queue to\n"
+											},
+											{
+												"kind": "code",
+												"text": "`POWER_QUEUE_INITIAL_CAPACITY`"
+											},
+											{
+												"kind": "text",
+												"text": ".\n\nThe **clock is not re-seeded**, contrary to what this comment used to say.\n"
+											},
+											{
+												"kind": "code",
+												"text": "`_now`"
+											},
+											{
+												"kind": "text",
+												"text": " is the caller's injected clock and "
+											},
+											{
+												"kind": "code",
+												"text": "`_nowExplicit`"
+											},
+											{
+												"kind": "text",
+												"text": " records that it was\ninjected, so replacing either would discard caller configuration rather than\nrelease a resource. There is no accumulated clock state here to clear."
 											}
 										],
 										"blockTags": [
@@ -37876,7 +37964,39 @@
 										"summary": [
 											{
 												"kind": "text",
-												"text": "Drop every recorded timestamp, returning the window to fully available."
+												"text": "Drop every recorded timestamp, returning the window to fully available.\n\n**The ring buffer is deliberately *not* shrunk here**, even though "
+											},
+											{
+												"kind": "code",
+												"text": "`clear`"
+											},
+											{
+												"kind": "text",
+												"text": "\nand "
+											},
+											{
+												"kind": "code",
+												"text": "`dispose`"
+											},
+											{
+												"kind": "text",
+												"text": " both shrink. The distinction is logical against physical:\n"
+											},
+											{
+												"kind": "code",
+												"text": "`reset()`"
+											},
+											{
+												"kind": "text",
+												"text": " puts a live window back to empty, and it may be called on a hot\npath (clearing a per-tenant window between requests), where reallocating\nthe ring on every call would be worse than holding it. "
+											},
+											{
+												"kind": "code",
+												"text": "`dispose()`"
+											},
+											{
+												"kind": "text",
+												"text": " is\nteardown, where the caller has finished with the instance entirely and\nanything still allocated is waste. Shrinking on reset would make the cheap\ncase expensive to fix the expensive one."
 											}
 										],
 										"blockTags": [
