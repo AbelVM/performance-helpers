@@ -98,12 +98,22 @@ export class PowerCron {
      * Times the task was invoked. Exposed as `fireCount` so a caller can count
      * runs rather than assume one per interval.
      *
-     * It does **not** count catch-up replays, and used to claim it did. `start()`
-     * sets `_nextAt = nowMs() + intervalMs`, so a restart begins a fresh cadence
-     * and periods missed while stopped are not replayed — which is the right
-     * behaviour for a cron, since replaying a backlog after a deploy would stamp
-     * a dozen tasks at once. `'catch-up'` delays *within* a run, but nothing
-     * revives periods missed while stopped.
+     * **It counts catch-up replays, and it is not always the number of task
+     * invocations.** `catchUp: 'catch-up'` increments it once per replay, so it
+     * tracks invocations exactly. `catchUp: 'run-once'` adds the number of
+     * *periods covered* rather than the single run that covered them, so there it
+     * counts work done, not runs made — measured, blocking the loop to force a
+     * six-period stall: `'skip'` 6 invocations / 6, `'catch-up'` 17 / 17,
+     * `'run-once'` 6 / 17.
+     *
+     * A previous version of this comment said the opposite — that it did *not*
+     * count replays, "and used to claim it did" — which was itself the error: the
+     * replays are counted at the two `+=` sites below, and `guides/powerCron.md`
+     * said so correctly while this said otherwise. What is genuinely not replayed
+     * is a period missed while **stopped**: `start()` sets
+     * `_nextAt = nowMs() + intervalMs`, so a restart begins a fresh cadence, which
+     * is the right behaviour for a cron — replaying a backlog after a deploy would
+     * stamp a dozen tasks at once.
      * @type {number}
      * @private
      */

@@ -24,7 +24,7 @@ callback **returns**", which has two consequences that only show up in productio
   already struggling.
 
 `PowerCron` re-arms from an **absolute target** instead. Each run records the
-time it was *aimed at*, and the next timer is computed from that target rather
+time it was _aimed at_, and the next timer is computed from that target rather
 than from `Date.now()`. Drift therefore cannot accumulate: a run that takes
 800 ms of a 1 s interval still leaves the next fire 200 ms away, not 800 ms away.
 A run that overran its interval skips the periods it missed, so it never
@@ -37,35 +37,35 @@ there so a schedule that cannot keep up says so.
 
 ### `new PowerCron(task, options?)`
 
-| Option | Type | Default | What it does |
-| --- | --- | --- | --- |
-| `task` | `() => any` | — | Run on each fire. May be async. **Required.** |
-| `intervalMs` | `number` | `60000` | Milliseconds between fires. Must be at least `10`, so a typo cannot become a hot loop. |
-| `catchUp` | `'skip' \| 'catch-up' \| 'run-once'` | `'skip'` | What to do about fires missed while the process was busy or asleep (see below). |
-| `jitter` | `number` | `0` | Random fraction (0–1) of the interval added to each fire, so a fleet's crons do not stampede a dependency on the same boundary. Clamped to `[0, 1]`. |
-| `runOnStart` | `boolean` | `false` | Fire once immediately on `start()`, then follow the cadence. |
-| `onError` | `(err) => void` | — | Called when the task throws or rejects. Without it, errors are logged. |
-| `onFire` | `(info) => void` | — | Called after each run with `{ scheduledFor, ranAt, driftMs, missed }`. |
-| `unref` | `boolean` | `true` | Whether the pending timer is `unref`'d, so a cron alone does not keep a Node process alive. |
+| Option       | Type                                 | Default  | What it does                                                                                                                                         |
+| ------------ | ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task`       | `() => any`                          | —        | Run on each fire. May be async. **Required.**                                                                                                        |
+| `intervalMs` | `number`                             | `60000`  | Milliseconds between fires. Must be at least `10`, so a typo cannot become a hot loop.                                                               |
+| `catchUp`    | `'skip' \| 'catch-up' \| 'run-once'` | `'skip'` | What to do about fires missed while the process was busy or asleep (see below).                                                                      |
+| `jitter`     | `number`                             | `0`      | Random fraction (0–1) of the interval added to each fire, so a fleet's crons do not stampede a dependency on the same boundary. Clamped to `[0, 1]`. |
+| `runOnStart` | `boolean`                            | `false`  | Fire once immediately on `start()`, then follow the cadence.                                                                                         |
+| `onError`    | `(err) => void`                      | —        | Called when the task throws or rejects. Without it, errors are logged.                                                                               |
+| `onFire`     | `(info) => void`                     | —        | Called after each run with `{ scheduledFor, ranAt, driftMs, missed }`.                                                                               |
+| `unref`      | `boolean`                            | `true`   | Whether the pending timer is `unref`'d, so a cron alone does not keep a Node process alive.                                                          |
 
 ### Methods
 
-| Method | Returns | Notes |
-| --- | --- | --- |
-| `start()` | `this` | Arm the schedule. Idempotent. |
-| `stop()` | `this` | Disarm. Idempotent. A task already in flight is left to finish — cancelling it would abandon work that may hold resources. |
-| `runNow()` | `this` | Fire immediately, out of band, without disturbing the cadence. |
-| `dispose()` | `void` | `stop()`, permanently. Also available as `[Symbol.dispose]`, so `using cron = new PowerCron(…)` stops the schedule at scope exit. |
+| Method      | Returns | Notes                                                                                                                             |
+| ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `start()`   | `this`  | Arm the schedule. Idempotent.                                                                                                     |
+| `stop()`    | `this`  | Disarm. Idempotent. A task already in flight is left to finish — cancelling it would abandon work that may hold resources.        |
+| `runNow()`  | `this`  | Fire immediately, out of band, without disturbing the cadence.                                                                    |
+| `dispose()` | `void`  | `stop()`, permanently. Also available as `[Symbol.dispose]`, so `using cron = new PowerCron(…)` stops the schedule at scope exit. |
 
 ### Properties
 
-| Property | Type | What it is |
-| --- | --- | --- |
-| `running` | `boolean` | Whether the schedule is armed. |
-| `intervalMs` | `number` | The configured interval. |
-| `fireCount` | `number` | How many times the task has been invoked, **including `catch-up` replays**. |
-| `averageDriftMs` | `number` | Mean lateness per fire; `0` before anything has run. A growing mean means the task cannot keep up. |
-| `nextRunAt` | `number \| null` | Epoch ms the next fire is aimed at; `null` when stopped. |
+| Property         | Type             | What it is                                                                                                                                                                                                                            |
+| ---------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `running`        | `boolean`        | Whether the schedule is armed.                                                                                                                                                                                                        |
+| `intervalMs`     | `number`         | The configured interval.                                                                                                                                                                                                              |
+| `fireCount`      | `number`         | How much work the schedule accounts for: one per invocation, **including `catch-up` replays**. Under `run-once` it counts the _periods covered_ rather than the single run that covered them, so it is not an invocation count there. |
+| `averageDriftMs` | `number`         | Mean lateness per fire; `0` before anything has run. A growing mean means the task cannot keep up.                                                                                                                                    |
+| `nextRunAt`      | `number \| null` | Epoch ms the next fire is aimed at; `null` when stopped.                                                                                                                                                                              |
 
 ## Catch-up policy
 
@@ -77,8 +77,9 @@ What happens to fires missed while the process was busy or asleep is a
   for work that must account for each period (billing, hourly rollups). The
   replays are included in `fireCount`, so a caller can see that a replay
   happened rather than assume a single resume.
-- `'run-once'` — coalesce all missed fires into one run. `fireCount` still
-  accounts for the periods covered, so the work skipped is visible.
+- `'run-once'` — coalesce all missed fires into one run. `fireCount` adds the
+  number of periods the run covered, so the work is visible even though the task
+  ran once.
 
 ## Errors do not kill the schedule
 
@@ -106,7 +107,7 @@ on the host. With no `onError` configured, errors are logged rather than dropped
 ## See also
 
 - [PowerScheduler](powerScheduler.md) — microtask/macrotask coalescing for
-  per-microtask work, where you want *one* flush per turn rather than a cadence.
+  per-microtask work, where you want _one_ flush per turn rather than a cadence.
 - [PowerThrottle](powerThrottle.md) and [PowerRateLimit](powerRateLimit.md) —
   rate limiting, if what you actually want is "not more than N per second"
   rather than "every N".

@@ -168,10 +168,16 @@ describe('PowerCron', () => {
     }, 30_000); /* real timers: a 200ms event-loop stall plus a 300ms wait, with headroom for a loaded parallel run */
 
     it("'catch-up' replays every missed period, so no window is silently dropped", async () => {
-      const { invocations } = await runThroughStall('catch-up');
+      const { invocations, fireCount } = await runThroughStall('catch-up');
       // ~STALL/INTERVAL missed periods, replayed, plus the stop. This is the
       // whole point of the policy: a job that must account for each period.
       expect(invocations).toBeGreaterThan(5);
+      // **Every replay is counted**, so here `fireCount` tracks invocations
+      // exactly. This assertion is the one that was missing, and its absence is
+      // how `powerCron.js` came to document the opposite — a docstring claiming
+      // replays are *not* counted stood for two release cycles with nothing to
+      // fail against. See the comment on `_fireCount`.
+      expect(fireCount).toBe(invocations);
     }, 30_000); /* real timers: a 200ms event-loop stall plus a 300ms wait, with headroom for a loaded parallel run */
 
     it("'run-once' invokes the task once but still counts the work it stands in for", async () => {
