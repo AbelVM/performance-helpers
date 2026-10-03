@@ -4985,6 +4985,33 @@ below the base is still clamped up to it, as before.
 
 Mutation-checked: with the validation removed, three of the four new tests fail.
 
+### `startCleanup` refuses a zero or negative interval (patch)
+
+`startCleanup` validated `interval` with `Number.isFinite` alone, and the numeric
+argument form was not validated at all. Both `0` and a negative reached
+`setSafeTimeout` — where Node treats a negative as `0` — so the cleanup tick
+rescheduled itself with no delay. Measured, counting ticks: `startCleanup(0)` ran
+**93 ticks in 100 ms**, `-5` ran 94, `{ interval: 0 }` ran 93, against 0 for the
+derived default. A caller asking for the fastest possible cleanup got a busy loop
+that competes with the work the cache exists to do.
+
+`interval` now goes through `assertLimitRequired` with a floor of 1 ms, on both
+argument shapes:
+
+```js
+cache.startCleanup(0); // now throws
+cache.startCleanup({ interval: 0 }); // now throws
+cache.startCleanup(1); // still legal
+cache.startCleanup(); // still the TTL-derived default
+```
+
+1 ms remains legal because that is the boundary between _scheduled_ and _as fast as
+the event loop can turn_ — it is a floor, not a recommendation. The tests assert the
+throw rather than a tick count, because a tick count is a duration assertion and
+this project measures a 28.61% median min/max spread; the boundary that matters is
+`0`, which is exact. Mutation-checked: with the old validation restored, the new
+test fails.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

@@ -2275,9 +2275,32 @@ export class PowerCache {
    * @returns {void}
    */
   startCleanup(intervalOrOptions = {}) {
+    // PERF-006. `interval` was validated with `Number.isFinite` alone, so `0` and a
+    // negative both reached `setSafeTimeout` — where Node treats a negative as `0`
+    // — and the cleanup tick rescheduled itself with no delay. Measured, with the
+    // tick counted: `startCleanup(0)` 93 ticks in 100 ms, `-5` 94,
+    // `{ interval: 0 }` 93, against 0 for the derived default. The numeric argument
+    // form did not validate at all.
+    //
+    // A floor of 1 ms is the minimum that means "scheduled" rather than "as fast as
+    // the event loop can turn". It is not a recommendation: a 1 ms cleanup scan is
+    // still a hot loop, and the derived default (the cache's TTL, floored at one
+    // second) remains what a caller gets when they do not ask for anything.
+    const derivedInterval = Math.max(
+      MS_PER_SEC,
+      Math.min(this.defaultTTL || DEFAULT_CACHE_DEFAULT_TTL_MS, DEFAULT_CACHE_DEFAULT_TTL_MS)
+    );
+    const limit = {
+      name: 'interval',
+      className: 'PowerCache',
+      min: 1,
+      integer: true,
+      fallback: derivedInterval,
+    };
+
     let interval, maxCleanupPerTick;
     if (typeof intervalOrOptions === 'number') {
-      interval = intervalOrOptions;
+      interval = assertLimitRequired(intervalOrOptions, limit);
       maxCleanupPerTick = this.maxCleanupPerTick;
     } else {
       // `intervalMs` is accepted as an alias for `interval`, because it is the
@@ -2285,12 +2308,7 @@ export class PowerCache {
       // reaching for the obvious name had it accepted and dropped — the one
       // argument shape `startCleanup` silently ignored.
       const requestedInterval = intervalOrOptions.interval ?? intervalOrOptions.intervalMs;
-      interval = Number.isFinite(Number(requestedInterval))
-        ? Number(requestedInterval)
-        : Math.max(
-            MS_PER_SEC,
-            Math.min(this.defaultTTL || DEFAULT_CACHE_DEFAULT_TTL_MS, DEFAULT_CACHE_DEFAULT_TTL_MS)
-          );
+      interval = assertLimitRequired(requestedInterval, limit);
       maxCleanupPerTick = Number.isFinite(Number(intervalOrOptions.maxCleanupPerTick))
         ? Math.max(1, Number(intervalOrOptions.maxCleanupPerTick))
         : this.maxCleanupPerTick;
