@@ -275,6 +275,30 @@ Style that is deliberate here, not incidental:
     `cp /tmp/kilo/foo.bak src/foo.js`. It is faster, it cannot conflict, and it
     leaves the index alone. `git stash` is for parking work you intend to resume,
     not for a thirty-second experiment.
+- **Do not trust a staged set you read before the commit — re-read it.** When two
+  sessions share a working tree, `git add -- <explicit paths>` protects you from
+  sweeping in _unstaged_ work, and it does not protect the commit at all. The
+  index is shared. Two occurrences, both in one afternoon, neither of them
+  caught by `git status` or by staging carefully:
+  - `ac45b6f` is titled `docs(review): BUG-003 is not a double-detach` and
+    contains `types/helpers/powerServo.d.ts` and `docs/helpers/powerServo/**` —
+    generated trees for a source file that was not in the repository. **A clean
+    checkout of that commit fails `types:drift`**, because `tsc` cannot produce a
+    declaration for a class that is not there. Found by regenerating types from
+    `git archive HEAD` and noticing the file did not reappear.
+  - `e476642` is titled `docs(review): PERF-005 confirmed and material` and
+    contains the whole feature: 613 lines of source, 731 of tests, a guide, an
+    ADR and a changeset. My `git commit` ran afterwards and reported
+    `nothing to commit, working tree clean` — the feature was in someone else's
+    commit and the message described unrelated audit work.
+    The hazard is that a wrong commit looks like a right one: the content is
+    exactly what you staged, and nothing in `git status` disagrees. So run
+    `git status --short` **immediately before** `git commit` and check the staged
+    set is still yours — `git diff --cached --name-only`, not the one you read
+    minutes ago. And if a commit you did not write already carries your work, do
+    not rewrite shared history to fix its message; say so, and let the release
+    notes carry the record instead. The changeset is the artefact that survives a
+    misleading commit, which is part of why it is mandatory.
 - **Do not edit `review.md` with a multi-step script, and do not trust one that
   reported success.** It is 450 KB+, gitignored — so `git checkout` cannot undo a
   bad edit and no commit ever holds it — and a markdown table row cannot contain

@@ -17,7 +17,7 @@ that replaced them. Read it by section rather than end to end.
 | the benchmark modes, and which numbers they retired | `## Benchmarks: the numbers that were not numbers`                           |
 
 The wire protocol, the histogram, and the release process all changed: 23
-commits of audit remediation, two new helper families, and a real release
+commits of audit remediation, three new helper families, and a real release
 pipeline.
 
 **Breaking**
