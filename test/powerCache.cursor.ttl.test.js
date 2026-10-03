@@ -101,6 +101,15 @@ describe('PowerCache TTL normalisation (CACHE-003)', () => {
     // expiresAt` so it survives exactly at its TTL. Both are deliberate, and
     // pinned independently — the asymmetry is real and a reader should not
     // assume they agree.
+    //
+    // **The other half of that pair is `test/invariants.test.js`**, "expires on
+    // the far side of the boundary, not at it", which pins the `PowerTTLMap`
+    // side and gives its reason. This asymmetry was once filed as a defect to
+    // standardise away; it was measured (a shared `ttl: 100` gives lifetimes
+    // differing by one to two ticks) and rejected, because both sides are
+    // deliberate and neither difference is observable to a caller. If you are
+    // here because the two helpers disagree and you want to change that, read
+    // both tests first — you would be reversing a decision, not fixing a bug.
     let clock = 1000;
     const cache = new PowerCache({ now: () => clock });
     cache.set('zero', 1, { ttl: 0 });

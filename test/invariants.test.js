@@ -356,6 +356,13 @@ describe('PowerTTLMap operation counts', () => {
     // entry is alive *at* its TTL and gone after it. The off-by-one is
     // deliberate and load-bearing: an entry that vanished exactly at its TTL
     // would be shorter-lived than the caller asked for.
+    //
+    // **`PowerCache` deliberately does the opposite**, lapsing *at* its expiry.
+    // Its half of the pair is `test/powerCache.cursor.ttl.test.js`, "a
+    // zero/never TTL is distinct and expires on the boundary, not one tick
+    // later", which gives that side's reason. The asymmetry was measured (a
+    // shared `ttl: 100` yields lifetimes one to two ticks apart) and a proposal
+    // to standardise it was rejected: both sides are pinned on purpose.
     expect(m.get('k')).toBe(1);
     clock = 101;
     expect(m.get('k')).toBe(1);
