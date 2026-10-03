@@ -78,6 +78,7 @@ describe('API surface', () => {
         'PowerRetryBudget',
         'PowerScheduler',
         'PowerSemaphore',
+        'PowerServo',
         'PowerSlidingWindow',
         'PowerSubscriberSet',
         'PowerTTLMap',

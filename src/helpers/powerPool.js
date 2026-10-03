@@ -734,7 +734,8 @@ export class PowerPool {
       //   'aimd'      - additive increase, multiplicative decrease
       //   'vegas'     - Vegas: infer bottleneck queue from min vs current RTT
       //   'gradient2' - Netflix Gradient2: long/short RTT EWMA divergence
-      // See `_updateAdaptiveLimit`.
+      // See `_updateAdaptiveLimit`, and ADR 0005 for why each of these is a
+      // *delay* signal here and why none of them is offered on the gate.
       const AUTOSCALE_POLICIES = ['ewma', 'aimd', 'vegas', 'gradient2'];
       const policy = AUTOSCALE_POLICIES.includes(as.policy) ? as.policy : 'ewma';
 
@@ -3527,6 +3528,19 @@ export class PowerPool {
    *
    * `ewma` (the default) does nothing here: it keeps the original
    * target-latency-threshold behaviour in `_autoScaleTick` unchanged.
+   *
+   * **The signal is end-to-end task latency, and Netflix's is queueing delay.**
+   * That is the same quantity only for a uniform workload. For a pool whose
+   * tasks vary in cost, `vegas`' `minRtt / currentRtt` and `aimd`'s
+   * `shortRtt / longRtt` test conflate "queueing appeared" with "a heavier task
+   * ran", and the controller will cut concurrency for work that was simply
+   * expensive. Measured against a fixed limit this is untested either way —
+   * `bench/claims.js` has no mode for it.
+   *
+   * **The `aimd` policy here is delay-shaped, despite the name.** Netflix's
+   * `AIMDLimit` is loss-based; this branches on RTT divergence, the same shape
+   * as `gradient2`. The loss-based AIMD in this library is
+   * `PowerBackpressure._aimdStep`. See ADR 0005 for the full signal taxonomy.
    *
    * @returns {number} The updated limit.
    * @private

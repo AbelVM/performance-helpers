@@ -219,6 +219,8 @@ recreateWorkers: false })` clears the interval without clearing the policy —
 - `'gradient2'` has no queue-pressure term to grow from, so an idle pool with an empty queue correctly holds its limit steady. Depth is what drives it up.
 - The limit is a **float**, smoothed by 0.2 each tick so a single noisy sample cannot swing the fleet. `getStats()` rounds it to two decimals.
 - This is a separate signal from the worker add/remove step, which still runs the existing `cooldown`/`backoff` logic. The controller steers; the existing machinery applies.
+- **The signal is end-to-end task latency; Netflix's controllers track queueing delay.** The two are the same quantity only for a uniform workload. On a pool whose tasks vary in cost, `vegas`' `minRtt / currentRtt` and `aimd`'s short/long RTT test cannot tell "queueing appeared" from "a heavier task ran", so the controller cuts concurrency for work that was merely expensive. Uniform-cost workloads are the case these port well to.
+- **`'aimd'` here is delay-shaped despite the name.** Netflix's `AIMDLimit` is loss-based; this branches on RTT divergence, the same shape as `'gradient2'`. The loss-based AIMD in this library is `PowerBackpressure`'s adaptive refill, and it is not interchangeable with this one — a permit gate has no round trip to measure.
 
 ## Events and handlers
 

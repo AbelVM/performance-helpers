@@ -16,12 +16,12 @@ const pool = new PowerPool(WorkerScript, {
   // When autoscaling is enabled, the pool defaults to a soft worker capacity
   // of 1 task per worker unless `maxTasksPerWorker` is explicitly set.
   autoScale: {
-    intervalMs: 1000,   // how often the pool evaluates scale decisions (ms)
-    targetMs: 50,       // target latency (ms) the pool tries to maintain
-    alpha: 0.2,         // EWMA smoothing factor (0..1)
-    cooldownMs: 5000,   // minimum time between scale actions (ms)
-    hysteresis: 0.2     // fractional hysteresis to avoid flapping (0..1)
-  }
+    intervalMs: 1000, // how often the pool evaluates scale decisions (ms)
+    targetMs: 50, // target latency (ms) the pool tries to maintain
+    alpha: 0.2, // EWMA smoothing factor (0..1)
+    cooldownMs: 5000, // minimum time between scale actions (ms)
+    hysteresis: 0.2, // fractional hysteresis to avoid flapping (0..1)
+  },
 });
 ```
 
@@ -32,6 +32,39 @@ const pool = new PowerPool(WorkerScript, {
   - Scale up when EWMA > `targetMs * (1 + hysteresis)` or when queue length indicates sustained pressure.
   - Scale down when EWMA < `targetMs * (1 - hysteresis)` and the queue is empty.
 - `cooldownMs` prevents repeated scaling decisions in rapid succession (debounce).
+
+### Concurrency policies (`policy`)
+
+Everything above is a **heuristic**: one EWMA compared against a fixed `targetMs`, and a step of one worker. It guesses at a fleet size rather than measuring one. `autoScale.policy` swaps in a real feedback loop that treats the worker count as a congestion window:
+
+| policy        | signal it steers on                                                                     |
+| ------------- | --------------------------------------------------------------------------------------- |
+| `'ewma'`      | _(default)_ none. Worker-count scaling only, as described above.                        |
+| `'aimd'`      | Short RTT rising above the long-window RTT — additive increase, `aimdBeta` cut.         |
+| `'vegas'`     | `limit * (1 - minRtt / currentRtt)` — an estimate of the bottleneck queue.              |
+| `'gradient2'` | Ratio of long-window to short-window RTT, held between `0.5` and `1`, plus queue depth. |
+
+```js
+autoScale: { policy: 'gradient2', limitMin: 1, limitMax: 16, longWindowAlpha: 0.05 }
+```
+
+Two things to know before choosing one:
+
+- **`'ewma'` is the default and it is not a controller.** It reads like one, and
+  `concurrencyLimit` in `getStats().performance` is `null` for exactly that
+  reason. Leaving the option alone gets you worker-count scaling and no
+  concurrency control.
+- **The signal is end-to-end task latency, while Netflix's controllers track
+  queueing delay.** The two are the same only for a uniform workload. On a pool
+  whose tasks vary in cost, a heavier task looks to `vegas` and `aimd` like
+  queueing appeared, and the controller cuts concurrency for work that was merely
+  expensive. Uniform-cost workloads are the case these were written for.
+
+Full option list and observability fields: [pool guide → Adaptive concurrency
+policies](powerPool.md#adaptive-concurrency-policies). `PowerBackpressure`'s
+adaptive refill is a different loop on a different signal, and the two are not
+interchangeable — it is loss-based because a permit gate has no round trip to
+measure.
 
 ### New options (multi-step scaling & backoff)
 
@@ -64,7 +97,7 @@ Example: `autoScale: { intervalMs: 1000, targetMs: 20, cooldownMs: 1000, backoff
 const pool = new PowerPool(WorkerScript, {
   minSize: 1,
   maxSize: 16,
-  autoScale: { intervalMs: 1000, targetMs: 20, alpha: 0.15, cooldownMs: 3000, hysteresis: 0.25 }
+  autoScale: { intervalMs: 1000, targetMs: 20, alpha: 0.15, cooldownMs: 3000, hysteresis: 0.25 },
 });
 
 // Use pool as usual
@@ -77,4 +110,4 @@ pool.postMessage({ work: 'doit' });
 - Autoscale is heuristic: for best control consider combining with external metrics or custom scaling logic.
 - The pool will never shrink below `minSize` or grow above `maxSize`.
 
-For more advanced policies (e.g. multi-step scaling, predictive scaling, or integration with external metrics) consider implementing a custom controller that calls `pool._addWorkerInstance()` / `pool.terminate()` as appropriate (these are internal helpers; a public `resize()` API may be added later).
+For anything beyond that — predictive scaling, or a controller driven by a metric this pool does not measure — implement a custom controller that calls `pool._addWorkerInstance()` / `pool.terminate()` as appropriate (these are internal helpers; a public `resize()` API may be added later). Check `autoScale.policy` first, though: three of its four values are already feedback loops, and reaching for private methods before trying them skips the supported path.

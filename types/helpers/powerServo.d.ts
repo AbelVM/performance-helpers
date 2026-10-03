@@ -6,8 +6,24 @@ export class PowerServo {
      * @param {PowerServoOptions} [options]
      */
     constructor(options?: import("./jsdoc-types.js").PowerServoOptions);
-    /** @type {number} - The reference `r`. Readable and writable. */
-    setpoint: number;
+    /** @type {number} */
+    _setpoint: number;
+    set setpoint(value: number);
+    /**
+     * The reference `r`. Writable at any time.
+     *
+     * Validated on assignment, which is the point of it being an accessor rather
+     * than a field. `NaN` here is the one input that makes the loop
+     * **unrecoverable**: `error` becomes `NaN`, `clamp` cannot catch it because
+     * `NaN` is neither `<` nor `>` anything, and the integral then accumulates
+     * `NaN` forever. Measured: assigning `servo.setpoint = NaN` for one step and
+     * then restoring it left `output` and `integral` at `NaN` for the rest of the
+     * object's life. Refusing the assignment is the only version of this that
+     * leaves the controller usable.
+     *
+     * @type {number}
+     */
+    get setpoint(): number;
     /** @type {number} - Proportional gain. */
     _kp: number;
     /** @type {number} - Integral gain. Zero disables the integrator entirely. */
@@ -20,10 +36,8 @@ export class PowerServo {
      * derivative very slow. Ignored when `kd` is `0`.
      */
     _derivativeFilter: number;
-    /** @type {number} - Lower output bound. `-Infinity` for no lower bound. */
-    min: number;
-    /** @type {number} - Upper output bound. `Infinity` for no upper bound. */
-    max: number;
+    _min: number;
+    _max: number;
     /** @type {Function|number|null} - Open-loop term, ahead of the error. */
     _feedforward: Function | number | null;
     /**
@@ -45,6 +59,26 @@ export class PowerServo {
     _output: number;
     _error: number;
     _saturated: boolean;
+    set min(value: number);
+    /**
+     * Lower output bound. `-Infinity` for no lower bound.
+     *
+     * Validated on assignment for the same reason {@link PowerServo#setpoint} is:
+     * a `NaN` bound silently **disables** the clamp, because every
+     * `contribution < lo` comparison against `NaN` is false. Measured: with
+     * `max = NaN` the loop happily wound its integral to 1978 with the output
+     * stuck at 0, which is the windup bug with the guard that prevents it removed.
+     *
+     * @type {number}
+     */
+    get min(): number;
+    set max(value: number);
+    /**
+     * Upper output bound. `Infinity` for no upper bound.
+     *
+     * @type {number}
+     */
+    get max(): number;
     /**
      * Advance the loop by one sample and return the control output.
      *

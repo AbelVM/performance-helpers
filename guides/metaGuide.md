@@ -108,6 +108,13 @@ Important distinction:
 - `PowerBulkhead` isolates lanes of concurrency.
 - `PowerPermitGate` is the primitive, not the typical app-level answer.
 
+Use `PowerServo` for a different question: not _how many_ may run, but _how many
+keep a measured value at a target_ — a queue held eight deep, a byte ceiling
+respected, a pool sized against a latency target. It is a closed-loop
+stabiliser, and the helpers above are not: they observe a signal and correct
+against a limit. Reach for `PowerServo` when you have a **setpoint**; do not
+reach for it to replace a concurrency gate.
+
 ### If you need `SharedArrayBuffer` in a worker
 
 The library uses it nowhere — a `SharedArrayBuffer` permit pool was measured at

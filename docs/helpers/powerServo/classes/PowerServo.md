@@ -97,6 +97,18 @@ Static-gain form of the feedforward path, applied to `disturbance` when
 
 ***
 
+### \_max
+
+> **\_max**: `number`
+
+***
+
+### \_min
+
+> **\_min**: `number`
+
+***
+
 ### \_output
 
 > **\_output**: `number`
@@ -115,21 +127,9 @@ Static-gain form of the feedforward path, applied to `disturbance` when
 
 ***
 
-### max
+### \_setpoint
 
-> **max**: `number`
-
-***
-
-### min
-
-> **min**: `number`
-
-***
-
-### setpoint
-
-> **setpoint**: `number`
+> **\_setpoint**: `number`
 
 ## Accessors
 
@@ -177,6 +177,68 @@ bound is the windup bug, and it is otherwise invisible.
 
 ***
 
+### max
+
+#### Get Signature
+
+> **get** **max**(): `number`
+
+Upper output bound. `Infinity` for no upper bound.
+
+##### Returns
+
+`number`
+
+#### Set Signature
+
+> **set** **max**(`value`): `void`
+
+##### Parameters
+
+###### value
+
+`number`
+
+##### Returns
+
+`void`
+
+***
+
+### min
+
+#### Get Signature
+
+> **get** **min**(): `number`
+
+Lower output bound. `-Infinity` for no lower bound.
+
+Validated on assignment for the same reason [PowerServo#setpoint](#setpoint) is:
+a `NaN` bound silently **disables** the clamp, because every
+`contribution < lo` comparison against `NaN` is false. Measured: with
+`max = NaN` the loop happily wound its integral to 1978 with the output
+stuck at 0, which is the windup bug with the guard that prevents it removed.
+
+##### Returns
+
+`number`
+
+#### Set Signature
+
+> **set** **min**(`value`): `void`
+
+##### Parameters
+
+###### value
+
+`number`
+
+##### Returns
+
+`void`
+
+***
+
 ### output
 
 #### Get Signature
@@ -207,6 +269,43 @@ Whether the last step was clamped by `min` or `max`.
 ##### Returns
 
 `boolean`
+
+***
+
+### setpoint
+
+#### Get Signature
+
+> **get** **setpoint**(): `number`
+
+The reference `r`. Writable at any time.
+
+Validated on assignment, which is the point of it being an accessor rather
+than a field. `NaN` here is the one input that makes the loop
+**unrecoverable**: `error` becomes `NaN`, `clamp` cannot catch it because
+`NaN` is neither `<` nor `>` anything, and the integral then accumulates
+`NaN` forever. Measured: assigning `servo.setpoint = NaN` for one step and
+then restoring it left `output` and `integral` at `NaN` for the rest of the
+object's life. Refusing the assignment is the only version of this that
+leaves the controller usable.
+
+##### Returns
+
+`number`
+
+#### Set Signature
+
+> **set** **setpoint**(`value`): `void`
+
+##### Parameters
+
+###### value
+
+`number`
+
+##### Returns
+
+`void`
 
 ## Methods
 
