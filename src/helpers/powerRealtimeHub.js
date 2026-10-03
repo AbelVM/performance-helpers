@@ -557,6 +557,31 @@ export class PowerRealtimeHub {
   }
 
   /**
+   * Asynchronous disposal hook: **flush what is pending, then close.**
+   *
+   * This is the graceful half of the pair, and it exists because `close()` is not
+   * graceful — it clears the pending batch along with everything else. A hub
+   * configured with `batchDelayMs > 0` can be holding frames that have been
+   * `publish`ed but not yet sent, and `using` at scope exit would drop them. So
+   * `await using` gets the frames out first.
+   *
+   * Deliberately the same shape as `PowerPool`'s: drain, swallow drain failures,
+   * then tear down. The swallowing is not carelessness — a `finally` in a
+   * disposal path must leave the instance closed even if the flush fails, and
+   * leaving it open would be worse than losing the flush.
+   *
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    try {
+      if (!this._closed) await this.flush();
+    } catch (err) {
+      // ignore flush failures and close anyway
+    }
+    this.close();
+  }
+
+  /**
    * Queue a message for one subscriber, applying the slow-consumer policy when
    * the queue is full.
    * @private

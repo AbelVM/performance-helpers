@@ -6255,3 +6255,59 @@ count `clear()` versus `shift()` calls rather than by timing, because the harnes
 measures a 28.61 % median min/max spread and anything finer is noise. The clock
 is pinned too, since a test cannot assert a comment: `dispose()` leaves `_now` and
 `_nowExplicit` exactly as the caller supplied them.
+
+## `await using` now works on the hub and the WebSocket client
+
+**21 of the 23 helpers implementing `[Symbol.dispose]` did not implement
+`[Symbol.asyncDispose]`.** `await using x = new PowerRealtimeHub(…)` therefore
+**never disposed the hub at all** — `await using` requires `asyncDispose`, and
+without it the resource is silently left open. That is the worse of the two
+failure modes: an ungraceful teardown at least releases something, whereas a
+missing hook looks exactly like correct code.
+
+`PowerPool` already had the hook, and already had a precedent worth following:
+`asyncDispose` does the **graceful** teardown (drain, then terminate) while
+`[Symbol.dispose]` does the immediate one. That shape is now applied to the two
+helpers this row names.
+
+**On the hub it is not a formality — it changes what is delivered.**
+
+| teardown                         | frames sent at scope exit |
+| -------------------------------- | ------------------------- |
+| `using hub = …` (sync `dispose`) | **0**                     |
+| `await using hub = …`            | **1**                     |
+
+`close()` is not graceful: it clears the pending batch along with everything else,
+so with `batchDelayMs > 0` a frame that `stats()` already counted as `published`
+can be dropped at scope exit. `asyncDispose` awaits `flush()` first and closes
+second. A flush that **fails** still closes the hub — leaving it open with
+listeners attached would be worse than losing the batch, and a disposal path must
+not be abandonable.
+
+**On the client it is a delegation, and that is the honest answer.**
+`PowerWebSocketClient`'s teardown is `close()`, which is synchronous and already
+complete. Inventing an awaitable variant would be a promise that resolves
+immediately and implies a graceful path that does not exist. The hook delegates to
+`dispose()` rather than `close()` because `dispose()` additionally detaches the
+metrics sink — a test asserts that with `observability: true`, since without it
+`_metrics` is `null` on a fresh instance and the assertion would be vacuous.
+
+**Scope, stated rather than left to look like an omission.** The other 17 helpers
+are sync-only and were left alone deliberately: their teardown is already complete
+and has nothing to await, so `using` is the correct tool and a delegating
+`asyncDispose` would add API surface with no behaviour behind it. The hub and the
+client are the ones where `await using` is either meaningful or named.
+
+**9 tests, 3 mutants — and one of the three found a vacuous test of mine.** The
+WSClient metrics test initially passed 9/9 _and_ passed against a mutant where
+`asyncDispose` called `close()` instead of `dispose()`, which is the only way to
+know it was asserting nothing: `_metrics` is `null` on a fresh client because
+metrics are opt-in, so the assertion could not fail. Fixed by constructing the
+client with `observability: true` and asserting the sink is attached _before_
+disposal; that mutant now fails it. Dropping the flush fails 3, and removing the
+try/catch around it fails 1.
+
+Two other guessed shapes were caught the same way: this `getStats()` returns
+counters and a `list` with no `status` key, and a frame can legitimately be sent
+by the hub's own timer even when the public `flush()` is made to reject — so
+neither test now claims either.

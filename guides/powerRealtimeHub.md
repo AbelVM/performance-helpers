@@ -149,6 +149,29 @@ options against this list.
 - `unsubscribe(id)` → `boolean`.
 - `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, encoded, list }`, where `list` has per-subscriber `queued` / `dropped` / `inFlight`. `encoded` counts frame encodes rather than deliveries, so it is one per flush and does not grow with the subscriber count — see [the frame is read-only](#the-frame-is-read-only).
 - `close()` / `[Symbol.dispose]()` — detaches everything and calls your `close` adapter with a reason (`'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`).
+- `await hub[Symbol.asyncDispose]()` — **flushes the pending batch, then closes**. The difference is not cosmetic, and it is the reason `await using` exists for this helper:
+
+  ```javascript
+  {
+    await using hub = new PowerRealtimeHub(adapter, { batchDelayMs: 50 });
+    hub.subscribe('room', handler);
+    hub.publish('room', { n: 1 });
+  } // the frame is flushed, then everything is detached
+  ```
+
+  | teardown                          | frames sent at scope exit            |
+  | --------------------------------- | ------------------------------------ |
+  | `using` (sync `[Symbol.dispose]`) | **0** — the pending batch is dropped |
+  | `await using`                     | **1**                                |
+
+  `close()` is not graceful: it clears the pending batch along with everything
+  else, so a frame that `stats()` counted as `published` may never be delivered.
+  If your hub batches, `await using` is the correct form — and note that plain
+  `using hub = ...` would leave the hub **undisposed entirely**, because
+  `await using` requires `asyncDispose` and silently does nothing without it.
+
+  A flush that fails still closes the hub. That is deliberate: leaving it open
+  with listeners attached would be worse than losing the batch.
 
 ## Observability
 

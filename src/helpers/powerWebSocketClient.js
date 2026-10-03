@@ -546,6 +546,23 @@ export class PowerWebSocketClient {
   }
 
   /**
+   * Asynchronous disposal hook, so `await using client = new PowerWebSocketClient(…)`
+   * works alongside the synchronous `using`.
+   *
+   * **A delegation rather than a graceful path, and that is deliberate.**
+   * `PowerRealtimeHub`'s `asyncDispose` awaits `flush()` first because it has real
+   * pending work; this client's teardown is `close()`, which is synchronous and
+   * already complete. Inventing an awaitable variant of it would be a promise
+   * that resolves immediately and implied a graceful path that does not exist —
+   * the `PowerPool` version drains because it has something to drain.
+   *
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
+
+  /**
    * Send a message, applying back-pressure.
    *
    * With the Streams tier this awaits `writer.ready`, so the returned promise
