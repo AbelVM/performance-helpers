@@ -367,10 +367,20 @@ export class PowerEventBus {
 
     if (bucket instanceof PowerSubscriberSet) {
       let notified = false;
-      bucket.forEach((fn) => {
+      // OBS-008. **A snapshot, not `forEach`.** `PowerSubscriberSet.forEach` walks its
+      // backing `Set`, and `Set` iteration visits entries added *during* traversal - so
+      // a listener that re-subscribes on every call is invoked again inside the same
+      // `emit`, forever. Measured with a listener that subscribes a fresh closure per
+      // call, capped at 40: `emit` invoked it **40 times**, `emitAsync` invoked it
+      // **once**. The same listener graph, two answers, from one class.
+      //
+      // `values()` is already the snapshot form - it copies into a fresh array - so
+      // this is a one-word change rather than a new mechanism, and it is why the
+      // helper has that method at all.
+      for (const fn of bucket.values()) {
         notified = true;
         notifyListener(fn, payload);
-      });
+      }
       if (bucket.size === 0) {
         this._clearWeakListenerEvent(event);
         this._listeners.delete(event);
@@ -379,7 +389,11 @@ export class PowerEventBus {
     }
 
     const hadEntries = bucket.size > 0;
-    for (const entry of bucket) {
+    // Snapshot for the same reason as the arm above, and the spread is also what makes
+    // the `bucket.delete(entry)` below safe: deleting from a `Set` while iterating it
+    // is defined, but it makes the loop's behaviour depend on where it is, and this
+    // loop already has a `continue` in it.
+    for (const entry of [...bucket]) {
       const fn = 'deref' in entry ? entry.deref() : entry;
       if (!fn) {
         bucket.delete(entry);

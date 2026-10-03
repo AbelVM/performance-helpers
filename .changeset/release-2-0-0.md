@@ -7642,3 +7642,47 @@ before writing the assertions: `skip` → `[0,2,2,2]`, `catch-up` → `[0,1,0,1,
 **Mutation-checked:** restoring `missed: 0` at both sites fails 3 of 6 tests. A control
 case pins `0` for a cron that keeps up, so the other three cannot pass against a field
 that is always zero.
+
+## `PowerEventBus.emit` no longer loops on a listener that re-subscribes
+
+**`Set` iteration visits entries added _during_ traversal**, and both arms of `emit`
+walked a live bucket. A listener that re-subscribes on every call was therefore invoked
+again _inside the same `emit`_ — bounded in the test only because the fixture stops at 40.
+
+**The sharpest form of the defect is that the two entry points disagreed.** Measured
+before the fix, on one listener that subscribes a fresh closure per call:
+
+```
+emit('grow')      -> the listener ran 40 times
+await emitAsync() -> the listener ran 1 time
+```
+
+Same bus, same listener graph, same call — two answers. Anyone reaching for `emitAsync`
+to work around a hang in `emit` got different semantics rather than the same semantics
+at a different speed.
+
+**Both arms are fixed**, because they are separate code: the `PowerSubscriberSet` arm now
+iterates `values()`, which was already the snapshot form and is why that method exists,
+and the generic `Set` arm spreads into an array. The spread also makes the existing
+`bucket.delete(entry)` for dead weak refs safe by position rather than by accident — that
+loop already has a `continue` in it.
+
+**A snapshot is right rather than merely safe**, and the test pins the other half of that:
+a listener added during one emit is still reached by the _next_ one. Skipping
+mid-emit additions entirely is the other tempting fix, and it would make self-renewing
+subscriptions silently stop — so a case asserts the count _grows_ across two emits.
+
+**The fixture has to subscribe a fresh closure, and that detail is the whole test.**
+Re-subscribing the _identical_ function reference is a no-op, because a `Set` dedupes by
+reference — the first draft of this test did exactly that and measured **1 call against
+the broken code**, passing for the wrong reason. For the same reason no case asserts
+"does not hang": a fixture with any cap at all makes that true of the broken version too,
+so every case asserts a **count**.
+
+**Mutation-checked:** restoring live `forEach` on the `PowerSubscriberSet` arm fails 4 of
+7 tests.
+
+_Not done, and recorded rather than assumed:_ the row also proposed folding `emit`'s two
+arms into `_iterBucketListeners` to delete ~40 duplicated lines. That is a refactor
+rather than part of the defect, and landing it in the same change as a behaviour fix would
+have made the two indistinguishable in review. The duplication is still there.
