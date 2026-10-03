@@ -41,8 +41,8 @@ import { PowerCache } from '../src/helpers/powerCache.js';
 import { SmallLfuSketch } from '../src/utils/smallLfu.js';
 
 /** @param {number} maxEntries @returns {SmallLfuSketch} */
-const sketchFor = (maxEntries) =>
-  /** @type {any} */ (new PowerCache({ maxEntries, admission: 'tinylfu' })._sketch);
+const sketchFor = (maxEntries, seed) =>
+  /** @type {any} */ (new PowerCache({ maxEntries, admission: 'tinylfu', seed })._sketch);
 
 /** Counters in the sketch's table. @param {any} s */
 const counters = (s) => s.width * s.depth;
@@ -132,11 +132,26 @@ describe('a correctly sized sketch discriminates at capacity', () => {
     // Pinned so the resize cannot be "fixed" by widening until everything
     // collides. At 16 entries the old table was already adequate (16
     // counters/entry) and must stay adequate.
-    const s = sketchFor(16);
-    for (let round = 0; round < 20; round += 1) {
-      for (let k = 0; k < 16; k += 1) s.increment(`hot-${k}`);
+    //
+    // **Seeded, over several seeds.** `smallLfu.js:138` draws a random
+    // per-instance seed when none is given, so this assertion was a coin flip: a
+    // Count-Min sketch never underestimates, so a cold key that happens to collide
+    // with a hot key in *every* row reports the same estimate. Observed failing
+    // at exactly `expected 15 to be less than 15`, where 15 is the saturated
+    // minimum — the collision, not a regression. One fixed seed would only replace
+    // a random failure with a lucky pass unless the seed were chosen for passing,
+    // which is how a guard becomes decoration, so the property is checked across
+    // five. Each is a real seed the sketch can draw, not a value tuned to collide.
+    for (const seed of [1, 2, 3, 4, 5]) {
+      const s = sketchFor(16, seed);
+      for (let round = 0; round < 20; round += 1) {
+        for (let k = 0; k < 16; k += 1) s.increment(`hot-${k}`);
+      }
+      expect(
+        s.estimate('never-inserted-key'),
+        `a never-inserted key must read below a hot one at seed ${seed}`
+      ).toBeLessThan(s.estimate('hot-0'));
     }
-    expect(s.estimate('never-inserted-key')).toBeLessThan(s.estimate('hot-0'));
   });
 });
 
