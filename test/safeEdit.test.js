@@ -38,6 +38,11 @@ function run(...args) {
 }
 
 /** Snapshot the file and return its digest. */
+const snapOf = (f) => {
+  const { out } = run('snapshot', '--file', f);
+  return out.match(/digest {2}: ([0-9a-f]{64})/)?.[1] ?? '';
+};
+
 const snap = () => {
   const { out } = run('snapshot', '--file', file);
   return out.match(/digest {2}: ([0-9a-f]{64})/)?.[1] ?? '';
@@ -147,6 +152,113 @@ describe('safe-edit: a patch that lands on nothing is a failure, not a success',
     expect(status).toBe(1);
     expect(out).toMatch(/anchor absent/);
     expect(readFileSync(file, 'utf8')).toBe('line one\nline two\n');
+  });
+});
+
+describe('safe-edit: a patch that succeeds and deletes a landmark', () => {
+  // **This is the failure mode the other two guards cannot see.** Three attempts
+  // to patch `bench/claims.js` computed an end index that swallowed the `MODES`
+  // table and `dispatch()`, and the file died with
+  // `ReferenceError: dispatch is not defined`. Every one of those patches
+  // *changed* the file, so the digest check passed (nothing else had touched it)
+  // and the no-change check passed (it did change). Both guards said nothing was
+  // wrong while the file was destroyed.
+  //
+  // Reproduced here with the smallest version of that mistake: a patch anchored on
+  // a marker that appears twice, taking the first, which silently truncates
+  // everything after it.
+  const LANDMARK = 'export function dispatch() {';
+  const FILE = 'const a = 1;\nMARKER\nconst b = 2;\nMARKER\n' + LANDMARK + '\nconst c = 3;\n';
+
+  let landmarkFile;
+  beforeEach(() => {
+    landmarkFile = path.join(dir, 'claims.js');
+    writeFileSync(landmarkFile, FILE);
+  });
+
+  const patchTakingFirstMarker = () =>
+    patch('truncate.mjs', "const i = t.indexOf('MARKER'); return t.slice(0, i);");
+
+  it('refuses when a required landmark would be removed, and writes nothing', () => {
+    const digest = snapOf(landmarkFile);
+    const { status, out } = run(
+      'apply',
+      '--file',
+      landmarkFile,
+      '--expect',
+      digest,
+      '--must-contain',
+      LANDMARK,
+      '--patch',
+      patchTakingFirstMarker()
+    );
+
+    expect(status).toBe(1);
+    expect(out).toMatch(/REFUSED/);
+    expect(out).toMatch(/required string/);
+    expect(out).toMatch(/Nothing was written/);
+    // The load-bearing assertion: the landmark is still in the file.
+    expect(readFileSync(landmarkFile, 'utf8')).toContain(LANDMARK);
+  });
+
+  it('allows the same patch when the landmark is not required', () => {
+    // Otherwise the flag reads as "refuse everything", which is the failure mode
+    // of every guard added so far — including the digest check before it had a
+    // test for the passing path.
+    const digest = snapOf(landmarkFile);
+    const { status } = run(
+      'apply',
+      '--file',
+      landmarkFile,
+      '--expect',
+      digest,
+      '--patch',
+      patchTakingFirstMarker()
+    );
+
+    expect(status).toBe(0);
+    expect(readFileSync(landmarkFile, 'utf8')).not.toContain(LANDMARK);
+  });
+
+  it('checks every value, and names all of the missing ones', () => {
+    const digest = snapOf(landmarkFile);
+    const { status, out } = run(
+      'apply',
+      '--file',
+      landmarkFile,
+      '--expect',
+      digest,
+      '--must-contain',
+      `${LANDMARK}|const c = 3;|const zzz = 9;`,
+      '--patch',
+      patch('append.mjs', "return t + 'APPENDED\\n';")
+    );
+
+    expect(status).toBe(1);
+    // One missing value is enough to refuse; both are reported, so a reader does
+    // not have to re-run to discover the second.
+    expect(out).toMatch(/const zzz = 9;/);
+    expect(out).toMatch(/required string/);
+    expect(readFileSync(landmarkFile, 'utf8')).not.toContain('APPENDED');
+  });
+
+  it('passes when every required landmark survives', () => {
+    const digest = snapOf(landmarkFile);
+    const { status } = run(
+      'apply',
+      '--file',
+      landmarkFile,
+      '--expect',
+      digest,
+      '--must-contain',
+      `${LANDMARK}|const c = 3;`,
+      '--patch',
+      patch('append.mjs', "return t + 'APPENDED\\n';")
+    );
+
+    expect(status).toBe(0);
+    expect(readFileSync(landmarkFile, 'utf8')).toContain('APPENDED');
+    expect(readFileSync(landmarkFile, 'utf8')).toContain(LANDMARK);
   });
 });
 

@@ -44,6 +44,7 @@ const USAGE = `safe-edit - check-then-write for shared files
 
   safe-edit snapshot --file <path>
   safe-edit apply    --file <path> --expect <sha256> --patch <module.mjs>
+                      [--must-contain <string>|<string>|...]
 
 Exit codes: 0 ok, 1 refused or failed. There is no partial write.
 `;
@@ -104,6 +105,34 @@ async function apply(args) {
   }
   if (after.includes('\0')) {
     console.error('safe-edit: REFUSED - the patched text contains a NUL byte.');
+    return 1;
+  }
+
+  // **Must-contain, for the failure this tool cannot otherwise catch.** The
+  // digest check catches "the file moved"; the no-change check catches "the
+  // anchor moved". Neither catches a patch that *succeeds* and deletes something
+  // it should not have — which is not hypothetical: three attempts to patch
+  // `bench/claims.js` computed an end index that swallowed the `MODES` table and
+  // `dispatch()`, and the file died with `ReferenceError: dispatch is not
+  // defined`. Every one of those patches produced a *changed* file, so both
+  // existing guards passed and said nothing.
+  //
+  // Naming the load-bearing landmarks turns "did the patch keep the parts that
+  // matter" into something mechanical instead of remembered. Repeatable.
+  const mustContain = args['must-contain'];
+  const required = mustContain
+    ? Array.isArray(mustContain)
+      ? mustContain
+      : String(mustContain).split('|')
+    : [];
+  const missing = required.filter((needle) => !after.includes(needle));
+  if (missing.length > 0) {
+    console.error(
+      `safe-edit: REFUSED - the patch would remove ${missing.length} required string(s):\n` +
+        missing.map((m) => `  ${JSON.stringify(m)}`).join('\n') +
+        '\nNothing was written. Either re-compose the patch, or pass fewer --must-contain\n' +
+        'values if the removal is genuinely intended.'
+    );
     return 1;
   }
 

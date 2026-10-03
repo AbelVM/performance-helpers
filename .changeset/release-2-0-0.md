@@ -6528,3 +6528,35 @@ test — which also asserts the other session's line survives, not merely that t
 tool exited non-zero. Removing the no-change guard fails exactly the test for it.
 The happy path is tested too, because a guard that refuses everything is an
 obstacle rather than a guard.
+
+## `safe-edit --must-contain`: make "the patch kept the load-bearing parts" mechanical
+
+**The failure the two existing guards cannot see.** `safe-edit` refuses a stale
+edit (the digest moved) and refuses a patch that changes nothing (the anchor
+moved). Neither catches a patch that **succeeds and deletes something it should
+not have**. That is not hypothetical: three attempts to patch `bench/claims.js`
+computed an end index that swallowed the `MODES` table and `dispatch()`, and the
+file died with `ReferenceError: dispatch is not defined`. Every one of those
+patches _changed_ the file, so the digest check passed — nothing else had touched
+it — and the no-change check passed, because it did change. Both guards reported
+nothing wrong while the file was destroyed.
+
+```
+safe-edit apply --file bench/claims.js --expect <sha256> \
+  --patch ./p.mjs --must-contain 'const MODES = {'|'async function dispatch()'
+```
+
+Values are separated by `|`, repeatable, and **all** missing ones are named so a
+reader does not have to re-run to discover the second.
+
+**Demonstrated on the real failure, not just asserted.** With a patch anchored on
+a marker that appears twice — the smallest version of the mistake that killed
+`bench/claims.js` — the tool **applies it** without the flag, truncating the file
+and removing `export function dispatch() {`. With the flag naming that string, it
+refuses, names what would be lost, and writes nothing.
+
+**4 new tests, and one mutant.** Removing the must-contain check fails 2 of them.
+The passing path is tested too, because a guard that refuses everything is an
+obstacle rather than a guard — and that has been the recurring failure mode of
+every guard added in this project, including the digest check before it had a
+test for the case where the digest still matches.
