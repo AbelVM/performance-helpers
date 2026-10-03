@@ -95,7 +95,28 @@ const worker = await WorkerAgnostic.create('./worker.js');
 
 ## Events
 
-`addEventListener(type, handler)` / `removeEventListener`, or the `on` / `off` aliases. Supported types are `message`, `error` and `messageerror`. A throwing handler is isolated and reported through the logger rather than being allowed to break the dispatcher.
+`addEventListener(type, handler)` / `removeEventListener`, or the `on` / `off` aliases. Supported types are `message`, `error` and `messageerror`.
+
+### A throwing handler is isolated — and now reported
+
+A handler that throws cannot break the dispatcher: the remaining handlers still run and the event loop survives. That part is deliberate and unchanged.
+
+**Since 2.0 you can also be told about it**, with the `onError` option:
+
+```js
+const worker = new WorkerAgnostic(() => new MyWorker(), {
+  onError: (err, context) => {
+    metrics.increment('workerAgnostic.listenerError');
+    logger.warn({ err, event: context?.type }, 'listener threw');
+  },
+});
+```
+
+**New in 2.0.** Before this, the isolation was _silent_: a handler that threw on every message left a worker that looked completely healthy — the events stopped arriving at that handler, nothing was logged, nothing was counted, and the only symptom was a feature quietly ceasing to work.
+
+The second argument is `{ type, listener }`, because "a listener threw" is not actionable when you registered four of them. A throwing `onError` is itself swallowed — letting it escape would turn a swallowed listener error into a crash _inside_ the dispatch loop, which is the thing the isolation exists to prevent.
+
+Options are optional; without `onError` nothing is allocated and the behaviour is exactly as before.
 
 ## Disposal
 

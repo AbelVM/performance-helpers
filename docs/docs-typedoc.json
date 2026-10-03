@@ -4021,7 +4021,7 @@
 					]
 				},
 				{
-					"id": 3668,
+					"id": 3676,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -4039,7 +4039,7 @@
 				{
 					"title": "References",
 					"children": [
-						3668
+						3676
 					]
 				}
 			]
@@ -4910,7 +4910,7 @@
 					]
 				},
 				{
-					"id": 3669,
+					"id": 3677,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -4928,7 +4928,7 @@
 				{
 					"title": "References",
 					"children": [
-						3669
+						3677
 					]
 				}
 			]
@@ -7102,7 +7102,7 @@
 					]
 				},
 				{
-					"id": 3670,
+					"id": 3678,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -7120,7 +7120,7 @@
 				{
 					"title": "References",
 					"children": [
-						3670
+						3678
 					]
 				}
 			]
@@ -16073,7 +16073,7 @@
 										"summary": [
 											{
 												"kind": "text",
-												"text": "Release every resource this instance holds.\n\nIdempotent, and safe to call while the instance is idle. Exists so the\ninstance works with "
+												"text": "Release the instance: reset it, then make it inert.\n\nIdempotent, and safe to call while the instance is idle. Exists so the\ninstance works with "
 											},
 											{
 												"kind": "code",
@@ -16089,7 +16089,39 @@
 											},
 											{
 												"kind": "text",
-												"text": " and gives callers an explicit\nname to call."
+												"text": " and gives callers an explicit\nname to call.\n\n**A disposed circuit stays disposed** (RES-026). This used to replace only\n"
+											},
+											{
+												"kind": "code",
+												"text": "`reset`"
+											},
+											{
+												"kind": "text",
+												"text": ", while the comment claimed \"a late call is a no-op\" — so a late\n"
+											},
+											{
+												"kind": "code",
+												"text": "`call()`"
+											},
+											{
+												"kind": "text",
+												"text": " ran "
+											},
+											{
+												"kind": "code",
+												"text": "`fn`"
+											},
+											{
+												"kind": "text",
+												"text": " and put the circuit straight back to work. It was a phantom\nAPI: a "
+											},
+											{
+												"kind": "code",
+												"text": "`dispose()`"
+											},
+											{
+												"kind": "text",
+												"text": " that released nothing, on a class that holds no resource to\nrelease. Disposal here is a **state reset**, which is what a lazy helper owes\nits caller, and a state reset has to cover the only method that does work."
 											}
 										],
 										"blockTags": [
@@ -16195,7 +16227,7 @@
 					]
 				},
 				{
-					"id": 3671,
+					"id": 3679,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -16213,7 +16245,7 @@
 				{
 					"title": "References",
 					"children": [
-						3671
+						3679
 					]
 				}
 			]
@@ -17390,7 +17422,7 @@
 					}
 				},
 				{
-					"id": 3672,
+					"id": 3680,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -17420,7 +17452,7 @@
 				{
 					"title": "References",
 					"children": [
-						3672
+						3680
 					]
 				}
 			]
@@ -17762,7 +17794,7 @@
 					]
 				},
 				{
-					"id": 3673,
+					"id": 3681,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -17780,7 +17812,7 @@
 				{
 					"title": "References",
 					"children": [
-						3673
+						3681
 					]
 				}
 			]
@@ -18215,7 +18247,7 @@
 					]
 				},
 				{
-					"id": 3674,
+					"id": 3682,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -18233,7 +18265,7 @@
 				{
 					"title": "References",
 					"children": [
-						3674
+						3682
 					]
 				}
 			]
@@ -20037,7 +20069,7 @@
 					}
 				},
 				{
-					"id": 3675,
+					"id": 3683,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -20061,7 +20093,7 @@
 				{
 					"title": "References",
 					"children": [
-						3675
+						3683
 					]
 				}
 			]
@@ -22064,7 +22096,7 @@
 					]
 				},
 				{
-					"id": 3676,
+					"id": 3684,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -22082,7 +22114,7 @@
 				{
 					"title": "References",
 					"children": [
-						3676
+						3684
 					]
 				}
 			]
@@ -23362,7 +23394,7 @@
 					]
 				},
 				{
-					"id": 3678,
+					"id": 3686,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -23380,7 +23412,7 @@
 				{
 					"title": "References",
 					"children": [
-						3678
+						3686
 					]
 				}
 			]
@@ -24674,7 +24706,7 @@
 					]
 				},
 				{
-					"id": 3679,
+					"id": 3687,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -24692,7 +24724,7 @@
 				{
 					"title": "References",
 					"children": [
-						3679
+						3687
 					]
 				}
 			]
@@ -27152,7 +27184,7 @@
 					]
 				},
 				{
-					"id": 3681,
+					"id": 3689,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -27170,7 +27202,7 @@
 				{
 					"title": "References",
 					"children": [
-						3681
+						3689
 					]
 				}
 			]
@@ -36993,7 +37025,7 @@
 					]
 				},
 				{
-					"id": 3682,
+					"id": 3690,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -37011,7 +37043,7 @@
 				{
 					"title": "References",
 					"children": [
-						3682
+						3690
 					]
 				}
 			]
@@ -38730,7 +38762,7 @@
 					]
 				},
 				{
-					"id": 3685,
+					"id": 3693,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -38748,7 +38780,7 @@
 				{
 					"title": "References",
 					"children": [
-						3685
+						3693
 					]
 				}
 			]
@@ -43092,7 +43124,7 @@
 					}
 				},
 				{
-					"id": 3686,
+					"id": 3694,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -43100,7 +43132,7 @@
 					"target": 2819
 				},
 				{
-					"id": 3687,
+					"id": 3695,
 					"name": "READY_STATE",
 					"variant": "reference",
 					"kind": 4194304,
@@ -43158,8 +43190,8 @@
 				{
 					"title": "References",
 					"children": [
-						3686,
-						3687
+						3694,
+						3695
 					]
 				}
 			]
@@ -47409,7 +47441,7 @@
 					]
 				},
 				{
-					"id": 3688,
+					"id": 3696,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -47427,7 +47459,7 @@
 				{
 					"title": "References",
 					"children": [
-						3688
+						3696
 					]
 				}
 			]
@@ -47574,7 +47606,7 @@
 					]
 				},
 				{
-					"id": 3667,
+					"id": 3675,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -47599,7 +47631,7 @@
 				{
 					"title": "References",
 					"children": [
-						3667
+						3675
 					]
 				}
 			]
@@ -47737,7 +47769,7 @@
 							]
 						},
 						{
-							"id": 3553,
+							"id": 3554,
 							"name": "_disposed",
 							"variant": "declaration",
 							"kind": 1024,
@@ -47748,7 +47780,7 @@
 							}
 						},
 						{
-							"id": 3554,
+							"id": 3555,
 							"name": "_listeners",
 							"variant": "declaration",
 							"kind": 1024,
@@ -47775,7 +47807,7 @@
 							}
 						},
 						{
-							"id": 3558,
+							"id": 3559,
 							"name": "_nativeModel",
 							"variant": "declaration",
 							"kind": 1024,
@@ -47796,6 +47828,33 @@
 						},
 						{
 							"id": 3548,
+							"name": "_onError",
+							"variant": "declaration",
+							"kind": 1024,
+							"flags": {},
+							"comment": {
+								"summary": [
+									{
+										"kind": "text",
+										"text": "WRK-003. Where a listener throw goes.\n\nRead before "
+									},
+									{
+										"kind": "code",
+										"text": "`_wireEvents`"
+									},
+									{
+										"kind": "text",
+										"text": ", because a listener that throws during the initial\ncapability announcement must already have somewhere to report to."
+									}
+								]
+							},
+							"type": {
+								"type": "intrinsic",
+								"name": "any"
+							}
+						},
+						{
+							"id": 3549,
 							"name": "_wired",
 							"variant": "declaration",
 							"kind": 1024,
@@ -47812,21 +47871,21 @@
 										{
 											"type": "reflection",
 											"declaration": {
-												"id": 3549,
+												"id": 3550,
 												"name": "__type",
 												"variant": "declaration",
 												"kind": 65536,
 												"flags": {},
 												"signatures": [
 													{
-														"id": 3550,
+														"id": 3551,
 														"name": "__type",
 														"variant": "signature",
 														"kind": 4096,
 														"flags": {},
 														"parameters": [
 															{
-																"id": 3551,
+																"id": 3552,
 																"name": "args",
 																"variant": "param",
 																"kind": 32768,
@@ -47855,7 +47914,7 @@
 							}
 						},
 						{
-							"id": 3552,
+							"id": 3553,
 							"name": "_wiredProperties",
 							"variant": "declaration",
 							"kind": 1024,
@@ -47906,7 +47965,7 @@
 							}
 						},
 						{
-							"id": 3555,
+							"id": 3556,
 							"name": "worker",
 							"variant": "declaration",
 							"kind": 1024,
@@ -47923,14 +47982,14 @@
 							}
 						},
 						{
-							"id": 3599,
+							"id": 3607,
 							"name": "[dispose]",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3600,
+									"id": 3608,
 									"name": "[dispose]",
 									"variant": "signature",
 									"kind": 4096,
@@ -47952,14 +48011,14 @@
 							]
 						},
 						{
-							"id": 3565,
+							"id": 3573,
 							"name": "addEventListener",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3566,
+									"id": 3574,
 									"name": "addEventListener",
 									"variant": "signature",
 									"kind": 4096,
@@ -47975,7 +48034,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3567,
+											"id": 3575,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -47986,7 +48045,7 @@
 											}
 										},
 										{
-											"id": 3568,
+											"id": 3576,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -47994,21 +48053,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3569,
+													"id": 3577,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3570,
+															"id": 3578,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3571,
+																	"id": 3579,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -48042,14 +48101,14 @@
 							]
 						},
 						{
-							"id": 3559,
+							"id": 3560,
 							"name": "dispose",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3560,
+									"id": 3561,
 									"name": "dispose",
 									"variant": "signature",
 									"kind": 4096,
@@ -48108,14 +48167,14 @@
 							]
 						},
 						{
-							"id": 3586,
+							"id": 3594,
 							"name": "off",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3587,
+									"id": 3595,
 									"name": "off",
 									"variant": "signature",
 									"kind": 4096,
@@ -48130,7 +48189,7 @@
 												"kind": "inline-tag",
 												"tag": "@link",
 												"text": "removeEventListener",
-												"target": 3572
+												"target": 3580
 											},
 											{
 												"kind": "text",
@@ -48146,7 +48205,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3588,
+											"id": 3596,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -48157,7 +48216,7 @@
 											}
 										},
 										{
-											"id": 3589,
+											"id": 3597,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -48165,21 +48224,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3590,
+													"id": 3598,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3591,
+															"id": 3599,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3592,
+																	"id": 3600,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -48213,14 +48272,14 @@
 							]
 						},
 						{
-							"id": 3579,
+							"id": 3587,
 							"name": "on",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3580,
+									"id": 3588,
 									"name": "on",
 									"variant": "signature",
 									"kind": 4096,
@@ -48235,7 +48294,7 @@
 												"kind": "inline-tag",
 												"tag": "@link",
 												"text": "addEventListener",
-												"target": 3565
+												"target": 3573
 											},
 											{
 												"kind": "text",
@@ -48251,7 +48310,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3581,
+											"id": 3589,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -48262,7 +48321,7 @@
 											}
 										},
 										{
-											"id": 3582,
+											"id": 3590,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -48270,21 +48329,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3583,
+													"id": 3591,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3584,
+															"id": 3592,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3585,
+																	"id": 3593,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -48318,14 +48377,14 @@
 							]
 						},
 						{
-							"id": 3593,
+							"id": 3601,
 							"name": "postMessage",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3594,
+									"id": 3602,
 									"name": "postMessage",
 									"variant": "signature",
 									"kind": 4096,
@@ -48341,7 +48400,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3595,
+											"id": 3603,
 											"name": "message",
 											"variant": "param",
 											"kind": 32768,
@@ -48352,7 +48411,7 @@
 											}
 										},
 										{
-											"id": 3596,
+											"id": 3604,
 											"name": "transfer",
 											"variant": "param",
 											"kind": 32768,
@@ -48422,14 +48481,14 @@
 							]
 						},
 						{
-							"id": 3572,
+							"id": 3580,
 							"name": "removeEventListener",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3573,
+									"id": 3581,
 									"name": "removeEventListener",
 									"variant": "signature",
 									"kind": 4096,
@@ -48445,7 +48504,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3574,
+											"id": 3582,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -48456,7 +48515,7 @@
 											}
 										},
 										{
-											"id": 3575,
+											"id": 3583,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -48464,21 +48523,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3576,
+													"id": 3584,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3577,
+															"id": 3585,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3578,
+																	"id": 3586,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -48512,14 +48571,14 @@
 							]
 						},
 						{
-							"id": 3597,
+							"id": 3605,
 							"name": "terminate",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3598,
+									"id": 3606,
 									"name": "terminate",
 									"variant": "signature",
 									"kind": 4096,
@@ -48668,34 +48727,35 @@
 						{
 							"title": "Properties",
 							"children": [
-								3553,
 								3554,
-								3558,
+								3555,
+								3559,
 								3548,
-								3552,
+								3549,
+								3553,
 								3545,
 								3546,
-								3555
+								3556
 							]
 						},
 						{
 							"title": "Methods",
 							"children": [
-								3599,
-								3565,
-								3559,
-								3586,
-								3579,
-								3593,
-								3572,
-								3597,
+								3607,
+								3573,
+								3560,
+								3594,
+								3587,
+								3601,
+								3580,
+								3605,
 								3536
 							]
 						}
 					]
 				},
 				{
-					"id": 3664,
+					"id": 3672,
 					"name": "announceCapabilities",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48711,7 +48771,7 @@
 					"target": 229
 				},
 				{
-					"id": 3655,
+					"id": 3663,
 					"name": "canUseNativeClone",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48719,7 +48779,7 @@
 					"target": 1478
 				},
 				{
-					"id": 3648,
+					"id": 3656,
 					"name": "CODECS",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48727,7 +48787,7 @@
 					"target": 1588
 				},
 				{
-					"id": 3665,
+					"id": 3673,
 					"name": "collectTransferables",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48735,7 +48795,7 @@
 					"target": 1576
 				},
 				{
-					"id": 3652,
+					"id": 3660,
 					"name": "createFrameDecoder",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48743,7 +48803,7 @@
 					"target": 1507
 				},
 				{
-					"id": 3666,
+					"id": 3674,
 					"name": "decodeInbound",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48751,7 +48811,7 @@
 					"target": 1580
 				},
 				{
-					"id": 3651,
+					"id": 3659,
 					"name": "decodeMessage",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48759,7 +48819,7 @@
 					"target": 1495
 				},
 				{
-					"id": 3616,
+					"id": 3624,
 					"name": "defaultMetrics",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48767,7 +48827,7 @@
 					"target": 109
 				},
 				{
-					"id": 3601,
+					"id": 3609,
 					"name": "detectEnv",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48775,7 +48835,7 @@
 					"target": 3524
 				},
 				{
-					"id": 3624,
+					"id": 3632,
 					"name": "detectWebTransportSupport",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48783,7 +48843,7 @@
 					"target": 3500
 				},
 				{
-					"id": 3650,
+					"id": 3658,
 					"name": "encodeMessage",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48791,7 +48851,7 @@
 					"target": 1486
 				},
 				{
-					"id": 3654,
+					"id": 3662,
 					"name": "encodeNative",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48799,7 +48859,7 @@
 					"target": 1540
 				},
 				{
-					"id": 3663,
+					"id": 3671,
 					"name": "encodeNativeEnvelope",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48807,7 +48867,7 @@
 					"target": 1555
 				},
 				{
-					"id": 3620,
+					"id": 3628,
 					"name": "formatErrorObj",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48815,7 +48875,7 @@
 					"target": 3395
 				},
 				{
-					"id": 3653,
+					"id": 3661,
 					"name": "frameEncodedJson",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48823,7 +48883,7 @@
 					"target": 1492
 				},
 				{
-					"id": 3658,
+					"id": 3666,
 					"name": "frameTransferList",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48831,7 +48891,7 @@
 					"target": 1546
 				},
 				{
-					"id": 3649,
+					"id": 3657,
 					"name": "HEADER_BYTES",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48839,7 +48899,7 @@
 					"target": 1591
 				},
 				{
-					"id": 3662,
+					"id": 3670,
 					"name": "isCapabilityAnnouncement",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48847,7 +48907,7 @@
 					"target": 1552
 				},
 				{
-					"id": 3661,
+					"id": 3669,
 					"name": "isNativeEnvelope",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48855,7 +48915,7 @@
 					"target": 1549
 				},
 				{
-					"id": 3657,
+					"id": 3665,
 					"name": "isRawPayload",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48863,7 +48923,7 @@
 					"target": 1480
 				},
 				{
-					"id": 3623,
+					"id": 3631,
 					"name": "measureAsync",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48871,7 +48931,7 @@
 					"target": 3448
 				},
 				{
-					"id": 3622,
+					"id": 3630,
 					"name": "measureSync",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48879,7 +48939,7 @@
 					"target": 3440
 				},
 				{
-					"id": 3647,
+					"id": 3655,
 					"name": "MESSAGE_CODECS",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48887,7 +48947,7 @@
 					"target": 1592
 				},
 				{
-					"id": 3646,
+					"id": 3654,
 					"name": "MESSAGE_PROTOCOL_VERSION",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48895,7 +48955,7 @@
 					"target": 1587
 				},
 				{
-					"id": 3618,
+					"id": 3626,
 					"name": "METRICS_VERSION",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48903,7 +48963,7 @@
 					"target": 79
 				},
 				{
-					"id": 3615,
+					"id": 3623,
 					"name": "MetricsCollector",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48911,7 +48971,7 @@
 					"target": 80
 				},
 				{
-					"id": 3659,
+					"id": 3667,
 					"name": "NATIVE_ENVELOPE_KEY",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48919,7 +48979,7 @@
 					"target": 1593
 				},
 				{
-					"id": 3660,
+					"id": 3668,
 					"name": "NATIVE_PROTOCOL_VERSION",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48927,7 +48987,7 @@
 					"target": 1594
 				},
 				{
-					"id": 3619,
+					"id": 3627,
 					"name": "normalizeError",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48935,7 +48995,7 @@
 					"target": 3386
 				},
 				{
-					"id": 3621,
+					"id": 3629,
 					"name": "nowMs",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48959,7 +49019,7 @@
 					"target": 219
 				},
 				{
-					"id": 3631,
+					"id": 3639,
 					"name": "PowerBackpressure",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48967,7 +49027,7 @@
 					"target": 111
 				},
 				{
-					"id": 3633,
+					"id": 3641,
 					"name": "PowerBatch",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48975,7 +49035,7 @@
 					"target": 180
 				},
 				{
-					"id": 3632,
+					"id": 3640,
 					"name": "PowerBulkhead",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48991,7 +49051,7 @@
 					"target": 326
 				},
 				{
-					"id": 3608,
+					"id": 3616,
 					"name": "PowerChunker",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48999,7 +49059,7 @@
 					"target": 824
 				},
 				{
-					"id": 3625,
+					"id": 3633,
 					"name": "PowerCircuit",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49007,7 +49067,7 @@
 					"target": 831
 				},
 				{
-					"id": 3626,
+					"id": 3634,
 					"name": "PowerCron",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49015,7 +49075,7 @@
 					"target": 878
 				},
 				{
-					"id": 3629,
+					"id": 3637,
 					"name": "PowerDeadline",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49023,7 +49083,7 @@
 					"target": 953
 				},
 				{
-					"id": 3613,
+					"id": 3621,
 					"name": "PowerDefer",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49031,7 +49091,7 @@
 					"target": 967
 				},
 				{
-					"id": 3637,
+					"id": 3645,
 					"name": "PowerEventBus",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49039,7 +49099,7 @@
 					"target": 988
 				},
 				{
-					"id": 3639,
+					"id": 3647,
 					"name": "PowerEventLoopMonitor",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49047,7 +49107,7 @@
 					"target": 1070
 				},
 				{
-					"id": 3638,
+					"id": 3646,
 					"name": "PowerGCRA",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49055,7 +49115,7 @@
 					"target": 1167
 				},
 				{
-					"id": 3630,
+					"id": 3638,
 					"name": "PowerHistogram",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49063,7 +49123,7 @@
 					"target": 1268
 				},
 				{
-					"id": 3635,
+					"id": 3643,
 					"name": "PowerLatch",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49071,7 +49131,7 @@
 					"target": 1344
 				},
 				{
-					"id": 3603,
+					"id": 3611,
 					"name": "PowerLogger",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49087,7 +49147,7 @@
 					"target": 655
 				},
 				{
-					"id": 3645,
+					"id": 3653,
 					"name": "PowerMessageCodec",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49095,7 +49155,7 @@
 					"target": 1595
 				},
 				{
-					"id": 3636,
+					"id": 3644,
 					"name": "PowerObserver",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49103,7 +49163,7 @@
 					"target": 1731
 				},
 				{
-					"id": 3609,
+					"id": 3617,
 					"name": "PowerPermitGate",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49119,7 +49179,7 @@
 					"target": 1866
 				},
 				{
-					"id": 3607,
+					"id": 3615,
 					"name": "PowerQueue",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49127,7 +49187,7 @@
 					"target": 2288
 				},
 				{
-					"id": 3606,
+					"id": 3614,
 					"name": "PowerRateLimit",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49135,7 +49195,7 @@
 					"target": 2343
 				},
 				{
-					"id": 3640,
+					"id": 3648,
 					"name": "PowerRealtimeHub",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49143,7 +49203,7 @@
 					"target": 2402
 				},
 				{
-					"id": 3627,
+					"id": 3635,
 					"name": "PowerRetry",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49151,7 +49211,7 @@
 					"target": 2625
 				},
 				{
-					"id": 3628,
+					"id": 3636,
 					"name": "PowerRetryBudget",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49159,7 +49219,7 @@
 					"target": 2589
 				},
 				{
-					"id": 3610,
+					"id": 3618,
 					"name": "PowerScheduler",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49167,7 +49227,7 @@
 					"target": 2641
 				},
 				{
-					"id": 3612,
+					"id": 3620,
 					"name": "PowerSemaphore",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49175,7 +49235,7 @@
 					"target": 2687
 				},
 				{
-					"id": 3634,
+					"id": 3642,
 					"name": "PowerServo",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49183,7 +49243,7 @@
 					"target": 2732
 				},
 				{
-					"id": 3605,
+					"id": 3613,
 					"name": "PowerSlidingWindow",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49191,7 +49251,7 @@
 					"target": 2786
 				},
 				{
-					"id": 3643,
+					"id": 3651,
 					"name": "PowerSocketAdapter",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49199,7 +49259,7 @@
 					"target": 2819
 				},
 				{
-					"id": 3611,
+					"id": 3619,
 					"name": "PowerSubscriberSet",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49207,7 +49267,7 @@
 					"target": 2980
 				},
 				{
-					"id": 3604,
+					"id": 3612,
 					"name": "PowerThrottle",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49223,7 +49283,7 @@
 					"target": 740
 				},
 				{
-					"id": 3614,
+					"id": 3622,
 					"name": "PowerTTLMap",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49231,7 +49291,7 @@
 					"target": 3037
 				},
 				{
-					"id": 3641,
+					"id": 3649,
 					"name": "PowerWebSocketClient",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49239,7 +49299,7 @@
 					"target": 3174
 				},
 				{
-					"id": 3602,
+					"id": 3610,
 					"name": "preloadNode",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49247,7 +49307,7 @@
 					"target": 3
 				},
 				{
-					"id": 3642,
+					"id": 3650,
 					"name": "READY_STATE",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49255,7 +49315,7 @@
 					"target": 19
 				},
 				{
-					"id": 3656,
+					"id": 3664,
 					"name": "selectCodec",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49271,7 +49331,7 @@
 					"target": 323
 				},
 				{
-					"id": 3617,
+					"id": 3625,
 					"name": "toSeries",
 					"variant": "reference",
 					"kind": 4194304,
@@ -49297,79 +49357,79 @@
 				{
 					"title": "References",
 					"children": [
-						3664,
+						3672,
 						3529,
-						3655,
-						3648,
-						3665,
-						3652,
-						3666,
-						3651,
-						3616,
-						3601,
-						3624,
-						3650,
-						3654,
 						3663,
-						3620,
-						3653,
-						3658,
-						3649,
-						3662,
-						3661,
-						3657,
-						3623,
-						3622,
-						3647,
-						3646,
-						3618,
-						3615,
-						3659,
+						3656,
+						3673,
 						3660,
-						3619,
-						3621,
+						3674,
+						3659,
+						3624,
+						3609,
+						3632,
+						3658,
+						3662,
+						3671,
+						3628,
+						3661,
+						3666,
+						3657,
+						3670,
+						3669,
+						3665,
+						3631,
+						3630,
+						3655,
+						3654,
+						3626,
+						3623,
+						3667,
+						3668,
+						3627,
+						3629,
 						3526,
 						3527,
-						3631,
-						3633,
-						3632,
-						3530,
-						3608,
-						3625,
-						3626,
-						3629,
-						3613,
-						3637,
 						3639,
-						3638,
-						3630,
-						3635,
-						3603,
-						3531,
-						3645,
-						3636,
-						3609,
-						3534,
-						3607,
-						3606,
+						3641,
 						3640,
-						3627,
-						3628,
-						3610,
-						3612,
+						3530,
+						3616,
+						3633,
 						3634,
-						3605,
+						3637,
+						3621,
+						3645,
+						3647,
+						3646,
+						3638,
 						3643,
 						3611,
-						3604,
-						3532,
-						3614,
-						3641,
-						3602,
-						3642,
-						3656,
-						3533,
+						3531,
+						3653,
+						3644,
 						3617,
+						3534,
+						3615,
+						3614,
+						3648,
+						3635,
+						3636,
+						3618,
+						3620,
+						3642,
+						3613,
+						3651,
+						3619,
+						3612,
+						3532,
+						3622,
+						3649,
+						3610,
+						3650,
+						3664,
+						3533,
+						3625,
 						3528
 					]
 				}
@@ -51364,7 +51424,7 @@
 					]
 				},
 				{
-					"id": 3677,
+					"id": 3685,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -51388,7 +51448,7 @@
 				{
 					"title": "References",
 					"children": [
-						3677
+						3685
 					]
 				}
 			]
@@ -57471,7 +57531,7 @@
 					]
 				},
 				{
-					"id": 3680,
+					"id": 3688,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -57520,7 +57580,7 @@
 				{
 					"title": "References",
 					"children": [
-						3680
+						3688
 					]
 				}
 			]
@@ -60833,7 +60893,7 @@
 					}
 				},
 				{
-					"id": 3683,
+					"id": 3691,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -60867,7 +60927,7 @@
 				{
 					"title": "References",
 					"children": [
-						3683
+						3691
 					]
 				}
 			]
@@ -62303,7 +62363,7 @@
 					]
 				},
 				{
-					"id": 3684,
+					"id": 3692,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -62322,7 +62382,7 @@
 				{
 					"title": "References",
 					"children": [
-						3684
+						3692
 					]
 				}
 			]
@@ -65905,7 +65965,7 @@
 					}
 				},
 				{
-					"id": 3689,
+					"id": 3697,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -65913,7 +65973,7 @@
 					"target": 3174
 				},
 				{
-					"id": 3690,
+					"id": 3698,
 					"name": "READY_STATE",
 					"variant": "reference",
 					"kind": 4194304,
@@ -65984,8 +66044,8 @@
 				{
 					"title": "References",
 					"children": [
-						3689,
-						3690
+						3697,
+						3698
 					]
 				}
 			]
@@ -67922,7 +67982,7 @@
 					]
 				},
 				{
-					"id": 3691,
+					"id": 3699,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -67942,7 +68002,7 @@
 				{
 					"title": "References",
 					"children": [
-						3691
+						3699
 					]
 				}
 			]
@@ -68554,7 +68614,7 @@
 					]
 				},
 				{
-					"id": 3692,
+					"id": 3700,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -68572,7 +68632,7 @@
 				{
 					"title": "References",
 					"children": [
-						3692
+						3700
 					]
 				}
 			]
@@ -83994,12 +84054,12 @@
 		"3548": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._wired"
+			"qualifiedName": "WorkerAgnostic._onError"
 		},
 		"3549": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "WorkerAgnostic._wired"
 		},
 		"3550": {
 			"packageName": "performance-helpers",
@@ -84009,102 +84069,67 @@
 		"3551": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "args"
+			"qualifiedName": "__type"
 		},
 		"3552": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._wiredProperties"
+			"qualifiedName": "args"
 		},
 		"3553": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._disposed"
+			"qualifiedName": "WorkerAgnostic._wiredProperties"
 		},
 		"3554": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._listeners"
+			"qualifiedName": "WorkerAgnostic._disposed"
 		},
 		"3555": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.worker"
+			"qualifiedName": "WorkerAgnostic._listeners"
 		},
-		"3558": {
+		"3556": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._nativeModel"
+			"qualifiedName": "WorkerAgnostic.worker"
 		},
 		"3559": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.dispose"
+			"qualifiedName": "WorkerAgnostic._nativeModel"
 		},
 		"3560": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
 			"qualifiedName": "WorkerAgnostic.dispose"
 		},
-		"3565": {
+		"3561": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.addEventListener"
-		},
-		"3566": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.addEventListener"
-		},
-		"3567": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
-		},
-		"3568": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
-		},
-		"3569": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
-		},
-		"3570": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
-		},
-		"3571": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
-		},
-		"3572": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.removeEventListener"
+			"qualifiedName": "WorkerAgnostic.dispose"
 		},
 		"3573": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.removeEventListener"
+			"qualifiedName": "WorkerAgnostic.addEventListener"
 		},
 		"3574": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
+			"qualifiedName": "WorkerAgnostic.addEventListener"
 		},
 		"3575": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
+			"qualifiedName": "type"
 		},
 		"3576": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "handler"
 		},
 		"3577": {
 			"packageName": "performance-helpers",
@@ -84114,32 +84139,32 @@
 		"3578": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "__type"
 		},
 		"3579": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.on"
+			"qualifiedName": "arg0"
 		},
 		"3580": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.on"
+			"qualifiedName": "WorkerAgnostic.removeEventListener"
 		},
 		"3581": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
+			"qualifiedName": "WorkerAgnostic.removeEventListener"
 		},
 		"3582": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
+			"qualifiedName": "type"
 		},
 		"3583": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "handler"
 		},
 		"3584": {
 			"packageName": "performance-helpers",
@@ -84149,32 +84174,32 @@
 		"3585": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "__type"
 		},
 		"3586": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.off"
+			"qualifiedName": "arg0"
 		},
 		"3587": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.off"
+			"qualifiedName": "WorkerAgnostic.on"
 		},
 		"3588": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
+			"qualifiedName": "WorkerAgnostic.on"
 		},
 		"3589": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
+			"qualifiedName": "type"
 		},
 		"3590": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "handler"
 		},
 		"3591": {
 			"packageName": "performance-helpers",
@@ -84184,499 +84209,539 @@
 		"3592": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "__type"
 		},
 		"3593": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.postMessage"
+			"qualifiedName": "arg0"
 		},
 		"3594": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.postMessage"
+			"qualifiedName": "WorkerAgnostic.off"
 		},
 		"3595": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "message"
+			"qualifiedName": "WorkerAgnostic.off"
 		},
 		"3596": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "transfer"
+			"qualifiedName": "type"
 		},
 		"3597": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.terminate"
+			"qualifiedName": "handler"
 		},
 		"3598": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.terminate"
+			"qualifiedName": "__type"
 		},
 		"3599": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.[dispose]"
+			"qualifiedName": "__type"
 		},
 		"3600": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.[dispose]"
+			"qualifiedName": "arg0"
 		},
 		"3601": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "detectEnv"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.postMessage"
 		},
 		"3602": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "preloadNode"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.postMessage"
 		},
 		"3603": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerLogger"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "message"
 		},
 		"3604": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerThrottle"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "transfer"
 		},
 		"3605": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSlidingWindow"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.terminate"
 		},
 		"3606": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRateLimit"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.terminate"
 		},
 		"3607": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerQueue"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.[dispose]"
 		},
 		"3608": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerChunker"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.[dispose]"
 		},
 		"3609": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerPermitGate"
+			"qualifiedName": "detectEnv"
 		},
 		"3610": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerScheduler"
+			"qualifiedName": "preloadNode"
 		},
 		"3611": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSubscriberSet"
+			"qualifiedName": "PowerLogger"
 		},
 		"3612": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSemaphore"
+			"qualifiedName": "PowerThrottle"
 		},
 		"3613": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerDefer"
+			"qualifiedName": "PowerSlidingWindow"
 		},
 		"3614": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerTTLMap"
+			"qualifiedName": "PowerRateLimit"
 		},
 		"3615": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "MetricsCollector"
+			"qualifiedName": "PowerQueue"
 		},
 		"3616": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "defaultMetrics"
+			"qualifiedName": "PowerChunker"
 		},
 		"3617": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "toSeries"
+			"qualifiedName": "PowerPermitGate"
 		},
 		"3618": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "METRICS_VERSION"
+			"qualifiedName": "PowerScheduler"
 		},
 		"3619": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "normalizeError"
+			"qualifiedName": "PowerSubscriberSet"
 		},
 		"3620": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "formatErrorObj"
+			"qualifiedName": "PowerSemaphore"
 		},
 		"3621": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "nowMs"
+			"qualifiedName": "PowerDefer"
 		},
 		"3622": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "measureSync"
+			"qualifiedName": "PowerTTLMap"
 		},
 		"3623": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "measureAsync"
+			"qualifiedName": "MetricsCollector"
 		},
 		"3624": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "detectWebTransportSupport"
+			"qualifiedName": "defaultMetrics"
 		},
 		"3625": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerCircuit"
+			"qualifiedName": "toSeries"
 		},
 		"3626": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerCron"
+			"qualifiedName": "METRICS_VERSION"
 		},
 		"3627": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRetry"
+			"qualifiedName": "normalizeError"
 		},
 		"3628": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRetryBudget"
+			"qualifiedName": "formatErrorObj"
 		},
 		"3629": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerDeadline"
+			"qualifiedName": "nowMs"
 		},
 		"3630": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerHistogram"
+			"qualifiedName": "measureSync"
 		},
 		"3631": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBackpressure"
+			"qualifiedName": "measureAsync"
 		},
 		"3632": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBulkhead"
+			"qualifiedName": "detectWebTransportSupport"
 		},
 		"3633": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBatch"
+			"qualifiedName": "PowerCircuit"
 		},
 		"3634": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerServo"
+			"qualifiedName": "PowerCron"
 		},
 		"3635": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerLatch"
+			"qualifiedName": "PowerRetry"
 		},
 		"3636": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerObserver"
+			"qualifiedName": "PowerRetryBudget"
 		},
 		"3637": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerEventBus"
+			"qualifiedName": "PowerDeadline"
 		},
 		"3638": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerGCRA"
+			"qualifiedName": "PowerHistogram"
 		},
 		"3639": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerEventLoopMonitor"
+			"qualifiedName": "PowerBackpressure"
 		},
 		"3640": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRealtimeHub"
+			"qualifiedName": "PowerBulkhead"
 		},
 		"3641": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerWebSocketClient"
+			"qualifiedName": "PowerBatch"
 		},
 		"3642": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "READY_STATE"
+			"qualifiedName": "PowerServo"
 		},
 		"3643": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSocketAdapter"
+			"qualifiedName": "PowerLatch"
+		},
+		"3644": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerObserver"
 		},
 		"3645": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerMessageCodec"
+			"qualifiedName": "PowerEventBus"
 		},
 		"3646": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "MESSAGE_PROTOCOL_VERSION"
+			"qualifiedName": "PowerGCRA"
 		},
 		"3647": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "MESSAGE_CODECS"
+			"qualifiedName": "PowerEventLoopMonitor"
 		},
 		"3648": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "CODECS"
+			"qualifiedName": "PowerRealtimeHub"
 		},
 		"3649": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "HEADER_BYTES"
+			"qualifiedName": "PowerWebSocketClient"
 		},
 		"3650": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "encodeMessage"
+			"qualifiedName": "READY_STATE"
 		},
 		"3651": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "decodeMessage"
-		},
-		"3652": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "createFrameDecoder"
+			"qualifiedName": "PowerSocketAdapter"
 		},
 		"3653": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "frameEncodedJson"
+			"qualifiedName": "PowerMessageCodec"
 		},
 		"3654": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "encodeNative"
+			"qualifiedName": "MESSAGE_PROTOCOL_VERSION"
 		},
 		"3655": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "canUseNativeClone"
+			"qualifiedName": "MESSAGE_CODECS"
 		},
 		"3656": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "selectCodec"
+			"qualifiedName": "CODECS"
 		},
 		"3657": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "isRawPayload"
+			"qualifiedName": "HEADER_BYTES"
 		},
 		"3658": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "frameTransferList"
+			"qualifiedName": "encodeMessage"
 		},
 		"3659": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "NATIVE_ENVELOPE_KEY"
+			"qualifiedName": "decodeMessage"
 		},
 		"3660": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "NATIVE_PROTOCOL_VERSION"
+			"qualifiedName": "createFrameDecoder"
 		},
 		"3661": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "isNativeEnvelope"
+			"qualifiedName": "frameEncodedJson"
 		},
 		"3662": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "isCapabilityAnnouncement"
+			"qualifiedName": "encodeNative"
 		},
 		"3663": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "encodeNativeEnvelope"
+			"qualifiedName": "canUseNativeClone"
 		},
 		"3664": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "announceCapabilities"
+			"qualifiedName": "selectCodec"
 		},
 		"3665": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "collectTransferables"
+			"qualifiedName": "isRawPayload"
 		},
 		"3666": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "decodeInbound"
+			"qualifiedName": "frameTransferList"
 		},
 		"3667": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "NATIVE_ENVELOPE_KEY"
+		},
+		"3668": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "NATIVE_PROTOCOL_VERSION"
+		},
+		"3669": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "isNativeEnvelope"
+		},
+		"3670": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "isCapabilityAnnouncement"
+		},
+		"3671": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "encodeNativeEnvelope"
+		},
+		"3672": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "announceCapabilities"
+		},
+		"3673": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "collectTransferables"
+		},
+		"3674": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "decodeInbound"
+		},
+		"3675": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
 			"qualifiedName": "default"
 		},
-		"3668": {
+		"3676": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBackpressure.js",
 			"qualifiedName": "default"
 		},
-		"3669": {
+		"3677": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBatch.js",
 			"qualifiedName": "default"
 		},
-		"3670": {
+		"3678": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBulkhead.js",
 			"qualifiedName": "default"
 		},
-		"3671": {
+		"3679": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerCircuit.js",
 			"qualifiedName": "default"
 		},
-		"3672": {
+		"3680": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerCron.js",
 			"qualifiedName": "default"
 		},
-		"3673": {
+		"3681": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerDeadline.js",
 			"qualifiedName": "default"
 		},
-		"3674": {
+		"3682": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerDefer.js",
 			"qualifiedName": "default"
 		},
-		"3675": {
+		"3683": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerEventBus.js",
 			"qualifiedName": "default"
 		},
-		"3676": {
+		"3684": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerEventLoopMonitor.js",
 			"qualifiedName": "default"
 		},
-		"3677": {
+		"3685": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerGCRA.js",
 			"qualifiedName": "default"
 		},
-		"3678": {
+		"3686": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerHistogram.js",
 			"qualifiedName": "default"
 		},
-		"3679": {
+		"3687": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerLatch.js",
 			"qualifiedName": "default"
 		},
-		"3680": {
+		"3688": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerMessageCodec.js",
 			"qualifiedName": "default"
 		},
-		"3681": {
+		"3689": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerObserver.js",
 			"qualifiedName": "default"
 		},
-		"3682": {
+		"3690": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRateLimit.js",
 			"qualifiedName": "default"
 		},
-		"3683": {
+		"3691": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRealtimeHub.js",
 			"qualifiedName": "default"
 		},
-		"3684": {
+		"3692": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRetry.js",
 			"qualifiedName": "default"
 		},
-		"3685": {
+		"3693": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSemaphore.js",
 			"qualifiedName": "default"
 		},
-		"3686": {
+		"3694": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSocketAdapter.js",
 			"qualifiedName": "default"
 		},
-		"3687": {
+		"3695": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSocketAdapter.js",
 			"qualifiedName": "READY_STATE"
 		},
-		"3688": {
+		"3696": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerTTLMap.js",
 			"qualifiedName": "default"
 		},
-		"3689": {
+		"3697": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerWebSocketClient.js",
 			"qualifiedName": "default"
 		},
-		"3690": {
+		"3698": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerWebSocketClient.js",
 			"qualifiedName": "READY_STATE"
 		},
-		"3691": {
+		"3699": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/now.js",
 			"qualifiedName": "default"
 		},
-		"3692": {
+		"3700": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/smallLfu.js",
 			"qualifiedName": "default"

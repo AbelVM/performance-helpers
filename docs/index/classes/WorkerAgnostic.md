@@ -57,6 +57,17 @@ Options forwarded to the native
 
 ***
 
+### \_onError
+
+> **\_onError**: `any`
+
+WRK-003. Where a listener throw goes.
+
+Read before `_wireEvents`, because a listener that throws during the initial
+capability announcement must already have somewhere to report to.
+
+***
+
 ### \_wired
 
 > **\_wired**: \[`string`, (...`args`) => `void`\][]

@@ -118,6 +118,23 @@ function detectEnv() {
 const SUPPORTED_EVENTS = ['message', 'error', 'messageerror'];
 
 /**
+ * The constructor options minus this class's own `onError`.
+ *
+ * @param {Object} options
+ * @returns {Object} A shallow copy without `onError`.
+ * @private
+ */
+function stripOnError(options) {
+  // Spelled as a `delete` on a copy rather than a rest-destructure, because the
+  // omitted binding would itself trip `no-unused-vars` — and an eslint-disable for a
+  // two-line helper is a worse trade than copying an object that is already copied
+  // on the path that uses it.
+  const rest = { ...options };
+  delete rest.onError;
+  return rest;
+}
+
+/**
  * Resolve and create the underlying native worker for the given source.
  *
  * @param {Function|string} workerSource - Worker constructor, factory function,
@@ -364,6 +381,13 @@ class WorkerAgnostic {
   constructor(workerSource, options = {}) {
     this.env = detectEnv();
     this.options = options && typeof options === 'object' ? options : {};
+    /**
+     * WRK-003. Where a listener throw goes.
+     *
+     * Read before `_wireEvents`, because a listener that throws during the initial
+     * capability announcement must already have somewhere to report to.
+     */
+    this._onError = typeof this.options.onError === 'function' ? this.options.onError : null;
     // unified listener registry: event name -> Set<handler>
     /** @type {Array<[string, (...args: any[]) => void]>} Native listeners this instance attached,
      * as `[type, handler]`, so `dispose()` can detach exactly what it wired. */
@@ -375,7 +399,16 @@ class WorkerAgnostic {
     this._disposed = false;
     this._listeners = new Map();
     /** @type {import('./jsdoc-types.js').WorkerLike} */
-    this.worker = resolveWorker(workerSource, this.options, this.env);
+    // `onError` is this class's own option, not the platform's, so it is stripped
+    // before the bag reaches `new Worker(...)`. Node's `Worker` and the DOM's
+    // `WorkerOptions` both ignore unknown members, so this is hygiene rather than a
+    // fix — but a library option forwarded into a platform constructor is the kind
+    // of thing that becomes a bug the day some implementation validates its bag.
+    this.worker = resolveWorker(
+      workerSource,
+      this._onError ? stripOnError(this.options) : this.options,
+      this.env
+    );
     this._wireEvents();
   }
 
@@ -537,8 +570,51 @@ class WorkerAgnostic {
       try {
         handler(...payload);
       } catch (e) {
-        // Never let a listener error break the worker event loop.
+        // Never let a listener error break the worker event loop — that part is not
+        // in question and must not change.
+        //
+        // **Swallowing silently is the defect (WRK-003).** This catch had no body but
+        // a comment, so a listener that throws on every message produced a class
+        // that appeared healthy: the events stopped arriving at that handler, nothing
+        // was logged, nothing was counted, and the only symptom was that a feature
+        // quietly stopped working. Four sibling helpers had already grown an
+        // `onError` route for exactly this, and this one was missed because it looked
+        // the same as a dozen deliberate `catch {}` blocks elsewhere in the tree.
+        this._notifyError(e, { type, listener: handler });
       }
+    }
+  }
+
+  /**
+   * Route a listener error to the configured `onError` handler.
+   *
+   * Mirrors `PowerScheduler._notifyError` deliberately rather than inventing a
+   * second shape: same signature, same guard, and the same refusal to let a throwing
+   * user handler escape. An error handler that throws would turn a swallowed
+   * listener error into an uncaught one, which is the failure this whole mechanism
+   * exists to prevent — so the guard is the point, not a detail.
+   *
+   * @param {any} err
+   * @param {{type: string, listener: Function}} [context] - Which event and which
+   *   handler threw. Included because "a listener threw" is not actionable on its
+   *   own when a caller has registered several.
+   * @private
+   * @returns {void}
+   */
+  _notifyError(err, context) {
+    if (!this._onError) return;
+    try {
+      this._onError(err, context);
+    } catch {
+      // A throwing `onError` must not become an uncaught error.
+      //
+      // WRK-003 added this site, and GATE-001 caught the first version of it as a
+      // bare dismissal — correctly. The reason it is safe: the only thing left to do
+      // with an error that the error handler itself threw is to drop it, and letting
+      // it escape would convert a swallowed listener error into a crash *inside the
+      // dispatch loop*, which is the exact outcome the surrounding catch exists to
+      // prevent. `PowerScheduler._notifyError` carries the same guard for the same
+      // reason.
     }
   }
 

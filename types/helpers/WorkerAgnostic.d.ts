@@ -45,6 +45,13 @@ declare class WorkerAgnostic {
     options: {
         [x: string]: any;
     };
+    /**
+     * WRK-003. Where a listener throw goes.
+     *
+     * Read before `_wireEvents`, because a listener that throws during the initial
+     * capability announcement must already have somewhere to report to.
+     */
+    _onError: any;
     /** @type {Array<[string, (...args: any[]) => void]>} Native listeners this instance attached,
      * as `[type, handler]`, so `dispose()` can detach exactly what it wired. */
     _wired: Array<[string, (...args: any[]) => void]>;
@@ -96,6 +103,23 @@ declare class WorkerAgnostic {
      * @private
      */
     private _dispatch;
+    /**
+     * Route a listener error to the configured `onError` handler.
+     *
+     * Mirrors `PowerScheduler._notifyError` deliberately rather than inventing a
+     * second shape: same signature, same guard, and the same refusal to let a throwing
+     * user handler escape. An error handler that throws would turn a swallowed
+     * listener error into an uncaught one, which is the failure this whole mechanism
+     * exists to prevent — so the guard is the point, not a detail.
+     *
+     * @param {any} err
+     * @param {{type: string, listener: Function}} [context] - Which event and which
+     *   handler threw. Included because "a listener threw" is not actionable on its
+     *   own when a caller has registered several.
+     * @private
+     * @returns {void}
+     */
+    private _notifyError;
     /**
      * @param {string} type
      * @param {function(...*):void} handler
