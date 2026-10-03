@@ -934,6 +934,16 @@ export class PowerWebSocketClient {
     }
     this._state = READY_STATE.OPEN;
     this._reconnectAttempts = 0;
+    // RT-012. The **backoff** is per outage too, and it was the one thing on this
+    // path not cleared here. `_nextReconnectDelay()` triples `_reconnectDelay` on
+    // every call and caps it at `reconnectMaxMs`, so an outage that ran long left
+    // the *next* outage starting from the grown value — measured: three retries
+    // grow it to 2700 ms with a base of 100, and a successful open left it there,
+    // so the following outage's first retry waited 2700 ms rather than ~100. Run
+    // long enough and the first retry of every subsequent outage waits the full
+    // 30 s ceiling. `guides/powerWebSocketClient.md` has claimed a successful open
+    // resets the backoff; this is what makes that true rather than aspirational.
+    this._reconnectDelay = null;
     // The elapsed budget covers one outage, so a fresh connection clears it —
     // and clears the reason with it, since nothing is exhausted any more.
     this._reconnectStartedAt = null;

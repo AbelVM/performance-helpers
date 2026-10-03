@@ -52,6 +52,35 @@ function outage(c, elapsedMs = 0) {
   c._reconnectStartedAt = Date.now() - elapsedMs;
 }
 
+describe('RT-012: a successful open resets the backoff', () => {
+  // `_nextReconnectDelay()` triples `_reconnectDelay` on every call and caps it at
+  // `reconnectMaxMs`, and `_handleOpen` cleared the attempt counter, the elapsed
+  // budget and the reason — but not the backoff. So an outage that ran long left
+  // the *next* outage starting from the grown value, and run long enough every
+  // subsequent outage's first retry waited the full 30s ceiling. Measured before
+  // the fix: three retries grew it to 2700 with a base of 100, and a successful
+  // open left it there.
+  //
+  // Asserted on the internal rather than on a timer: `Date.now()` is stubbed in
+  // this file, so the jitter in `_nextReconnectDelay` is deterministic, but the
+  // property is *which* delay the next outage starts from, not how long it is.
+  it('clears the grown backoff so the next outage starts from the base', () => {
+    const c = client({ reconnectBaseMs: 10_000, reconnectMaxMs: 30_000 });
+    const grown = [c._nextReconnectDelay(), c._nextReconnectDelay(), c._nextReconnectDelay()];
+    expect(c._reconnectDelay, 'the backoff grew while retrying').toBeGreaterThan(
+      Math.max(...grown.map(Number))
+    );
+
+    c._handleOpen(() => {});
+
+    expect(c._reconnectDelay, 'a successful open resets the backoff').toBe(null);
+    // And the next outage really does start from the base again, rather than
+    // from whatever the previous one grew to.
+    expect(c._nextReconnectDelay()).toBeLessThanOrEqual(10_000);
+    expect(c._reconnectAttempts, 'the attempt counter was already reset here').toBe(0);
+  });
+});
+
 describe('RT-013: the reconnect bounds are validated, not coerced', () => {
   // The gate is `this._reconnectAttempts >= this._maxReconnectAttempts`, and
   // **every comparison with `NaN` is false**. So before this row,

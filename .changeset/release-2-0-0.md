@@ -5066,6 +5066,26 @@ probes reported the synchronous throw and the row’s own probe did not, and the
 disagreed because of the **call shape** — the key is `options.partitionKey`, not the first
 argument. Mutation-checked: restoring the old expression fails the new tests.
 
+### A successful open resets the reconnect backoff (patch)
+
+`_handleOpen` cleared the attempt counter, the elapsed budget and the reason — but not
+the backoff. `_nextReconnectDelay()` triples `_reconnectDelay` on every call and caps
+it at `reconnectMaxMs`, so an outage that ran long left the **next** outage starting
+from the grown value instead of from `reconnectBaseMs`.
+
+Measured with a base of 100 ms: three retries grew the internal delay to 2700 ms,
+and a successful open left it there, so the following outage’s first retry waited
+2700 ms rather than ~100 ms. Run an outage long enough and every subsequent outage’s
+first retry waits the full 30 s ceiling — the client looks like it is refusing to
+reconnect promptly at exactly the moment it recovered.
+
+`guides/powerWebSocketClient.md` has claimed _“a successful open resets the counter and
+the backoff”_ all along. This is what makes that true rather than aspirational. No
+change to the delay _handed out_ within an outage — only to where the next one starts.
+
+Mutation-checked: with the reset removed, the new test fails (`expected 30000 to be
+null`).
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
