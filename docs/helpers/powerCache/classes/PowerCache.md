@@ -791,6 +791,10 @@ which is the property a consumer relies on.
 
 > **poolSize**: `number`
 
+##### refreshesSkipped
+
+> **refreshesSkipped**: `number`
+
 ##### rejected
 
 > **rejected**: `number`
@@ -1086,6 +1090,10 @@ Return runtime statistics for the cache.
 ##### poolSize
 
 > **poolSize**: `number`
+
+##### refreshesSkipped
+
+> **refreshesSkipped**: `number`
 
 ##### rejected
 

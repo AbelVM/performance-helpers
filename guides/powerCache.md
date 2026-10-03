@@ -4,21 +4,22 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 ## PowerCache
 
-| option              |                         type |    default | description                                                                                                                                                                                                                                                                                    |
-| ------------------- | ---------------------------: | ---------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxEntries`        |                     `number` | `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                                                                                                                                                                                                                  |
-| `maxWeight`         |                     `number` | `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                                                                                                                                                                                                        |
-| `weightFn`          |     `function(value):number` |  `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                                                                                                                                                                                                                   |
-| `defaultTTL`        |                     `number` |    `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                                                                                                                                                                                                            |
-| `maxPoolSize`       |                     `number` |     `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                                                                                                                                                                                                                      |
-| `rejectOversized`   |                    `boolean` |    `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                                                                                                                                                                                                                  |
-| `onEvict`           | `function(key,value,reason)` |     `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                                                                                                                                                                                                                  | 'deleted' | 'rejected-oversized'`. |
-| `onExpire`          |        `function(key,value)` |     `null` | Callback invoked when an entry expires due to TTL.                                                                                                                                                                                                                                             |
-| `now`               |               `() => number` |  `nowMs()` | Injected clock in milliseconds, matching the limiters and `PowerTTLMap`. Expiry is the one behaviour here that cannot be observed synchronously, so this turns "assert it expired after 100 ms" from a sleep into an exact assertion — see [Testing expiry](#testing-expiry-without-sleeping). |
-| `initialPoolSize`   |                     `number` |        `0` | Prefill the internal node pool to reduce early allocations.                                                                                                                                                                                                                                    |
-| `maxCleanupPerTick` |                     `number` |      `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                                                                                                                                                                                                       |
-| `policy`            |              `'lru'\|'slru'` |    `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`.                                                                                                                                                                                        |
-| `admission`         |                     `'none'` |   `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan).                                                                                                       |
+| option                 |                         type |                                         default | description                                                                                                                                                                                                                                                                                    |
+| ---------------------- | ---------------------------: | ----------------------------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxEntries`           |                     `number` |                                      `Infinity` | Maximum number of entries to retain. Older entries are evicted when exceeded.                                                                                                                                                                                                                  |
+| `maxInflightRefreshes` |                     `number` | `maxEntries`, or `1024` when that is `Infinity` | Maximum background refreshes in flight at once. Reaching it **skips** a refresh rather than evicting one; skips are counted in `stats().refreshesSkipped`. See [capping background refreshes](#capping-background-refreshes).                                                                  |
+| `maxWeight`            |                     `number` |                                      `Infinity` | Maximum total weight across all entries. Eviction occurs when exceeded.                                                                                                                                                                                                                        |
+| `weightFn`             |     `function(value):number` |                                       `() => 1` | Compute the weight for a value when explicit `weight` not provided to `set`.                                                                                                                                                                                                                   |
+| `defaultTTL`           |                     `number` |                                         `60000` | Default time-to-live (ms) for entries. Use `null`/`Infinity` to disable expiration.                                                                                                                                                                                                            |
+| `maxPoolSize`          |                     `number` |                                          `1000` | Maximum size of the internal node pool used to reuse nodes and reduce GC.                                                                                                                                                                                                                      |
+| `rejectOversized`      |                    `boolean` |                                         `false` | When `true`, inserting an item with weight &gt; `maxWeight` will be rejected.                                                                                                                                                                                                                  |
+| `onEvict`              | `function(key,value,reason)` |                                          `null` | Callback invoked for evicted/deleted/rejected entries. `reason` is `'evicted'                                                                                                                                                                                                                  | 'deleted' | 'rejected-oversized'`. |
+| `onExpire`             |        `function(key,value)` |                                          `null` | Callback invoked when an entry expires due to TTL.                                                                                                                                                                                                                                             |
+| `now`                  |               `() => number` |                                       `nowMs()` | Injected clock in milliseconds, matching the limiters and `PowerTTLMap`. Expiry is the one behaviour here that cannot be observed synchronously, so this turns "assert it expired after 100 ms" from a sleep into an exact assertion — see [Testing expiry](#testing-expiry-without-sleeping). |
+| `initialPoolSize`      |                     `number` |                                             `0` | Prefill the internal node pool to reduce early allocations.                                                                                                                                                                                                                                    |
+| `maxCleanupPerTick`    |                     `number` |                                           `100` | Max nodes scanned per cleanup tick for `startCleanup()`.                                                                                                                                                                                                                                       |
+| `policy`               |              `'lru'\|'slru'` |                                         `'lru'` | Eviction policy. `'slru'` adds a protected segment (see below). An unknown value falls back to `'lru'`.                                                                                                                                                                                        |
+| `admission`            |                     `'none'` |                                        `'none'` | `'tinylfu'` adds a 4-bit Count-Min frequency filter that refuses an insert when the entry it would evict is still wanted — see [TinyLFU admission](#tinylfu-admission-resisting-a-scan).                                                                                                       |
 
 ### API
 
@@ -111,6 +112,42 @@ cache.stats().staleServes; //   the subset that was expired
 This is the one number worth alerting on. An upstream that starts failing does
 not make requests fail — it makes them serve old data, and the hit rate looks
 _better_, not worse. Without this counter the failure mode is invisible.
+
+**And watch `stats().refreshesSkipped` next to it.** A background refresh is
+skipped when `maxInflightRefreshes` is reached, so a cache can be serving stale
+data _and_ not be refreshing it — which looks healthy on every other counter.
+Both counters together say whether you are seeing fresh-enough data:
+
+```javascript
+cache.stats().staleServes; //     stale values served
+cache.stats().refreshesSkipped; // refreshes dropped for want of room
+```
+
+### Capping background refreshes
+
+Every stale serve schedules a background refresh, and each one holds a promise
+and an `AbortController` until the factory settles. That was **unbounded** before
+`maxInflightRefreshes` existed: a scan across distinct keys with a slow factory
+retained one of each per key. Measured, with the shipped default of
+`maxEntries: Infinity`, a 20 000-key scan retained **20 000** inflight entries
+and 20 000 `AbortController`s. It is now bounded.
+
+| `maxInflightRefreshes`                            | meaning                                                                                  |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `maxEntries` (default, when finite)               | **at most one in-flight refresh per cacheable key**                                      |
+| `1024` (default, when `maxEntries` is `Infinity`) | a fixed ceiling — the default cache size is infinite, so there is nothing to derive from |
+| `0`                                               | never refresh in the background                                                          |
+
+**Reaching the cap skips a refresh; it does not evict one.** Skipping is free —
+the caller has already been served the stale value, and the next `getOrSet` for
+that key will schedule a refresh if there is room by then. Evicting the oldest
+inflight entry instead would abort a fetch that `getOrSetAsync` may already have
+handed to a caller, which trades a bounded background queue for a
+caller-visible failure. Every skip is counted.
+
+Raise the cap if `refreshesSkipped` is climbing while your data is genuinely
+stale; lower it to `0` if your values are cheap enough to recompute on the next
+read that needs them.
 
 **Concurrency is already handled.** Concurrent callers on one expired key share a
 single in-flight fetch: 20 simultaneous `getOrSetAsync` calls run the factory

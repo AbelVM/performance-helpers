@@ -109,7 +109,13 @@
  * pool reads are checked where it reads them.
  *
  * @typedef {Object} AutoScaleOptions
- * @property {'ewma'|'aimd'|'vegas'|'gradient2'} [policy='ewma']
+ * @property {'ewma'|'aimd'|'vegas'|'gradient2'} [policy='ewma'] - Which
+ *   concurrency controller computes the adaptive limit. **`'ewma'` — the
+ *   default — runs no concurrency control at all**: it compares one EWMA
+ *   against `targetMs` and adds or removes a worker, and `_adaptiveLimit` stays
+ *   at its seed value, which is why `getStats().performance.concurrencyLimit`
+ *   reports `null` for it. The other three are real feedback loops over a
+ *   latency signal. See the pool guide's "Adaptive concurrency policies".
  * @property {number} [intervalMs]
  * @property {number} [targetMs]
  * @property {number} [alpha]
@@ -807,6 +813,13 @@ export {};
  * Options accepted by `PowerCache`.
  * @typedef {Object} PowerCacheOptions
  * @property {number} [maxEntries]
+ * @property {number} [maxInflightRefreshes] Maximum background refreshes in
+ *   flight at once. Defaults to `maxEntries` — *at most one per cacheable key* —
+ *   or to a fixed `1024` when `maxEntries` is `Infinity`, since an infinite cache
+ *   size derives no ceiling. Reaching it **skips** the refresh and counts it in
+ *   `stats().refreshesSkipped`; it never evicts one, because an eviction would
+ *   abort a fetch `getOrSetAsync` may already have handed out. `0` means never
+ *   refresh in the background.
  * @property {number} [maxWeight]
  * @property {?(function(*):number)} [weightFn]
  * @property {number} [defaultTTL]

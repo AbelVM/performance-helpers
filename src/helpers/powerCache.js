@@ -171,6 +171,10 @@ export class PowerCache {
    */
   constructor({
     maxEntries = Infinity,
+    // No default here on purpose: `undefined` is what tells the constructor the
+    // caller said nothing, as distinct from having said `null`, which
+    // `assertLimitRequired` rightly rejects.
+    maxInflightRefreshes,
     maxWeight = Infinity,
     weightFn = () => 1,
     defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
@@ -229,6 +233,37 @@ export class PowerCache {
       min: 0,
       allowInfinity: true,
     });
+    // MEM-001. Defaults to `maxEntries`, which gives the invariant that matters:
+    // **at most one in-flight background refresh per cacheable key.** Both maps
+    // grew without any bound before this, so a scan across distinct keys with a
+    // slow factory retained one promise and one `AbortController` per key —
+    // measured at 20,000 of each, against a `maxEntries` of 20,000, and
+    // uncapped when it was larger.
+    //
+    // `maxEntries` rather than `Infinity` because a refresh for a key the cache
+    // can no longer hold is work whose result will be discarded, and because the
+    // cache's own size is the only figure a caller already has a feel for. Note
+    // the default is deliberately *not* `maxEntries * 2`: the extra headroom
+    // buys nothing here, and a round number with a stated invariant is easier to
+    // reason about than a multiple.
+    //
+    // A cap of `0` is allowed and means "never refresh in the background", which
+    // is a legitimate configuration for a cache whose values are cheap to
+    // recompute synchronously.
+    //
+    // The default is resolved rather than passed to `assertLimitRequired`, because
+    // that helper rejects a `null` fallback outright — and "derive it from
+    // `maxEntries`" is exactly the case where no caller-supplied value exists.
+    if (maxInflightRefreshes === undefined) {
+      this.maxInflightRefreshes = Number.isFinite(this.maxEntries) ? this.maxEntries : 1024;
+    } else {
+      this.maxInflightRefreshes = assertLimitRequired(maxInflightRefreshes, {
+        name: 'maxInflightRefreshes',
+        className: 'PowerCache',
+        integer: true,
+        min: 0,
+      });
+    }
     this.maxWeight = assertLimitRequired(maxWeight, {
       name: 'maxWeight',
       className: 'PowerCache',
@@ -379,6 +414,12 @@ export class PowerCache {
     this._staleServes = 0;
     this._misses = 0;
     this._evictions = 0;
+    // MEM-001: background refreshes refused because `maxInflightRefreshes` was
+    // reached. Counted rather than swallowed, because the cap makes a refresh
+    // *not happen* and a refresh that silently does not happen reads as a cache
+    // that is not refreshing — the same reasoning as `_rejected` and
+    // `_rejectedAdmission` beside it.
+    this._refreshesSkipped = 0;
     this._rejected = 0; // rejected oversized insert attempts
     this._rejectedAdmission = 0; // insert attempts refused by the TinyLFU filter
     this._expirations = 0;
@@ -836,6 +877,17 @@ export class PowerCache {
    */
   _refreshStaleEntry(key, factory, { ttl = undefined, weight = undefined } = {}) {
     if (this._inflightPromises.has(key)) return;
+    // **MEM-001: the cap, and a skip rather than an eviction.** Reaching the cap
+    // means dropping a *background* refresh, and the cost of that is precisely
+    // zero: the caller has already been served the stale value, and the next
+    // `getOrSet` for this key will schedule a refresh if there is room by then.
+    // Evicting the oldest in-flight entry instead would abort a fetch a caller
+    // may be awaiting — `getOrSetAsync` hands out the very promise stored here —
+    // which trades a bounded background queue for a real caller-visible failure.
+    if (this._inflightPromises.size >= this.maxInflightRefreshes) {
+      this._refreshesSkipped += 1;
+      return;
+    }
     // The signal is the factory's first argument, as in `fetch` and
     // `lru-cache`, so a factory written for either works here unchanged.
     const controller = new AbortController();
@@ -2283,7 +2335,7 @@ export class PowerCache {
   /**
    * Return runtime statistics for the cache.
    * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
-   *   evictions:number, expirations:number, rejected:number, poolSize:number}}
+   *   evictions:number, expirations:number, rejected:number, refreshesSkipped:number, poolSize:number}}
    */
   stats() {
     return {
@@ -2296,6 +2348,12 @@ export class PowerCache {
       evictions: this._evictions,
       expirations: this._expirations,
       rejected: this._rejected,
+      // MEM-001. Non-zero means background refreshes are being *dropped* because
+      // `maxInflightRefreshes` was reached — the cache still serves, but it is
+      // not refreshing those keys. Worth alerting on separately from `size`: a
+      // cache whose stale values are never being refreshed looks healthy on every
+      // other counter.
+      refreshesSkipped: this._refreshesSkipped,
       poolSize: this._pool.length,
     };
   }
@@ -2805,6 +2863,7 @@ export class PowerMemoizer {
         'keyResolver',
         'maxCleanupPerTick',
         'maxEntries',
+        'maxInflightRefreshes',
         'maxPoolSize',
         'maxWeight',
         'now',

@@ -873,7 +873,7 @@ export class PowerCache {
     /**
      * Return runtime statistics for the cache.
      * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
-     *   evictions:number, expirations:number, rejected:number, poolSize:number}}
+     *   evictions:number, expirations:number, rejected:number, refreshesSkipped:number, poolSize:number}}
      */
     stats(): {
         size: number;
@@ -884,6 +884,7 @@ export class PowerCache {
         evictions: number;
         expirations: number;
         rejected: number;
+        refreshesSkipped: number;
         poolSize: number;
     };
     /**
@@ -921,6 +922,7 @@ export class PowerCache {
         evictions: number;
         expirations: number;
         rejected: number;
+        refreshesSkipped: number;
         poolSize: number;
     };
     /**
@@ -1281,6 +1283,7 @@ export class PowerTimedCache {
         evictions: number;
         expirations: number;
         rejected: number;
+        refreshesSkipped: number;
         poolSize: number;
     };
     /**
@@ -1318,6 +1321,7 @@ export class PowerTimedCache {
         evictions: number;
         expirations: number;
         rejected: number;
+        refreshesSkipped: number;
         poolSize: number;
     };
     startCleanup(intervalOrOptions?: undefined): void;

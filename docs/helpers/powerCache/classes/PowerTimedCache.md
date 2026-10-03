@@ -228,6 +228,10 @@ which is the property a consumer relies on.
 
 > **poolSize**: `number`
 
+##### refreshesSkipped
+
+> **refreshesSkipped**: `number`
+
 ##### rejected
 
 > **rejected**: `number`
@@ -370,6 +374,10 @@ Per-entry TTL in ms and
 ##### poolSize
 
 > **poolSize**: `number`
+
+##### refreshesSkipped
+
+> **refreshesSkipped**: `number`
 
 ##### rejected
 

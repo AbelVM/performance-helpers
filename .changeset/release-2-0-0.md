@@ -6311,3 +6311,59 @@ Two other guessed shapes were caught the same way: this `getStats()` returns
 counters and a `list` with no `status` key, and a frame can legitimately be sent
 by the hub's own timer even when the public `flush()` is made to reject — so
 neither test now claims either.
+
+## `PowerCache`: background refreshes are capped, and the cap is counted
+
+**Both inflight maps grew without any bound.** Every stale serve schedules a
+background refresh, and each one holds a promise and an `AbortController` until
+its factory settles — with nothing to stop a scan across distinct keys from
+retaining one of each per key. Measured with an injected clock (so no assertion
+races a real timer), 20,000 stale keys and a factory blocked on a gate:
+
+|                                              | before                     | after     |
+| -------------------------------------------- | -------------------------- | --------- |
+| `_inflightPromises` peak, **default** config | **20,000**                 | **1,024** |
+| `_inflightControllers` peak                  | **20,000**                 | **1,024** |
+| skips recorded                               | _(nothing was observable)_ | 18,976    |
+
+**The shipped default was the unbounded case**, which is why the fallback is a
+fixed figure rather than derived: `maxEntries` defaults to `Infinity`, so a cap
+taken from it derives no ceiling at all.
+
+| `maxInflightRefreshes`                            | meaning                                             |
+| ------------------------------------------------- | --------------------------------------------------- |
+| `maxEntries` (default, when finite)               | **at most one in-flight refresh per cacheable key** |
+| `1024` (default, when `maxEntries` is `Infinity`) | a fixed ceiling                                     |
+| `0`                                               | never refresh in the background                     |
+
+**Reaching the cap skips a refresh; it never evicts one.** Skipping costs
+nothing — the caller has already been served the stale value, and the next
+`getOrSet` for that key will schedule a refresh if there is room by then.
+Evicting the oldest inflight entry instead would abort a fetch that
+`getOrSetAsync` may already have handed to a caller, which trades a bounded
+background queue for a caller-visible failure. Every skip increments
+`stats().refreshesSkipped`, which is new and is the point: a cache can serve
+stale data _and_ not be refreshing it, and that combination looks healthy on
+every other counter the cache exports.
+
+**Two limitations found while fixing this, recorded rather than quietly
+addressed.**
+
+- **`PowerCache` does not validate its options.** A mistyped
+  `maxInflightRefresh` is accepted silently, so it keeps the default cap rather
+  than erroring. The `assertKnownOptions` call whose whitelist includes
+  `maxInflightRefreshes` belongs to **`PowerMemoizer`** — the cache has no option
+  check of its own. A test pins the limitation as it stands so a future
+  validation pass fails visibly; adding validation here would start throwing
+  where callers are not throwing today, which is a behaviour change that needs
+  its own decision.
+- **`maxEntries: 0` makes the derived cap 0**, so a cache configured to hold
+  nothing also never refreshes. That follows from the invariant rather than
+  contradicting it, and is why an explicit `maxInflightRefreshes` is available.
+
+**10 tests, 2 mutants, both caught.** Removing the cap fails 4; skipping without
+counting fails 2. One test asserts the property that makes skipping the right
+answer — that **every** caller still receives the stale value even when its
+refresh was dropped — because a fix that broke that would be trading a memory bug
+for an availability one. Another asserts refreshes still happen when there is
+room, so a cap cannot be quietly implemented as "stop refreshing".
