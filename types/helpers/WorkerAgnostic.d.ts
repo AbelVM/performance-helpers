@@ -45,6 +45,14 @@ declare class WorkerAgnostic {
     options: {
         [x: string]: any;
     };
+    /** @type {Array<[string, (...args: any[]) => void]>} Native listeners this instance attached,
+     * as `[type, handler]`, so `dispose()` can detach exactly what it wired. */
+    _wired: Array<[string, (...args: any[]) => void]>;
+    /** @type {Array<[string, any]>} For the property native model, the
+     * `[propertyName, previousValue]` pairs to restore on disposal. */
+    _wiredProperties: Array<[string, any]>;
+    /** @type {boolean} */
+    _disposed: boolean;
     _listeners: Map<any, any>;
     /** @type {import('./jsdoc-types.js').WorkerLike} */
     worker: import("./jsdoc-types.js").WorkerLike;
@@ -54,8 +62,6 @@ declare class WorkerAgnostic {
      */
     private _wireEvents;
     _nativeModel: string | undefined;
-    _wiredProperties: any[] | (string | ((...arg0: any[]) => void) | undefined)[][] | undefined;
-    _wired: any[] | [string, Function][] | undefined;
     /**
      * Release every resource this instance holds.
      *
@@ -76,7 +82,6 @@ declare class WorkerAgnostic {
      * @returns {void}
      */
     dispose(): void;
-    _disposed: boolean | undefined;
     /**
      * Dispatch a native event to all registered unified listeners, normalizing
      * the payload shape so consumers see a consistent `{ data }` for `message`

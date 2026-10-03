@@ -6742,3 +6742,26 @@ tried and abandoned**: matching quoted strings near each `assertKnownOptions` ca
 returned method names rather than option names for `PowerLogger`, which is a
 reminder that a regex over source is a guess about structure wearing a test's
 clothes.
+
+**Follow-up: the `WorkerAgnostic` disposal change added seven type errors, and they are fixed.**
+
+`npm run typecheck:ratchet` failed at 151 against a ceiling of 148 after the dispose
+work. Measured rather than assumed: reverting only my three source files to `HEAD`
+still read 151, because `HEAD` **contains** my commit — so that measurement was
+worthless. Reverting instead to the commit _before_ it read **144**, which located
+all seven as mine.
+
+All seven came from three places, and each is a place where hand-written JSDoc
+types were needed and absent:
+
+- three `(...args) => this._dispatch(type, ...args)` handlers stored for later
+  detachment, each `TS7019: Rest parameter 'args' implicitly has an 'any[]' type`;
+- `_wired` and `_wiredProperties` inferred as `any[]`, and a local `saved` inferred
+  as a union-of-tuples array;
+- restoring `onmessage`/`onerror`/`onmessageerror` on the property native model, which
+  indexes a `WorkerLike` that declares none of them — that one is a cast, and it is
+  a statement about the branch rather than an escape hatch, because the property
+  model is _defined_ by those three names existing.
+
+**The ratchet now reads 144 against a ceiling of 148** — below the baseline that
+preceded the work, not merely back at it. 54 tests green, lint 0 errors.

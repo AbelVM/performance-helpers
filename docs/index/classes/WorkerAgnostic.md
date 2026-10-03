@@ -39,6 +39,12 @@ Options forwarded to the native
 
 ## Properties
 
+### \_disposed
+
+> **\_disposed**: `boolean`
+
+***
+
 ### \_listeners
 
 > **\_listeners**: `Map`\<`any`, `any`\>
@@ -48,6 +54,18 @@ Options forwarded to the native
 ### \_nativeModel
 
 > **\_nativeModel**: `string` \| `undefined`
+
+***
+
+### \_wired
+
+> **\_wired**: \[`string`, (...`args`) => `void`\][]
+
+***
+
+### \_wiredProperties
+
+> **\_wiredProperties**: \[`string`, `any`\][]
 
 ***
 
@@ -69,6 +87,16 @@ Options forwarded to the native
 
 ## Methods
 
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+#### Returns
+
+`void`
+
+***
+
 ### addEventListener()
 
 > **addEventListener**(`type`, `handler`): `WorkerAgnostic`
@@ -86,6 +114,32 @@ Options forwarded to the native
 #### Returns
 
 `WorkerAgnostic`
+
+***
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds.
+
+This wrapper owns the underlying worker and the native listeners it attached
+to it, and both were previously unreleasable: the listeners were anonymous
+arrow functions passed straight to `addEventListener`, so no handle existed to
+remove them.
+
+**It does not terminate the worker.** `WorkerAgnostic` wraps a worker handed
+to it by a caller, and terminating it would be a decision this class has no
+mandate to make — `PowerPool` owns the lifecycle of its workers and drives
+termination itself. So this detaches everything it attached and drops its own
+listener registry; it leaves the worker alone. A caller that does own the
+worker should terminate it, which is what the owning helper is for.
+
+Idempotent, and safe on an instance whose `_wireEvents` bailed early.
+
+#### Returns
+
+`void`
 
 ***
 

@@ -365,6 +365,14 @@ class WorkerAgnostic {
     this.env = detectEnv();
     this.options = options && typeof options === 'object' ? options : {};
     // unified listener registry: event name -> Set<handler>
+    /** @type {Array<[string, (...args: any[]) => void]>} Native listeners this instance attached,
+     * as `[type, handler]`, so `dispose()` can detach exactly what it wired. */
+    this._wired = [];
+    /** @type {Array<[string, any]>} For the property native model, the
+     * `[propertyName, previousValue]` pairs to restore on disposal. */
+    this._wiredProperties = [];
+    /** @type {boolean} */
+    this._disposed = false;
     this._listeners = new Map();
     /** @type {import('./jsdoc-types.js').WorkerLike} */
     this.worker = resolveWorker(workerSource, this.options, this.env);
@@ -398,11 +406,12 @@ class WorkerAgnostic {
     // release path — `dispose()` could not have been written against it, because
     // there was no handle to remove. Recorded per type so `dispose()` can detach
     // exactly what it attached, on all three native models.
-    /** @type {Array<[string, Function]>} */
+    /** @type {Array<[string, (...args: any[]) => void]>} */
     const wired = [];
     if (typeof w.addEventListener === 'function') {
       this._nativeModel = 'listener';
       for (const type of SUPPORTED_EVENTS) {
+        /** @type {(...args: any[]) => void} */
         const handler = (...args) => this._dispatch(type, ...args);
         w.addEventListener(type, handler);
         wired.push([type, handler]);
@@ -410,6 +419,7 @@ class WorkerAgnostic {
     } else if (typeof w.on === 'function') {
       this._nativeModel = 'emitter';
       for (const type of SUPPORTED_EVENTS) {
+        /** @type {(...args: any[]) => void} */
         const handler = (...args) => this._dispatch(type, ...args);
         w.on(type, handler);
         wired.push([type, handler]);
@@ -418,10 +428,12 @@ class WorkerAgnostic {
       this._nativeModel = 'property';
       // The property model assigns rather than registers, so detaching means
       // putting the properties back the way they were found.
+      /** @type {Array<[string, any]>} */
       const saved = [];
       for (const type of SUPPORTED_EVENTS) {
         const prop =
           type === 'message' ? 'onmessage' : type === 'error' ? 'onerror' : 'onmessageerror';
+        /** @type {(...args: any[]) => void} */
         const handler = (...args) => this._dispatch(type, ...args);
         saved.push([prop, w[prop]]);
         w[prop] = handler;
@@ -470,8 +482,11 @@ class WorkerAgnostic {
         }
       }
       if (this._nativeModel === 'property') {
+        // The property native model is *defined* by these three names existing, so
+        // the cast is a statement about the branch rather than an escape hatch.
+        const target = /** @type {Record<string, any>} */ (/** @type {any} */ (w));
         for (const [prop, previous] of this._wiredProperties ?? []) {
-          if (w[prop] !== undefined || previous !== undefined) w[prop] = previous;
+          if (target[prop] !== undefined || previous !== undefined) target[prop] = previous;
         }
       }
     }
