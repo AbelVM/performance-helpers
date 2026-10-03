@@ -7710,3 +7710,38 @@ _Not done, and recorded rather than assumed:_ the row also proposed folding `emi
 arms into `_iterBucketListeners` to delete ~40 duplicated lines. That is a refactor
 rather than part of the defect, and landing it in the same change as a behaviour fix would
 have made the two indistinguishable in review. The duplication is still there.
+
+## Characterisation tests for the two liveness implementations (RT-016, step one)
+
+**No behaviour changes.** This entry exists because the repository's rule requires a
+changeset for any non-docs commit, and it would be wrong to invent a user-visible change
+to satisfy that. What it does is pin what `PowerWebSocketClient` and `PowerSocketAdapter`
+each do _today_ on the pong path, so the extraction into a shared `livenessStateMachine`
+can be checked against a record rather than against memory.
+
+**What the record shows, and it is sharper than the row claimed.** The row says the
+adapter holds "the correct" heartbeat and the client "the broken" one. RT-003 fixed the
+client, so the client is now the **superset** — and the two differ by four lines:
+
+|                           | client `_handlePong` | adapter `_handlePong` |
+| ------------------------- | -------------------- | --------------------- |
+| clears the probe deadline | yes                  | yes                   |
+| reads `_pingSentAt`       | yes                  | **no**                |
+| resets `_pingSentAt`      | yes                  | **no**                |
+| rejects a backwards clock | yes                  | **no**                |
+| `rtt.record(...)`         | yes                  | **no `rtt` at all**   |
+| counts `heartbeats`       | yes                  | **no**                |
+
+So the adapter **writes `_pingSentAt` and never reads it** — the value is still sitting
+there after the pong. That is the gap the extraction closes, and it is four lines rather
+than a capability difference.
+
+**Two properties both sides share, pinned on both so the extraction cannot lose them:**
+a pong clears the **probe deadline** and not the heartbeat — RT-003 measured the client at
+1 ping for the life of the socket against 28 in 150 ms when that was wrong — and a
+transport with no `ping()` reports liveness as **unmeasured rather than as 0 ms**, because
+a browser deliberately does not expose `ping()`.
+
+**A case asserts the gap is still a gap today** (`stats().rtt` is `undefined`, `heartbeats`
+is 0), so that closing it during the extraction is a _visible_ change rather than a silent
+one — which is the whole reason to write a characterisation test before a refactor.
