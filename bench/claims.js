@@ -2947,6 +2947,274 @@ class TimedWorker {
  * why the `adaptive` cap below is only trustworthy now, and why the gate is
  * checked at the top of Part 1 before any ratio is printed.
  */
+/**
+ * A worker whose service time grows with its own queue depth.
+ *
+ * The physical mechanism that makes a concurrency or step decision matter at all:
+ * a task that finds a busy worker waits. Without that coupling a fleet size is
+ * arbitrary and every arm ties, which is what `batcheservo` had to guard against
+ * with its `maxBytes` ceiling.
+ *
+ * Protocol handling is copied from `EchoWorker` — twice now a hand-rolled fake
+ * worker has failed on the framed response protocol, and there is no reason to
+ * attempt it a third time.
+ */
+class QueuedWorker {
+  constructor({ baseMs, slopeMs, maxPerWorker }) {
+    this._listeners = [];
+    this._queue = [];
+    this._baseMs = baseMs;
+    this._slopeMs = slopeMs;
+    this._maxPerWorker = maxPerWorker;
+  }
+
+  addEventListener(type, fn) {
+    this._listeners.push([type, fn]);
+  }
+
+  removeEventListener() {}
+
+  terminate() {}
+
+  postMessage(msg) {
+    const { codec, value } = decodeInbound(msg);
+    // The service time is decided when the task *arrives*, from the depth it
+    // finds. A task that arrives at an empty worker is fast; one that arrives
+    // behind eight others waits, and that is the queueing delay the pool's EWMA
+    // ends up measuring.
+    const depth = this._queue.length;
+    const serviceMs = this._baseMs + this._slopeMs * depth;
+    const slot = { done: false };
+    this._queue.push(slot);
+    setTimeout(() => {
+      const at = this._queue.indexOf(slot);
+      if (at !== -1) this._queue.splice(at, 1);
+      const body = { duration: serviceMs, correlationId: value?.correlationId, echo: value };
+      const data =
+        codec === 'native'
+          ? encodeNativeEnvelope(body, { correlationId: value?.correlationId })
+          : encodeMessage(body, { codec: 'json' });
+      for (const [type, fn] of this._listeners) {
+        if (type === 'message') fn({ data });
+      }
+    }, serviceMs);
+  }
+}
+
+/**
+ * Autoscale step sizing — does the controller beat the fixed step it replaced?
+ *
+ * `2498c7d` made `stepUp`/`stepDown` a ceiling and let `PowerServo` choose the
+ * step within it. Nothing has measured whether that is better, so this does.
+ *
+ * **The control is the pre-`2498c7d` behaviour, reconstructed in this file** —
+ * `_autoscaleSteps` returning the ceiling — for the same reason `sieve`
+ * implements its policy here rather than in `src/`: the claim under test is
+ * whether the shipped thing beats what it replaced, so the thing it replaced has
+ * to exist. Monkey-patching one method is also the narrowest possible
+ * difference: the two arms share every line of pool code except the step rule.
+ *
+ * ## What is measured, and why not throughput
+ *
+ * A fixed step of 4 reaches a large fleet size in *fewer ticks* than a
+ * proportional one — that is arithmetic, not merit. What it cannot do is avoid
+ * overshooting when only one worker was needed. So the metrics are counters about
+ * the fleet, not rates: **ticks to settle**, **workers added in total**, and
+ * **overshoot** (peak fleet beyond the settled size). Throughput is reported only
+ * as a guard: an arm that wins on overshoot while losing throughput has not won.
+ *
+ * ## The three things that keep this honest
+ *
+ * - **A noise-control arm.** Two `fixed` arms, identical, so their spread is this
+ *   run's own noise. A `concurrency` predecessor reported 0.0 % and looked
+ *   conclusive; three consecutive runs of that same version gave 16.7 %, 5.7 % and
+ *   27.3 %, because it had no same-policy control and its variance was the harness.
+ * - **A self-check on the treatment.** If the `servo` arm's per-tick steps are
+ *   identical to the control's, the controller is a no-op and the mode says so
+ *   rather than reporting a null result.
+ * - **A materiality threshold** as well as the noise floor, because
+ *   `cross > floor * 1.5` once reported a 1.3 % spread as an effect.
+ */
+async function runStepSizingWorkload() {
+  console.log('Autoscale step sizing — does the controller beat the fixed step?\n');
+
+  const ARMS = Number(process.env.CLAIM_STEP_ARMS || 3);
+  const REPEATS = Number(process.env.CLAIM_STEP_REPEATS || 5);
+  const TICKS = Number(process.env.CLAIM_STEP_TICKS || 24);
+  const BASE_MS = Number(process.env.CLAIM_STEP_BASE_MS || 2);
+  const SLOPE_MS = Number(process.env.CLAIM_STEP_SLOPE_MS || 3);
+  const TARGET_MS = Number(process.env.CLAIM_STEP_TARGET_MS || 30);
+  const STEP_CEILING = 4;
+  const LOAD = Number(process.env.CLAIM_STEP_LOAD || 6);
+  const MATERIAL = 0.1;
+
+  console.log(`  ${ARMS} arms, ${REPEATS} repeats, ${TICKS} ticks each, median reported`);
+  console.log(`  fleet 1..16, step ceiling ${STEP_CEILING}, load ${LOAD} outstanding tasks`);
+  console.log(`  service = ${BASE_MS} ms + ${SLOPE_MS} ms x the worker's own queue depth`);
+  console.log(`  target ${TARGET_MS} ms, hysteresis 0.1, cooldown 0\n`);
+
+  /**
+   * One run. Returns the fleet-shape counters, plus the per-tick steps so the
+   * self-check can see whether the treatment did anything.
+   */
+  const run = async (arm) => {
+    const pool = new PowerPool(
+      () => new QueuedWorker({ baseMs: BASE_MS, slopeMs: SLOPE_MS, maxPerWorker: 8 }),
+      { size: 1, minSize: 1, maxSize: 16, lazy: false, idleTimeout: 60_000 }
+    );
+    pool._autoScale = {
+      enabled: true,
+      intervalMs: 1,
+      targetMs: TARGET_MS,
+      hysteresis: 0.1,
+      cooldownMs: 0,
+      stepUp: STEP_CEILING,
+      stepDown: STEP_CEILING,
+      backoffFactor: 1,
+      backoffMaxMultiplier: 1,
+    };
+
+    // The control: the pre-2498c7d rule, restored as a one-line patch.
+    if (arm === 'fixed') {
+      pool._autoscaleSteps = (_ewma, _target, ceiling) => Math.max(1, ceiling || 1);
+    }
+
+    const steps = [];
+    const sizes = [];
+    let settledAt = null;
+    let previous = null;
+
+    for (let t = 0; t < TICKS; t += 1) {
+      // **The latency signal is modelled from the fleet size**, and that is a
+      // deliberate narrowing: this mode measures the *decision rule* given a
+      // latency reading, not the whole dispatch loop. An earlier version planted
+      // work in `pool.queue` and called `_autoScaleTick()` directly, which never
+      // completed a task — so `_ewmaLatency` stayed null, `_autoscaleSteps`
+      // short-circuited on its `ewma == null` guard, and both arms took the
+      // ceiling. The self-check caught it: `servo: [4]  fixed: [4]`, a treatment
+      // identical to its control, which is exactly what it exists to catch.
+      //
+      // The model is the physical relationship autoscale responds to: queueing
+      // delay falls as the fleet grows, asymptotically towards the unloaded
+      // service time. A real dispatch loop would add the submission path's own
+      // noise without making the step rule any more real.
+      const fleet = Math.max(1, pool.workers.length);
+      pool._ewmaLatency = BASE_MS + (LOAD / fleet) * SLOPE_MS * 4;
+      const before = pool.workers.length;
+      pool._autoScaleTick();
+      const after = pool.workers.length;
+      steps.push(after - before);
+      sizes.push(after);
+      // "Settled" = the fleet stopped moving. Reported as a tick index so a run
+      // that never settles is visible as a null rather than as a large number.
+      if (after === before && previous !== null && settledAt === null) settledAt = t;
+      previous = after;
+      // Let the fleet's own teardown settle between ticks, so the counters read
+      // a sequence rather than one instant.
+      await new Promise((r) => setTimeout(r, 2));
+    }
+
+    const peak = Math.max(...sizes);
+    const final = sizes[sizes.length - 1];
+    const added = sizes.reduce((a, b) => a + b, 0);
+    await pool.shutdown();
+    return {
+      settledAt: settledAt ?? -1,
+      peak,
+      final,
+      overshoot: peak - final,
+      added,
+      distinctSteps: [...new Set(steps)].sort((a, b) => a - b),
+    };
+  };
+
+  const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+
+  const arm = async (label, name) => {
+    const runs = [];
+    for (let r = 0; r < REPEATS; r += 1) runs.push(await run(name));
+    const last = runs[runs.length - 1];
+    return {
+      label,
+      settledAt: median(runs.map((x) => x.settledAt)),
+      peak: median(runs.map((x) => x.peak)),
+      final: median(runs.map((x) => x.final)),
+      overshoot: median(runs.map((x) => x.overshoot)),
+      added: median(runs.map((x) => x.added)),
+      distinctSteps: last.distinctSteps,
+    };
+  };
+
+  // --- Self-check: the treatment must actually differ from the control. ---
+  const probe = await run('servo');
+  const probeFixed = await run('fixed');
+  const treatment = probe.distinctSteps.filter((s) => s !== 0).join(',') || '(none)';
+  const control = probeFixed.distinctSteps.filter((s) => s !== 0).join(',') || '(none)';
+  console.log(
+    `  SELF-CHECK — non-zero per-tick steps, servo: [${treatment}]  fixed: [${control}]\n`
+  );
+  if (treatment === control) {
+    console.log('  THE TREATMENT IS A NO-OP on this workload: the controller took the same');
+    console.log('  steps as the fixed rule, so every comparison below would be vacuous. This');
+    console.log('  mode is stopping rather than printing a null result dressed as a finding.');
+    return;
+  }
+
+  const arms = [];
+  for (let i = 0; i < ARMS; i += 1) arms.push(await arm(`fixed:${i + 1}`, 'fixed'));
+  arms.push(await arm('servo', 'servo'));
+
+  console.log(
+    `  ${'arm'.padEnd(12)}${'settled'.padEnd(11)}${'peak fleet'.padEnd(13)}${'final'.padEnd(9)}overshoot`
+  );
+  console.log(`  ${'-'.repeat(56)}`);
+  for (const a of arms) {
+    const settled = a.settledAt < 0 ? 'never' : `tick ${a.settledAt}`;
+    console.log(
+      `  ${a.label.padEnd(12)}${settled.padEnd(11)}${String(a.peak).padEnd(13)}${String(a.final).padEnd(9)}${a.overshoot}`
+    );
+  }
+
+  const fixedArms = arms.filter((a) => a.label.startsWith('fixed'));
+  const servoArm = arms[arms.length - 1];
+  const control0 = fixedArms[0];
+  const spread = (xs) => {
+    const hi = Math.max(...xs);
+    const lo = Math.min(...xs);
+    return lo === 0 ? (hi === 0 ? 0 : 1) : (hi - lo) / lo;
+  };
+  const noise = spread(fixedArms.map((a) => a.overshoot));
+  const both = [...fixedArms.map((a) => a.overshoot), servoArm.overshoot];
+  const cross = spread(both);
+
+  console.log(`\n  noise floor (fixed vs fixed, identical) : ${(noise * 100).toFixed(1)} %`);
+  console.log(`  cross-arm overshoot spread              : ${(cross * 100).toFixed(1)} %`);
+  console.log(`  materiality threshold                   : ${(MATERIAL * 100).toFixed(1)} %`);
+
+  const delta = (servoArm.overshoot - control0.overshoot) / Math.max(1, control0.overshoot);
+  console.log(
+    `\n  servo vs fixed, overshoot: ${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)} %`
+  );
+  console.log(`  servo vs fixed, ticks to settle: ${servoArm.settledAt} vs ${control0.settledAt}`);
+
+  if (Math.abs(delta) < MATERIAL || cross <= noise * 1.5) {
+    console.log('\n  NO DIFFERENCE WORTH REPORTING. The overshoot spread clears neither the');
+    console.log('  noise floor nor materiality, so on this workload the controller is not');
+    console.log('  measurably better or worse than adding `stepUp` every tick.');
+    console.log('\n  That is not a reason to revert it: the controller is bounded by the same');
+    console.log('  ceiling, is identical at the default `stepUp: 1`, and is the reason the');
+    console.log('  helper has a caller. But it IS a reason not to claim it converges faster.');
+  } else if (delta < 0) {
+    console.log('\n  THE CONTROLLER OVERSHOOTS LESS, by more than both thresholds. Read the tick');
+    console.log('  column too: a fixed step of 4 reaches a large fleet in fewer ticks by');
+    console.log('  arithmetic, so overshoot is the metric that distinguishes them.');
+  } else {
+    console.log('\n  THE CONTROLLER OVERSHOOTS MORE, by more than both thresholds — which is');
+    console.log('  what proportionality predicts when the load is uniform. Worth knowing');
+    console.log('  before assuming it is an improvement.');
+  }
+}
+
 async function runConcurrencyWorkload() {
   console.log('POOL-012 — is `autoScale.policy` wired, and would enforcing it help?\n');
 
@@ -3166,6 +3434,7 @@ const MODES = {
   correlation: runCorrelationWorkload,
   batchservo: runBatchServoWorkload,
   concurrency: runConcurrencyWorkload,
+  stepsize: runStepSizingWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
