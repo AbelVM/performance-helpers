@@ -136,6 +136,27 @@ export class PowerRateLimit {
      * cannot price is how a limiter is bypassed, whereas returning nothing merely
      * over-charges the caller.
      *
+     * **What a leg's `release` actually receives, which is a contract and not an
+     * implementation detail.** There are two undo paths in this class and they hand
+     * a leg different objects, deliberately:
+     *
+     * - **This one** passes the caller's `tokenOrN` through unchanged, so a leg
+     *   that implements `reserve` receives the **composer's** token — `{ n }` — not
+     *   the object the leg itself minted. The token is public API and two tests in
+     *   `powerRateLimit.extra.test.js` pin that shape, so it is not changing.
+     * - **`_undoCommit`** — the rollback taken when a later leg fails — passes the
+     *   **leg's own** token, because it has it in hand and the leg is the only thing
+     *   that could have minted it.
+     *
+     * A leg whose `release` only reads `.n` (as `PowerThrottle`'s does) cannot tell
+     * the difference. **A leg that looks its token up in a `Map` it minted it into
+     * can, and will miss.** So the requirement on a limiter used here is that its
+     * `release` accepts either shape — a `{ n }`-bearing object *or* a plain count —
+     * which is exactly what `PowerThrottle.release` already does. Where a leg's
+     * `release` throws on an unrecognised token, the fallback below reaches
+     * `rollback`/`addTokens` with the count instead, so the credit is not simply
+     * lost.
+     *
      * @param {object|number} tokenOrN
      */
     release(tokenOrN: object | number): void;

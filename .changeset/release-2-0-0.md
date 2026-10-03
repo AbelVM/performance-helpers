@@ -7241,3 +7241,43 @@ one command each and neither had been. The file now says what the script's own
 docblock has said all along: `test:types` is at zero and runs directly in `verify`,
 and only the internal `checkJs` project is on the ratchet, because gating a
 few-hundred-error project on zero would mean the gate can never pass.
+
+## `PowerRateLimit`: the two undo paths are documented as the contract they are
+
+**RES-035 asked for two things, and both turned out to be settled already — in opposite
+directions.** Checking the code rather than the row's line numbers was the whole job
+here; the row's `:246` predates a fix and its second half describes a deliberate shape.
+
+**`reserve()` already forwards `options`.** `:424` reads
+`this.tryConsume(want, { ...options, atomic: true })`, with a comment saying the key is
+forwarded rather than re-derived so a reservation and a consumption cannot land on
+different budgets. A caller-supplied `now` reaches every leg, which is what `PERF-007`
+exists for. The row's claim that it is discarded is stale.
+
+**The two token shapes are deliberately different, and two tests pin them.**
+`release(tokenOrN)` passes the caller's token straight through, so a leg implementing
+`reserve` receives the **composer's** `{ n }` — not the object the leg minted.
+`_undoCommit`, the rollback taken when a later leg fails, passes the **leg's own**
+token, because it has it in hand and the leg is the only thing that could have minted
+it. Collapsing them is not a fix: the composer's token is public API and callers compare
+it, so `powerRateLimit.extra.test.js` asserts `toHaveBeenCalledWith(token)`.
+
+**What was missing is the requirement this puts on a limiter**, and nothing stated it.
+A leg whose `release` only reads `.n` — as `PowerThrottle`'s does — cannot tell the two
+apart. A third-party limiter that looks its token up in a `Map` it minted it into **can,
+and misses**: it is handed a foreign object, throws, and the credit is lost unless the
+composer falls through to `rollback`/`addTokens` with the count. That requirement is now
+written on `release()`.
+
+**`test/powerRateLimit.undoPaths.test.js` states the disagreement as one boolean, from
+the leg's side.** The existing tests pin the composer's behaviour; they say nothing about
+whether a leg can cope. The new fixture is the strictest reasonable leg — it accepts only
+tokens it minted — and asserts `presented` is `[false]` on the public path (foreign
+token, credit recovered via the count fallback) and `[true]` on the rollback path (its own
+token, no fallback needed). That pair _is_ the contract. A fourth test composes a real
+`PowerThrottle` and asserts its tokens come all the way back, so a future change that
+hands either path something the throttle cannot read fails on the real helper.
+
+**Mutation-checked:** changing `release()` to hand each leg the count instead — the
+"unification" the row asked for — fails 2 of the existing tests, which is the evidence
+that the current shape is deliberate rather than accidental.
