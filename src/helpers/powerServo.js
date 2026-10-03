@@ -43,10 +43,21 @@
  * step**, and the integral is clamped so it can only ever push the output
  * *within* those bounds. There is no gain configuration that escapes, because
  * the clamp does not consult the gains for its bounds — only for which part of
- * the window the integral may occupy. Measured across a sweep of `kp` from 0.2 to
- * 6 and sample intervals from 100 ms to 1 ms against a first-order lag with
- * transport delay: the output converged every time and the integral stayed
- * bounded.
+ * the window the integral may occupy.
+ *
+ * What that sweep actually establishes, stated precisely because the difference
+ * matters and the looser version of it was wrong once: across `kp` 0.2→6, `ki`
+ * and `kd` on and off, and sample intervals 100 ms→1 ms against a 200 ms lag with
+ * 300 ms of transport delay, **the output stayed inside `[min, max]` and the
+ * integral stayed bounded in all 90 combinations. The loop did not converge in
+ * all of them.** It converges for `kp` up to 1.5 at every interval, and outside
+ * that band it limit-cycles — `kp: 3` at `dt: 100`, and `kp: 6` at `dt: 10` and
+ * `dt: 1`, swing the full 0→100 every two seconds for as long as they are run
+ * (measured over 20 s). That is not a defect in the arithmetic; 300 ms of pure
+ * dead time caps the loop gain near `tau / delay`, so those are unstable tunings
+ * on that plant and any PI would do it. The clamp is what keeps an unstable
+ * tuning *bounded* instead of divergent, and `saturated` is `true` throughout.
+ * A caller on a delayed plant gets a loud loop rather than a quiet wrong one.
  *
  * What bounds the *rate* of change is the same arithmetic: the output can move
  * by at most `|kp·Δmeasured| + |ki·error|·dt + |kd·Δmeasured|/dt` in one step,
@@ -64,6 +75,16 @@
  * thrash to fix, and an option accepted on a measurement of the wrong quantity is
  * the failure `AGENTS.md` calls decoration. Recorded rather than deleted so the
  * next proposal does not re-derive it from the same bad metric.
+ *
+ * **These figures only hold for the tail, and measuring the whole run gives the
+ * opposite answer.** Re-measured at `kp: 0.6, ki: 0.02` on the plant above, the
+ * largest single move over the run including the setpoint step is 60 — because the
+ * first sample answers a 100-unit error with `kp × 100`, which is the correct
+ * response and not chatter — and `maxDelta: 2` *lowers* total variation there
+ * (149 → 100) by capping exactly that step. Excluding the transient reproduces the
+ * recorded direction: largest move 0.161 and variation 0.4 without the limit
+ * against 8.0 with it. Anyone re-measuring this must state which window they
+ * counted, because the two windows disagree about whether the limit helps.
  *
  * The genuinely unrecoverable input was a non-finite number reaching the loop,
  * and every route to one is closed: `measured` and a `feedforward` return throw,

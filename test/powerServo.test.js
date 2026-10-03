@@ -537,6 +537,56 @@ describe('PowerServo', () => {
         expect(Math.abs(0.5 * servo.integral)).toBeLessThanOrEqual(100 + 1e-9);
       }
     });
+
+    it('keeps an unstable tuning bounded rather than divergent', () => {
+      // The sweep above establishes bounds in all 90 combinations. It does
+      // **not** establish convergence in all 90, and an earlier version of the
+      // claim said it did: at `kp: 3` with `dt: 100` this plant limit-cycles the
+      // full 0→100 every two seconds, indefinitely. Measured over 20 s, at
+      // `kp: 6` and `dt: 10` as well.
+      //
+      // That is the plant's transport delay and not the arithmetic — 300 ms of
+      // dead time caps the loop gain near `tau / delay`, so any PI oscillates
+      // there. What the clamp buys is that the oscillation stays *bounded*, and
+      // that `saturated` reports it. Without this test the property is only ever
+      // stated in prose, and prose is what was wrong the first time.
+      for (const [kp, ki, dt] of [
+        [3, 0.02, 100],
+        [6, 0.02, 10],
+        [6, 0.02, 1],
+      ]) {
+        const plant = makePlant(1, 200, 300, dt);
+        const servo = new PowerServo({ setpoint: 100, kp, ki, kd: 0, min: 0, max: 100 });
+        let saturatedTicks = 0;
+        for (let i = 0; i < Math.ceil(20000 / dt); i++) {
+          const u = servo.step(plant.measure(), dt);
+          expect(Number.isFinite(u), `kp:${kp} dt:${dt} step:${i}`).toBe(true);
+          expect(u).toBeGreaterThanOrEqual(0);
+          expect(u).toBeLessThanOrEqual(100);
+          if (servo.saturated) saturatedTicks += 1;
+          plant.apply(u);
+        }
+        // Bounded, and loud: a limit-cycling loop spends most of its time against
+        // a bound, which is what makes this a diagnosable tuning problem rather
+        // than a silent one. Not asserted as an exact fraction — the count is a
+        // shape, not a constant, and this harness cannot pin timing.
+        expect(saturatedTicks, `kp:${kp} dt:${dt}`).toBeGreaterThan(0);
+        expect(Number.isFinite(servo.integral)).toBe(true);
+        // The window the integral's contribution must lie in, which is the
+        // property that actually delivers the bounded output:
+        // `u = kp·e + ki·I`, so `ki·I` may occupy `[min − kp·e, max − kp·e]`.
+        // It is *not* simply `[min, max]` — a large negative error makes `kp·e`
+        // very negative and the integral has to supply a correspondingly large
+        // positive contribution to pull the output back inside the bounds. That
+        // offset is the anti-windup window, and it is why an assertion of
+        // `|ki·I| <= max` passes on a converging loop and fails here.
+        const contribution = ki * servo.integral;
+        const lo = 0 - kp * servo.error;
+        const hi = 100 - kp * servo.error;
+        expect(contribution, `kp:${kp} dt:${dt}`).toBeGreaterThanOrEqual(lo - 1e-9);
+        expect(contribution, `kp:${kp} dt:${dt}`).toBeLessThanOrEqual(hi + 1e-9);
+      }
+    });
   });
 
   describe('every route to an unrecoverable state is refused', () => {
