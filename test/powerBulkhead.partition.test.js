@@ -266,3 +266,31 @@ describe('pending and drain stay honest under per-partition accounting', () => {
     expect(drainedEarly).toBe(false);
   });
 });
+
+describe('RES-007: a partitioner answer is turned into a real bucket index', () => {
+  // `Math.abs(Number(index) || 0) % partitions` returned a *fractional* index for
+  // a fractional answer: `2.5 % 4` is `2.5`, `this._buckets[2.5]` is `undefined`,
+  // and `run()` then threw a **synchronous** TypeError reading `.gate` of
+  // undefined — from a method documented `@returns {Promise<any>}`, so a caller's
+  // `.catch()` never saw it. Asserted as a resolution rather than as a throw
+  // because the throw was the bug: what the contract promises is a promise.
+  for (const [answer, expected] of [
+    [2.5, 2],
+    [-3.7, 3],
+    [Infinity, 0],
+    [NaN, 0],
+    [undefined, 0],
+    ['nonsense', 0],
+  ]) {
+    it(`routes \`${String(answer)}\` to partition ${expected}`, async () => {
+      const bulkhead = new PowerBulkhead({
+        maxConcurrency: 4,
+        partitions: 4,
+        partitioner: () => answer,
+      });
+      expect(bulkhead._choosePartition('k')).toBe(expected);
+      await expect(bulkhead.run(async () => 'work', { partitionKey: 'k' })).resolves.toBe('work');
+      bulkhead.dispose?.();
+    });
+  }
+});

@@ -424,7 +424,22 @@ export class PowerBulkhead {
   _choosePartition(key) {
     if (this._partitioner) {
       const index = this._partitioner(key);
-      return Math.abs(Number(index) || 0) % this._partitions;
+      // RES-007. A `partitioner` returning a fraction produced a fractional index:
+      // `2.5 % 4` is `2.5`, `this._buckets[2.5]` is `undefined`, and `run()` then
+      // threw a **synchronous** `TypeError` reading `.gate` of undefined — from a
+      // method documented `@returns {Promise<any>}`, so a caller's `.catch()` never
+      // saw it. Two independent probes reported this; the row's own probe did not
+      // reproduce it and was wrong, which is why it was worth running again rather
+      // than closing as unreproducible.
+      //
+      // Truncating is what the documented contract already promised — "an index in
+      // `[0, partitions)`" — and it is the only reading under which a fractional
+      // answer from a caller's partitioner means anything. Non-finite results
+      // (`NaN`, `Infinity` — `Infinity % 4` is `NaN`, so the same crash) fall back
+      // to partition 0, which is where `|| 0` was already reaching.
+      const raw = Number(index);
+      if (!Number.isFinite(raw)) return 0;
+      return Math.abs(Math.trunc(raw)) % this._partitions;
     }
     if (key != null) {
       return this._hashKey(String(key)) % this._partitions;

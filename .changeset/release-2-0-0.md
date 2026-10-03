@@ -5041,6 +5041,31 @@ Mutation-checked: with `call` left un-neutralised, the new test fails on its cou
 assertion rather than on the error, which is the assertion that matters — a thrown
 error alone would also be satisfied by a `call()` that ran `fn` and _then_ failed.
 
+### A `partitioner` answer is truncated into a real bucket index (patch)
+
+`Math.abs(Number(index) || 0) % partitions` returned a **fractional** index when a
+custom `partitioner` returned one: `2.5 % 4` is `2.5`, so `this._buckets[2.5]` was
+`undefined` and `run()` threw a **synchronous** `TypeError` reading `.gate` of
+undefined — from a method documented `@returns {Promise<any>}`, so a caller’s
+`.catch()` never saw it.
+
+```js
+const bulkhead = new PowerBulkhead({ partitioner: () => 2.5 });
+bulkhead.run(fn).catch(() => {}); // before: threw synchronously, never rejected
+```
+
+`Math.trunc` is what the documented contract already promised — *“an index in
+`[0, partitions)`” — and it is the only reading under which a fractional answer means
+anything. Non-finite answers (`NaN`, `Infinity`, since `Infinity % 4` is `NaN`) reach
+the identical crash and now fall back to partition 0, which is where `|| 0` was
+already reaching. Negative fractions keep the documented non-negative result:
+`-3.7` routes to partition 3.
+
+This row was worth re-running rather than closing as unreproducible: two independent
+probes reported the synchronous throw and the row’s own probe did not, and the probes
+disagreed because of the **call shape** — the key is `options.partitionKey`, not the first
+argument. Mutation-checked: restoring the old expression fails the new tests.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
