@@ -4876,6 +4876,44 @@ controllers assume. Sizing an already-bounded action is more forgiving than
 gating admission with that signal, but the gap is inherited rather than fixed. No
 benchmark yet compares this against the fixed step it replaces.
 
+### `PowerChunker` returns its pool before the iterable is exhausted (patch)
+
+Streaming mode — anything that is not an array — drained the iterable **inside the
+constructor**. `new PowerChunker(function* forever(){...})` therefore never
+returned, so there was no pool to `terminate()`, and the only way out was the
+process being killed. A lazy generator large enough to matter paid the same cost
+with no visible symptom, because the constructor did not return until every item
+had been pulled.
+
+The iterable is now pulled in bounded windows, one per macrotask, and the
+constructor returns as soon as the pool exists. Measured: the infinite-generator
+constructor returns in **~2 ms** where it previously never returned.
+
+**Two things did not change, and both were checked rather than assumed.**
+
+_It was never a memory problem._ The row this fixes described streaming mode as
+"fully materialising the iterable", and that is false: a lazy generator of 400 000
+objects left the heap at 5.2 MB during construction — the pre-construction
+baseline — and memory is bounded by the pool's queue, not by the iterable, which
+is what `powerChunking.js` has always claimed. So this is a liveness fix and is
+described as one. The obvious heap-delta test was attempted twice and discarded:
+the pool's queue retains the chunks either way, so the ~40 MB it holds swamps the
+difference, and in separate processes the comparison inverted about one run in four.
+
+_Termination is what stops the pump, and that is deliberate._ Pumping on a
+macrotask alone would have traded a constructor that hangs for a pump that runs
+for ever — an unbounded iterable keeps an endless `setImmediate` chain alive. The
+pump's lifetime is therefore the pool's: `terminate()` stops it, which is exactly
+what a caller could not do before, because the pool never arrived. No new public
+API and no cancellation handle were added for it.
+
+`await pool.drain()` still means what its callers take it to mean. `PowerPool`'s
+`drain()` resolves immediately on an empty queue, so a pool handed back with its
+pump still to run would have resolved **before the first chunk was read** — a
+silent early return that looks like success. `drain()` on a streamed pool waits for
+the iterable to finish first; an already-aborted `signal` still rejects at once
+rather than queueing behind a pump that may never end.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records
@@ -6943,3 +6981,70 @@ started-handle behaviour BC-004 records for `BroadcastChannel` itself.
 `AGENTS.md` and the `claims.js` usage block now list the mode. `MODES` holds
 **17**, verified against the table rather than against the prose lists, which
 AGENTS.md warns drift.
+
+## The timing gate stopped discarding evidence, and stopped letting a busy machine acquit a regression
+
+**Two defects in `bench/baseline.js`, both of which made a change invisible rather than
+making a gate wrong.** This gate has already failed once for passing a deliberate 64 %
+regression in `PowerCache.get`; these are the same species of problem, in the
+reporting rather than the arithmetic.
+
+**1. A site that got noisier was dropped without a word.** Condition 1 excludes a
+site whose band widened past `spreadTolerance` from the comparison — correctly, since
+a band that wide cannot support a verdict — and it did so with a bare `continue`.
+The report never mentioned it.
+
+**That hides the class of regression most likely to be introduced by a change to a
+performance library.** An added allocation, a `Map` that grows, a megamorphic call
+site: none of these makes a site reliably slower, they make its band _wider_ first.
+A change that got slower _and_ more variable landed in the excluded list rather than
+the regression list, so the run said "the machine moved" or said nothing at all.
+
+Noisy sites are now collected and reported, with both spreads and the reason. They
+are still excluded from the verdict — reporting is not judging — and `checked` still
+counts them, because "compared, and the answer was unjudgeable" is not the same as
+"not looked at".
+
+**2. A machine shift overwrote `fail` with `inconclusive`.** The status was assigned
+in two unconditional steps, and the second ran last:
+
+```js
+if (regressions.length) status = 'fail';
+if (shifted || noiseWorse) status = 'inconclusive'; // overwrites it
+```
+
+So a run with sites past their own recorded thresholds **and** a drifted machine
+reported `INCONCLUSIVE`, which the CLI prints as "Not a failure" and exits 0 on. The
+gate could be silenced by making the machine busier — the cheapest way to hide a
+change, and the easiest to do by accident.
+
+**The fix is not "fail wins", and a pinned test is why.** The row asked for exactly
+that. Implemented literally, it broke
+`is inconclusive when the machine level shifted` — six sites at +50 %, all past their
+5 % thresholds — and that test encodes a _measured_ observation: a clean tree once
+reported six unrelated helpers 44–48 % slower than a baseline recorded minutes
+earlier. A blanket "fail wins" turns it into a permanently red gate, which is the
+coin flip this design exists to avoid arriving from the other direction.
+
+**What separates the two is not the presence of a drift but whether a site moved
+further than the machine did.** A site counts as a regression only when its delta
+exceeds the run's median shift. Six sites at +50 % is the machine, six times over. One
+site at +300 % in a run whose median moved +40 % is not, and no thermal drift accounts
+for it — so the verdict is `FAIL`, with the five explained sites reported as explained
+(`5 of 6 site(s) … attributed to the machine`). Nothing is filtered silently, which is
+the same rule as the noisy-site half.
+
+**The ranking of the lines was broken too, and a new test found it while checking
+something else.** `deltaOfReason` read the text _after_ `', threshold'` — the
+threshold, not the delta — so every site scored the same number, the sort was a no-op,
+and the lines came out in measurement order. Invisible until a run mixed a +40 % site
+with a +300 % one, which is what a real mutation looks like. The moved-share headline
+had the mirror defect: sorting the assembled `reasons` array scored it 0 and pushed it
+_below_ the lines it summarises, and it counted every site past threshold rather than
+the sites actually being reported — so a run where the machine explained 18 of 19
+would have printed "19 of 19 past their threshold" above one line.
+
+**Mutation-checked, three mutants, all caught:** restoring the bare `continue` fails 4
+tests; pointing the verdict at `regressions` instead of the shift-filtered list fails
+3, including the pre-existing machine-shift test; reverting `deltaOfReason` fails the
+ranking test. 30 tests in `test/benchBaseline.test.js`, up from 19.

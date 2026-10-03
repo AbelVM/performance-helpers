@@ -204,7 +204,6 @@ export function compare(report, baseline, options = {}) {
     shiftTolerance = 0.1,
     minSitesForShift = 5,
   } = options;
-  const reasons = [];
   const current = bandsOf(report);
   const recorded = new Map((baseline?.bands ?? []).map((b) => [b.label, b]));
 
@@ -232,6 +231,20 @@ export function compare(report, baseline, options = {}) {
 
   let checked = 0;
   const regressions = [];
+  // GATE-012. Sites whose band widened past what they were calibrated at. They
+  // were `continue`d, which is a silent drop: a site that became *noisier* was
+  // removed from the comparison and nothing said so.
+  //
+  // **The class of regression this gate is least able to see is the one this
+  // hides.** An added allocation, a Map that grows, a megamorphic call site —
+  // these do not make a site reliably slower, they make its *band* wider first.
+  // A site that got slower *and* more variable lands in this list rather than in
+  // `regressions`, so the run reports "the machine moved" or "nothing to report"
+  // and the change that caused it is invisible. It is still excluded from the
+  // median comparison, because a band too wide to judge cannot support a verdict
+  // — but it is named, with both spreads, so "could not judge" is distinguishable
+  // from "nothing moved".
+  const noisy = [];
   for (const band of current) {
     const before = recorded.get(band.label);
     if (!before) continue;
@@ -239,6 +252,7 @@ export function compare(report, baseline, options = {}) {
     // Condition 1: a site whose own band widened past what it was calibrated
     // at is telling us about the machine, not about the code.
     if (before.spreadPct > 0 && band.spreadPct > before.spreadPct * spreadTolerance) {
+      noisy.push({ label: band.label, before: before.spreadPct, after: band.spreadPct });
       continue;
     }
     // Condition 2: the threshold is the site's *recorded* p95 spread, so a
@@ -257,46 +271,20 @@ export function compare(report, baseline, options = {}) {
         label: band.label,
         before: before.median,
         after: band.median,
+        delta: (band.median / before.median - 1) * 100,
         deltaPct: ((band.median / before.median - 1) * 100).toFixed(1),
         thresholdPct: thresholdPct.toFixed(1),
       });
     }
   }
 
-  for (const r of regressions) {
-    reasons.push(
-      `${r.label}: ${r.before.toFixed(3)} ms -> ${r.after.toFixed(3)} ms ` +
-        `(+${r.deltaPct}%, threshold +${r.thresholdPct}%)`
-    );
-  }
-  // Rank by how far past its own threshold the site moved, so the headline is
-  // the thing that actually changed rather than whichever label sorted first.
-  // A deliberate regression in `PowerCache.get` also drags the rest of the run
-  // with it — it allocates more, and the harness measures helpers in sequence
-  // without a heap reset between them — so the same mutation reports five or six
-  // sites. Ordering by delta puts the real one at the top.
-  reasons.sort((a, b) => {
-    const d = (s) => {
-      const m = /\+([\d.]+)%/.exec(s.split(', threshold')[1] ?? s);
-      return m ? Number(m[1]) : 0;
-    };
-    return d(b) - d(a);
-  });
-
-  if (regressions.length) {
-    // Say how much of the run moved. "One of 25 sites" is a regression; "19 of
-    // 25" is a machine that was busy, and the per-site deltas in that case are
-    // measuring the same thing twenty-five times. Reporting the count is the
-    // difference between a gate a reader trusts and one they learn to ignore.
-    const movedShare = Math.round((regressions.length / Math.max(1, checked)) * 100);
-    reasons.unshift(
-      `${regressions.length} of ${checked} sites past their threshold (${movedShare}%). ` +
-        (movedShare >= 60
-          ? 'That is most of the run, so the machine was probably slower rather than the ' +
-            'code: re-run on a calmer machine before believing any single line above.'
-          : 'A minority of sites, so this looks like a change in the code rather than the machine.')
-    );
-  }
+  const noisyLines = noisy
+    .map(
+      (n) =>
+        `${n.label}: spread ${n.before.toFixed(1)}% -> ${n.after.toFixed(1)}%, past the ` +
+        `${spreadTolerance}x widening this site was calibrated at, so its median was NOT compared`
+    )
+    .sort((a, b) => widenRatio(b) - widenRatio(a));
 
   // Condition 4, and the one that makes the gate usable at all: has the
   // *machine's level* moved?
@@ -329,31 +317,158 @@ export function compare(report, baseline, options = {}) {
   // something; the harness records 25.
   const medianDelta = percentile(deltas, 50) * 100;
   const shifted = deltas.length >= minSitesForShift && Math.abs(medianDelta) > shiftTolerance * 100;
-  if (shifted) {
-    reasons.unshift(
-      `the machine's level moved ${medianDelta > 0 ? '+' : ''}${medianDelta.toFixed(1)}% ` +
-        `against the baseline (median across ${deltas.length} sites, tolerance ` +
-        `${(shiftTolerance * 100).toFixed(0)}%). Nothing below can be attributed to the code. ` +
-        'Re-run on a calmer machine, or re-record the baseline if this one has genuinely changed.'
-    );
-  }
+  const shiftedLine = shifted
+    ? `the machine's level moved ${medianDelta > 0 ? '+' : ''}${medianDelta.toFixed(1)}% ` +
+      `against the baseline (median across ${deltas.length} sites, tolerance ` +
+      `${(shiftTolerance * 100).toFixed(0)}%). Nothing below can be attributed to the code. ` +
+      'Re-run on a calmer machine, or re-record the baseline if this one has genuinely changed.'
+    : null;
 
-  if (noiseWorse) {
-    reasons.unshift(
-      `run noise p95 ${currentP95.toFixed(2)}% exceeds the recorded ${baselineP95.toFixed(2)}% ` +
-        `by more than ${noiseTolerance}x; the harness itself is less repeatable than when it was calibrated`
-    );
-  }
+  const noiseWorseLine = noiseWorse
+    ? `run noise p95 ${currentP95.toFixed(2)}% exceeds the recorded ${baselineP95.toFixed(2)}% ` +
+      `by more than ${noiseTolerance}x; the harness itself is less repeatable than when it was calibrated`
+    : null;
 
-  // A shifted or noisy machine means this run cannot distinguish a regression
-  // from the hardware, so the honest verdict is "no verdict" — and "no verdict"
-  // is never a failure. A gate that fails because the machine was busy is the
-  // coin flip this whole design exists to avoid, and the first version of it
-  // failed exactly that way on a clean tree.
+  // **GATE-012: a machine shift must not be able to delete a failure.** The status
+  // used to be assigned in two unconditional steps — `if (regressions.length)
+  // status = 'fail'`, then `if (shifted || noiseWorse) status = 'inconclusive'` —
+  // so the second overwrote the first. A run with sites past their own recorded
+  // thresholds *and* a machine shift reported `inconclusive`, which the CLI prints
+  // as "Not a failure" and exits 0 on. The gate could be silenced by making the
+  // machine busier, which is the cheapest way to hide a change and the easiest to
+  // do by accident.
+  //
+  // **"Fail wins" on its own would have been wrong too, and a pinned test says
+  // so.** `is inconclusive when the machine level shifted` drives all six sites
+  // +50 % and expects `inconclusive`, because that is a *measured* observation: a
+  // clean tree once reported six unrelated helpers 44–48 % slower than a baseline
+  // recorded minutes earlier. Every one of those six sites is past its threshold,
+  // so a blanket "fail wins" turns that observation into a permanent red gate —
+  // the coin flip this whole design exists to avoid, arriving from the other
+  // direction.
+  //
+  // What separates the two cases is not the presence of a shift, it is whether a
+  // site moved *further than the machine did*. "The machine moved +50 %" is a
+  // statement about the median; six sites at +50 % is that statement, six times
+  // over. One site at +200 % in a run whose median moved +50 % is not, and no
+  // amount of thermal drift accounts for it.
+  //
+  // So a shift filters the regression list rather than replacing the verdict, and
+  // the sites it filters out are reported as filtered — nothing is dropped
+  // silently, which is the same rule the noisy-site half of this row is about.
+  const shiftPct = Math.abs(medianDelta);
+  const beyondShift = shifted
+    ? regressions.filter((r) => Math.abs(r.delta) > shiftPct)
+    : regressions;
+  const explainedByShift = regressions.length - beyondShift.length;
+  const explainedLine =
+    explainedByShift > 0
+      ? `${explainedByShift} of ${regressions.length} site(s) past their threshold moved no further ` +
+        `than the machine's own ${medianDelta > 0 ? '+' : ''}${medianDelta.toFixed(1)}%, so they are ` +
+        'attributed to the machine and not counted as regressions.'
+      : null;
+
+  // Rank by how far past its own threshold the site moved, so the headline is
+  // the thing that actually changed rather than whichever label sorted first.
+  // A deliberate regression in `PowerCache.get` also drags the rest of the run
+  // with it — it allocates more, and the harness measures helpers in sequence
+  // without a heap reset between them — so the same mutation reports five or six
+  // sites. Ordering by delta puts the real one at the top.
+  //
+  // The sort is over the site's own lines rather than over the assembled
+  // `reasons`, because the headlines are added afterwards. Sorting `reasons`
+  // directly demoted the summary to the bottom: it carries no `+%`, so it scored
+  // 0 and sorted last, below the very lines it was summarising.
+  const regressionLines = beyondShift
+    .map(regressionLine)
+    .sort((a, b) => deltaOfReason(b) - deltaOfReason(a));
+
+  // Say how much of the run moved. "One of 25 sites" is a regression; "19 of
+  // 25" is a machine that was busy, and the per-site deltas in that case are
+  // measuring the same thing twenty-five times. Reporting the count is the
+  // difference between a gate a reader trusts and one they learn to ignore.
+  //
+  // Counted over `beyondShift`, so the share describes what is being *reported*
+  // as a regression. A run where the machine explains 18 of 19 sites should not
+  // print "19 of 19 past their threshold" above a single line — that headline
+  // describes a different set of sites than the ones under it.
+  //
+  // The wording follows `shifted`. Below `minSitesForShift` the shift check is
+  // skipped entirely, so there is no machine move to be "beyond", and saying so
+  // would name a condition the gate never evaluated.
+  const movedShareLines = beyondShift.length
+    ? [
+        `${beyondShift.length} of ${checked} sites past their threshold` +
+          (shifted ? " and beyond the machine's own move" : '') +
+          ` (${Math.round((beyondShift.length / Math.max(1, checked)) * 100)}%). ` +
+          (beyondShift.length / Math.max(1, checked) >= 0.6
+            ? 'That is most of the run, so the machine was probably slower as well: re-run on a ' +
+              'calmer machine before believing any single line below.'
+            : 'A minority of sites, so this looks like a change in the code rather than the machine.'),
+      ]
+    : [];
+
+  // Assembled in one place, in the order a reader needs: what could not be
+  // trusted first, then how much of the run moved, then the sites themselves,
+  // then the sites that could not be judged at all. Each headline carries the
+  // caveat that stops the lines under it being read as verdicts about the code.
+  const reasons = [
+    ...(noiseWorse ? [noiseWorseLine] : []),
+    ...(shifted ? [shiftedLine] : []),
+    ...movedShareLines,
+    ...(explainedLine ? [explainedLine] : []),
+    ...regressionLines,
+    ...noisyLines,
+  ];
+
+  // The verdict reads `beyondShift` and nothing else, so the reasoning above
+  // applies here directly: a shift can narrow what counts as a regression, never
+  // widen it into a pass.
   let status = 'pass';
-  if (regressions.length) status = 'fail';
   if (shifted || noiseWorse) status = 'inconclusive';
+  if (beyondShift.length) status = 'fail';
   return { status, reasons, checked };
+}
+
+/**
+ * One regression's report line.
+ *
+ * @param {{label: string, before: number, after: number, deltaPct: string, thresholdPct: string}} r
+ * @returns {string}
+ */
+function regressionLine(r) {
+  return (
+    `${r.label}: ${r.before.toFixed(3)} ms -> ${r.after.toFixed(3)} ms ` +
+    `(+${r.deltaPct}%, threshold +${r.thresholdPct}%)`
+  );
+}
+
+/**
+ * The percentage a reason line reports as a regression, for ranking.
+ *
+ * Scoped to the text **before** `', threshold'`, which is where the delta is.
+ * It used to read the text *after* that separator — the threshold — so every site
+ * scored the same number, the sort was a no-op, and the lines came out in
+ * measurement order. That is invisible until a run mixes a +40 % site with a
+ * +300 % one, which is exactly what a real mutation looks like.
+ *
+ * @param {string} reason
+ * @returns {number}
+ */
+function deltaOfReason(reason) {
+  const m = /\+([\d.]+)%/.exec(reason.split(', threshold')[0]);
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * How far past its calibrated spread a site widened, for ranking noisy lines.
+ *
+ * @param {string} line - A `label: spread a% -> b%, …` line.
+ * @returns {number} `b / a`, or 0 when the line does not parse.
+ */
+function widenRatio(line) {
+  const m = /spread ([\d.]+)% -> ([\d.]+)%/.exec(line);
+  return m && Number(m[1]) > 0 ? Number(m[2]) / Number(m[1]) : 0;
 }
 
 /**

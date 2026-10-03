@@ -205,6 +205,199 @@ describe('compare: the machine noise floor', () => {
   });
 });
 
+describe('compare: a site too noisy to judge is reported, not dropped (GATE-012)', () => {
+  // The defect this pins: a site whose band widened past `spreadTolerance` was
+  // `continue`d, so it vanished from the output with nothing said about it. **The
+  // class of regression this gate is least able to see is the one that hid** — an
+  // added allocation or a growing Map does not make a site reliably slower, it
+  // makes its band wider first, and a wider band meant the site stopped being
+  // compared at all.
+  const widening = (beforeSpread, afterSpread) => ({
+    before: [band('calm', 10, beforeSpread), band('noisy', 10, beforeSpread)],
+    after: [band('calm', 10, beforeSpread), band('noisy', 10, afterSpread)],
+  });
+
+  it('names the site it could not judge, with both spreads', () => {
+    const { before, after } = widening(10, 30);
+    const verdict = compare(report(after), baselineOf(before));
+    const line = verdict.reasons.find((r) => r.startsWith('noisy:'));
+    expect(line).toBeDefined();
+    // Both numbers, because "it got noisier" is not actionable on its own - a
+    // reader needs to see how far past the calibration it went.
+    expect(line).toContain('10.0%');
+    expect(line).toContain('30.0%');
+    expect(line).toContain('NOT compared');
+  });
+
+  it('still excludes that site from the verdict rather than judging it', () => {
+    // Reporting is not judging. A band too wide to support a verdict still cannot
+    // support one, so a noisy site that is also much slower must not be reported
+    // as a regression - otherwise the fix would reintroduce the coin flip this
+    // gate exists to avoid, just in the other direction.
+    //
+    // The verdict here is `inconclusive`, and for a second reason worth pinning:
+    // one site tripling its spread pushes the run's p95 to 25% against a recorded
+    // 10%, which is the harness-wide noise check firing. Both are correct, and
+    // neither is a regression - which is the claim.
+    const before = ['calm', 'b', 'c', 'd', 'e'].map((l) => band(l, 10, 10));
+    const after = [...before.map((b) => ({ ...b })), band('noisy', 40, 30)];
+    const verdict = compare(report(after), baselineOf([...before, band('noisy', 10, 10)]));
+
+    expect(verdict.status).toBe('inconclusive');
+    // Named, with the reason it was set aside.
+    expect(verdict.reasons.join(' ')).toContain('noisy: spread 10.0% -> 30.0%');
+    // And *not* judged: no regression line for it, so it is not in the count
+    // either. `checked` includes it, because it was compared - the outcome was
+    // "unjudgeable", which is not the same as "not looked at".
+    expect(verdict.reasons.join(' ')).not.toMatch(/noisy: [\d.]+ ms/);
+    expect(verdict.reasons.join(' ')).not.toContain('sites past their threshold');
+    expect(verdict.checked).toBe(6);
+  });
+
+  it('reports both a noisy site and a real regression in one run', () => {
+    // The two lists are independent, and a change that makes one helper noisier
+    // often makes another slower. If reporting the noisy sites had replaced the
+    // regression path rather than joined it, this is the case that would break.
+    const before = [band('calm', 10, 10), band('slow', 10, 10), band('noisy', 10, 10)];
+    const after = [band('calm', 10, 10), band('slow', 40, 10), band('noisy', 10, 30)];
+    const verdict = compare(report(after), baselineOf(before));
+    expect(verdict.status).toBe('fail');
+    expect(verdict.reasons.join(' ')).toContain('slow:');
+    expect(verdict.reasons.join(' ')).toContain('noisy:');
+  });
+
+  it('a clean run says nothing about noise it did not find', () => {
+    // The other direction: reporting must not manufacture a line. A gate that
+    // always prints a noise section trains its readers to skip it.
+    const bands = [band('a', 10, 20), band('b', 5, 30)];
+    const verdict = compare(report(bands), baselineOf(bands));
+    expect(verdict.reasons).toEqual([]);
+  });
+});
+
+describe('compare: a machine shift cannot delete a failure (GATE-012)', () => {
+  // The second half of the row. The status used to be assigned in two
+  // unconditional steps, `fail` then `inconclusive`, so the second overwrote the
+  // first: a run with sites past their thresholds *and* a machine shift reported
+  // `inconclusive`, which the CLI prints as "Not a failure" and exits 0 on.
+
+  it('keeps `fail` when a site moved further than the machine did', () => {
+    // The row's scenario. Five sites ride the machine up +40%, one goes to +300%.
+    // The shift is real and it is not the explanation: 300% is not 40%, and no
+    // amount of thermal drift is.
+    const before = ['a', 'b', 'c', 'd', 'e', 'f'].map((l) => band(l, 10, 10));
+    const after = [
+      band('a', 14, 10),
+      band('b', 14, 10),
+      band('c', 14, 10),
+      band('d', 14, 10),
+      band('e', 14, 10),
+      band('f', 40, 10),
+    ];
+    const verdict = compare(report(after), baselineOf(before));
+    expect(verdict.status).toBe('fail');
+    expect(verdict.reasons.join(' ')).toContain('f:');
+  });
+
+  it('attributes the sites the shift does explain, and says how many', () => {
+    // Same run, and the report has to be honest about both halves: `f` is a
+    // regression, the other five are the machine, and the reader can see that
+    // rather than having to recompute it.
+    const before = ['a', 'b', 'c', 'd', 'e', 'f'].map((l) => band(l, 10, 10));
+    const after = [
+      band('a', 14, 10),
+      band('b', 14, 10),
+      band('c', 14, 10),
+      band('d', 14, 10),
+      band('e', 14, 10),
+      band('f', 40, 10),
+    ];
+    const verdict = compare(report(after), baselineOf(before));
+    expect(verdict.reasons.join(' ')).toContain('5 of 6 site(s)');
+    expect(verdict.reasons.join(' ')).toContain('attributed to the machine');
+  });
+
+  it('still calls a uniform shift inconclusive, because every site is explained', () => {
+    // **The row's literal wording - "keep `fail` when per-site regressions
+    // coexist with a machine shift" - was implemented and rejected.** Six sites at
+    // +50% are all past their 5% thresholds, so a blanket "fail wins" reads that
+    // as six regressions. The measurement behind
+    // `is inconclusive when the machine level shifted` is exactly this shape: a
+    // clean tree once reported six unrelated helpers 44-48% slower than a baseline
+    // recorded minutes earlier. A gate that fails there is a permanently red gate.
+    //
+    // So the shift filters the regression list rather than replacing the verdict,
+    // and this test is what holds the filter honest in the other direction.
+    const before = ['a', 'b', 'c', 'd', 'e', 'f'].map((l) => band(l, 10, 10));
+    const after = ['a', 'b', 'c', 'd', 'e', 'f'].map((l) => band(l, 15, 10));
+    const verdict = compare(report(after), baselineOf(before));
+    expect(verdict.status).toBe('inconclusive');
+    expect(verdict.reasons.join(' ')).toContain('6 of 6 site(s)');
+  });
+
+  it('counts the moved-share headline over what is reported, not over what tripped', () => {
+    // Otherwise the headline describes a different set of sites than the lines
+    // under it: "6 of 6 past their threshold" above a single reported site is a
+    // contradiction, and it is the contradiction a reader is most likely to trust.
+    const before = ['a', 'b', 'c', 'd', 'e', 'f'].map((l) => band(l, 10, 10));
+    const after = [
+      band('a', 14, 10),
+      band('b', 14, 10),
+      band('c', 14, 10),
+      band('d', 14, 10),
+      band('e', 14, 10),
+      band('f', 40, 10),
+    ];
+    const verdict = compare(report(after), baselineOf(before));
+    expect(verdict.reasons.join(' ')).toContain('1 of 6 sites past their threshold and beyond');
+  });
+
+  it('a noisy site does not hide a real regression elsewhere in the run', () => {
+    // The interaction the two lists share a loop for: a change that makes one
+    // helper noisier often makes another slower, and the widening must not
+    // swallow the site that can still be judged.
+    const before = ['a', 'b', 'c', 'd', 'e'].map((l) => band(l, 10, 10));
+    const after = [
+      band('a', 14, 10),
+      band('b', 14, 10),
+      band('c', 14, 10),
+      band('d', 14, 10),
+      band('e', 40, 30),
+    ];
+    const verdict = compare(report(after), baselineOf([...before, band('e', 10, 10)]));
+    expect(verdict.reasons.join(' ')).toContain('e: spread');
+    // `e` is unjudgeable, so nothing here is beyond the +40% the other four show -
+    // the machine explains the whole run.
+    expect(verdict.status).toBe('inconclusive');
+    expect(verdict.reasons.join(' ')).toContain('level moved');
+  });
+});
+
+describe('compare: the report is assembled in a readable order', () => {
+  it('puts the summary above the lines it summarises', () => {
+    // The sort used to run over the whole `reasons` array, so the summary line -
+    // which carries no `+%` of its own - scored 0 and sorted *last*, below the
+    // sites it was describing. An ordering nobody reads is an ordering nobody
+    // should have to fix twice.
+    const before = [band('a', 10, 10), band('b', 10, 10), band('c', 10, 10), band('d', 10, 10)];
+    const after = [band('a', 40, 10), band('b', 10, 10), band('c', 10, 10), band('d', 10, 10)];
+    const verdict = compare(report(after), baselineOf(before));
+    expect(verdict.reasons[0]).toContain('1 of 4 sites');
+  });
+
+  it('ranks the site that moved furthest to the top', () => {
+    // A deliberate regression drags the rest of the run with it - it allocates
+    // more, and the harness measures helpers in sequence with no heap reset - so
+    // one mutation reports several sites. Ordering by delta is what makes the
+    // headline the real one.
+    const before = [band('a', 10, 10), band('b', 10, 10), band('c', 10, 10), band('d', 10, 10)];
+    const after = [band('a', 14, 10), band('b', 16, 10), band('c', 40, 10), band('d', 10, 10)];
+    const verdict = compare(report(after), baselineOf(before));
+    const siteLines = verdict.reasons.filter((r) => /^\w+:/.test(r));
+    expect(siteLines[0]).toMatch(/^c:/);
+  });
+});
+
 describe('machineKey', () => {
   it('is stable within a process', () => {
     expect(machineKey()).toBe(machineKey());
