@@ -5116,6 +5116,30 @@ passed reading: the value is consulted only when expiry is actually being checke
 `0` still means "do not check". No behaviour change; this is purely fewer clock samples
 on the same decisions.
 
+### `decodeInbound` names the frame fault instead of blaming JSON (patch)
+
+A **version-2 frame** fell through to the legacy-JSON fallback and came back as
+`SyntaxError: Unexpected token` — an error naming neither the frame nor the version, and
+not actionable by a caller. A **truncated frame** did the same, which the comment above
+the guard had explicitly claimed it would not do.
+
+```js
+decodeInbound(new Uint8Array([2, 0, 2, 0, 0, 0, 123, 125]));
+// before: SyntaxError: Unexpected token
+// after:  RangeError: unsupported protocol version 2 (expected 1)
+
+decodeInbound(new Uint8Array([1, 0, 2]));
+// after:  RangeError: truncated frame — 3 byte(s) is shorter than the 6-byte header
+```
+
+The discriminator is the one the class JSDoc already leans on: **no JSON document starts
+with a control byte that is not whitespace**, so such a body is a frame rather than a
+legacy body. Every legacy shape is asserted unchanged in the same test — bare JSON, JSON
+behind leading whitespace, a bare number, a bare string, and a valid v1 frame.
+
+Mutation-checked: removing the guard fails the two frame tests while the legacy test still
+passes.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

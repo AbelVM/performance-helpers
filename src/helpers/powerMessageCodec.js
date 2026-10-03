@@ -822,9 +822,53 @@ export function decodeInbound(data) {
       const frame = decodeMessage(bytes);
       return { codec: frame.codec, value: frame.value, correlationId: undefined };
     }
+    // RT-024. The comment above promises that "a version-2 frame or a truncated one
+    // reports the error it actually is rather than a JSON syntax error from the
+    // fallback" — and for a **truncated** frame it does, because a short body fails
+    // `bytes.length >= HEADER_BYTES` and lands on `u82o` as legacy JSON. For a
+    // *version-2* frame it did not: it fell through to the same fallback and came
+    // back as `SyntaxError: Unexpected token`, which is the one outcome the comment
+    // rules out, and the one a caller cannot act on.
+    //
+    // The discriminator is the same one the class JSDoc leans on: no JSON document
+    // begins with a control byte that is not whitespace. So a long enough body whose
+    // first byte is neither the version-1 byte nor something JSON can start with is a
+    // frame of some other version, and says so.
+    if (!canStartJsonDocument(bytes[0])) {
+      // Right version byte, too short for a header: a truncated frame rather than
+      // a version this build does not know. The comment above claims a truncated
+      // frame "reports the error it actually is" too, and it did not — it came back
+      // as `SyntaxError` from the fallback, naming neither the frame nor the cut.
+      if (bytes[0] === MESSAGE_PROTOCOL_VERSION) {
+        throw new RangeError(
+          `PowerMessageCodec: truncated frame — ${bytes.length} byte(s) is shorter than the ${HEADER_BYTES}-byte header`
+        );
+      }
+      throw new RangeError(
+        `PowerMessageCodec: unsupported protocol version ${bytes[0]} (expected ${MESSAGE_PROTOCOL_VERSION})`
+      );
+    }
     return { codec: 'legacy', value: u82o(bytes), correlationId: undefined };
   }
   return { codec: 'raw', value: data, correlationId: undefined };
+}
+
+/**
+ * Whether a byte can be the first byte of a JSON document.
+ *
+ * Used to tell a frame of an unknown version from a legacy bare-JSON body
+ * (RT-024). JSON starts with whitespace, `{`, `[`, `"`, `t`, `f`, `n` or a digit
+ * — so a byte below `0x20` that is not whitespace cannot begin one, and a body
+ * that starts with one is a frame carrying a version this build does not know.
+ *
+ * @private
+ * @param {number} byte
+ * @returns {boolean}
+ */
+function canStartJsonDocument(byte) {
+  // 0x20 space, 0x09 tab, 0x0a LF, 0x0d CR.
+  if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) return true;
+  return byte >= 0x20;
 }
 
 /**

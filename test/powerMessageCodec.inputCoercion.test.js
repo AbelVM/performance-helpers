@@ -24,7 +24,13 @@
  * @see src/helpers/powerMessageCodec.js
  */
 import { describe, it, expect } from 'vitest';
-import { frameEncodedJson, decodeMessage, isRawPayload } from '../src/index.js';
+import {
+  frameEncodedJson,
+  decodeMessage,
+  decodeInbound,
+  encodeMessage,
+  isRawPayload,
+} from '../src/index.js';
 
 const JSON_DOC = '{"hello":"world"}';
 const EXPECTED = { hello: 'world' };
@@ -89,5 +95,35 @@ describe('frameEncodedJson input coercion (BUG-029)', () => {
     );
     const fromU8 = frameEncodedJson(bytes);
     expect(Array.from(fromView)).toEqual(Array.from(fromU8));
+  });
+});
+
+describe('RT-024: decodeInbound names the frame fault instead of blaming JSON', () => {
+  // A version-2 frame used to fall through to the legacy-JSON fallback and come
+  // back as `SyntaxError: Unexpected token`, and a truncated frame did the same.
+  // Both are the outcomes the comment above the guard said this path ruled out,
+  // and neither is actionable by a caller: the message names neither the frame
+  // nor the version.
+  //
+  // The discriminator is the one the class JSDoc already leans on — no JSON
+  // document starts with a control byte that is not whitespace — so these bodies
+  // are frames, and the legacy paths below are asserted in the same test because
+  // the guard must not catch them.
+  it('reports an unsupported protocol version as a version RangeError', () => {
+    expect(() => decodeInbound(new Uint8Array([2, 0, 2, 0, 0, 0, 123, 125]))).toThrow(
+      /unsupported protocol version 2 \(expected 1\)/
+    );
+  });
+
+  it('reports a truncated frame as such, naming the header', () => {
+    expect(() => decodeInbound(new Uint8Array([1, 0, 2]))).toThrow(/truncated frame/);
+  });
+
+  it('still decodes every legacy bare-JSON body', () => {
+    const enc = new TextEncoder();
+    for (const body of [JSON.stringify({ a: 1 }), '  ' + JSON.stringify({ a: 1 }), '123', '"hi"']) {
+      expect(decodeInbound(enc.encode(body)).codec, body.slice(0, 12)).toBe('legacy');
+    }
+    expect(decodeInbound(encodeMessage('hello')).value).toBe('hello');
   });
 });
