@@ -54600,13 +54600,78 @@
 																	},
 																	{
 																		"kind": "text",
-																		"text": ", so the frame must not be reused afterwards."
+																		"text": ", so the frame must not be reused afterwards.\n\nTwo inputs cannot be answered by handing back "
+																	},
+																	{
+																		"kind": "code",
+																		"text": "`frame.buffer`"
+																	},
+																	{
+																		"kind": "text",
+																		"text": ", and both were\n**wrong answers rather than slow ones** (RT-022):\n\n- A **SAB-backed** frame. A "
+																	},
+																	{
+																		"kind": "code",
+																		"text": "`SharedArrayBuffer`"
+																	},
+																	{
+																		"kind": "text",
+																		"text": " is not transferable, so naming\n  one here makes "
+																	},
+																	{
+																		"kind": "code",
+																		"text": "`postMessage`"
+																	},
+																	{
+																		"kind": "text",
+																		"text": " throw "
+																	},
+																	{
+																		"kind": "code",
+																		"text": "`DOMException: Found invalid value in\n  transferList`"
+																	},
+																	{
+																		"kind": "text",
+																		"text": " \\u2014 measured \\u2014 rather than post. It must also not be detached, so the\n  only correct answer is to leave it out and let the frame be copied.\n- A **view into a slab**. "
+																	},
+																	{
+																		"kind": "code",
+																		"text": "`frame.buffer`"
+																	},
+																	{
+																		"kind": "text",
+																		"text": " names the whole buffer, so a 6-byte\n  view into a 16-byte slab transferred all 16 and left the caller with a\n  detached slab \\u2014 measured, "
+																	},
+																	{
+																		"kind": "code",
+																		"text": "`slab.byteLength === 0`"
+																	},
+																	{
+																		"kind": "text",
+																		"text": " afterwards \\u2014 silently\n  destroying bytes that had nothing to do with this frame. There is no\n  transfer list that expresses \"these six bytes\", so this is rejected instead."
 																	}
 																],
 																"blockTags": [
 																	{
 																		"tag": "@returns",
 																		"content": []
+																	},
+																	{
+																		"tag": "@throws",
+																		"content": [
+																			{
+																				"kind": "text",
+																				"text": "When "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`frame`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " is a view into part of a larger buffer."
+																			}
+																		]
 																	}
 																]
 															},
@@ -57338,13 +57403,78 @@
 									},
 									{
 										"kind": "text",
-										"text": ", so the frame must not be reused afterwards."
+										"text": ", so the frame must not be reused afterwards.\n\nTwo inputs cannot be answered by handing back "
+									},
+									{
+										"kind": "code",
+										"text": "`frame.buffer`"
+									},
+									{
+										"kind": "text",
+										"text": ", and both were\n**wrong answers rather than slow ones** (RT-022):\n\n- A **SAB-backed** frame. A "
+									},
+									{
+										"kind": "code",
+										"text": "`SharedArrayBuffer`"
+									},
+									{
+										"kind": "text",
+										"text": " is not transferable, so naming\n  one here makes "
+									},
+									{
+										"kind": "code",
+										"text": "`postMessage`"
+									},
+									{
+										"kind": "text",
+										"text": " throw "
+									},
+									{
+										"kind": "code",
+										"text": "`DOMException: Found invalid value in\n  transferList`"
+									},
+									{
+										"kind": "text",
+										"text": " \\u2014 measured \\u2014 rather than post. It must also not be detached, so the\n  only correct answer is to leave it out and let the frame be copied.\n- A **view into a slab**. "
+									},
+									{
+										"kind": "code",
+										"text": "`frame.buffer`"
+									},
+									{
+										"kind": "text",
+										"text": " names the whole buffer, so a 6-byte\n  view into a 16-byte slab transferred all 16 and left the caller with a\n  detached slab \\u2014 measured, "
+									},
+									{
+										"kind": "code",
+										"text": "`slab.byteLength === 0`"
+									},
+									{
+										"kind": "text",
+										"text": " afterwards \\u2014 silently\n  destroying bytes that had nothing to do with this frame. There is no\n  transfer list that expresses \"these six bytes\", so this is rejected instead."
 									}
 								],
 								"blockTags": [
 									{
 										"tag": "@returns",
 										"content": []
+									},
+									{
+										"tag": "@throws",
+										"content": [
+											{
+												"kind": "text",
+												"text": "When "
+											},
+											{
+												"kind": "code",
+												"text": "`frame`"
+											},
+											{
+												"kind": "text",
+												"text": " is a view into part of a larger buffer."
+											}
+										]
 									}
 								]
 							},
