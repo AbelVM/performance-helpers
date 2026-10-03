@@ -2837,6 +2837,232 @@ async function runBatchServoWorkload() {
   }
 }
 
+/**
+ * A worker with a controllable service time.
+ *
+ * **Derived from `EchoWorker`'s protocol handling, deliberately.** Two earlier
+ * attempts at this mode hand-rolled a fake worker and both failed on it: one
+ * never satisfied the framed response protocol so every awaited post hung, and
+ * one read `awaitResponseTimeout: 0` as "no timeout" when it means *time out
+ * immediately*, so every completion it counted was a rejection. The envelope
+ * handling below is copied rather than re-derived for exactly that reason; the
+ * only change from `EchoWorker` is `setTimeout` in place of `queueMicrotask`, to
+ * give the task a service time.
+ */
+class TimedWorker {
+  constructor(serviceMs) {
+    this._listeners = [];
+    this._serviceMs = serviceMs;
+  }
+
+  addEventListener(type, fn) {
+    this._listeners.push([type, fn]);
+  }
+
+  removeEventListener() {}
+
+  terminate() {}
+
+  postMessage(msg) {
+    const { codec, value } = decodeInbound(msg);
+    setTimeout(() => {
+      const body = {
+        duration: this._serviceMs,
+        correlationId: value?.correlationId,
+        echo: value,
+      };
+      const data =
+        codec === 'native'
+          ? encodeNativeEnvelope(body, { correlationId: value?.correlationId })
+          : encodeMessage(body, { codec: 'json' });
+      for (const [type, fn] of this._listeners) {
+        if (type === 'message') fn({ data });
+      }
+    }, this._serviceMs);
+  }
+}
+
+/**
+ * POOL-012 — is `autoScale.policy` wired to anything?
+ *
+ * The read-based answer is that `_adaptiveLimit` is written by
+ * `_updateAdaptiveLimit()` and read by `getStats()`, with no read on the dispatch
+ * path. This mode asks the behavioural question, because a read-based answer can
+ * be wrong and one probe of mine was.
+ *
+ * **What this mode can support is narrow, and it checks that before printing
+ * anything.** Wall-clock throughput carries the 28 % median min/max spread
+ * BENCH-001 measured, so a raw spread across policies means nothing on its own.
+ * The arms therefore include `ewma` **twice**: `ewma:a` and `ewma:b` are the same
+ * configuration, so their spread is this harness's noise floor *measured on this
+ * run*. A cross-policy spread only counts as an effect if it clears both that
+ * floor and an absolute materiality threshold — a first version used
+ * `cross > floor * 1.5` alone and duly reported a 1.3 % spread, which is twenty
+ * four admissions out of 1920, as "an effect larger than the noise floor".
+ *
+ * The gate claims its slot inside the admission decision. The obvious shape —
+ * `await room(); pending += 1;` — is a check-then-act race: awaiting an
+ * already-resolved promise yields a microtask, so every racer evaluated
+ * `pending < cap` before any of them incremented it. Measured with that shape,
+ * `admitted == inflight` for every cap including 2, which is how two "enforced"
+ * arms came out 25x apart on a cap that was never applied.
+ *
+ * `gate held (peak N <= cap M)` at the top is that check, run every time. A mode
+ * that cannot trust its own gate says so and stops rather than printing a ratio.
+ */
+async function runConcurrencyWorkload() {
+  console.log('POOL-012 — is `autoScale.policy` wired to anything?\n');
+
+  const BUDGET_MS = Number(process.env.CLAIM_CONCURRENCY_BUDGET_MS || 2000);
+  const REPEATS = Number(process.env.CLAIM_CONCURRENCY_REPEATS || 5);
+  const SERVICE_MS = Number(process.env.CLAIM_CONCURRENCY_SERVICE_MS || 4);
+  const INFLIGHT = Number(process.env.CLAIM_CONCURRENCY_INFLIGHT || 8);
+  const POOL_SIZE = 4;
+  const MATERIAL = 0.05;
+
+  console.log(`  budget ${BUDGET_MS} ms per arm, ${REPEATS} repeats, median reported`);
+  console.log(
+    `  pool size ${POOL_SIZE}, ${INFLIGHT} submitted at a time, ${SERVICE_MS} ms service`
+  );
+  console.log(`  an effect must clear both the noise floor and ${MATERIAL * 100} % to count\n`);
+
+  const runArm = async (policy, cap) => {
+    const pool = new PowerPool(() => new TimedWorker(SERVICE_MS), {
+      size: POOL_SIZE,
+      minSize: POOL_SIZE,
+      maxSize: POOL_SIZE,
+      lazy: false,
+      autoScale: {
+        policy,
+        intervalMs: 25,
+        cooldownMs: 0,
+        targetMs: SERVICE_MS * POOL_SIZE,
+        limitMin: 1,
+        limitMax: POOL_SIZE * 2,
+      },
+    });
+
+    let pending = 0;
+    let peak = 0;
+    const waiters = [];
+    const capNow = () => (cap === null ? Infinity : cap);
+
+    // Claim inside the decision — no `await` between the check and the increment.
+    const acquire = () =>
+      new Promise((resolve) => {
+        if (pending < capNow()) {
+          pending += 1;
+          resolve();
+          return;
+        }
+        waiters.push(resolve);
+      });
+
+    const submit = async () => {
+      await acquire();
+      if (pending > peak) peak = pending;
+      return pool.postMessage({ x: 1 }, undefined, { awaitResponse: true }).finally(() => {
+        pending -= 1;
+        while (waiters.length > 0 && pending < capNow()) {
+          pending += 1;
+          waiters.shift()();
+        }
+      });
+    };
+
+    const deadline = Number(process.hrtime.bigint() / 1000000n) + BUDGET_MS;
+    let admitted = 0;
+    while (Number(process.hrtime.bigint() / 1000000n) < deadline) {
+      const batch = [];
+      for (let i = 0; i < INFLIGHT; i += 1) batch.push(submit());
+      admitted += INFLIGHT;
+      await Promise.all(batch);
+    }
+    const limit = pool.getStats().performance.concurrencyLimit;
+    await pool.shutdown();
+    return { admitted, peak, limit };
+  };
+
+  const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+
+  const arm = async (label, policy, cap = null) => {
+    const runs = [];
+    for (let r = 0; r < REPEATS; r += 1) runs.push(await runArm(policy, cap));
+    return {
+      label,
+      admitted: median(runs.map((x) => x.admitted)),
+      peak: Math.max(...runs.map((x) => x.peak)),
+      limits: [...new Set(runs.map((x) => String(x.limit)))].join(' '),
+    };
+  };
+
+  // --- The gate has to work before any ratio means anything. ---
+  const capUnderTest = Math.max(1, INFLIGHT / 2);
+  const gated = await arm(`capped:${capUnderTest}`, 'ewma', capUnderTest);
+  console.log(`  GATE SELF-CHECK — cap ${capUnderTest}, ${INFLIGHT} submitted at a time\n`);
+  console.log(`    peak observed ${gated.peak}, cap ${capUnderTest}`);
+  if (gated.peak > capUnderTest) {
+    console.log('    THE GATE DID NOT HOLD, so every ratio below would be meaningless and this');
+    console.log('    mode is stopping rather than printing them. The slot has to be claimed');
+    console.log('    inside the admission decision — see the note above this function.');
+    return;
+  }
+  console.log('    gate held. Ratios below are meaningful.\n');
+
+  // --- Two identical arms give the noise floor for this run. ---
+  const noiseA = await arm('ewma:a', 'ewma');
+  const noiseB = await arm('ewma:b', 'ewma');
+  const others = [];
+  for (const policy of ['aimd', 'vegas', 'gradient2'])
+    others.push(await arm(`policy:${policy}`, policy));
+  const arms = [noiseA, noiseB, ...others];
+
+  const header = ['arm', 'admitted', 'peak', 'concurrencyLimit'];
+  console.log(`  ${header[0].padEnd(18)}${header[1].padEnd(12)}${header[2].padEnd(8)}${header[3]}`);
+  console.log(`  ${'-'.repeat(66)}`);
+  for (const a of arms) {
+    console.log(
+      `  ${a.label.padEnd(18)}${String(a.admitted).padEnd(12)}${String(a.peak).padEnd(8)}${a.limits}`
+    );
+  }
+  console.log(`\n  raw medians: ${arms.map((a) => `${a.label}=${a.admitted}`).join(', ')}`);
+
+  const spread = (xs) => {
+    const hi = Math.max(...xs);
+    const lo = Math.min(...xs);
+    return hi === lo ? 0 : (hi - lo) / lo;
+  };
+  const floor = spread([noiseA.admitted, noiseB.admitted]);
+  const cross = spread(arms.map((a) => a.admitted));
+
+  console.log(`\n  noise floor  (ewma vs ewma, identical config) : ${(floor * 100).toFixed(1)} %`);
+  console.log(
+    `  cross-policy (all ${arms.length} arms)                        : ${(cross * 100).toFixed(1)} %`
+  );
+  console.log(`  materiality threshold                       : ${(MATERIAL * 100).toFixed(1)} %`);
+
+  if (cross <= floor * 1.5 || cross < MATERIAL) {
+    console.log('\n  NO EFFECT WORTH REPORTING. The cross-policy spread clears neither the');
+    console.log('  noise floor nor the materiality threshold, so throughput on this workload');
+    console.log('  does not depend on which policy is configured. Note the last column:');
+    console.log('  `concurrencyLimit` differs per policy and is stable within each, so the');
+    console.log('  controller is running and its belief is changing — and nothing consumes it.');
+    console.log('  That is the signature of a controller that is not on the dispatch path, and');
+    console.log('  it agrees with the read: `_adaptiveLimit` is written by');
+    console.log('  `_updateAdaptiveLimit()` and read by `getStats()`.');
+  } else {
+    console.log('\n  A spread above both thresholds is visible on this workload. That does NOT');
+    console.log('  show the controller caused it: `concurrencyLimit` is read by `getStats()`');
+    console.log('  only, so a difference here would mean some other path is sensitive to the');
+    console.log('  configured policy. Re-run before believing it, and check the gate line above.');
+  }
+
+  console.log('\n  NOT MEASURED HERE: whether enforcing the limit would help. That needs the');
+  console.log('  same `aimd` controller with `concurrencyLimit` applied to a gate this mode');
+  console.log('  owns, against a hand-picked constant cap. The control is the point — a');
+  console.log('  controller that only beats a badly-chosen constant has not earned a getter.');
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -2852,6 +3078,7 @@ const MODES = {
   hubencode: runHubEncodeWorkload,
   correlation: runCorrelationWorkload,
   batchservo: runBatchServoWorkload,
+  concurrency: runConcurrencyWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';

@@ -88,6 +88,7 @@ node bench/claims.js framedecode # incremental decoding against re-concatenating
 node bench/claims.js hubencode   # whether the hub's fan-out flush is encode-bound
 node bench/claims.js correlation # what awaiting a correlated reply costs
 node bench/claims.js batchservo   # does a closed loop beat a fixed flush size
+node bench/claims.js concurrency  # is `autoScale.policy` wired to anything
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only
