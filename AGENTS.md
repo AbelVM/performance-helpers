@@ -282,7 +282,7 @@ Style that is deliberate here, not incidental:
 - **Do not trust a staged set you read before the commit — re-read it.** When two
   sessions share a working tree, `git add -- <explicit paths>` protects you from
   sweeping in _unstaged_ work, and it does not protect the commit at all. The
-  index is shared. Two occurrences, both in one afternoon, neither of them
+  index is shared. Four occurrences, the first two in one afternoon, none of them
   caught by `git status` or by staging carefully:
   - `ac45b6f` is titled `docs(review): BUG-003 is not a double-detach` and
     contains `types/helpers/powerServo.d.ts` and `docs/helpers/powerServo/**` —
@@ -295,6 +295,18 @@ Style that is deliberate here, not incidental:
     ADR and a changeset. My `git commit` ran afterwards and reported
     `nothing to commit, working tree clean` — the feature was in someone else's
     commit and the message described unrelated audit work.
+  - `.changeset/release-2-0-0.md` was swept into `f637752` (`fix(metrics): …`).
+    A changeset is the one artefact whose _absence_ from a commit is invisible:
+    the file is edited constantly, so a stray `git add` of it looks deliberate.
+  - `38f8e1d` (`feat(cache): pin the TinyLFU seed …`) carries
+    `test/types.optionsCoverage.test.js`, which no one staging it had edited. It
+    swept in a one-file fix to a committed test that was sitting unstaged in the
+    shared worktree. **This one happened with the guard already written**, so the
+    lesson is not only "use the guard" — it is that **the guard is opt-in and
+    nothing says so at commit time.** `git commit` is exactly as unguarded as it
+    was before the guard existed unless the commit goes _through_ the guard, and
+    a bypassed guard leaves no trace in `git status`, the commit message, or the
+    output.
     The hazard is that a wrong commit looks like a right one: the content is
     exactly what you staged, and nothing in `git status` disagrees. **So use the
     guard rather than the habit** —
@@ -312,7 +324,7 @@ Style that is deliberate here, not incidental:
     so it never appears in `git status` and is never committed.
 
     The habit it replaces — `git diff --cached --name-only` immediately before
-    `git commit` — is what all three occurrences above ran, and all three shipped.
+    `git commit` — is what all four occurrences above ran, and all four shipped.
     A habit is not a safeguard. If you commit by hand, re-read that list
     immediately before, not minutes ago.
 

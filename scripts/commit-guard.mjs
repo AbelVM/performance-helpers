@@ -6,7 +6,7 @@
  * right one: the content is what you staged, and nothing in `git status` disagrees.
  * When two sessions share a working tree the index is shared too, so
  * `git add -- <explicit paths>` protects you from sweeping in *unstaged* work and
- * does not protect the commit at all. Three commits in this repository were wrong
+ * does not protect the commit at all. Four commits in this repository were wrong
  * that way, and the documented mitigation — re-read `git diff --cached --name-only`
  * immediately before committing — is a habit, and habits are what keep failing:
  *
@@ -17,6 +17,14 @@
  *   whole feature: 613 lines of source, 731 of tests, a guide, an ADR and a
  *   changeset.
  * - `.changeset/release-2-0-0.md` was swept into `f637752` ("fix(metrics): ...").
+ * - `38f8e1d` ("feat(cache): pin the TinyLFU seed ...") carries
+ *   `test/types.optionsCoverage.test.js`, which no one staging it had edited — a
+ *   one-file fix to a committed test that was sitting unstaged in the shared
+ *   worktree. That one is recorded in `AGENTS.md` because it carries the lesson
+ *   the other three do not: **this guard is opt-in.** A commit that does not go
+ *   through it is exactly as unguarded as it was before the guard existed, and a
+ *   bypassed guard leaves no trace in `git status`, the commit message, or any
+ *   output. Nothing enforces it; it has to be typed.
  *
  * A single-phase check cannot fix this, for the same reason `scripts/safe-edit.mjs`
  * says it cannot: comparing against a snapshot taken inside the same process only

@@ -8,10 +8,12 @@ import { fileURLToPath } from 'node:url';
 /**
  * `scripts/commit-guard.mjs`.
  *
- * The guard exists because three commits in this repository were wrong in exactly
- * the way it detects: `ac45b6f`, `e476642`, and a changeset swept into
- * `f637752`. So the test that matters is not "does it run" — it is **does it
- * refuse**, and does it refuse *before* the commit rather than after.
+ * The guard exists because four commits in this repository were wrong in exactly
+ * the way it detects: `ac45b6f`, `e476642`, a changeset swept into `f637752`,
+ * and `38f8e1d` — which carried a committed test nobody staging it had edited,
+ * and did so while this guard was already written. So the test that matters is
+ * not "does it run" — it is **does it refuse**, and does it refuse *before* the
+ * commit rather than after.
  *
  * Every case builds a throwaway repository. Nothing here touches the real index,
  * which is the whole hazard the script is about.
