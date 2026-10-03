@@ -296,10 +296,27 @@ Style that is deliberate here, not incidental:
     `nothing to commit, working tree clean` — the feature was in someone else's
     commit and the message described unrelated audit work.
     The hazard is that a wrong commit looks like a right one: the content is
-    exactly what you staged, and nothing in `git status` disagrees. So run
-    `git status --short` **immediately before** `git commit` and check the staged
-    set is still yours — `git diff --cached --name-only`, not the one you read
-    minutes ago. And if a commit you did not write already carries your work, do
+    exactly what you staged, and nothing in `git status` disagrees. **So use the
+    guard rather than the habit** —
+
+    ```bash
+    git add -- <explicit paths>
+    node scripts/commit-guard.mjs commit -m "..."   # snapshot, verify, commit, re-verify
+    ```
+
+    — which records the staged set, refuses to commit if the index moved between
+    that snapshot and the commit, and then confirms the commit it produced contains
+    exactly those paths and blob hashes. The digest is content-addressed, so
+    another session re-staging _different content_ under a path you already staged
+    is caught too; a path list would miss that. The snapshot lives under `.git/`,
+    so it never appears in `git status` and is never committed.
+
+    The habit it replaces — `git diff --cached --name-only` immediately before
+    `git commit` — is what all three occurrences above ran, and all three shipped.
+    A habit is not a safeguard. If you commit by hand, re-read that list
+    immediately before, not minutes ago.
+
+    And if a commit you did not write already carries your work, do
     not rewrite shared history to fix its message; say so, and let the release
     notes carry the record instead. The changeset is the artefact that survives a
     misleading commit, which is part of why it is mandatory.
