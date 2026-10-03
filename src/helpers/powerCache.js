@@ -838,6 +838,12 @@ export class PowerCache {
    *   of `null`. Read by `_fetchValidNode` and passed by `getOrSet` when
    *   `staleWhileRevalidate` is on; previously read but never documented, so it
    *   was missing from the declared options type.
+   * @param {number} [options.now] A clock reading the caller has already taken.
+   *   Threading it in halves the clock reads on the hot path (PERF-003):
+   *   `getOrSet` and `touch` each read the clock and then called this, which read
+   *   it again — and `utils/now.js` puts `nowMs()` at 141 ns and calls it "on the
+   *   hot path of essentially every helper". Omit it and this reads its own, so
+   *   the callers that have no reading to pass are unaffected.
    * @returns {CacheNode|null}
    */
   _fetchValidNode(
@@ -845,10 +851,11 @@ export class PowerCache {
     // Inline cast, not a `@param [options]` tag: this is destructured in the
     // signature, so there is no parameter named `options` for a tag to bind
     // to and TS rejects the tag with TS8024.
-    /** @type {{ignoreExpiry?: boolean, countMiss?: boolean, allowExpired?: boolean}} */ {
+    /** @type {{ignoreExpiry?: boolean, countMiss?: boolean, allowExpired?: boolean, now?: number}} */ {
       ignoreExpiry = false,
       countMiss = false,
       allowExpired = false,
+      now: providedNow,
     } = {}
   ) {
     const node = this._map.get(key);
@@ -857,8 +864,11 @@ export class PowerCache {
       return null;
     }
     // Only sample the clock when we need to check expiry to avoid unnecessary
-    // system calls on non-expiry paths.
-    const now = !ignoreExpiry && node.expiresAt ? this._now() : 0;
+    // system calls on non-expiry paths. `0` still means "do not check", and
+    // `ignoreExpiry` still wins over a reading the caller passed: the value is
+    // consulted only when expiry is actually being checked.
+    const now =
+      ignoreExpiry || !node.expiresAt ? 0 : providedNow !== undefined ? providedNow : this._now();
     if (now && node.expiresAt <= now) {
       if (allowExpired) return node;
       this._removeExpiredNode(node, now);
@@ -1803,9 +1813,11 @@ export class PowerCache {
     { ttl = undefined, weight = undefined, staleWhileRevalidate = this.allowStale } = {}
   ) {
     const now = this._now();
+    // PERF-003: `now` was read above and `_fetchValidNode` read it again.
     const node = this._fetchValidNode(key, {
       countMiss: false,
       allowExpired: staleWhileRevalidate,
+      now,
     });
 
     if (node) {
@@ -1928,9 +1940,12 @@ export class PowerCache {
    * @returns {boolean} True if the entry existed (and was not expired), false otherwise.
    */
   touch(key, ttl = undefined) {
-    const node = this._fetchValidNode(key);
-    if (!node) return false;
+    // PERF-003: the reading is taken *before* the lookup and threaded into it.
+    // Reading it afterwards - as this did - meant two reads per call whenever
+    // the node carried an expiry.
     const now = this._now();
+    const node = this._fetchValidNode(key, { now });
+    if (!node) return false;
     if (ttl !== undefined) {
       node.expiresAt = this._expiresAt(ttl, now);
     }

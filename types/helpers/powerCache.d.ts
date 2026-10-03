@@ -251,12 +251,19 @@ export class PowerCache {
      *   of `null`. Read by `_fetchValidNode` and passed by `getOrSet` when
      *   `staleWhileRevalidate` is on; previously read but never documented, so it
      *   was missing from the declared options type.
+     * @param {number} [options.now] A clock reading the caller has already taken.
+     *   Threading it in halves the clock reads on the hot path (PERF-003):
+     *   `getOrSet` and `touch` each read the clock and then called this, which read
+     *   it again — and `utils/now.js` puts `nowMs()` at 141 ns and calls it "on the
+     *   hot path of essentially every helper". Omit it and this reads its own, so
+     *   the callers that have no reading to pass are unaffected.
      * @returns {CacheNode|null}
      */
-    protected _fetchValidNode(key: any, { ignoreExpiry, countMiss, allowExpired, }?: {
+    protected _fetchValidNode(key: any, { ignoreExpiry, countMiss, allowExpired, now: providedNow, }?: {
         ignoreExpiry?: boolean;
         countMiss?: boolean;
         allowExpired?: boolean;
+        now?: number;
     }): CacheNode | null;
     /**
      * Whether an expired node may still be served at `now`.

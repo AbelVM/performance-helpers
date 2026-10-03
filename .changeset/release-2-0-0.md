@@ -5101,6 +5101,21 @@ for the next connection.
 “stop emitting resume at close” and “stop emitting resume” look identical from the failure.
 Mutation-checked: restoring `_setPaused(false)` fails the test.
 
+### The cache reads its clock once per call, not twice (patch)
+
+`getOrSet` and `touch` each read the clock and then called `_fetchValidNode`, which read
+it again. `utils/now.js` puts `nowMs()` at 141 ns and calls it "on the hot path of
+essentially every helper", so this was two samples where one suffices.
+
+Measured with an injected clock, counting reads: `getOrSet` **2 → 1**, `touch` **2 → 1**.
+`get` and `has` were already single reads and are unchanged.
+
+The reading is threaded in as an optional `now`, so a caller with no reading to pass is
+unaffected — `_fetchValidNode` still reads its own. `ignoreExpiry` still wins over a
+passed reading: the value is consulted only when expiry is actually being checked, and
+`0` still means "do not check". No behaviour change; this is purely fewer clock samples
+on the same decisions.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

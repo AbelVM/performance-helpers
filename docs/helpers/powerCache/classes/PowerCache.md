@@ -425,6 +425,17 @@ Return an expired node instead
 
 `boolean` = `false`
 
+###### now?
+
+`number`
+
+A clock reading the caller has already taken.
+  Threading it in halves the clock reads on the hot path (PERF-003):
+  `getOrSet` and `touch` each read the clock and then called this, which read
+  it again — and `utils/now.js` puts `nowMs()` at 141 ns and calls it "on the
+  hot path of essentially every helper". Omit it and this reads its own, so
+  the callers that have no reading to pass are unaffected.
+
 #### Returns
 
 `CacheNode` \| `null`
