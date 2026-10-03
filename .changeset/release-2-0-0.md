@@ -6595,3 +6595,43 @@ is worse than no test**, because it is counted as coverage.
 `WorkerAgnostic` is now the 17th entry in `RESOURCE_OWNERS`. That list held
 **16**, not the 19 the row claimed, so the row's own count needed re-verifying
 too — which is the second half of what it asked for.
+
+## `PowerCache` rejects unknown options
+
+**A one-character typo silently disabled a memory-safety limit.** `PowerCache`
+accepted unknown options and fell back to its defaults, so:
+
+|                                      | entries after 1000 `set()`s |
+| ------------------------------------ | --------------------------- |
+| `new PowerCache({ maxEntries: 5 })`  | **5**                       |
+| `new PowerCache({ maxEntriess: 5 })` | **1000**                    |
+
+The second is the same code with one letter moved, and it produced an **unbounded**
+cache with `maxEntries: Infinity` in force — while the caller believed they had
+capped it at five. `PowerMemoizer` has validated its options all along; the
+whitelist that includes `maxInflightRefreshes` belonged to `PowerMemoizer` and not
+to `PowerCache`, which is why the gap survived.
+
+`assertKnownOptions` is now called from `PowerCache`'s constructor over all 21
+accepted options, and the error names the offending key and suggests the nearest
+match.
+
+**This is a breaking change, deliberately.** Anyone still passing a removed option
+— `eagerCleanupOnRead`, deleted in CACHE-008 — now gets an actionable error instead
+of silence. The alternative was leaving a limit silently unset, which is the worse
+of the two failures: one breaks loudly at construction, the other fails to bound
+memory in production.
+
+**Two existing tests asserted the old behaviour and were inverted rather than
+deleted**, both in the same shape:
+
+- `powerCache.maxInflightRefreshes.test.js` read _"ignores a mistyped cap, because
+  PowerCache does not validate its options"_ — pinned deliberately when MEM-001
+  landed, so that a validation pass would fail visibly rather than change behaviour
+  quietly. **It failed exactly as written to**, and that is the mechanism working.
+- `powerCache.eagerExpiry.test.js` read _"an unknown option is ignored rather than
+  erroring"_, written to protect a caller still passing `eagerCleanupOnRead`. That
+  population is real, but the same permissiveness permitted every other unknown
+  option forever, which is how `maxEntriess` went unnoticed.
+
+Removing the validation fails both, so neither inversion is decorative.

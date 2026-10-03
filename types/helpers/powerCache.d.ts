@@ -38,7 +38,7 @@ export class PowerCache {
      * @param {PowerCacheOptions} [options]
      * @throws {TypeError} When a non-object is provided as the options argument.
      */
-    constructor({ maxEntries, maxInflightRefreshes, maxWeight, weightFn, defaultTTL, allowStale, staleTtl, fetchMethod, maxPoolSize, rejectOversized, onEvict, onExpire, initialPoolSize, maxCleanupPerTick, defaultAsyncTimeout, onError, policy, admission, windowSize, now, }?: PowerCacheOptions, ...args: any[]);
+    constructor(options?: PowerCacheOptions, ...args: any[]);
     maxEntries: number;
     maxInflightRefreshes: number;
     maxWeight: number;

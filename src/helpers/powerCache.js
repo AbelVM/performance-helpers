@@ -169,53 +169,81 @@ export class PowerCache {
    * @param {PowerCacheOptions} [options]
    * @throws {TypeError} When a non-object is provided as the options argument.
    */
-  constructor({
-    maxEntries = Infinity,
-    // No default here on purpose: `undefined` is what tells the constructor the
-    // caller said nothing, as distinct from having said `null`, which
-    // `assertLimitRequired` rightly rejects.
-    maxInflightRefreshes,
-    maxWeight = Infinity,
-    weightFn = () => 1,
-    defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
-    // ── Stale-while-revalidate ──────────────────────────────────────────────
-    // `staleWhileRevalidate` already existed as a **per-call** flag, and that is
-    // where the defect lived: with no upper bound on the stale window, it
-    // served a value expired at *any* point in the past. Measured — a value
-    // **5 years** past `expiresAt` was still returned as "stale", with the
-    // refresh running in the background and failing silently every time. That is
-    // not stale-while-revalidate, it is serve-forever-while-refreshing, and it
-    // is the one failure mode SWR must not have: a caller asking for
-    // freshness-while-not-blocking is asking for it for a bounded time.
-    allowStale = false,
-    staleTtl = Infinity,
-    // A default producer for `getOrFetch`. Declared here rather than required at
-    // each call site because the per-call form still wins, so a cache can have a
-    // general default that one caller overrides.
-    fetchMethod = null,
-    maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
-    rejectOversized = false,
-    onEvict = null,
-    onExpire = null,
-    initialPoolSize = 0,
-    maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
-    // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
-    defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
-    // invoked as onError(err, message) whenever an internal failure is
-    // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
-    onError = null,
-    /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
-    policy = 'lru',
-    admission = 'none',
-    windowSize = 0,
-    /**
-     * Injected clock in milliseconds, matching the limiters (PERF-007) and
-     * `PowerTTLMap`. Expiry is the one behaviour in this class that cannot be
-     * observed synchronously, so this is what turns "assert it expired after
-     * 100 ms" from a sleep into an exact assertion.
-     */
-    now,
-  } = {}) {
+  constructor(options = {}) {
+    assertKnownOptions(
+      options,
+      [
+        'maxEntries',
+        'maxInflightRefreshes',
+        'maxWeight',
+        'weightFn',
+        'defaultTTL',
+        'maxPoolSize',
+        'rejectOversized',
+        'onEvict',
+        'onExpire',
+        'initialPoolSize',
+        'maxCleanupPerTick',
+        'defaultAsyncTimeout',
+        'now',
+        'onError',
+        'admission',
+        'windowSize',
+        'policy',
+        'allowStale',
+        'staleTtl',
+        'fetchMethod',
+        'observability',
+      ],
+      'PowerCache'
+    );
+    const {
+      maxEntries = Infinity,
+      // No default here on purpose: `undefined` is what tells the constructor the
+      // caller said nothing, as distinct from having said `null`, which
+      // `assertLimitRequired` rightly rejects.
+      maxInflightRefreshes,
+      maxWeight = Infinity,
+      weightFn = () => 1,
+      defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
+      // ── Stale-while-revalidate ──────────────────────────────────────────────
+      // `staleWhileRevalidate` already existed as a **per-call** flag, and that is
+      // where the defect lived: with no upper bound on the stale window, it
+      // served a value expired at *any* point in the past. Measured — a value
+      // **5 years** past `expiresAt` was still returned as "stale", with the
+      // refresh running in the background and failing silently every time. That is
+      // not stale-while-revalidate, it is serve-forever-while-refreshing, and it
+      // is the one failure mode SWR must not have: a caller asking for
+      // freshness-while-not-blocking is asking for it for a bounded time.
+      allowStale = false,
+      staleTtl = Infinity,
+      // A default producer for `getOrFetch`. Declared here rather than required at
+      // each call site because the per-call form still wins, so a cache can have a
+      // general default that one caller overrides.
+      fetchMethod = null,
+      maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
+      rejectOversized = false,
+      onEvict = null,
+      onExpire = null,
+      initialPoolSize = 0,
+      maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
+      // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
+      defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
+      // invoked as onError(err, message) whenever an internal failure is
+      // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
+      onError = null,
+      /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
+      policy = 'lru',
+      admission = 'none',
+      windowSize = 0,
+      /**
+       * Injected clock in milliseconds, matching the limiters (PERF-007) and
+       * `PowerTTLMap`. Expiry is the one behaviour in this class that cannot be
+       * observed synchronously, so this is what turns "assert it expired after
+       * 100 ms" from a sleep into an exact assertion.
+       */
+      now,
+    } = options;
     // Basic options validation: when an explicit options argument is provided it must be an object
     if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
       throw new TypeError('PowerCache options must be an object');

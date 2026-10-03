@@ -228,22 +228,29 @@ describe('MEM-001: background refreshes are capped', () => {
     }
   });
 
-  it('ignores a mistyped cap, because PowerCache does not validate its options', () => {
-    // **Written to pin an existing limitation, not to assert a protection.** An
-    // earlier draft of this file asserted that `maxInflightRefresh` (missing the
-    // trailing `es`) would be *rejected*, on the reasoning that an ignored option
-    // looks exactly like a working one. It does not: `new PowerCache({ ... })`
-    // accepts unknown options silently, and the `assertKnownOptions` call with a
-    // whitelist that includes `maxInflightRefreshes` belongs to **`PowerMemoizer`**,
-    // not to `PowerCache`.
+  it('rejects a mistyped cap, because PowerCache validates its options', () => {
+    // **This assertion was inverted, and that is the point.** It previously read
+    // "ignores a mistyped cap, because PowerCache does not validate its options",
+    // written as a deliberate pin of that limitation so a future validation pass
+    // would fail visibly rather than silently change behaviour. It did exactly
+    // that, and this is that failure.
     //
-    // So a typo here leaves the cache on its default cap rather than unbounded —
-    // the failure is a stale value that is not refreshed as often as intended,
-    // which is quieter than the OOM this row fixed, but it is still a trap.
-    // Asserted as-is so the limitation is visible and a future validation pass
-    // will fail this and say so.
-    const cache = new PowerCache({ maxInflightRefresh: 10 });
-    expect(cache.maxInflightRefreshes, 'the real option kept its default').toBe(1024);
+    // What it cost while it was true: a caller writing `maxInflightRefresh: 10`
+    // got a cache reporting the default 1024, with no signal. The same shape
+    // applies to the options that matter more — `maxEntriess: 5` left
+    // `maxEntries` at `Infinity`, so **a one-character typo turned a 5-entry cache
+    // into an unbounded one** and the caller believed they were protected.
+    for (const bad of ['maxInflightRefresh', 'maxEntriess', 'staleTtll']) {
+      expect(() => new PowerCache({ [bad]: 10 }), `${bad} must be rejected, not ignored`).toThrow(
+        new RegExp(bad)
+      );
+    }
+
+    // And the real options still work, which is the other half: a validation pass
+    // that rejected a valid spelling would be worse than none.
+    const ok = new PowerCache({ maxInflightRefreshes: 7, maxEntries: 11, staleTtl: 99 });
+    expect(ok.maxInflightRefreshes).toBe(7);
+    expect(ok.maxEntries).toBe(11);
   });
 
   it('defaults from a finite maxEntries rather than from Infinity', async () => {

@@ -94,14 +94,34 @@ describe('expiry is eager on every read path, with no option', () => {
     cache.dispose();
   });
 
-  it('an unknown option is ignored rather than erroring', () => {
-    // What happens to a caller who was already passing it — which is the only
-    // population that could have been depending on it, and could not have been
-    // depending on the behaviour, since the behaviour was unconditional.
-    const { cache } = withClock({ eagerCleanupOnRead: true });
-    cache.set('a', 1);
-    expect(cache.get('a')).toBe(1);
-    cache.dispose();
+  it('a removed option is now rejected rather than silently ignored', () => {
+    // **This assertion was inverted, deliberately and in the same shape as the one
+    // in `powerCache.maxInflightRefreshes.test.js`.** It previously read "an
+    // unknown option is ignored rather than erroring" and existed to protect a
+    // caller already passing `eagerCleanupOnRead` — a real concern, since the
+    // behaviour was unconditional so nobody could have depended on the option.
+    //
+    // What it also permitted was every *other* unknown option being ignored
+    // forever, which is how `maxEntriess: 5` left `maxEntries` at `Infinity`: a
+    // one-character typo silently turned a 5-entry cache into an unbounded one
+    // and the caller believed they were protected. `PowerCache` now calls
+    // `assertKnownOptions`, so a removed option and a misspelled one are the same
+    // event, and both are loud.
+    //
+    // **A breaking change for anyone still passing `eagerCleanupOnRead`**, and
+    // deliberately so: the alternative was leaving a memory-safety option
+    // silently unset. The error names the option and suggests the nearest match.
+    expect(() => withClock({ eagerCleanupOnRead: true })).toThrow(/eagerCleanupOnRead/);
+
+    // And the population this test was written to protect gets an actionable
+    // error rather than silence.
+    let message = '';
+    try {
+      withClock({ eagerCleanupOnRead: true });
+    } catch (e) {
+      message = e.message;
+    }
+    expect(message).toMatch(/unknown option/i);
   });
 
   it('a live entry is still not removed by a read', () => {
