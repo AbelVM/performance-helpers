@@ -6454,3 +6454,36 @@ skewed key distribution.
 shift of 3 instead of 1 — the byte-order slip the word form makes possible — fails 2. What the suite deliberately does **not** assert is the speed: the harness
 measures a 28.61% median min/max spread, so a duration assertion would be noise,
 and the 4.5× is evidenced by the measurement above rather than by the gate.
+
+## `scripts/safe-edit.mjs`: check-then-write editing for shared files
+
+**A tool, prompted by an incident rather than a theory.** A hand-written edit to
+`review_04.md` reverted a concurrent session's section renumbering — three changes,
+silently, because writing a whole file from a version read thirty seconds earlier is
+what an editor does. `AGENTS.md` records the same failure for `git stash`, and
+`scripts/close-review-row.mjs` grew an `mtime` guard for it. **That guard protects
+the script; it does not protect the habit**, and this incident was not made through
+the script.
+
+**A single-phase check cannot fix this class of loss.** Comparing a file against a
+snapshot taken inside the same process only catches a write landing _during_ the
+run, and the dangerous case is the one where it landed _before_. So the snapshot is
+taken by the caller, separately, and handed back as a digest:
+
+```
+safe-edit snapshot --file review_04.md
+safe-edit apply    --file review_04.md --expect <sha256> --patch <module.mjs>
+```
+
+`apply` refuses with exit 1 and writes nothing if the digest has moved, so a stale
+edit fails loudly instead of reverting someone. It also refuses a patch that
+produces no change — a stale anchor yields an identical string, and writing it would
+exit 0 and look like success, which is the failure that makes "did my edit land?"
+unanswerable from outside. The backup is kept beside the file and the tool prints
+the `cp` to revert it, because `git stash` is the documented wrong answer.
+
+**7 tests, 2 mutants, both caught.** Removing the digest check fails the stale-edit
+test — which also asserts the other session's line survives, not merely that the
+tool exited non-zero. Removing the no-change guard fails exactly the test for it.
+The happy path is tested too, because a guard that refuses everything is an
+obstacle rather than a guard.
