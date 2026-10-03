@@ -5189,6 +5189,31 @@ That last one was found by accident and is the most consequential: it surfaced a
 cross-test pollution, where one test stubbing `TextEncoder` away poisoned every later
 test in the file. Mutation-checked both ways.
 
+### `MESSAGE_CODECS` is a read-only registry, not a mutable `Set` (patch)
+
+The `@readonly` on this export was a **type claim with nothing behind it**. `Object.freeze` does
+not freeze a `Set`'s contents, so `MESSAGE_CODECS.add('bogus')` succeeded — and `PowerPool`
+validates `options.messageCodec` with `MESSAGE_CODECS.has(...)`, so the pool then accepted
+`'bogus'` and negotiated against a protocol nobody implements, failing later and somewhere
+else entirely.
+
+```js
+MESSAGE_CODECS.add('bogus');
+// before: Set(4) { 'framed', 'legacy', 'negotiated', 'bogus' }
+// after:  TypeError: MESSAGE_CODECS is read-only
+```
+
+**The mutators throw rather than silently no-op**, because a silent no-op would leave a caller
+believing it had registered a codec.
+
+A frozen **array** was the alternative and it breaks every consumer's `.has()`; dropping the
+export breaks the namespace. This keeps the `Set`, keeps `.has()`, keeps iteration and `new
+Set(codecs)`, and supplies the property that was actually missing. `Set.prototype.add.call(
+MESSAGE_CODECS, ...)` still works — as it does against any frozen object in JavaScript, which is
+a language floor rather than a choice made here.
+
+Mutation-checked: restoring a plain mutable `Set` fails both new tests.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

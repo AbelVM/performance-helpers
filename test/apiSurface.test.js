@@ -287,3 +287,36 @@ describe('API surface', () => {
 // It reads both artefacts from disk after a build, and is part of
 // `npm run verify`. Demonstrated failing: adding an export to `src/index.js`
 // without rebuilding reports the missing name and the stale bundle.
+
+describe('MESSAGE_CODECS is a read-only registry, not a mutable Set', () => {
+  // RT-025. The `@readonly` was a *type* claim with nothing behind it:
+  // `Object.freeze` does not freeze a `Set`'s contents, so `add('bogus')`
+  // succeeded and `PowerPool` — which validates `options.messageCodec` with
+  // `MESSAGE_CODECS.has(...)` — then accepted 'bogus' and negotiated against a
+  // protocol nobody implements, failing later and somewhere else.
+  //
+  // Asserted on the mutators throwing, with the read surface pinned alongside: a
+  // fix that broke `.has()` would satisfy the throw alone.
+  it('refuses to be widened, narrowed or emptied', () => {
+    const codecs = index.MESSAGE_CODECS;
+    for (const method of ['add', 'delete', 'clear']) {
+      expect(() => codecs[method](method === 'add' ? 'bogus' : 'framed'), method).toThrow(
+        /read-only/
+      );
+    }
+    expect([...codecs], 'and the registry is unchanged').toEqual([
+      'framed',
+      'legacy',
+      'negotiated',
+    ]);
+  });
+
+  it('still reads as a Set, so `.has()` consumers are unaffected', () => {
+    const codecs = index.MESSAGE_CODECS;
+    expect(codecs).toBeInstanceOf(Set);
+    expect(codecs.has('framed')).toBe(true);
+    expect(codecs.has('bogus')).toBe(false);
+    expect(codecs.size).toBe(3);
+    expect(new Set(codecs).size).toBe(3);
+  });
+});

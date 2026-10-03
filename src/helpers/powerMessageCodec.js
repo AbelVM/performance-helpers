@@ -91,6 +91,34 @@ export const HEADER_BYTES = 6;
  */
 export const MESSAGE_CODECS = new Set(['framed', 'legacy', 'negotiated']);
 
+// The `@readonly` above is a *type* claim, and it was not enforced at runtime:
+// `Object.freeze` does not freeze a `Set`'s contents, so `MESSAGE_CODECS.add('bogus')`
+// succeeded — and `powerPool.js` validates `options.messageCodec` with
+// `MESSAGE_CODECS.has(...)`, so the pool then accepted `'bogus'` and negotiated
+// against a protocol nobody implements, failing later and somewhere else (RT-025).
+//
+// The mutators throw rather than silently no-op, because a silent no-op would leave
+// a caller believing it had registered a codec.
+//
+// A frozen **array** was the alternative, and it breaks every consumer's `.has()`;
+// dropping the export breaks the namespace. This keeps `Set`, keeps `.has()`, keeps
+// the export, and supplies the property that was actually missing. `Set.prototype.add
+// .call(MESSAGE_CODECS, ...)` still works — as it does against any frozen object in
+// JavaScript, which is a language floor rather than a choice made here.
+for (const method of /** @type {const} */ (['add', 'delete', 'clear'])) {
+  Object.defineProperty(MESSAGE_CODECS, method, {
+    value: () => {
+      throw new TypeError(
+        `MESSAGE_CODECS is read-only: \`${method}()\` would let a consumer widen the set ` +
+          'of codecs a pool accepts, and PowerPool validates against it.'
+      );
+    },
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  });
+}
+
 const CODEC_BY_ID = new Map([
   [CODECS.JSON, 'json'],
   [CODECS.RAW, 'raw'],
