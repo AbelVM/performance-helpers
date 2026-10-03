@@ -86,11 +86,9 @@ function getMacrotaskChannel() {
     // would otherwise exit is dropped rather than holding the process open. A
     // scheduler's job is to yield promptly inside a running program, not to keep
     // one alive. Guarded because a browser `MessagePort` has no `unref`, and
-    // browsers have no event loop to hold open.
-    // Guarded because a browser `MessagePort` has no `unref`, and browsers have
-    // no event loop to hold open. The cast is the same one `utils/timers.js`
-    // makes and for the same reason: the DOM's `MessagePort` type has no
-    // `unref`, while Node's has it as an own instance property, so the
+    // browsers have no event loop to hold open. The cast is the same one
+    // `utils/timers.js` makes and for the same reason: the DOM's `MessagePort`
+    // type has no `unref`, while Node's has it as an own instance property, so the
     // capability has to be probed on the value rather than asserted through a
     // type that only holds in one of them. `typecheck:ratchet` caught both
     // accesses at 292 against a 290 ceiling.
