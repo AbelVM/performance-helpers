@@ -39,7 +39,7 @@ import { decodeMessage, encodeMessage } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
-import { settleHeartbeatProbe } from '../utils/liveness.js';
+import { sendHeartbeatProbe, settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
 import { READY_STATE } from './constants.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
@@ -1154,45 +1154,31 @@ export class PowerWebSocketClient {
    * @private
    */
   _tickHeartbeat() {
-    if (this._socket && typeof this._socket.ping === 'function') {
-      this._pingSentAt = nowMs();
-      try {
-        this._socket.ping();
-      } catch (e) {
-        this._emit('error', e);
-      }
-      // Arm the deadline **once per live window**, and never while one is already
-      // outstanding. Two things were wrong here and the row's prescription only
-      // addresses the first.
-      //
-      // The handle was overwritten without being cleared, so a socket that never
-      // answered orphaned one timer per tick - none clearable, each firing later to
-      // increment `heartbeatTimeouts` and close the socket. Measured with a socket
-      // whose `ping()` is never answered: three ticks, three deadlines armed, zero
-      // cleared.
-      //
-      // But *clearing and re-arming* is worse than either: the deadline measures
-      // from the ping, so resetting it on every tick means a socket that never
-      // answers never times out at all whenever `heartbeatTimeoutMs` exceeds
-      // `heartbeatIntervalMs`. Two existing tests caught that, and they are right -
-      // the fix is to leave a live deadline alone.
-      if (this._heartbeatTimeoutMs > 0 && !this._heartbeatDeadline) {
-        // Clear the previous deadline before arming the next one. It was cleared only in
-        // `_handlePong`/`_onPong`, so a socket that never answers re-armed here on every
-        // tick and **overwrote** the handle: one orphan timer per tick, none of them
-        // clearable, and each firing later to increment `heartbeatTimeouts` and close the
-        // socket. Measured with a socket whose `ping()` is never answered, three ticks:
-        // three deadlines armed, zero cleared.
-        //
-        // The clean-up is idempotent - the handle is nulled on both the clear and the
-        // fire - so a pong landing mid-window clears nothing twice.
-
+    // RT-016. Shared with `PowerSocketAdapter` via `src/utils/liveness.js`.
+    //
+    // **One behaviour changed here, and it was a decision rather than a merge.** This
+    // used to report a throwing `ping()` and fall through to the arming, so a deadline
+    // could be armed against a probe that had never gone out — and a deadline firing
+    // with nothing outstanding reports a transport dead that may not be. The adapter
+    // already did the safer thing. Both now arm only on a probe that was actually sent;
+    // the reasoning is in that module's docblock so it can be argued with.
+    sendHeartbeatProbe({
+      canPing: Boolean(this._socket) && typeof this._socket.ping === 'function',
+      now: nowMs(),
+      ping: () => this._socket.ping(),
+      onPingError: (e) => this._emit('error', e),
+      markSent: (now) => {
+        this._pingSentAt = now;
+      },
+      timeoutMs: this._heartbeatTimeoutMs,
+      hasOutstanding: () => this._heartbeatDeadline !== null,
+      arm: () => {
         this._heartbeatDeadline = setSafeTimeout(() => {
           this._heartbeatDeadline = null;
           this._onHeartbeatTimeout();
         }, this._heartbeatTimeoutMs);
-      }
-    }
+      },
+    });
   }
 
   /**

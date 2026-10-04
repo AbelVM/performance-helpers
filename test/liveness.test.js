@@ -12,7 +12,7 @@
  * than through a socket: four outcomes, each one a thing that can go wrong in production.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { settleHeartbeatProbe } from '../src/utils/liveness.js';
+import { sendHeartbeatProbe, settleHeartbeatProbe } from '../src/utils/liveness.js';
 
 /** A probe context with the callbacks spied, so each can be asserted independently. */
 function probe(overrides = {}) {
@@ -86,5 +86,99 @@ describe('settleHeartbeatProbe', () => {
     expect(settleHeartbeatProbe({ pingSentAt: 1000, now: 1100, clearDeadline: () => {} })).toBe(
       100
     );
+  });
+});
+
+describe('sendHeartbeatProbe', () => {
+  /** A probe context with every callback spied. */
+  function send(overrides = {}) {
+    const ping = vi.fn();
+    const onPingError = vi.fn();
+    const markSent = vi.fn();
+    const arm = vi.fn();
+    const hasOutstanding = vi.fn(() => false);
+    return {
+      args: {
+        canPing: true,
+        now: 1000,
+        ping,
+        onPingError,
+        markSent,
+        timeoutMs: 5000,
+        hasOutstanding,
+        arm,
+        ...overrides,
+      },
+      ping,
+      onPingError,
+      markSent,
+      arm,
+      hasOutstanding,
+    };
+  }
+
+  it('sends, stamps, and arms', () => {
+    const { args, ping, markSent, arm } = send();
+    expect(sendHeartbeatProbe(args)).toBe(true);
+    expect(markSent).toHaveBeenCalledWith(1000);
+    expect(ping).toHaveBeenCalledTimes(1);
+    expect(arm).toHaveBeenCalledTimes(1);
+  });
+
+  it('stamps before pinging, so a synchronous reply still finds it', () => {
+    // Order matters: a socket that replies inline would find `_pingSentAt` unset if the
+    // stamp came after the send, and the RTT would be dropped as a stray pong.
+    const order = [];
+    const { args } = send({
+      markSent: () => order.push('stamp'),
+      ping: () => order.push('ping'),
+    });
+    sendHeartbeatProbe(args);
+    expect(order).toEqual(['stamp', 'ping']);
+  });
+
+  it('sends nothing and arms nothing when the transport cannot ping', () => {
+    // A browser does not expose `ping()` by design. Inventing a probe there would be a
+    // lie, and arming a deadline against it would report a healthy transport dead.
+    const { args, ping, arm } = send({ canPing: false });
+    expect(sendHeartbeatProbe(args)).toBe(false);
+    expect(ping).not.toHaveBeenCalled();
+    expect(arm).not.toHaveBeenCalled();
+  });
+
+  it('reports a throwing ping and arms nothing', () => {
+    // **The decision RT-016 had to make.** The client used to fall through to the arming
+    // here, leaving a deadline armed against a probe that was never sent; a deadline
+    // firing with nothing outstanding reports a transport dead that may not be. The
+    // adapter already behaved this way and both do now.
+    const boom = new Error('ping failed');
+    const { args, arm, onPingError } = send({
+      ping: () => {
+        throw boom;
+      },
+    });
+    expect(sendHeartbeatProbe(args)).toBe(false);
+    expect(onPingError).toHaveBeenCalledWith(boom);
+    expect(arm).not.toHaveBeenCalled();
+  });
+
+  it('arms once per live window, never over an outstanding deadline', () => {
+    // Two bugs live in this condition. Re-arming without clearing orphaned one timer per
+    // tick; and clearing-and-re-arming means a socket that never answers never times out
+    // at all when `heartbeatTimeoutMs` exceeds `heartbeatIntervalMs`, because the
+    // deadline keeps measuring from the latest ping.
+    const { args, arm } = send({ hasOutstanding: () => true });
+    expect(sendHeartbeatProbe(args)).toBe(true);
+    expect(arm).not.toHaveBeenCalled();
+  });
+
+  it('arms nothing when the timeout is disabled', () => {
+    const { args, arm } = send({ timeoutMs: 0 });
+    expect(sendHeartbeatProbe(args)).toBe(true);
+    expect(arm).not.toHaveBeenCalled();
+  });
+
+  it('works without the optional callbacks', () => {
+    expect(sendHeartbeatProbe({ canPing: true, now: 1, ping: () => {} })).toBe(true);
   });
 });

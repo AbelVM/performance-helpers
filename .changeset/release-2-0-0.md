@@ -7926,3 +7926,37 @@ one**, which is what a loopback transport produces routinely.
 The tick half — sending the probe and arming the deadline — is still duplicated. It is the
 same in both classes today, comment for comment, and extracting it is the remaining half of
 this row.
+
+## One heartbeat, two implementations, one shared module — and one behaviour changed
+
+Completes RT-016. `src/utils/liveness.js` now owns both halves of the protocol-level
+heartbeat that `PowerWebSocketClient` and `PowerSocketAdapter` each implemented
+separately: `sendHeartbeatProbe` (stamp, ping, arm the deadline) and `settleHeartbeatProbe`
+(clear the deadline, measure the RTT). Both classes' `_tickHeartbeat` and `_handlePong` are
+now bindings of their own deadline field, histogram, counter and error sink.
+
+**One behaviour genuinely changed, and it was a decision rather than a merge.** The two
+classes disagreed on what a throwing `ping()` means. The adapter reported it and returned,
+so no deadline was armed. The client reported it and _fell through to the arming_, so a
+deadline could be armed against a probe that had never gone out.
+
+**A deadline that fires with nothing outstanding reports a transport dead that may not
+be**, so arming on a failed send is the worse of the two, and that is what both classes do
+now. The reasoning is in the module's docblock rather than only here, because the next
+person to move this code should be able to argue with it: a failed `ping()` means the
+transport is already broken, and the honest report is the error, not a timeout against a
+probe nobody will answer. A liveness signal that fires spuriously is worse than one that
+fires late, because it closes a healthy connection.
+
+**The long comments about the arming condition moved with the code** into that docblock.
+Both classes carried identical prose about two bugs measured on a socket whose `ping()` is
+never answered — re-arming without clearing orphans one timer per tick, and
+clearing-and-re-arming means a socket that never answers never times out at all when
+`heartbeatTimeoutMs` exceeds `heartbeatIntervalMs`. Identical comments are what made the
+two look interchangeable while their throw paths were not.
+
+**Two mutants, both caught:** dropping the early return so a failed send arms anyway fails
+the throw case, and dropping the `hasOutstanding` check so the deadline re-arms every tick
+fails the arm-once case. 14 tests in `test/liveness.test.js`, covering all four outcomes of
+each function — including the stamp-before-ping ordering, without which a socket replying
+inline would be recorded as a stray pong and its RTT dropped.

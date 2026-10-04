@@ -381,3 +381,50 @@ Per-call clock override.
 #### Returns
 
 `boolean`
+
+***
+
+### tryReserve()
+
+> **tryReserve**(`n?`, `options?`): \{ `ok`: `true`; `runAt`: `null`; \} \| \{ `ok`: `false`; `runAt`: `number`; \}
+
+Consume, and on refusal report **the exact time** the batch would be admitted.
+
+The capability is not missing — [PowerGCRA#retryAfter](#retryafter) already computes
+the exact wait. What is missing is doing both **from one clock reading**:
+`tryConsume()` followed by `retryAfter()` takes two, and this class's own
+comments record that two spellings of the same arithmetic have already
+disagreed in the last bit and admitted a batch `available()` had just called
+unaffordable. A caller wiring an HTTP 429 needs both answers at once anyway.
+
+`runAt` is an **absolute timestamp**, not a delay — an HTTP `Retry-After` and a
+log line both want the instant, and converting one to the other is where a
+caller gets it wrong. It is `null` on success because there is nothing to wait
+for.
+
+This mirrors `tryConsume`'s admission path line for line rather than calling
+it, because calling it would cost the second reading this method exists to
+avoid. `test/powerGCRA.test.js` asserts the two agree across a spread of
+configurations, so a future change to either one that the other does not
+follow fails rather than drifting.
+
+#### Parameters
+
+##### n?
+
+`number` = `1`
+
+Number of operations to reserve.
+
+##### options?
+
+`LimiterNowOptions` = `{}`
+
+Per-call clock override.
+
+#### Returns
+
+\{ `ok`: `true`; `runAt`: `null`; \} \| \{ `ok`: `false`; `runAt`: `number`; \}
+
+`runAt` is the
+  absolute time the refused batch would be admitted.

@@ -38,4 +38,5 @@ The guards are the client's, verbatim, and each earned its place:
 
 ## Functions
 
+- [sendHeartbeatProbe](functions/sendHeartbeatProbe.md)
 - [settleHeartbeatProbe](functions/settleHeartbeatProbe.md)

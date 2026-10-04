@@ -34,7 +34,7 @@
 import { setSafeTimeout } from '../utils/timers.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { nowMs } from '../utils/now.js';
-import { settleHeartbeatProbe } from '../utils/liveness.js';
+import { sendHeartbeatProbe, settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { frameByteLength } from '../utils/frameSize.js';
@@ -955,63 +955,36 @@ export class PowerSocketAdapter {
    * @private
    */
   _tickHeartbeat() {
-    if (!this.canPing) {
-      // No protocol-level ping available - the browser deliberately does not
-      // expose one, and `WebSocketStream` has none. The adapter does not
-      // pretend otherwise; `stats().canPing` reports `false` and the liveness
-      // signal is message activity plus the idle timer, if configured.
-      return;
-    }
-    this._pingSentAt = nowMs();
-    try {
-      this.socket.ping();
-    } catch (e) {
-      this._emitError(e);
-      return;
-    }
-    // Arm the deadline **once per live window**, and never while one is already
-    // outstanding. Two things were wrong here and the row's prescription only
-    // addresses the first.
-    //
-    // The handle was overwritten without being cleared, so a socket that never
-    // answered orphaned one timer per tick - none clearable, each firing later to
-    // increment `heartbeatTimeouts` and close the socket. Measured with a socket
-    // whose `ping()` is never answered: three ticks, three deadlines armed, zero
-    // cleared.
-    //
-    // But *clearing and re-arming* is worse than either: the deadline measures
-    // from the ping, so resetting it on every tick means a socket that never
-    // answers never times out at all whenever `heartbeatTimeoutMs` exceeds
-    // `heartbeatIntervalMs`. Two existing tests caught that, and they are right -
-    // the fix is to leave a live deadline alone.
-    if (this._heartbeatTimeoutMs > 0 && !this._heartbeatDeadline) {
-      // Clear the previous deadline before arming the next one. It was cleared only in
-      // `_handlePong`/`_onPong`, so a socket that never answers re-armed here on every
-      // tick and **overwrote** the handle: one orphan timer per tick, none of them
-      // clearable, and each firing later to increment `heartbeatTimeouts` and close the
-      // socket. Measured with a socket whose `ping()` is never answered, three ticks:
-      // three deadlines armed, zero cleared.
-      //
-      // The clean-up is idempotent - the handle is nulled on both the clear and the
-      // fire - so a pong landing mid-window clears nothing twice.
-
-      this._heartbeatDeadline = setSafeTimeout(() => {
-        this._heartbeatDeadline = null;
-        this._counters.heartbeatTimeouts += 1;
-        this._clearTimers();
-        // A socket can sit in OPEN forever with nothing getting through - the
-        // normal state of affairs behind a dead load balancer. Treating that
-        // as alive is how a "connected" pool serves 100 % errors.
-        try {
-          this.socket?.close(4000, 'heartbeat timeout');
-        } catch (e) {
-          this._emitError(e);
-        }
-        this._state = READY_STATE.CLOSED;
-        this._finishDrain();
-        this._invoke(this._onClose, { code: 4000, reason: 'heartbeat timeout', adapter: this });
-      }, this._heartbeatTimeoutMs);
-    }
+    // RT-016. Shared with `PowerWebSocketClient` via `src/utils/liveness.js`. The
+    // long-form history of the arming condition below moved into that module's docblock
+    // with the code; the two classes carried identical comments about it, which is exactly
+    // what made them look interchangeable while their `ping()` throw paths were not.
+    sendHeartbeatProbe({
+      canPing: this.canPing,
+      now: nowMs(),
+      ping: () => this.socket.ping(),
+      onPingError: (e) => this._emitError(e),
+      markSent: (now) => {
+        this._pingSentAt = now;
+      },
+      timeoutMs: this._heartbeatTimeoutMs,
+      hasOutstanding: () => this._heartbeatDeadline !== null,
+      arm: () => {
+        this._heartbeatDeadline = setSafeTimeout(() => {
+          this._heartbeatDeadline = null;
+          this._counters.heartbeatTimeouts += 1;
+          this._clearTimers();
+          // A socket can sit in OPEN forever with nothing getting through - the
+          // normal state of affairs behind a dead load balancer. Treating that
+          // as alive is how a "connected" pool serves 100 % errors.
+          try {
+            this.socket?.close(4000, 'heartbeat timeout');
+          } catch {
+            /* already closing */
+          }
+        }, this._heartbeatTimeoutMs);
+      },
+    });
   }
 
   /**
