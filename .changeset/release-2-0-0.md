@@ -5214,6 +5214,32 @@ a language floor rather than a choice made here.
 
 Mutation-checked: restoring a plain mutable `Set` fails both new tests.
 
+### `PowerGCRA.tryReserve()`: the refusal tells you _when_ (minor)
+
+A new method, and the row behind it was **half wrong in a useful way**. It asked for this because
+`bottleneck` "can not tell at what exact timestamp it will run yet" — but `PowerGCRA` already
+could: `retryAfter()` computes the exact wait. What was missing was answering **both**
+questions at once.
+
+```js
+const { ok, runAt } = limiter.tryReserve();
+if (!ok) response.set('Retry-After', Math.ceil((runAt - Date.now()) / 1000));
+```
+
+`runAt` is an **absolute timestamp**, not a delay — an HTTP `Retry-After` and a log line both want
+the instant, and converting between the two is where callers get it wrong. It is `null` on
+admission, because there is nothing to wait for.
+
+The reason it is not just `tryConsume()` then `retryAfter()` is the **clock**: that sequence
+takes two readings, and this class's own comments record two spellings of the same
+arithmetic already disagreeing in the last bit and admitting a batch `available()` had just
+called unaffordable. Here both answers come from one reading, so they cannot straddle a tick.
+
+`tryReserve` mirrors `tryConsume`'s admission path rather than calling it — calling it would
+cost the second reading — so a test asserts the two agree on **384 decisions** across
+`rate` 1-40 × `burst` 0-12 × `n` 1-16, on twin limiters driven by the same clock sequence.
+That is the drift guard; mutation-checked.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

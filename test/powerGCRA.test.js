@@ -357,3 +357,53 @@ describe('PowerGCRA invariants', () => {
     expect(combined.tryConsume()).toBe(true);
   });
 });
+
+describe('GAP-006: tryReserve answers both questions from one clock reading', () => {
+  // `retryAfter()` already computed the exact wait, so the capability was not
+  // missing — what was missing was doing both at once. `tryConsume()` followed by
+  // `retryAfter()` takes **two** clock readings, and this class's own comments record
+  // that two spellings of the same arithmetic have already disagreed in the last
+  // bit and admitted a batch `available()` had just called unaffordable.
+  it('returns an absolute runAt on refusal, and null on admission', () => {
+    let now = 1000;
+    const g = new PowerGCRA({ rate: 1, burst: 0, now: () => now });
+    expect(g.tryReserve(), 'first is admitted').toEqual({ ok: true, runAt: null });
+    // rate 1/1000ms with no burst: the next slot is at 2000, and `runAt` is that
+    // **instant**, not the 1000ms delay — an HTTP Retry-After and a log line both
+    // want the instant, and converting one to the other is where callers go wrong.
+    expect(g.tryReserve()).toEqual({ ok: false, runAt: 2000 });
+    now = 2000;
+    expect(g.tryReserve(), 'admitted once the clock reaches it').toEqual({ ok: true, runAt: null });
+  });
+
+  it('agrees with tryConsume on every decision, on twin limiters', () => {
+    // The drift guard. `tryReserve` mirrors `tryConsume`'s admission path rather than
+    // calling it, so the two can diverge; this fails if either changes without the
+    // other. Compared on **twin limiters** driven by the same clock sequence — an
+    // earlier version of this check ran both against one instance and disagreed 42
+    // times out of 384, which was the test double-consuming rather than a real
+    // divergence.
+    let checked = 0;
+    let disagreed = 0;
+    for (const rate of [1, 3, 7, 40]) {
+      for (const burst of [0, 1, 4, 12]) {
+        for (const n of [1, 2, 5, 16]) {
+          let c1 = 5000;
+          let c2 = 5000;
+          const a = new PowerGCRA({ rate, burst, now: () => c1 });
+          const b = new PowerGCRA({ rate, burst, now: () => c2 });
+          for (let step = 0; step < 6; step += 1) {
+            const reserved = a.tryReserve(n).ok;
+            const consumed = b.tryConsume(n);
+            checked += 1;
+            if (reserved !== consumed) disagreed += 1;
+            c1 += 37;
+            c2 += 37;
+          }
+        }
+      }
+    }
+    expect(checked).toBe(384);
+    expect(disagreed, 'tryReserve must decide exactly as tryConsume does').toBe(0);
+  });
+});
