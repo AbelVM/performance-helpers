@@ -432,22 +432,6 @@ The socket's ready state, mirroring the platform
 
 ## Methods
 
-### \_handleMessage()
-
-> **\_handleMessage**(`event`): `void`
-
-#### Parameters
-
-##### event
-
-`any`
-
-#### Returns
-
-`void`
-
-***
-
 ### \[asyncDispose\]()
 
 > **\[asyncDispose\]**(): `Promise`\<`void`\>

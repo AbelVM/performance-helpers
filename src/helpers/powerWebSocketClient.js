@@ -1139,11 +1139,6 @@ export class PowerWebSocketClient {
   }
 
   /**
-   * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
-   *   the caller delivers one directly - hence `event?.data ?? event`.
-   * @private
-   */
-  /**
    * Read the streams tier's inbound frames until the stream ends.
    *
    * A `WebSocketStream` has no `message` event: inbound frames arrive from
@@ -1197,6 +1192,11 @@ export class PowerWebSocketClient {
     })();
   }
 
+  /**
+   * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
+   *   the caller delivers one directly - hence `event?.data ?? event`.
+   * @private
+   */
   _handleMessage(event) {
     const data = event?.data ?? event;
 

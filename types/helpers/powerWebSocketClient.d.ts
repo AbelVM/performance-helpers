@@ -242,11 +242,6 @@ export class PowerWebSocketClient {
      */
     private _handleOpen;
     /**
-     * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
-     *   the caller delivers one directly - hence `event?.data ?? event`.
-     * @private
-     */
-    /**
      * Read the streams tier's inbound frames until the stream ends.
      *
      * A `WebSocketStream` has no `message` event: inbound frames arrive from
@@ -272,7 +267,12 @@ export class PowerWebSocketClient {
      * @returns {void}
      */
     private _startStreamPump;
-    _handleMessage(event: any): void;
+    /**
+     * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
+     *   the caller delivers one directly - hence `event?.data ?? event`.
+     * @private
+     */
+    private _handleMessage;
     /**
      * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
      *   absent on a synthetic close.
