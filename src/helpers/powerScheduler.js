@@ -1,4 +1,5 @@
 import { assertKnownOptions } from '../utils/options.js';
+import { neutralise } from '../utils/neutralise.js';
 /**
  * PowerScheduler
  *
@@ -411,7 +412,7 @@ export class PowerScheduler {
     closeMacrotaskChannel();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
-    this.cancel = () => {};
+    neutralise(this, 'cancel');
   }
 
   /**

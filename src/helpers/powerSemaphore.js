@@ -18,6 +18,7 @@
  */
 import { PowerPermitGate } from './powerPermitGate.js';
 import { assertKnownOptions } from '../utils/options.js';
+import { neutralise } from '../utils/neutralise.js';
 
 export class PowerSemaphore {
   /**
@@ -181,7 +182,7 @@ export class PowerSemaphore {
     this.reset();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
-    this.reset = () => {};
+    neutralise(this, 'reset');
   }
 
   /**

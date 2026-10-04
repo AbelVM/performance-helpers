@@ -13,6 +13,7 @@ import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { abortReason } from '../utils/abort.js';
 import { queueFullError } from '../utils/errors.js';
+import { neutralise } from '../utils/neutralise.js';
 
 /**
  * PowerPermitGate
@@ -436,7 +437,7 @@ export class PowerPermitGate {
     this.reset();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
-    this.reset = () => {};
+    neutralise(this, 'reset');
   }
 
   /**

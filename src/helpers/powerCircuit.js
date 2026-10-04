@@ -23,6 +23,7 @@
 import { PowerEventBus } from './powerEventBus.js';
 import { nowMs } from '../utils/now.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+import { neutralise } from '../utils/neutralise.js';
 import {
   DEFAULT_CIRCUIT_MAX_OPEN_FACTOR,
   DEFAULT_CIRCUIT_MIN_JITTER_RATIO,
@@ -382,7 +383,7 @@ export class PowerCircuit {
     };
     // Neutralise the cleanup so a second dispose (or a late reset) is a no-op
     // rather than a second teardown pass.
-    this.reset = () => {};
+    neutralise(this, 'reset');
   }
 
   /**

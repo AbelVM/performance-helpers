@@ -16,6 +16,7 @@
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerDefer } from './powerDefer.js';
 import { setSafeTimeout } from '../utils/timers.js';
+import { neutralise } from '../utils/neutralise.js';
 
 export class PowerLatch {
   /**
@@ -358,7 +359,7 @@ export class PowerLatch {
     this._rejectAll(Object.assign(new Error('Disposed'), { code: 'EDISPOSED' }));
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
-    this.reset = () => {};
+    neutralise(this, 'reset');
   }
 
   /**

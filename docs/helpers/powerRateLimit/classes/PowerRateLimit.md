@@ -105,6 +105,19 @@ Limiter instances to compose. Each
 
 ***
 
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1), so `using limit = new PowerRateLimit(…)` releases
+it deterministically at scope exit.
+
+#### Returns
+
+`void`
+
+***
+
 ### available()
 
 > **available**(`options?`): `number`
@@ -123,6 +136,48 @@ without it the result is the shared default slot's.
 #### Returns
 
 `number`
+
+***
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release every resource this instance holds, so it can take part in `using` /
+`await using` and a DI container's teardown like every other long-lived
+limiter here.
+
+A composer holds no timer and no subscription — its legs refill lazily and
+compute elapsed time from a stored timestamp whenever they are read — so this
+is a **state release**, not a cleanup, and there is nothing to cancel.
+
+**With `keyFn`, this drops the lazily built per-slot limiter sets**, and that
+is the part worth having. They are the largest thing a rate limiter in this
+library holds: `buckets` (default 1024) slots, each a fresh limiter set built
+from the caller's factories, addressed by a hash of a **client-controlled**
+key. Filling them with `null` drops the whole graph in one pass, where
+`reset()` alone would walk every built slot calling `reset()` on each leg and
+leave every one of them resident. An unkeyed composer has nothing built and
+falls through to the reset below.
+
+**Disposing and then reusing a keyed composer hands every built slot a fresh
+allowance.** That is the same "eviction is a reset" bypass the constructor
+refuses to commit to, and it is stated rather than prevented because the two
+situations are not the same: a slot is never discarded *while the instance is
+live*, because a tenant evicted while quiet would return to a full budget and
+rate limiting would be skippable. Here the caller has declared it is finished
+with the instance, and the alternative — keeping slots resident after teardown
+so a disposed composer is still indistinguishable from a live one — is the
+memory a dispose exists to release.
+
+The caller's own `limiters` are **not** discarded. They were passed in, so
+they belong to the caller; the unkeyed path resets them, which is what
+[PowerRateLimit#reset](#reset) already does, and leaves the caller's objects
+usable.
+
+#### Returns
+
+`void`
 
 ***
 

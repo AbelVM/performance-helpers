@@ -1,4 +1,5 @@
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+import { neutralise } from '../utils/neutralise.js';
 /**
  * Shared subscriber set helper used by event buses and observable stores.
  *
@@ -375,7 +376,7 @@ export class PowerSubscriberSet {
     this.clear();
     // Neutralise `clear` so a second dispose (or a late callback) cannot run a
     // second teardown pass over an already-empty registry.
-    this.clear = () => {};
+    neutralise(this, 'clear');
   }
 
   /**

@@ -5290,6 +5290,34 @@ from this library's type set and TS rejects the left-hand side outright.
 
 Type debt fell from 148 to 147; the ceiling was lowered rather than left slack.
 
+### Ten `dispose()` methods now neutralise through one helper (patch)
+
+Six helpers shipped the same shadowing line by hand — `this.reset = () => {}` and its two
+siblings — for **ten** instances across the library. That idiom has two costs, and both are now
+fixed in one place rather than ten.
+
+**A second `dispose()` re-assigned**, allocating a _fresh_ arrow. Two calls produced two
+different functions for the same method, so anything holding a reference across disposal saw it
+swapped out from underneath.
+
+**The own property left behind was enumerable**, so the instance's shape changed at disposal:
+`for...in`, a spread, `Object.assign` and a JSON serialisation all began reporting a `reset` that
+was not there before.
+
+```js
+neutralise(instance, 'reset');
+// idempotent, and the shadow is non-enumerable
+```
+
+One thing it deliberately does **not** do is hide the property from
+`Object.getOwnPropertyNames`. The method still exists — it must, or a second `dispose()` would
+throw — so exact reflection will still see it. Deleting it or assigning `undefined` turns every
+post-disposal call into a `TypeError`, which is a louder failure than the one being fixed.
+
+Internal only: `utils/neutralise.js` is not exported, so the public surface is unchanged.
+Mutation-checked — reverting to plain assignment fails both the idempotence and the enumerability
+tests.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

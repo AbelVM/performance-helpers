@@ -18,6 +18,7 @@ import { abortReason, raceWithAbort } from '../utils/abort.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerScheduler } from './powerScheduler.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
+import { neutralise } from '../utils/neutralise.js';
 
 /**
  * PowerBatch
@@ -240,7 +241,7 @@ export class PowerBatch {
     this.clear();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
-    this.clear = () => {};
+    neutralise(this, 'clear');
   }
 
   /**

@@ -879,6 +879,106 @@ export type PowerSocketAdapterOptions = {
     drainTimeoutMs?: number | undefined;
 };
 /**
+ * Options for `PowerRTCChannel`.
+ */
+export type PowerRTCChannelOptions = {
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
+     */
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
+    /**
+     * -
+     * Called for each inbound message, with the raw `MessageEvent.data`. Not decoded:
+     * `binaryType` is `arraybuffer` by default, so a `Uint8Array` goes straight into
+     * `decodeMessage` or a `PowerRealtimeHub` handler. A `Blob` here means the
+     * channel's `binaryType` was changed — see `stats().binaryType`.
+     */
+    onMessage?: ((arg0: {
+        data: any;
+        channel: import("./powerRTCChannel.js").PowerRTCChannel;
+    }) => void) | undefined;
+    /**
+     * -
+     * The channel is open and {@link import ('./powerRTCChannel.js').PowerRTCChannel#send}will be served.
+     *
+     * **Fires for a channel that was already open at construction**, not only from
+     * the `open` event: a transferred channel arrives in whatever state it was
+     * transferred in, and one transferred after negotiation never fires `open` at
+     * all. `stats().opened` counts both.
+     */
+    onOpen?: ((arg0: import("./powerRTCChannel.js").PowerRTCChannel) => void) | undefined;
+    /**
+     * -
+     * The channel closed. `'local'` means this class called `close()`; `'remote'`
+     * covers a peer that vanished, an ICE drop and a `close()` from the other side
+     * alike, because the platform's `close` event carries no code and no reason —
+     * take the reason from the hub's own `close(sub, reason)` argument instead.
+     */
+    onClose?: ((arg0: {
+        reason: "local" | "remote";
+        channel: import("./powerRTCChannel.js").PowerRTCChannel;
+    }) => void) | undefined;
+    /**
+     * -
+     * A transport, listener-registration, or `send()` error. A throwing `onError` is
+     * swallowed.
+     */
+    onError?: ((arg0: any, arg1: import("./powerRTCChannel.js").PowerRTCChannel) => void) | undefined;
+    /**
+     * - Above this `bufferedAmount`,
+     * {@link import ('./powerRTCChannel.js').PowerRTCChannel#isBackpressured} is `true`.
+     * 64 KiB by default.
+     *
+     * Written to the channel's `bufferedAmountLowThreshold`, so it is **also** a
+     * mutation of the caller's object and overrides any threshold already there.
+     * `0` disables the watermark, and does not write the property — the platform
+     * default of `0` would make `bufferedamountlow` fire whenever the buffer
+     * reached empty, turning the event into a metronome.
+     *
+     * One option rather than the client's four (`highWaterMarkBytes`,
+     * `lowWaterMarkBytes`, `pollIntervalMs`, `maxPollIntervalMs`), because the
+     * platform pushes `bufferedamountlow` and `PowerWebSocketClient` had to poll
+     * for it. See `guides/powerRTCChannel.md`.
+     */
+    highWaterMarkBytes?: number | undefined;
+    /**
+     * - Largest frame this channel may be
+     * asked to send. Defaults to `RTCSctpTransport.maxMessageSize` — the real
+     * negotiated ceiling — and to 256 KiB where the platform does not expose one.
+     *
+     * **Enforced, not reported.** {@link import ('./powerRTCChannel.js').PowerRTCChannel#send}
+     * checks before calling the platform and *throws*, because SCTP caps a single
+     * message where a `WebSocket` would merely buffer: retrying cannot make a frame
+     * smaller, and a `PowerRealtimeHub` adapter that refused one by returning
+     * `false` would lose it with `delivered` already incremented. `Infinity`
+     * delegates the check to the platform's own throw.
+     *
+     * This is the outbound counterpart of
+     * {@link PowerSocketAdapterOptions.maxPayloadSizeBytes}, and it reports the
+     * **opposite** fact: that one counts a frame the platform had already received,
+     * this one stops a frame the platform has not seen.
+     */
+    maxMessageSizeBytes?: number | undefined;
+    /**
+     * - Assert, at construction, that the
+     * channel really is `ordered: false` and `maxRetransmits: 0`, and throw
+     * {@link TypeError} if it is not.
+     *
+     * Those two are fixed by `createDataChannel()` and cannot be changed afterwards,
+     * so this class cannot make a channel UDP-like — only tell you it is not. A
+     * helper that reported "UDP-like" while silently accepting the *default*
+     * reliable channel would be the class of defect this repository exists to
+     * prevent, because every latency claim built on that assumption would then be
+     * false and nothing would say so. Checked before anything is attached or
+     * mutated, so a refusal leaves no listener installed. Off by default: report
+     * `stats().ordered` at runtime instead if that suits the application better.
+     */
+    expectUnreliable?: boolean | undefined;
+};
+/**
  * Logger options for `PowerLogger`.
  */
 export type PowerLoggerOptions = {

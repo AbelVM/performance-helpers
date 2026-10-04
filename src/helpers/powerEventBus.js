@@ -1,5 +1,6 @@
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerSubscriberSet, cleanupWeakRefs } from './powerSubscriberSet.js';
+import { neutralise } from '../utils/neutralise.js';
 
 /**
  * PowerEventBus
@@ -548,7 +549,7 @@ export class PowerEventBus {
     this.clear();
     // Neutralise `clear` so a second dispose, or a late callback, cannot run a
     // second teardown pass over an already-empty bus.
-    this.clear = () => {};
+    neutralise(this, 'clear');
   }
 
   /**

@@ -8,6 +8,7 @@
 import { PowerPermitGate } from './powerPermitGate.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { assertKnownOptions } from '../utils/options.js';
+import { neutralise } from '../utils/neutralise.js';
 import {
   DEFAULT_QUEUE_CAPACITY,
   DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
@@ -429,7 +430,7 @@ export class PowerBackpressure extends PowerPermitGate {
     this.reset();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
-    this.reset = () => {};
+    neutralise(this, 'reset');
   }
 
   /**
