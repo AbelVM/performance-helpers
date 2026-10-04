@@ -1,6 +1,6 @@
 {
-  "ceiling": 148,
+  "ceiling": 147,
   "minFilesWithDiagnostics": 12,
-  "recordedAt": "2026-10-03",
-  "reason": "powerRateLimit _undoCommit entry.token is optional - the rollback variant has no token - and typed the remaining unannotated callback parameters in powerWebSocketClient and powerDeadline"
+  "recordedAt": "2026-10-04",
+  "reason": "powerBuffer: o2b now returns an owning ArrayBuffer for SAB-backed views, and the shared-buffer test is routed through one typed helper (PERF-005)"
 }

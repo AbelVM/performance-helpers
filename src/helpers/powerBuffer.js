@@ -55,6 +55,25 @@ function getEncoder() {
 }
 
 /**
+ * Whether `buf` is a `SharedArrayBuffer`.
+ *
+ * `instanceof SharedArrayBuffer` is not writable directly: the global is absent
+ * from this library's type set, so TS rejects the left-hand side of an `instanceof`
+ * expression outright (PERF-005). Routing every use through here fixes that once
+ * instead of casting at each site.
+ *
+ * @private
+ * @param {ArrayBufferLike} buf
+ * @returns {boolean}
+ */
+function isSharedBuffer(buf) {
+  return (
+    typeof SharedArrayBuffer !== 'undefined' &&
+    /** @type {any} */ (/** @type {unknown} */ (buf)) instanceof SharedArrayBuffer
+  );
+}
+
+/**
  * Resolve a UTF-8 decoder, caching the answer - including "there is none".
  *
  * @returns {?BufferDecoder} `null` when the runtime has neither
@@ -113,8 +132,8 @@ export const o2u8 = (obj, preStringified) => {
   // to `JSON.stringify` it became the two bytes `{}`, so a value the caller
   // certainly did not mean travelled the wire and came back as an empty object
   // with nothing to say so (PERF-005).
-  if (typeof SharedArrayBuffer !== 'undefined' && obj instanceof SharedArrayBuffer) {
-    return new Uint8Array(obj);
+  if (isSharedBuffer(/** @type {ArrayBufferLike} */ (obj))) {
+    return new Uint8Array(/** @type {ArrayBuffer} */ (/** @type {unknown} */ (obj)));
   }
   // Allow callers to pass a pre-computed JSON string (e.g. when the same
   // string is also used as a cache key) to avoid a redundant `JSON.stringify`.
@@ -169,8 +188,8 @@ export const u82o = (buf) => {
   // Its own branch for the same reason as `o2u8`: a `SharedArrayBuffer` is not an
   // `ArrayBuffer`, so without this a SAB was rejected as an unsupported input
   // rather than decoded (PERF-005).
-  else if (typeof SharedArrayBuffer !== 'undefined' && buf instanceof SharedArrayBuffer) {
-    u8 = new Uint8Array(buf);
+  else if (isSharedBuffer(buf)) {
+    u8 = new Uint8Array(/** @type {ArrayBuffer} */ (/** @type {unknown} */ (buf)));
   } else if (
     typeof Buffer !== 'undefined' &&
     typeof Buffer.isBuffer === 'function' &&
@@ -219,9 +238,18 @@ export const u82o = (buf) => {
  */
 export const o2b = (obj) => {
   const u8 = o2u8(obj);
+  // A SAB-backed view's `.buffer` is a `SharedArrayBuffer`, and slicing one returns
+  // another — so both zero-copy paths below would hand back shared mutable state under
+  // a signature promising an **owning** `ArrayBuffer`. `Uint8Array.prototype.slice`
+  // allocates through the species constructor, so this yields a plain one. Only the SAB
+  // path copies; every other input keeps its zero-copy promise (PERF-005).
+  if (isSharedBuffer(u8.buffer)) return u8.slice().buffer;
+  // Not shared, so `u8.buffer` really is an `ArrayBuffer`; the cast is only here
+  // because `Uint8Array#buffer` is typed `ArrayBufferLike` and TS cannot narrow it.
+  const buf = /** @type {ArrayBuffer} */ (/** @type {unknown} */ (u8.buffer));
   // prefer zero-copy when the view covers the full underlying buffer
-  if (u8.byteOffset === 0 && u8.byteLength === u8.buffer.byteLength) return u8.buffer;
-  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
+  if (u8.byteOffset === 0 && u8.byteLength === buf.byteLength) return buf;
+  return buf.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
 };
 
 /**

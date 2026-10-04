@@ -5264,6 +5264,32 @@ line is unobservable, which is precisely what made it dead code. What is pinned 
 branch that _is_ live — with both globals absent, `u82o` throws the documented error rather than
 falling back.
 
+### `o2b` keeps its promise of an owning `ArrayBuffer` (patch)
+
+A knock-on from `o2b`'s new SAB support, and a **real contract violation** rather than a type
+nit: `o2u8` can now return a `SharedArrayBuffer`-backed view, so `o2b`'s zero-copy paths handed
+back **shared mutable state** under a signature promising an owning `ArrayBuffer` — and
+`SharedArrayBuffer.prototype.slice` returns another SAB, so the slicing path did not help
+either.
+
+```js
+o2b(new Uint8Array(sab));
+// before: SharedArrayBuffer, despite the declared ArrayBuffer return
+// after:  ArrayBuffer, copied; the source SAB is untouched and still readable
+```
+
+Only the SAB path copies. Every other input keeps its zero-copy promise, asserted separately
+(`o2b(u8) === u8.buffer`).
+
+The type ratchet caught this as two errors, and **only because the per-file listing was
+consulted** — the ratchet's own summary shows a total and a sample, which pointed at a different
+file entirely. Three errors in this file had been present since the SAB change and were
+attributed twice to a concurrent session before being found. Every use of
+`instanceof SharedArrayBuffer` now goes through one typed helper, because the global is absent
+from this library's type set and TS rejects the left-hand side outright.
+
+Type debt fell from 148 to 147; the ceiling was lowered rather than left slack.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

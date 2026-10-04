@@ -181,6 +181,27 @@ describe('the encoder/decoder verdict is not cached as permanently unavailable',
   // permanently denied.
   //
   // The positive result is still cached, so this asserts recoverability only.
+  it('o2b copies a SAB-backed view, because it promises an owning ArrayBuffer', async () => {
+    // PERF-005. `o2u8` returning a SAB-backed view made `o2b`'s zero-copy paths hand
+    // back **shared mutable state** under a signature promising an owning
+    // `ArrayBuffer` — and `SharedArrayBuffer.prototype.slice` returns another SAB, so
+    // the slicing path did not help either. The type ratchet caught this as two
+    // errors; the contract is what makes the fix obvious.
+    //
+    // Asserted on all three properties together, because any one alone is
+    // satisfiable by a wrong fix: the *type* of the result, its contents, and the
+    // source SAB being left readable (a copy that detached the source would be a
+    // different bug).
+    const { o2b } = await import('../src/helpers/powerBuffer.js');
+    const sab = new SharedArrayBuffer(4);
+    new Uint8Array(sab).set([1, 2, 3, 4]);
+    const out = o2b(new Uint8Array(sab));
+    expect(out).toBeInstanceOf(ArrayBuffer);
+    expect(out).not.toBeInstanceOf(SharedArrayBuffer);
+    expect(Array.from(new Uint8Array(out))).toEqual([1, 2, 3, 4]);
+    expect(new Uint8Array(sab)[0], 'the source SAB is untouched').toBe(1);
+  });
+
   it('throws from u82o when there is no decoder, rather than falling back', async () => {
     // PERF-004. `u82o` carried a second fallback guarded by
     // `typeof TextDecoder !== 'undefined'`, on the line *after* the one that
