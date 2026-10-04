@@ -605,6 +605,12 @@ required is the worker reply shape.
   again, and a caller draining in a loop accumulated one per call.
   `drain()` now owns its listener lifecycle and detaches on every exit path,
   including an idle/timeout race.
+- **A `message` event is the pool's own object, not the platform's `MessageEvent`.**
+  `onmessage` / `'message'` listeners previously received the browser's event
+  itself, with `correlationId` written onto it — so a second listener on the same
+  event saw fields the pool had invented. Read `event.originalEvent` where you
+  read the event's own `origin`, `target` or `lastEventId`; `data` is unchanged.
+  On Node, where there is no wrapper, `originalEvent` is the posted value.
 - **`postMessageBatch` could dispatch half a batch and orphan the other half.**
   A `correlationIdFactory` is caller code, so a constant or sloppy one returns
   the same id twice; `postMessage` does not defend against that (a second
@@ -6742,6 +6748,244 @@ appears to be enforced and may not be. That is a separate question from this row
 and changing it would alter a field consumers read today, so it is recorded here
 rather than fixed under POOL-007. It is worth its own row.
 
+## WRK-004: one worker abstraction, and the bug that was hiding behind two of them
+
+**A worker reply with its own `data` field lost every sibling field, in Node
+only.** The pool unwrapped `.data` from every event it received:
+`e?.data !== undefined ? e.data : e`. That is right for a browser
+`MessageEvent`, where the payload is on `.data`, and **wrong for Node**, where
+`worker.on('message', value)` hands over the payload itself with nothing to
+unwrap. So a task returning `{ data: rows, id: 7 }` — an ordinary shape for
+anything that returns records — reached `awaitResponse` as `rows`. Verified
+against a real `worker_threads` worker, not a fake:
+
+```
+worker replies:  { data: { rows: [1,2,3] }, id: 7, correlationId, duration }
+awaitResponse:   { rows: [1, 2, 3] }
+```
+
+No error, no counter, no `messageerror`: `id` was not dropped by a failure, it
+was never read. The pool did not have two bugs, it had **one rule applied to two
+runtimes**, and it was correct on exactly one of them.
+
+**The cause is that `PowerPool` was not using `WorkerAgnostic`.** It called the
+class's _static_ `create()` — which resolves the source and hands back the bare
+native worker — and then wired `message` / `error` / `messageerror` itself,
+through its own copy of the three-way native-model ladder. So the library
+carried two implementations of the same normalisation, 485 lines of class with no
+consumer, and `WorkerAgnostic.dispose()` — added by WRK-002 — had nobody calling
+it. Two copies of one rule is how they came to disagree; that is the whole row.
+
+**The pool now holds a `WorkerAgnostic` per worker and subscribes through it.**
+One implementation, and it is the one whose rule is right in both runtimes:
+unwrap `.data` only where the platform wraps a value in an event, never on the
+EventEmitter model. The 51-line ladder is gone from `powerPool.js`, and
+`_handleMessage` no longer decides anything about event shape.
+
+**Retirement disposes, which is what makes WRK-002's method reachable.** All six
+retirement paths route through `_terminateWorker`, which now disposes the wrapper
+before `terminate()`. A terminated worker that keeps its listeners keeps a
+reference to the pool through them, so a pool that resized once stayed reachable
+from every worker it had dropped.
+
+**Two things deliberately did not move through the class.** `WorkerWrapper` still
+wraps the **raw** native worker and posts to it directly, because it accepts a
+transfer list that is any iterable or array-like and may add a buffer of its own
+encoding, whereas `WorkerAgnostic.postMessage` normalises its argument down to an
+array or a `{ transfer }` bag — routing sends through the class would have
+silently stopped transferring. And the socket, port and RTC helpers are left
+alone: they normalise `event.data` for `WebSocket`, `MessagePort` and
+`RTCDataChannel`, none of which `WorkerAgnostic` models.
+
+**17 tests, 3 mutants, all caught — and the first mutant check found a hole
+rather than confirming a guard.** The mutants are the three things this change
+asserts: the old unwrap (3 tests, including the real-worker one), the pool
+subscribing to `message` only, and retirement skipping `dispose()` (4 tests).
+
+The subscription mutant **survived the first attempt**, which is why it is worth
+recording. Every test in the new file passed with the pool listening for
+`message` alone — including the disposal ones, and _correctly_: `WorkerAgnostic`
+wires all three natively whether or not anyone subscribes, so disposal was never
+broken. What nothing pinned was the pool's half of the contract. Both existing
+`*.messageerror` tests had missed it too, because they drive a _decode failure_,
+which reaches `_handleMessageError` as a direct call rather than as an event off
+the worker. Four tests now drive a real `error` / `messageerror` event from the
+worker to `pool.onerror` and the bus, and the mutant dies on three of them.
+
+## The `WebSocketStream` tier received nothing, and looked healthy while doing it
+
+**A `PowerWebSocketClient` on a runtime with `WebSocketStream` never read a
+single inbound frame.** The streams branch acquired `writable` for sending,
+wired `opened`, and skipped polling — and nothing else. `message` was wired
+**only** in the `WebSocket` branch below it. There is no `getReader`, no `.read()`
+and no pump anywhere in the class, so inbound was not slow or lossy: it was
+absent.
+
+The failure had no signal at all, which is why it survived. Verified against the
+real client with a complete fake stream — one that has `readable`, unlike the
+fixture in the test file:
+
+```
+socket opened (isOpen)       true
+backpressureMode             streams
+stats().received             0
+stats().decodeErrors         0
+messages delivered           0 []
+readable.getReader() calls   0
+```
+
+An open socket, working sends, `received: 0`, no error, no counter. Nothing ever
+looked, so nothing reported. **This is the same failure `PowerSocketAdapter` had
+and fixed** — its guide already names the shape ("a healthy-looking adapter,
+permanently deaf") and records the cause as detecting the tier on
+`readable`/`writable` _truthiness_, which on a Node `Duplex` are booleans and
+matched every TCP socket in existence. That fix is why the adapter tests the
+**method**: `typeof socket.readable?.getReader === 'function'`. Detection was
+never the problem in the client — `_WSStream` is a constructor, not a flag — so
+the missing half was simply the reader.
+
+**The fix takes a reader once the connection opens and pumps `readable` through
+the existing decode path.** After `opened`, because a `WebSocketStream` reports
+`readable: null` until then and that object is still a stream — acquiring a
+reader earlier throws. The frame goes to `_handleMessage`, which reads
+`event?.data ?? event` and therefore serves both tiers unchanged.
+
+**The reader is retained and cancelled on `close()`, before the writer is
+aborted.** A pending `read()` holds the stream lock and aborting the write side
+does not release it, so dropping the handle would leak a lock per reconnect
+until the replacement stream could not supply a reader at all — deaf for a
+second, unrelated reason.
+
+**One limitation is recorded rather than designed away.** A `read()` that
+rejects is reported as an `error` and deliberately does not open a reconnect,
+because synthesising a close would invent a `close` event and a close code the
+peer never sent. The cost is that a stream failing _after_ opening leaves a deaf
+open socket — the shape this change exists to remove. Fixing it needs a decision
+about what a fabricated close should look like, which is a design question
+rather than a patch.
+
+**Why the three existing tests missed it: the fixture had no `readable`.** They
+covered send, poll suppression and writer failure — all outbound — using a
+double that could not express inbound at all. The gap was not a weak assertion;
+the tier's own socket was never the one under observation. `mkClient` also
+recorded only `WebSocketImpl` instances, so `created` was empty for every
+streams test. Six tests now cover inbound, multi-frame reads, cancellation,
+read failure, end-of-stream and reconnect.
+
+**3 mutants, all caught:** removing the pump kills 6, reading one frame and
+stopping kills the multi-frame test alone, and dropping the `cancel()` kills the
+lock test alone — each naming exactly what it asserts, so a fix cannot trade one
+for another.
+
+**Reachable two ways:** the documented `WebSocketStreamImpl` option, and any
+runtime exposing the global — Deno, Bun, Node 24+ with
+`--experimental-websocketstream`. This is the one friction point in the audit
+that bites **Node**, not the browser.
+
+## Cross-realm `Error`s: four narrowings left behind, and one of them poisoned a cache key
+
+**`src/utils/errors.js` already made this argument, and three helpers had already
+acted on it.** `isError()` prefers `Error.isError()` — a brand check on the
+`[[ErrorData]]` slot, realm-independent — falling back to `instanceof` only
+because the capability is absent on the declared floor. Its comment states the
+rule: "`instanceof` compares against _this realm's_ `Error.prototype`, so it is
+`false` for an error created in another `vm` context, another realm, or an
+iframe … Every site in this library that narrows with `instanceof Error` is
+therefore wrong for a caller who hands us an error from somewhere else, and the
+failure mode is a _substitute_ rather than a diagnostic."
+
+**`PowerCache` was the one that mattered, and it was not diagnostic at all.**
+`simpleArgsKey` encodes cache-key arguments, and its `Error` branch read
+`if (v instanceof Error)`. A cross-realm error missed it and fell through to the
+plain-object branch — where `Object.keys` returns `[]`, because an `Error`'s
+`message` and `stack` are own but **non-enumerable**. So every cross-realm error
+produced the same key:
+
+```
+simpleArgsKey(cross-realm TypeError)   "O:{}"
+simpleArgsKey(cross-realm RangeError)  "O:{}"     <- different error, same key
+simpleArgsKey(local TypeError)         "E:TypeError:user A not found"
+```
+
+`cache.get(errA)` returned whatever was stored for `errB`. Not a lost diagnostic —
+a **wrong value handed back from a cache**, which is the worst failure shape this
+library has. It also failed to match its own local twin, so a cross-realm
+argument silently missed a populated entry. Now it encodes as
+`"E:RangeError:user B quota exceeded"`, and a cross-realm error keys identically
+to the local error it is.
+
+**The other three substitute a message, which is still wrong.**
+`PowerCron._report` wrapped a cross-realm cause in `new Error(String(err))` —
+stringifying to `"TypeError: …"` and **discarding `err.code`**, so `onError` was
+told the cron entry failed rather than why. That is verbatim the substitution
+`powerBulkhead` was fixed for. `PowerMetrics` exported `"RangeError: …"` as a
+series error, and `PowerPool._prepareForTransfer` put the class name into the
+unframed-post warning it tells operators to grep for.
+
+**`PowerLogger` was in the list and is already done — its comment disproves the
+premise about it.** It records that the row's claim ("`powerLogger` was
+realm-fragile") "is false, and was verified by logging a `vm`-created `TypeError`
+and a local one and diffing the emitted payloads (identical once `ts` is
+stripped) _before_ any edit". Grepping `instanceof Error` and taking the line
+numbers without reading them would have re-reported a fixed site as open; the
+live count is **four**, not five.
+
+**10 tests, 4 mutants, all caught, and the tests found their own blind spot.**
+Each site has its own named test, and the mutants die one apiece. The
+`PowerPool` test is the one worth recording: it first used a `BigInt` payload,
+which makes `JSON.stringify` throw a **local** `TypeError` — accepted by
+`instanceof`, so the test passed with _and_ without the fix and pinned nothing.
+The reachable way to make the encoder throw a **cross-realm** error is a payload
+whose `toJSON` throws one, which is what the test does now. The fixture asserts
+both halves of the premise (`instanceof` **false**, `message` present) so it
+cannot quietly stop testing the defect, and `Object.keys(crossRealmError) === []`
+is asserted because that empty key list is the mechanism of the collision.
+
+## A bare `ArrayBuffer` from another realm was silently replaced with `{}`
+
+**A cross-realm buffer reached the wire as an empty object, and the frame
+decoded successfully.** `powerMessageCodec.isRawPayload` tested
+`instanceof ArrayBuffer`, which compares against _this realm's_ prototype, so a
+bare `ArrayBuffer` from a `vm` context, another realm or an iframe failed it.
+Measured before any edit:
+
+```
+selectCodec(foreign bare)      -> 'json'        (should be 'raw')
+encodeMessage(foreign bare)    -> 8 bytes, decoding to {}      payload was {"a":1}
+```
+
+No error, no counter. **Views were never affected** — `ArrayBuffer.isView` is
+realm-independent — which is why `frameEncodedJson`'s existing comment about this
+defect class read as though the file were covered.
+
+**The line that did the corrupting was not the one the symptom pointed at.**
+`encodeMessage`'s raw path read `instanceof ArrayBuffer ? new Uint8Array(value) :
+new Uint8Array(value.buffer, value.byteOffset, value.byteLength)`. A bare foreign
+buffer failed the test, took the **view** branch, and read `.buffer` off a buffer
+— which is `undefined` — so the payload became empty and the frame decoded to
+`{}`. Five sites fixed: `isRawPayload`, that raw branch, `toBytes`,
+`decodeInbound`, and `u82o`/`o2u8`. `isSharedBuffer` was realm-bound the same way
+and got the same treatment.
+
+**The obvious fix is wrong, and it was measured rather than assumed.**
+`Object.prototype.toString` is realm-independent and **spoofable**: a plain
+`{ [Symbol.toStringTag]: 'ArrayBuffer', byteLength: 8 }` reports
+`[object ArrayBuffer]` _and is accepted by `new Uint8Array()`_, so a `toString`
+check turns an impostor into silent corruption instead of a rejection. The fix
+uses `Reflect.get` on the spec's own `byteLength` accessor, which performs the
+internal-slot check — the length for a real buffer, `TypeError` for the impostor,
+cross-realm included — with `instanceof` kept as the **first** test so the
+same-realm case still costs one comparison and only a value that fails it pays
+for the `Reflect.get` and the `try`.
+
+**11 tests, 3 mutants, all caught.** Dropping the cross-realm half of the brand
+check kills 5; restoring the view branch in the raw encoder kills 2; swapping
+`Reflect.get` for the `toString` test kills the spoof test alone. The impostor is
+asserted with a real tagged object rather than a description of one, because a
+hand-rolled `{byteLength: n}` stand-in would be _accepted_ by `new Uint8Array()`
+and pass for the wrong reason. Before and after: a foreign bare buffer now
+produces a frame byte-identical to the local one.
+
 ## `maxReconnectAttempts` still defaults to `Infinity`, and 2.0 says so on purpose
 
 **GAP-010 is half shipped by decision, not by omission.** `maxReconnectElapsedMs`
@@ -8704,3 +8948,156 @@ up. And the `ignoreExpiry` test asserted `get(a)` "to show it is expired" **firs
 plain read on an expired entry _removes_ it, so the control destroyed its own subject and
 the forwarding assertion could never pass. The long cleanup interval added to compensate was
 also wrong: no sweep had run, and the removal was mine.
+
+## `PowerCache`: bulk removal, and object keys the filter can tell apart
+
+**`invalidate(predicate)` and `evict(count)` are new.** Until 2.0 the only ways out
+were `delete(key)` one at a time and `clear()` for everything, so shedding a _subset_ —
+every entry for one tenant, every entry older than a deploy marker — meant walking
+`entries()` yourself and deleting as you went. Both are new API:
+
+```js
+cache.invalidate((key, value) => value.tenantId === 'gone'); // returns the count
+cache.evict(500); // the 500 least-recently-used
+```
+
+`invalidate` evaluates the predicate over the whole cache **before** removing anything, so
+a predicate that throws leaves the cache exactly as it was, and it does not drive removal
+off the public `entries()` walk — which documents that removing two _adjacent_ entries in
+one iteration step can end its walk early, so a walk-driven removal would silently stop at
+the first pair. `evict` reports the number it **actually** removed, so `evict(99)` on a
+3-entry cache returns 3, and it refuses anything `Number()` would coerce: `null`, `true` and
+`'3'` all throw, because coercion would make `evict(null)` silently do nothing and
+`evict(true)` silently evict one. Both fire `onEvict` (`'invalidated'` / `'evicted'`) and
+count into `stats().evictions`.
+
+**Object keys are now tracked by identity, not by `String(key)`.** The sketch bucketed a key
+by its string form, which is `"[object Object]"` for _every_ object — so a cache keyed by
+object references, which `PowerCache` is (entries live in a `Map`), handed the filter one
+counter for the whole key space:
+
+| 200 distinct objects |  sum | distinct estimates | a never-seen object |
+| -------------------- | ---: | -----------------: | ------------------: |
+| objects (2.0)        |  509 |       **5 of 200** |               **2** |
+| objects (before)     | 3000 |       **1 of 200** |              **15** |
+
+Before, all 200 read the same number _and so did a key that had never been inserted_: the
+filter could not tell a newcomer from a hot one, so it had no admission signal at all. Primitives
+keep their shared-counter behaviour, and `null`, symbols and BigInts keep hashing by value.
+**If you relied on `{id:'a'}` and a second `{id:'a'}` sharing a frequency history, they no
+longer do** — which matches what the cache already did with them, since it stores them as two
+entries. A string key is the way to get value semantics.
+
+It is also **faster than what it replaced** (`node bench/claims.js sketch`, increment plus
+estimate): 152.6 ns → **82.5 ns** for a plain object, and 1353.0 ns → **101.4 ns** for an
+object whose `toString()` returns 256 characters, because `String(obj)` allocates and walks
+a string while the identity path hashes an integer.
+
+18 tests, mutation-checked. Two claims of mine did not survive measurement and were corrected
+rather than shipped: a hash salt whose justification was wrong (removed — an object id and
+the string spelling it arrive as different hashes already), and a claim that the string path's
+cost scales with key size (it does not; `String()` on a plain object ignores own properties,
+so the comparison is only meaningful on a key that defines `toString`). One guard is **not**
+observable by any test and says so in the source: the `_evictionCandidate` repair after
+`invalidate`, which is harmless either way only because the node pool recycles the freed node.
+
+## Weighted permits: `acquire({ weight })`, and a `totalWeight` for the queue
+
+`weightFn` existed on `PowerCache` and on **no gate, bulkhead or queue**, so "this task costs
+5 units" was inexpressible in one helper out of thirty-three. Now:
+
+- **`PowerPermitGate`** (and `PowerSemaphore` / `PowerBackpressure`, which share it):
+  `acquire({ weight })`, `tryAcquire(weight)`, `release(count)`. A waiter holds `weight` units.
+- **`PowerBulkhead`**: `run(key, fn, { weight })` and `tryRun(key, fn, { weight })`, reserved
+  from **that partition's** `maxConcurrency`.
+- **`PowerQueue`**: a new `totalWeight` getter — the sum of the queued items' `weight`
+  properties, maintained incrementally so reading it is O(1).
+
+Three decisions worth knowing. **`weight` must be a whole number `>= 1`.** **`weight >
+capacity` rejects immediately with a `TypeError`** — such a waiter can never be granted, and
+`queueCapacity` defaults to `Infinity`, so queueing it would be a hang with no error ever.
+**`active` and `available` count units, not holders**: with the default `weight: 1` the two
+are the same number, so nothing observable changes for existing callers and
+`available + active === capacity` still holds. `pending` still counts _waiters_, because that
+is what `queueCapacity` limits.
+
+`PowerQueue` deliberately does the opposite on invalid weights — a non-numeric, non-finite or
+absent `weight` counts as `1` rather than throwing — because nothing is _granted_ from a queue,
+so there is no waiter to hang. That divergence is documented in both guides.
+
+## `PowerWebSocketClient`: `nonRetryableCloseCodes`
+
+**New, opt-in, default `[]`.** Backoff bounds _how long_ a client keeps trying; it does not
+stop it from trying at all. A peer closing with **1008** (policy violation), **1001** or
+**1002** is telling you something specific, and reconnecting immediately — with
+decorrelated jitter, so within a second or two — means every client in the fleet re-offers the
+connection the server just refused. That is the stampede the backoff exists to prevent,
+arriving through the one door the backoff does not close.
+
+```js
+new PowerWebSocketClient({ url, nonRetryableCloseCodes: [1008, 1001, 1002] });
+```
+
+The check runs **ahead of every reconnect input** (`autoReconnect`,
+`maxReconnectAttempts`, `maxReconnectElapsedMs`), so a bound cannot re-enable it. Settlement
+matches a caller-initiated close rather than inventing a terminal path: `readyState` `CLOSED`,
+the `close` event still fires, timers cleared, no reconnect timer armed. It is **not latched**
+— `connect()` afterwards works, because a code can be terminal for one close and wrong for the
+next. `stats().reconnectExhaustedBy` gained a third value, `'close-code'`, which is the only
+thing that distinguishes "stopped because you said so" from "stopped because
+`autoReconnect: false`".
+
+A non-array throws, and so does an entry that is not a close code; duplicates are legal and
+the array is copied at construction. Numeric strings match numeric codes.
+
+## The admission window, re-measured on the fixed build — and the decision not to delete it
+
+The TinyLFU admission path had three real defects fixed since ADR 0003 measured it: the
+sketch is now sized from the cache's capacity, the key is hashed once per call instead of
+four times, and the half-life counts _effective_ increments. A rejection measured against a
+broken instrument is not a measurement, so both gates were re-run before the conclusion was
+allowed to stand:
+
+| variant                     | ws hit rate |    was |
+| --------------------------- | ----------: | -----: |
+| `lru`                       |      75.0 % |      — |
+| `lru` + `tinylfu` (shipped) |      70.8 % |      — |
+| window = 1                  |  **77.7 %** | 76.5 % |
+| `slru`                      |  **89.4 %** |      — |
+
+Cold start is unchanged at every window size: `lru` **80.0 %**, shipped `tynilfu` **0.0 %**,
+the best window **1.0 %**. **Three of the four acceptance criteria are now met** — the one
+that flipped is the one ADR 0003 called secondary — and the criterion the mechanism exists for
+still misses by 79 points. Every window row moved up about a point and **the ranking did not
+move**. `windowSize` stays `0` by default and documented as not recommended;
+`policy: 'slru'` remains the answer to scan resistance.
+
+**Deletion was considered and declined**, with the numbers: the fixes moved the window rows
+about a point and left the winner unchanged, so deleting the correct mechanics would not have
+changed the answer — and `windowSize` behind a flag, a sweep inside `bench/claims.js zipf`,
+`coldstart` as a workload of its own and `test/powerCache.window.test.js` are what make the
+conclusion re-checkable by the next person. A mechanism whose only record is a paragraph is
+one refactor away from being rediscovered as promising, which is how the first three attempts
+at this happened.
+
+Two withdrawn figures were still being quoted in the guide and in source comments — a cold
+start of "2.5 % against plain LRU's 66.4 %" — and a guide section still described the window
+size and the `slru` no-op as undecided when both are decided and one has shipped. All
+corrected.
+
+## The coverage number now measures the library
+
+`vitest.config.js` set no `coverage.include`, so v8 reported every file it saw — the benchmark
+harness (`bench/baseline.js`, 50.78 % lines), the dev scripts (`scripts/review-row.mjs`,
+38.77 %) and the test helper — all inside the thresholds. The headline number was an average
+over code that is not shipped and that nobody holds to a threshold, so "All files 89.15 %" said
+nothing about the library and a reader had no way to know that from the number. With
+`include: ['src/**']` it is **92.14 % statements / 88.18 % branches / 95.28 % functions /
+93.55 % lines**, and the table contains only `src/`. Narrowing the include makes the gate
+_easier_, not harder, so the thresholds are deliberately unchanged.
+
+`WorkerAgnostic.js`'s `new Function` lines are **uncovered, not excluded**, and `vitest.config.js`
+now says so: they need a real pure-ESM process, `vi.stubGlobal('require')` does not work
+because vitest injects `require` into the module _scope_, and `test/workerAgnostic.esm.test.js`
+exercises the behaviour in a real subprocess instead. Do not "fix" the gap with
+`coverage.exclude` — that would delete the number instead of explaining it.
