@@ -41,7 +41,7 @@ So the two things are split by what they actually are:
 - [encodeMessage](functions/encodeMessage.md) / [decodeMessage](functions/decodeMessage.md) — **framed bytes**, for
   transports that carry a byte stream (WebSocket, files, HTTP bodies).
   Codecs: [CODECS.JSON](enumerations/CODECS.md#json), [CODECS.RAW](enumerations/CODECS.md#raw).
-- [encodeNative](functions/encodeNative.md) / [encodeNativeEnvelope](functions/encodeNativeEnvelope.md) — **native structured
+- [encodeNativeEnvelope](functions/encodeNativeEnvelope.md) (and the deprecated [encodeNative](functions/encodeNative.md)) — **native structured
   clone**, for a `MessagePort` or `Worker`, where the platform does the work
   and no framing is needed at all. Lossless for `Map`, `Set`, `Date`,
   `BigInt`, cycles and binary, which the JSON frame is not — see the
@@ -79,7 +79,7 @@ read that handles all three carriers.
 - [decodeInbound](functions/decodeInbound.md)
 - [decodeMessage](functions/decodeMessage.md)
 - [encodeMessage](functions/encodeMessage.md)
-- [encodeNative](functions/encodeNative.md)
+- [~~encodeNative~~](functions/encodeNative.md)
 - [encodeNativeEnvelope](functions/encodeNativeEnvelope.md)
 - [frameEncodedJson](functions/frameEncodedJson.md)
 - [frameTransferList](functions/frameTransferList.md)

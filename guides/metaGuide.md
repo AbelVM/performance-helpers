@@ -599,8 +599,12 @@ channel, and the other two sit between them.
   Use it instead of hand-rolling a JSON protocol, and instead of `PowerPool`'s internal sniffing.
   Since 2.0 `PowerPool` speaks it by default, so every worker reads
   `decodeMessage(e.data).value` instead of `u82o(e.data)`.
-- `encodeNative`: for a `MessagePort` or `Worker`, where the platform's structured clone beats any
-  serialization and handles `Map`, `Set`, `Date` and cycles losslessly.
+- `encodeNativeEnvelope`: for a `MessagePort` or `Worker`, where the platform's structured clone beats
+  any serialization and handles `Map`, `Set`, `Date` and cycles losslessly. It does not clone
+  itself, so the one copy `postMessage` makes is the only copy. (`encodeNative` is **deprecated**
+  in 2.0 — it clones _and_ hands the clone back, so `postMessage` clones a second time. Keep it
+  only when you need a private copy plus a transfer list, i.e. to post binary without detaching
+  the caller's buffer.)
 - **Protocol negotiation** (`decodeInbound`, `announceCapabilities`, and
   `messageCodec: 'negotiated'`): the frame is lossy — a `Map` arrives as `{}`, a `Date` as an ISO
   string, a `BigInt` makes the message undecodable — so a worker can advertise the native carrier
@@ -639,7 +643,7 @@ channel, and the other two sit between them.
   (`datagrams`, `createWritable`, `byob`) are `false` unless you pass a live transport in.
 
 Reach for the framed codec when the transport carries bytes (WebSocket, file, HTTP body), and
-`encodeNative` when it is an in-process message port. Reach for the hub before writing
+`encodeNativeEnvelope` when it is an in-process message port. Reach for the hub before writing
 `for (ws of clients) ws.send(...)`: that pattern has no back-pressure and no signal when a client
 falls behind.
 

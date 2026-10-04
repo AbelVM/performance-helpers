@@ -34,7 +34,7 @@
  * - {@link encodeMessage} / {@link decodeMessage} — **framed bytes**, for
  *   transports that carry a byte stream (WebSocket, files, HTTP bodies).
  *   Codecs: {@link CODECS.JSON}, {@link CODECS.RAW}.
- * - {@link encodeNative} / {@link encodeNativeEnvelope} — **native structured
+ * - {@link encodeNativeEnvelope} (and the deprecated {@link encodeNative}) — **native structured
  *   clone**, for a `MessagePort` or `Worker`, where the platform does the work
  *   and no framing is needed at all. Lossless for `Map`, `Set`, `Date`,
  *   `BigInt`, cycles and binary, which the JSON frame is not — see the
@@ -129,8 +129,8 @@ const ID_BY_CODEC = new Map([
 ]);
 
 /**
- * Whether the runtime can structured-clone, i.e. whether
- * {@link encodeNative} is usable.
+ * Whether the runtime can structured-clone, i.e. whether the native carrier —
+ * {@link encodeNativeEnvelope}, or the deprecated {@link encodeNative} — is usable.
  * @returns {boolean}
  */
 export function canUseNativeClone() {
@@ -175,7 +175,7 @@ export function encodeMessage(value, options = {}) {
   if (codecId === undefined) {
     throw new TypeError(
       `PowerMessageCodec: unknown codec "${codecName}". Expected "json" or "raw". ` +
-        'For structured-clone speed on a MessagePort/Worker use encodeNative() instead.'
+        'For structured-clone speed on a MessagePort/Worker use encodeNativeEnvelope() instead.'
     );
   }
 
@@ -586,6 +586,32 @@ export function createFrameDecoder(options) {
  * Encode a value for a `MessagePort` / `Worker` using the platform's structured
  * clone, with no framing and no serialization.
  *
+ * @deprecated **RT-023. Use {@link encodeNativeEnvelope} instead**, which does not
+ *   clone. This function clones the value *and* hands the clone back for the caller
+ *   to post — and `postMessage` then clones it again, because a transfer list only
+ *   ever names buffers inside the object being posted and never replaces the clone.
+ *   **So the common case pays for two deep copies where one suffices.** Measured on
+ *   the real path (the encode, plus the clone `postMessage` performs), median of
+ *   nine passes over 4 000 iterations, stable across three orderings: **~3 800 ns
+ *   with this, ~260 ns with the envelope — about 14x** on a small object, with the
+ *   extra clone ~95% of the cost. That is far outside the 28% median min/max spread
+ *   BENCH-001 measures, so the direction and rough magnitude are solid even though
+ *   the absolute figure is machine-specific: an earlier subagent measurement of the
+ *   same defect read 50 µs on different hardware, and **the robust claim is the
+ *   ratio, not either absolute number.**
+ *
+ *   **Deprecated, not wrong — and one caller still needs it.** Posting binary
+ *   without detaching the caller's data requires a private copy *and* a transfer
+ *   list naming that copy's buffers, and this is the only call that returns both.
+ *   `PowerPool._encodeNativeForWorker` uses it for exactly that case. If your
+ *   message has no `ArrayBuffer` in it — the overwhelming majority — there is
+ *   nothing to protect and the envelope is strictly better.
+ *
+ *   This is the first `@deprecated` in the library, so the convention is set here:
+ *   the tag names the replacement, and the body says what breaks if you ignore it.
+ *   The export stays — removing it is a breaking change to the published surface,
+ *   and the pool's own use would break with it.
+ *
  * This is the fast path for in-process boundaries — faster than the `json` frame
  * and lossless for `Map`, `Set`, `Date`, `RegExp`, cycles and binary. It is
  * *not* a byte stream, so it cannot be used over a WebSocket; use
@@ -606,26 +632,18 @@ export function encodeNative(value) {
   // Clone first so `transfer` is computed against the copy, not the caller's
   // buffer, and so the returned object shares no memory with the input.
   const message = structuredClone(value);
-  /** @type {ArrayBuffer[]} */
-  const transfer = [];
-  // `any` on both parameters deliberately: this walks caller-supplied values of a
-  // type the library does not know, and narrowing `v` to `object` here would
-  // reject the primitives the `typeof v === 'object'` guard is there to skip.
-  const collect = (/** @type {any} */ v, /** @type {number} */ depth) => {
-    if (!v || depth > 8) return;
-    if (v instanceof ArrayBuffer) {
-      if (!transfer.includes(v)) transfer.push(v);
-      return;
-    }
-    if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(v)) {
-      if (!transfer.includes(v.buffer)) transfer.push(v.buffer);
-      return;
-    }
-    if (typeof v === 'object') {
-      for (const key of Object.keys(v)) collect(v[key], depth + 1);
-    }
-  };
-  collect(message, 0);
+  // **RT-023: this was a private `collect` closure using `transfer.includes(v)` with
+  // no `seen` set** — a near-duplicate of the exported `collectTransferables`, and a
+  // worse one. It was **correct**: `includes` does stop a buffer being collected
+  // twice, so this is a cost claim and not a correctness one, and it is worth
+  // stating that plainly rather than implying a defect that was not there. But
+  // `includes` is a linear scan, so collecting n buffers cost O(n²) where the
+  // exported function costs O(n) behind a `Set`, and the two copies could drift —
+  // which is the actual hazard, since only one of them had a test. This delegates
+  // rather than reimplements. Behaviour is otherwise identical, including the
+  // `depth > 8` bound: that is the exported function's default parameter, not a
+  // coincidence.
+  const transfer = collectTransferables(message);
   return { message, transfer };
 }
 

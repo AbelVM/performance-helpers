@@ -55288,22 +55288,22 @@
 					{
 						"kind": "inline-tag",
 						"tag": "@link",
-						"text": "encodeNative",
-						"target": 1552
-					},
-					{
-						"kind": "text",
-						"text": " / "
-					},
-					{
-						"kind": "inline-tag",
-						"tag": "@link",
 						"text": "encodeNativeEnvelope",
 						"target": 1567
 					},
 					{
 						"kind": "text",
-						"text": " — **native structured\n  clone**, for a "
+						"text": " (and the deprecated "
+					},
+					{
+						"kind": "inline-tag",
+						"tag": "@link",
+						"text": "encodeNative",
+						"target": 1552
+					},
+					{
+						"kind": "text",
+						"text": ") — **native structured\n  clone**, for a "
 					},
 					{
 						"kind": "code",
@@ -55930,7 +55930,17 @@
 																"summary": [
 																	{
 																		"kind": "text",
-																		"text": "Whether the runtime can structured-clone, i.e. whether\n"
+																		"text": "Whether the runtime can structured-clone, i.e. whether the native carrier —\n"
+																	},
+																	{
+																		"kind": "inline-tag",
+																		"tag": "@link",
+																		"text": "encodeNativeEnvelope",
+																		"target": 1567
+																	},
+																	{
+																		"kind": "text",
+																		"text": ", or the deprecated "
 																	},
 																	{
 																		"kind": "inline-tag",
@@ -55940,7 +55950,7 @@
 																	},
 																	{
 																		"kind": "text",
-																		"text": " is usable."
+																		"text": " — is usable."
 																	}
 																],
 																"blockTags": [
@@ -57640,60 +57650,119 @@
 																	},
 																	{
 																		"kind": "text",
-																		"text": " using the platform's structured\nclone, with no framing and no serialization.\n\nThis is the fast path for in-process boundaries — faster than the "
-																	},
-																	{
-																		"kind": "code",
-																		"text": "`json`"
-																	},
-																	{
-																		"kind": "text",
-																		"text": " frame\nand lossless for "
-																	},
-																	{
-																		"kind": "code",
-																		"text": "`Map`"
-																	},
-																	{
-																		"kind": "text",
-																		"text": ", "
-																	},
-																	{
-																		"kind": "code",
-																		"text": "`Set`"
-																	},
-																	{
-																		"kind": "text",
-																		"text": ", "
-																	},
-																	{
-																		"kind": "code",
-																		"text": "`Date`"
-																	},
-																	{
-																		"kind": "text",
-																		"text": ", "
-																	},
-																	{
-																		"kind": "code",
-																		"text": "`RegExp`"
-																	},
-																	{
-																		"kind": "text",
-																		"text": ", cycles and binary. It is\n*not* a byte stream, so it cannot be used over a WebSocket; use\n"
-																	},
-																	{
-																		"kind": "inline-tag",
-																		"tag": "@link",
-																		"text": "encodeMessage",
-																		"target": 1498
-																	},
-																	{
-																		"kind": "text",
-																		"text": " there."
+																		"text": " using the platform's structured\nclone, with no framing and no serialization."
 																	}
 																],
 																"blockTags": [
+																	{
+																		"tag": "@deprecated",
+																		"content": [
+																			{
+																				"kind": "text",
+																				"text": "**RT-023. Use "
+																			},
+																			{
+																				"kind": "inline-tag",
+																				"tag": "@link",
+																				"text": "encodeNativeEnvelope",
+																				"target": 1567
+																			},
+																			{
+																				"kind": "text",
+																				"text": " instead**, which does not\n  clone. This function clones the value *and* hands the clone back for the caller\n  to post — and "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`postMessage`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " then clones it again, because a transfer list only\n  ever names buffers inside the object being posted and never replaces the clone.\n  **So the common case pays for two deep copies where one suffices.** Measured on\n  the real path (the encode, plus the clone "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`postMessage`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " performs), median of\n  nine passes over 4 000 iterations, stable across three orderings: **~3 800 ns\n  with this, ~260 ns with the envelope — about 14x** on a small object, with the\n  extra clone ~95% of the cost. That is far outside the 28% median min/max spread\n  BENCH-001 measures, so the direction and rough magnitude are solid even though\n  the absolute figure is machine-specific: an earlier subagent measurement of the\n  same defect read 50 µs on different hardware, and **the robust claim is the\n  ratio, not either absolute number.**\n\n  **Deprecated, not wrong — and one caller still needs it.** Posting binary\n  without detaching the caller's data requires a private copy *and* a transfer\n  list naming that copy's buffers, and this is the only call that returns both.\n  "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`PowerPool._encodeNativeForWorker`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " uses it for exactly that case. If your\n  message has no "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`ArrayBuffer`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " in it — the overwhelming majority — there is\n  nothing to protect and the envelope is strictly better.\n\n  This is the first "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`@deprecated`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " in the library, so the convention is set here:\n  the tag names the replacement, and the body says what breaks if you ignore it.\n  The export stays — removing it is a breaking change to the published surface,\n  and the pool's own use would break with it.\n\nThis is the fast path for in-process boundaries — faster than the "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`json`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": " frame\nand lossless for "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`Map`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": ", "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`Set`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": ", "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`Date`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": ", "
+																			},
+																			{
+																				"kind": "code",
+																				"text": "`RegExp`"
+																			},
+																			{
+																				"kind": "text",
+																				"text": ", cycles and binary. It is\n*not* a byte stream, so it cannot be used over a WebSocket; use\n"
+																			},
+																			{
+																				"kind": "inline-tag",
+																				"tag": "@link",
+																				"text": "encodeMessage",
+																				"target": 1498
+																			},
+																			{
+																				"kind": "text",
+																				"text": " there."
+																			}
+																		]
+																	},
 																	{
 																		"tag": "@returns",
 																		"content": [
@@ -58985,7 +59054,17 @@
 								"summary": [
 									{
 										"kind": "text",
-										"text": "Whether the runtime can structured-clone, i.e. whether\n"
+										"text": "Whether the runtime can structured-clone, i.e. whether the native carrier —\n"
+									},
+									{
+										"kind": "inline-tag",
+										"tag": "@link",
+										"text": "encodeNativeEnvelope",
+										"target": 1567
+									},
+									{
+										"kind": "text",
+										"text": ", or the deprecated "
 									},
 									{
 										"kind": "inline-tag",
@@ -58995,7 +59074,7 @@
 									},
 									{
 										"kind": "text",
-										"text": " is usable."
+										"text": " — is usable."
 									}
 								],
 								"blockTags": [
@@ -60473,60 +60552,119 @@
 									},
 									{
 										"kind": "text",
-										"text": " using the platform's structured\nclone, with no framing and no serialization.\n\nThis is the fast path for in-process boundaries — faster than the "
-									},
-									{
-										"kind": "code",
-										"text": "`json`"
-									},
-									{
-										"kind": "text",
-										"text": " frame\nand lossless for "
-									},
-									{
-										"kind": "code",
-										"text": "`Map`"
-									},
-									{
-										"kind": "text",
-										"text": ", "
-									},
-									{
-										"kind": "code",
-										"text": "`Set`"
-									},
-									{
-										"kind": "text",
-										"text": ", "
-									},
-									{
-										"kind": "code",
-										"text": "`Date`"
-									},
-									{
-										"kind": "text",
-										"text": ", "
-									},
-									{
-										"kind": "code",
-										"text": "`RegExp`"
-									},
-									{
-										"kind": "text",
-										"text": ", cycles and binary. It is\n*not* a byte stream, so it cannot be used over a WebSocket; use\n"
-									},
-									{
-										"kind": "inline-tag",
-										"tag": "@link",
-										"text": "encodeMessage",
-										"target": 1498
-									},
-									{
-										"kind": "text",
-										"text": " there."
+										"text": " using the platform's structured\nclone, with no framing and no serialization."
 									}
 								],
 								"blockTags": [
+									{
+										"tag": "@deprecated",
+										"content": [
+											{
+												"kind": "text",
+												"text": "**RT-023. Use "
+											},
+											{
+												"kind": "inline-tag",
+												"tag": "@link",
+												"text": "encodeNativeEnvelope",
+												"target": 1567
+											},
+											{
+												"kind": "text",
+												"text": " instead**, which does not\n  clone. This function clones the value *and* hands the clone back for the caller\n  to post — and "
+											},
+											{
+												"kind": "code",
+												"text": "`postMessage`"
+											},
+											{
+												"kind": "text",
+												"text": " then clones it again, because a transfer list only\n  ever names buffers inside the object being posted and never replaces the clone.\n  **So the common case pays for two deep copies where one suffices.** Measured on\n  the real path (the encode, plus the clone "
+											},
+											{
+												"kind": "code",
+												"text": "`postMessage`"
+											},
+											{
+												"kind": "text",
+												"text": " performs), median of\n  nine passes over 4 000 iterations, stable across three orderings: **~3 800 ns\n  with this, ~260 ns with the envelope — about 14x** on a small object, with the\n  extra clone ~95% of the cost. That is far outside the 28% median min/max spread\n  BENCH-001 measures, so the direction and rough magnitude are solid even though\n  the absolute figure is machine-specific: an earlier subagent measurement of the\n  same defect read 50 µs on different hardware, and **the robust claim is the\n  ratio, not either absolute number.**\n\n  **Deprecated, not wrong — and one caller still needs it.** Posting binary\n  without detaching the caller's data requires a private copy *and* a transfer\n  list naming that copy's buffers, and this is the only call that returns both.\n  "
+											},
+											{
+												"kind": "code",
+												"text": "`PowerPool._encodeNativeForWorker`"
+											},
+											{
+												"kind": "text",
+												"text": " uses it for exactly that case. If your\n  message has no "
+											},
+											{
+												"kind": "code",
+												"text": "`ArrayBuffer`"
+											},
+											{
+												"kind": "text",
+												"text": " in it — the overwhelming majority — there is\n  nothing to protect and the envelope is strictly better.\n\n  This is the first "
+											},
+											{
+												"kind": "code",
+												"text": "`@deprecated`"
+											},
+											{
+												"kind": "text",
+												"text": " in the library, so the convention is set here:\n  the tag names the replacement, and the body says what breaks if you ignore it.\n  The export stays — removing it is a breaking change to the published surface,\n  and the pool's own use would break with it.\n\nThis is the fast path for in-process boundaries — faster than the "
+											},
+											{
+												"kind": "code",
+												"text": "`json`"
+											},
+											{
+												"kind": "text",
+												"text": " frame\nand lossless for "
+											},
+											{
+												"kind": "code",
+												"text": "`Map`"
+											},
+											{
+												"kind": "text",
+												"text": ", "
+											},
+											{
+												"kind": "code",
+												"text": "`Set`"
+											},
+											{
+												"kind": "text",
+												"text": ", "
+											},
+											{
+												"kind": "code",
+												"text": "`Date`"
+											},
+											{
+												"kind": "text",
+												"text": ", "
+											},
+											{
+												"kind": "code",
+												"text": "`RegExp`"
+											},
+											{
+												"kind": "text",
+												"text": ", cycles and binary. It is\n*not* a byte stream, so it cannot be used over a WebSocket; use\n"
+											},
+											{
+												"kind": "inline-tag",
+												"tag": "@link",
+												"text": "encodeMessage",
+												"target": 1498
+											},
+											{
+												"kind": "text",
+												"text": " there."
+											}
+										]
+									},
 									{
 										"tag": "@returns",
 										"content": [

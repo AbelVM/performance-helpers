@@ -140,6 +140,12 @@ const CROSS_CLASS = new Set([
   'createFrameDecoder',
   'selectCodec',
   'encodeNative',
+  // Its replacement, added with the RT-023 deprecation. It was already named in the
+  // guide before that row, but never as a *backticked call* in a section the rule
+  // scans — and the deprecation made the native example call it directly. Same
+  // category as `encodeNative` above: a module-level export, not a method of the
+  // `PowerMessageCodec` object this guide documents.
+  'encodeNativeEnvelope',
   'canUseNativeClone',
   'isRawPayload',
   'frameTransferList',

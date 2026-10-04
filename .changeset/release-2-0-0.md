@@ -6977,6 +6977,60 @@ fail this one.
 **2 mutants, both killed**: reinstating `has()` before `get()`, and branching on
 the stored value rather than the node.
 
+## `encodeNative` is deprecated — use `encodeNativeEnvelope`
+
+`encodeNative(value)` clones the value and returns `{ message, transfer }` for you
+to post. But `postMessage` then clones that again: a transfer list only ever
+_names_ buffers inside the object being posted, it never replaces the clone. **So
+the common case paid for two deep copies where one suffices.**
+
+Measured on the real path — the encode plus the clone `postMessage` performs,
+median of nine passes over 4 000 iterations, stable across three orderings, because
+a first run gave an inconsistent figure and ordering turned out to be the cause:
+
+| path                                             | cost          |
+| ------------------------------------------------ | ------------- |
+| `encodeNative` + the `postMessage` clone         | **~3 800 ns** |
+| `encodeNativeEnvelope` + the `postMessage` clone | **~260 ns**   |
+
+About **14x**, with the extra clone ~95% of the total. That is far outside the
+**28 % median min/max spread BENCH-001 measures**, so the ratio is the claim and
+the absolute numbers are machine-specific. An earlier subagent measurement of the
+same defect read 50 µs on different hardware; both agree on direction and order.
+
+**`encodeNativeEnvelope` clones nothing.** It wraps, and the transport clones what
+it is handed — one copy, not two. That is now what the guide, the quick chooser and
+the worked example all point at.
+
+**Deprecated, not removed, because one caller genuinely needs it.** Posting binary
+_without detaching the caller's data_ requires a private copy **and** a transfer
+list naming that copy's buffers, and `encodeNative` is the only call returning both.
+`PowerPool._encodeNativeForWorker` uses it for exactly that. So the export stays:
+removing it is a breaking change to the published surface and would break the pool.
+
+**The duplicated walk is gone.** `encodeNative` carried a private `collect` closure
+that was a near-duplicate of the exported `collectTransferables`. It was
+**correct** — `Array.includes` does prevent a buffer being collected twice — so this
+is a cost and maintainability change, not a correctness one, and it is worth saying
+so rather than implying a defect that was not there. But `includes` is a linear
+scan, so collecting n buffers cost O(n²) where the exported function is O(n) behind
+a `Set`, and two hand-rolled copies of the same walk, only one of them directly
+tested, is the hazard that actually mattered. It now delegates.
+
+**One claim in the row was wrong.** It said the benchmark table's "native" column is
+attributed to `encodeNative`. It is not: `bench/claims.js` times
+`encodeNativeEnvelope(structuredClone(make()))` — the envelope _plus_ an explicit
+clone, modelling the pool's real path. The benchmark was already measuring the
+right thing.
+
+**3 mutants, all 3 killed**: `encodeNative` stopping its clone, the transfer list
+losing its de-duplication, and `encodeNativeEnvelope` starting to clone — the last
+of which would erase the entire reason for the deprecation while leaving the guide
+still calling the envelope the fast path.
+
+This is the library's first `@deprecated`, so the convention is set here: the tag
+names the replacement, and the body says what breaks if you ignore it.
+
 ## A disposed `PowerTTLMap` refuses writes
 
 **Breaking, in the smallest way available.** `set()` after `dispose()` now throws a

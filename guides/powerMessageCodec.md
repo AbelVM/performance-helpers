@@ -30,15 +30,16 @@ So the two things are split by what they actually are:
 |                  | API                               | Use when                                                                                     |
 | ---------------- | --------------------------------- | -------------------------------------------------------------------------------------------- |
 | **Framed bytes** | `encodeMessage` / `decodeMessage` | the transport is a byte stream: WebSocket, file, HTTP body                                   |
-| **Native clone** | `encodeNative`                    | the transport is a `MessagePort` or `Worker` — the platform does the work, no framing needed |
+| **Native clone** | `encodeNativeEnvelope`            | the transport is a `MessagePort` or `Worker` — the platform does the work, no framing needed |
 
 ## API
 
 - `encodeMessage(value, { codec })` — value to a framed `Uint8Array`. `codec` defaults to `selectCodec(value)`.
 - `decodeMessage(input, { strict, rawAsBytes })` — **one whole frame** to `{ version, codec, value, byteLength }`. Accepts a `Uint8Array`, `ArrayBuffer` or `DataView`. Throws on a partial frame; use `createFrameDecoder` for a stream.
 - `createFrameDecoder({ maxFrameBytes, strict, rawAsBytes })` — an incremental decoder over a byte stream. See [Reading a stream](#reading-a-stream).
-- `encodeNative(value)` — `{ message, transfer }` for a `MessagePort`/`Worker`, using the platform's structured clone.
-- `canUseNativeClone()` — whether `encodeNative` is usable.
+- `encodeNativeEnvelope(value, { correlationId })` — wraps a value for the native carrier **without cloning it**. The transport clones whatever it is handed, so this is the one clone, not two. This is what you want.
+- `encodeNative(value)` — `{ message, transfer }`, **deprecated in 2.0 in favour of `encodeNativeEnvelope`**. It clones _and_ hands the clone back for you to post, and `postMessage` clones that again. Still correct for the one case that needs a private copy — see [Native clone](#native-clone).
+- `canUseNativeClone()` — whether the native carrier is usable at all.
 - `selectCodec(value)` / `isRawPayload(value)` — codec choice helpers.
 - `frameTransferList(frame)` — `[frame.buffer]`, for `postMessage` transfer lists. Note that transferring detaches the buffer.
 - `MESSAGE_PROTOCOL_VERSION`, `CODECS`, `HEADER_BYTES`.
@@ -72,13 +73,46 @@ socket.send(encodeMessage(bytes)); // codec: 'raw'
 On a `MessagePort` or `Worker`, skip the framing:
 
 ```javascript
-import { encodeNative } from '../src/helpers/powerMessageCodec.js';
+import { encodeNativeEnvelope } from '../src/helpers/powerMessageCodec.js';
 
-const { message, transfer } = encodeNative({ map: new Map(), bin: new Uint8Array(1024) });
-port.postMessage(message, transfer);
+port.postMessage(encodeNativeEnvelope({ map: new Map(), bin: new Uint8Array(1024) }));
 ```
 
-`encodeNative` is lossless for `Map`, `Set`, `Date`, `RegExp`, cycles and binary — none of which the `json` codec supports — and it clones first, so the returned object shares no memory with the input.
+That is the whole native path. The envelope is lossless for `Map`, `Set`, `Date`,
+`RegExp`, cycles and binary — none of which the `json` codec supports — and it does
+**not** clone, because `postMessage` clones whatever it is handed. One deep copy,
+not two.
+
+### `encodeNative` is deprecated, and one case still needs it
+
+`encodeNative(value)` clones the value and returns `{ message, transfer }` for you
+to post. But `postMessage` then clones that again: a transfer list only ever
+_names_ buffers inside the object being posted, it never replaces the clone. So the
+common case pays for two deep copies where one suffices.
+
+Measured on the real path — the encode plus the clone `postMessage` performs,
+median of nine passes over 4 000 iterations, stable across three orderings — a
+small object costs **~3 800 ns with `encodeNative` and ~260 ns with the envelope,
+about 14x**, with the extra clone ~95% of the total. That is far outside the 28%
+median min/max spread this project's harness measures, so treat the ratio as the
+claim and the absolute numbers as machine-specific.
+
+**It is deprecated rather than removed, because one caller genuinely needs it.**
+Posting binary _without detaching the caller's data_ requires a private copy **and**
+a transfer list naming that copy's buffers, and `encodeNative` is the only call that
+returns both. That is exactly how `PowerPool` uses it internally.
+
+So: if your message carries an `ArrayBuffer` **and** you must not detach the
+caller's buffer, `encodeNative` is correct. If it carries no binary — which is the
+overwhelming majority of messages — the envelope is strictly better and you should
+switch.
+
+```javascript
+// Only when you need the caller's buffer left intact:
+import { encodeNative } from '../src/helpers/powerMessageCodec.js';
+const { message, transfer } = encodeNative(payload);
+port.postMessage(message, transfer); // transfers the *clone's* buffers
+```
 
 ## Reading a stream
 
