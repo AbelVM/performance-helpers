@@ -968,15 +968,22 @@ export {};
  *   of the eviction policy. `'tinylfu'` runs a 4-bit Count-Min frequency
  *   sketch and refuses an insert when the entry it would evict is still wanted,
  *   which is what makes a cache survive a one-off scan. Only consulted at
- *   capacity, and a tie keeps the incumbent.
+ *   capacity, and a tie keeps the incumbent. **Experimental, and measured worse
+ *   than `policy: 'slru'`, which resists the same scan** — see
+ *   `guides/powerCache.md`. Object keys are tracked by identity rather than by
+ *   `String(key)`, so two objects with the same fields are two keys to the
+ *   filter, matching how the cache itself stores them; `adr/0007` has the
+ *   measurement.
  * @property {number|null} [windowSize=0] - Size of the W-TinyLFU admission
  *   window, used only with `admission: 'tinylfu'`. `0` (the default) is the
  *   shipped behaviour, which refuses a challenger outright rather than routing it
  *   through a window. A positive value makes the last `windowSize` entries the
  *   window: new keys land there unconditionally and only the window's oldest is
- *   arbitrated against the main-space victim. `null` selects the recommended
- *   size, `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))`.
- *   See `adr/0003-tinylfu-admission-window.md`.
+ *   arbitrated against the main-space victim. `null` selects the formula's size,
+ *   `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))` — which is
+ *   **not** a recommendation: the window meets three of ADR 0003's four
+ *   acceptance criteria and misses cold start by 79 points, which is the case it
+ *   was built to fix. See `adr/0003-tinylfu-admission-window.md`.
  * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits
  *   the list into probation and protected segments and promotes on access, which
  *   resists a one-off sequential scan. Defaults to `'lru'`.
