@@ -9180,10 +9180,16 @@ flagged itself again and needed an exemption. And the assertion that `globalSetu
 `dist/` used a regex that could not span `path.resolve`'s own closing paren, so it **never
 matched anything** — the failure mode where a guard looks like it is guarding.
 
-**The measurement is incomplete and is recorded as such.** Three consecutive coverage runs
-after the fix measured 12 failures, then 2885/2885, then 1 — and those failures were
+**The measurement needed a quiet tree, and got one.** The first three coverage runs after
+the fix were confounded — 12 failures, then 2885/2885, then 1 — but those failures were
 `docsCodeAgreement` reporting a `powerWebSocketClient.md` reference from a concurrent
-session's uncommitted edit, not this defect. What can be said: the `ENOENT` /
-`.cjs must exist` / `Command failed: npm run build` class did not reappear in any run after
-the fix, and it was present in every run before it. Re-running the three on a quiet tree
-would close it completely.
+session's uncommitted edit, not this defect. Re-run once that session committed:
+
+| run | result    | `ENOENT` / must-exist / build-failed |
+| --- | --------- | -----------------------------------: |
+| 1   | 2885/2885 |                                    0 |
+| 2   | 2885/2885 |                                    0 |
+| 3   | 2885/2885 |                                    0 |
+
+Before the fix that class was present in **every** run, at between one and twelve failures.
+It is gone, and `VERIFY_TEST=test:coverage` is no longer a gate that means "try again".
