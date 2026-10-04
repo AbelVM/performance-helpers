@@ -93,19 +93,33 @@
 
 ***
 
+### \_className
+
+> **\_className**: `string`
+
+#### Inherited from
+
+[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_className`](../../powerPermitGate/classes/PowerPermitGate.md#_classname)
+
+***
+
 ### \_held
 
 > `protected` **\_held**: `number`
 
-Permits that have been granted and not yet returned.
+Capacity units that have been granted and not yet returned.
 
 The single count of outstanding work in this class, and the reason
 [PowerPermitGate#reset](../../powerPermitGate/classes/PowerPermitGate.md#reset) can no longer mint a permit. The invariant
 it maintains is `_available + _held === _capacity`; `reset()` may only set
 `_available` up to `capacity - _held`, so a holder that is still running
-keeps occupying its permit across a reset instead of the reset handing
+keeps occupying its unit across a reset instead of the reset handing
 out a second one. Both grant paths go through `_grantTo`, so there is no
-way for a permit to exist without being counted here.
+way for a unit to exist without being counted here.
+
+With weights this is the sum of all outstanding `weight` values, not the
+number of holders: a caller that acquired `weight: 3` occupies three units
+in this counter.
 
 `protected` rather than `private`: `PowerBackpressure` reads it for its
 heartbeat termination condition and for its `_inFlight` view, and
@@ -169,9 +183,12 @@ a subclass reading a base field is precisely what the tag describes.
 
 > **get** **active**(): `number`
 
-Number of permits currently held by callers that have not released yet.
+Number of capacity units currently held by callers that have not released yet.
 
-Read from `_held` rather than computed as `capacity - available`. The two are
+This is the sum of `weight` across all outstanding holders: with the default
+`weight` of 1 it equals the holder count, but a caller that acquired with
+`weight: 3` occupies three units. Read from `_held` rather than computed as
+`capacity - available`. The two are
 the same number whenever `capacity` is a ceiling on concurrent holders -
 which it is for this class, for `PowerSemaphore` and for `PowerBulkhead`, and
 there the difference is invisible. It stops being the same for a subclass
@@ -302,7 +319,13 @@ equal to the `refillAmount` option.
 
 ### \_makeRelease()
 
-> **\_makeRelease**(): () => `void`
+> **\_makeRelease**(`weight?`): () => `void`
+
+#### Parameters
+
+##### weight?
+
+`number` = `1`
 
 #### Returns
 
@@ -349,10 +372,15 @@ with a live waiter still queued, and every refill tick short-circuited on
 
 Aborted entries are compacted here rather than on the abort path, on
 purpose: removing by reference from a ring buffer is O(n) per cancellation,
-and a cancellation storm is exactly when an O(n) walk per cancelled waiter
-is least affordable. The `_cancelledWaiters` counter keeps
+and a cancellation storm is exactly the case where an O(n) walk per cancelled
+waiter is least affordable. The `_cancelledWaiters` counter keeps
 [PowerPermitGate#pending](../../powerPermitGate/classes/PowerPermitGate.md#pending) and [PowerPermitGate#isFull](../../powerPermitGate/classes/PowerPermitGate.md#isfull) honest in
 the meantime.
+
+With weights, each waiter consumes `entry.weight` units when served. A waiter
+whose weight exceeds the remaining permits is **not** skipped — FIFO order
+means no waiter behind it can advance either, so the loop stops and leaves
+it in the queue for the next release.
 
 #### Parameters
 
@@ -360,7 +388,7 @@ the meantime.
 
 `number`
 
-Maximum number of waiters to serve.
+Maximum number of units to distribute.
 
 ##### fromAvailable
 
@@ -376,7 +404,7 @@ Whether the served permits are drawn from
 
 `number`
 
-How many were served.
+How many units were served.
 
 #### Inherited from
 

@@ -43,6 +43,7 @@
  * @type {number}
  */
 import { assertKnownOptions } from '../utils/options.js';
+import { isError } from '../utils/errors.js';
 
 export const METRICS_VERSION = 1;
 
@@ -201,7 +202,10 @@ export class MetricsCollector {
       try {
         stats = read();
       } catch (err) {
-        errors[name] = err instanceof Error ? err.message : String(err);
+        // `isError()` rather than `instanceof Error`: a cross-realm read failure
+        // exported `"TypeError: …"` as the series error, naming the class instead
+        // of the message. WRK-007.
+        errors[name] = isError(err) ? err.message : String(err);
         continue;
       }
       const flat = toSeries(this._prefix + name, stats);

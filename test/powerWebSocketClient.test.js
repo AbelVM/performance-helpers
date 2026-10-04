@@ -63,6 +63,19 @@ class FakeSocket {
 
 const mkClient = (options = {}) => {
   const created = [];
+  // Record stream instances too. Without this `created` is empty for every test
+  // that passes `WebSocketStreamImpl`, because the `WebSocketImpl` subclass below
+  // is never instantiated on that tier — which is itself a small picture of the
+  // bug: the tier's own socket was never the one the harness was watching.
+  const StreamImpl = options.WebSocketStreamImpl;
+  const wrappedStream = StreamImpl
+    ? class extends StreamImpl {
+        constructor(u, p) {
+          super(u, p);
+          created.push(this);
+        }
+      }
+    : undefined;
   const client = new PowerWebSocketClient({
     url: 'ws://test/',
     WebSocketImpl: class extends FakeSocket {
@@ -73,6 +86,7 @@ const mkClient = (options = {}) => {
     },
     heartbeatIntervalMs: 0,
     ...options,
+    ...(wrappedStream ? { WebSocketStreamImpl: wrappedStream } : {}),
   });
   return { client, created };
 };
@@ -243,11 +257,30 @@ describe('PowerWebSocketClient backpressure: bufferedAmount watermarks', () => {
 });
 
 describe('PowerWebSocketClient backpressure: Streams tier', () => {
-  /** A WebSocketStream double with a controllable writer. */
+  /**
+   * A WebSocketStream double with a controllable writer **and a real `readable`.**
+   *
+   * The `readable` is the point, and it was missing until the audit that found
+   * the tier never read. Three tests here cover send, poll suppression and writer
+   * failure — all outbound — and this double had no inbound side at all, so the
+   * one thing the tier could not do was the one thing no test could see. The
+   * shape follows the real API: `readable` is `null` until `opened` settles, and
+   * only then is it a stream (`guides/powerSocketAdapter.md`).
+   */
   class FakeStream {
     constructor(url) {
       this.url = url;
       this.holdReady = false;
+      /** @type {{getReader: () => any}|null} */
+      this.readable = null;
+      /** Frames a test pushes inbound with `deliver()`. */
+      this._queue = [];
+      /** Resolvers waiting for a frame, so a push wakes a pending `read()`. */
+      this._waiting = [];
+      this.getReaderCalls = 0;
+      this.cancelCalls = 0;
+      /** Set to make the next `read()` reject, as a broken connection would. */
+      this.failNextRead = null;
       this.writable = {
         getWriter: () => {
           // Resolved by default so ordinary sends do not hang. A test that
@@ -265,7 +298,71 @@ describe('PowerWebSocketClient backpressure: Streams tier', () => {
           };
         },
       };
-      this.opened = Promise.resolve();
+      this.opened = Promise.resolve().then(() => {
+        // `readable` appears only once the connection is open, as the real type
+        // does. A test that tried to take a reader before this would be testing
+        // something the platform does not allow.
+        this.readable = {
+          getReader: () => {
+            this.getReaderCalls += 1;
+            return {
+              read: () => {
+                if (this.failNextRead) {
+                  const err = this.failNextRead;
+                  this.failNextRead = null;
+                  return Promise.reject(err);
+                }
+                return new Promise((resolve, reject) => {
+                  const next = this._queue.shift();
+                  if (next !== undefined) {
+                    resolve({ value: next, done: false });
+                    return;
+                  }
+                  // Hold the read open, as a live stream does. Without this the
+                  // pump's second `read()` resolves immediately and the loop
+                  // exits, which would make the tier look like it had finished.
+                  this._waiting.push({ resolve, reject });
+                });
+              },
+              cancel: () => {
+                this.cancelCalls += 1;
+                return Promise.resolve();
+              },
+              releaseLock: () => {},
+            };
+          },
+        };
+      });
+    }
+
+    /** Push one inbound frame, waking a pending `read()`. */
+    deliver(value) {
+      const waiting = this._waiting.shift();
+      if (waiting) waiting.resolve({ value, done: false });
+      else this._queue.push(value);
+    }
+
+    /** End the stream, as a closing server would. */
+    endStream() {
+      const waiting = this._waiting.shift();
+      if (waiting) waiting.resolve({ value: undefined, done: true });
+    }
+
+    /**
+     * Make the pending `read()` reject, as a broken connection does.
+     *
+     * Set on the *parked* read rather than on the next one: by the time a test
+     * has awaited `connect()`, the pump's first `read()` is already waiting, so
+     * arming a flag for a subsequent read would never fire.
+     */
+    failStream(error) {
+      const waiting = this._waiting.shift();
+      if (waiting) waiting.reject(error);
+      else this.failNextRead = error;
+    }
+
+    close() {
+      this.closed = true;
     }
   }
 
@@ -319,6 +416,119 @@ describe('PowerWebSocketClient backpressure: Streams tier', () => {
     client._writer.write = vi.fn().mockRejectedValue(new Error('writer-dead'));
     expect(await client.send({ a: 1 })).toBe(false);
     expect(errors.length).toBe(1);
+    client.close();
+  });
+
+  // ---- inbound, which the tier did not do at all ----
+
+  it('reads inbound frames off `readable`', async () => {
+    // **The defect.** The streams tier acquired a writer and never a reader, so
+    // it opened, sent, and received nothing — with no error and no counter,
+    // because nothing ever looked. `received: 0` and an empty handler list are
+    // indistinguishable from an idle socket, which is what made it survive.
+    const { client, created } = mkClient({ WebSocketStreamImpl: FakeStream });
+    const messages = [];
+    client.on('message', (m) => messages.push(m));
+    await client.connect();
+
+    const stream = created[0];
+    expect(stream.readable, 'readable appears once opened').not.toBeNull();
+
+    stream.deliver(encodeMessage({ hello: 'from the server' }));
+    await vi.waitFor(() => expect(messages).toHaveLength(1));
+
+    expect(messages[0]).toEqual({ hello: 'from the server' });
+    expect(client.stats().received).toBe(1);
+    expect(stream.getReaderCalls).toBe(1);
+    client.close();
+  });
+
+  it('reads a stream of frames rather than only the first', async () => {
+    // A pump that handled one frame and stopped would pass the test above.
+    const { client, created } = mkClient({ WebSocketStreamImpl: FakeStream });
+    const messages = [];
+    client.on('message', (m) => messages.push(m));
+    await client.connect();
+
+    const stream = created[0];
+    for (const n of [1, 2, 3]) stream.deliver(encodeMessage({ n }));
+    await vi.waitFor(() => expect(messages).toHaveLength(3));
+
+    expect(messages.map((m) => m.n)).toEqual([1, 2, 3]);
+    client.close();
+  });
+
+  it('cancels the reader on close, so the stream lock is not leaked', async () => {
+    // The reader is retained for this. A pending `read()` holds the lock; drop the
+    // handle and every reconnect leaks one, until the replacement stream cannot
+    // hand out a reader at all — deaf for a second, unrelated reason.
+    const { client, created } = mkClient({ WebSocketStreamImpl: FakeStream });
+    await client.connect();
+    const stream = created[0];
+
+    expect(client._streamReader).not.toBeNull();
+    client.close();
+
+    expect(stream.cancelCalls).toBe(1);
+    expect(client._streamReader).toBeNull();
+  });
+
+  it('reports a read failure instead of throwing out of the pump', async () => {
+    const { client, created } = mkClient({ WebSocketStreamImpl: FakeStream });
+    const errors = [];
+    client.on('error', (e) => errors.push(e));
+    await client.connect();
+    const stream = created[0];
+
+    // Make the next read reject, as a broken connection would.
+    stream.failStream(new Error('stream-dead'));
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
+    expect(String(errors[0].message)).toMatch(/stream-dead/);
+    client.close();
+  });
+
+  it('stops reading a stream that ends', async () => {
+    // Otherwise a completed stream leaves a pump parked on a reader forever.
+    const { client, created } = mkClient({ WebSocketStreamImpl: FakeStream });
+    const messages = [];
+    client.on('message', (m) => messages.push(m));
+    await client.connect();
+    const stream = created[0];
+
+    stream.deliver(encodeMessage({ n: 1 }));
+    await vi.waitFor(() => expect(messages).toHaveLength(1));
+    stream.endStream();
+
+    stream.deliver(encodeMessage({ n: 2 }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(messages, 'nothing arrives after the stream ends').toHaveLength(1);
+    client.close();
+  });
+
+  it('is deaf no longer: reads on a reconnect too', async () => {
+    // The pump is started per connection, not once per client. A client that read
+    // only its first connection would pass every test above.
+    const { client, created } = mkClient({
+      WebSocketStreamImpl: FakeStream,
+      reconnectBaseMs: 100,
+      reconnectMaxMs: 1000,
+    });
+    const messages = [];
+    client.on('message', (m) => messages.push(m));
+    await client.connect();
+
+    created[0].deliver(encodeMessage({ n: 'first' }));
+    await vi.waitFor(() => expect(messages).toHaveLength(1));
+
+    created[0].closed = true;
+    // Reconnect by hand rather than by racing the backoff timer.
+    await client._open().catch(() => {});
+    const second = created[created.length - 1];
+    second.deliver(encodeMessage({ n: 'second' }));
+    await vi.waitFor(() => expect(messages).toHaveLength(2));
+
+    expect(messages.map((m) => m.n)).toEqual(['first', 'second']);
+    expect(second.getReaderCalls).toBe(1);
     client.close();
   });
 });

@@ -55,6 +55,49 @@ function getEncoder() {
 }
 
 /**
+ * Whether `value` is an `ArrayBuffer`, **across realms**.
+ *
+ * `instanceof` compares against *this realm's* `ArrayBuffer.prototype`, so it is
+ * `false` for a buffer created in another `vm` context, another realm, or an
+ * iframe — even though the value is exactly what the caller means. The same is
+ * true of `Symbol.toStringTag`, which is worse than useless here: a plain object
+ * carrying `{ [Symbol.toStringTag]: 'ArrayBuffer' }` reports `[object
+ * ArrayBuffer]` *and* is accepted by `new Uint8Array()`, so that check turns a
+ * spoof into silent corruption rather than a rejection.
+ *
+ * `Reflect.get` on the spec's own `byteLength` accessor performs the
+ * **internal-slot check**, which is what actually identifies an `ArrayBuffer` and
+ * is unforgeable: the accessor throws `TypeError` for anything else, cross-realm
+ * or spoofed. Measured: it returns the length for a real buffer and throws for a
+ * tagged impostor.
+ *
+ * `instanceof` is kept as the **first** test so the same-realm case — which is
+ * every call on a normal encode or decode — still costs one comparison. Only a
+ * value that fails it pays for `Reflect.get` and the `try`.
+ *
+ * Declared as a type predicate for the same reason `isError` is: `instanceof`
+ * used to *narrow* at every call site, so returning a plain `boolean` here would
+ * have traded a realm bug for two fresh type errors where a bare `ArrayBuffer` is
+ * passed on.
+ *
+ * @param {unknown} value
+ * @returns {value is ArrayBuffer}
+ */
+export function isArrayBuffer(value) {
+  if (value instanceof ArrayBuffer) return true;
+  try {
+    return typeof Reflect.get(ArrayBuffer.prototype, 'byteLength', value) === 'number';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @private
+ * @param {ArrayBufferLike} buf
+ * @returns {boolean}
+ */
+/**
  * Whether `buf` is a `SharedArrayBuffer`.
  *
  * `instanceof SharedArrayBuffer` is not writable directly: the global is absent
@@ -67,10 +110,20 @@ function getEncoder() {
  * @returns {boolean}
  */
 function isSharedBuffer(buf) {
-  return (
-    typeof SharedArrayBuffer !== 'undefined' &&
-    /** @type {any} */ (/** @type {unknown} */ (buf)) instanceof SharedArrayBuffer
-  );
+  // `instanceof` for the same-realm fast path, then the internal-slot check for a
+  // buffer from another realm — see `isArrayBuffer` for why `Symbol.toStringTag`
+  // is not an option. A cross-realm `SharedArrayBuffer` missed both spellings
+  // before, and reached `JSON.stringify` as `{}`.
+  if (typeof SharedArrayBuffer === 'undefined') return false;
+  if (buf instanceof SharedArrayBuffer) return true;
+  try {
+    return (
+      typeof Reflect.get(SharedArrayBuffer.prototype, 'byteLength', /** @type {any} */ (buf)) ===
+      'number'
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -126,7 +179,10 @@ function getDecoder() {
 export const o2u8 = (obj, preStringified) => {
   if (obj instanceof Uint8Array) return obj;
   if (ArrayBuffer.isView(obj)) return new Uint8Array(obj.buffer, obj.byteOffset, obj.byteLength);
-  if (obj instanceof ArrayBuffer) return new Uint8Array(obj);
+  // `isArrayBuffer()` rather than `instanceof`: a bare `ArrayBuffer` from another
+  // realm is a real ArrayBuffer, and missing it dropped the value into
+  // `JSON.stringify`, which sent `{}` (WRK-006).
+  if (isArrayBuffer(obj)) return new Uint8Array(obj);
   // A `SharedArrayBuffer` is deliberately **not** an `ArrayBuffer` — that is how
   // the platform keeps the two distinguishable — so it needs its own branch. Left
   // to `JSON.stringify` it became the two bytes `{}`, so a value the caller
@@ -184,7 +240,7 @@ export const u82o = (buf) => {
   let u8;
   if (buf instanceof Uint8Array) u8 = buf;
   else if (ArrayBuffer.isView(buf)) u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-  else if (buf instanceof ArrayBuffer) u8 = new Uint8Array(buf);
+  else if (isArrayBuffer(buf)) u8 = new Uint8Array(buf);
   // Its own branch for the same reason as `o2u8`: a `SharedArrayBuffer` is not an
   // `ArrayBuffer`, so without this a SAB was rejected as an unsupported input
   // rather than decoded (PERF-005).

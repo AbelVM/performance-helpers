@@ -125,6 +125,16 @@ const NOT_CALLS = new Set([
  * underneath it.
  */
 const CROSS_CLASS = new Set([
+  // Methods of `ReadableStreamDefaultReader`, named from powerWebSocketClient's
+  // Streams tier. The client holds the reader rather than exposing it, so
+  // `read()` and `cancel()` are members of another object entirely — the same
+  // category as `memoize` above (a method of something the guide describes but
+  // does not document as its own API), and for the same reason: the guide cannot
+  // say *how* the inbound path works without naming them, and a backticked call
+  // is the only way to say it in prose. Added with RT-035, which is what gave
+  // this tier a reader at all.
+  'read',
+  'cancel',
   // PowerMemoizer, referenced from powerCache. `memoize` is a method of it, and
   // `memo` is the *value that method returns* — the memoized wrapper a guide
   // example then calls. A local binding rather than a member, so no source

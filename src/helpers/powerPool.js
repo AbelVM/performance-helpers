@@ -15,6 +15,7 @@
  */
 import { o2u8, u82o } from './powerBuffer.js';
 import { abortReason } from '../utils/abort.js';
+import { isError } from '../utils/errors.js';
 import WorkerAgnostic from './WorkerAgnostic.js';
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
@@ -1553,6 +1554,17 @@ export class PowerPool {
     // idle.
     workerObj.tasksSettled = true;
     try {
+      // Disposed, not just terminated. `terminate()` stops the worker; it does not
+      // detach the three native listeners `WorkerAgnostic` wired onto it at
+      // construction, and each one closes over `this` pool. Disposing first means
+      // a message that was already in flight reaches nobody — which is also what
+      // the `tasksSettled` guard above was written for, so the two agree rather
+      // than one papering over the other.
+      workerObj._agnostic?.dispose();
+    } catch (err) {
+      this._debugLog?.(err, `_terminateWorker(${reason}): worker dispose failed`);
+    }
+    try {
       workerObj.worker?.terminate();
     } catch (err) {
       this._debugLog?.(err, `_terminateWorker(${reason}): worker.terminate failed`);
@@ -2109,7 +2121,10 @@ export class PowerPool {
           'PowerPool: message could not be framed and was posted unframed ' +
             `(messageCodec is "${this._messageCodec}"). A worker using ` +
             'decodeMessage() will reject it. Cause: ' +
-            (err instanceof Error ? err.message : String(err))
+            // `isError()` rather than `instanceof Error`, so a cross-realm failure
+            // logs its own message instead of a stringified copy that carries the
+            // class name too. WRK-007.
+            (isError(err) ? err.message : String(err))
         );
       }
       return { message: msg, transfer: tr };
@@ -2237,24 +2252,73 @@ export class PowerPool {
   }
 
   /**
-   * Create a new worker instance using the configured source.
+   * Create a new worker for this pool, wrapped for the current runtime.
    *
-   * Worker creation is delegated to `WorkerAgnostic`, which transparently
-   * resolves the configured `workerSource` (a Worker constructor, a factory
-   * function, or a path/URL string) into the appropriate native worker for the
-   * current runtime — Node.js `worker_threads` or a Web Worker — without any
-   * environment-specific branching in this pool. Throws when `workerSource`
-   * is neither a function nor a string.
+   * **This returns the `WorkerAgnostic` wrapper, not the raw native worker**
+   * (WRK-004). It used to return `WorkerAgnostic.create(...)` — the class's
+   * *static* helper, which resolves the source and hands back the bare native
+   * worker — so the pool then wired `message`/`error`/`messageerror` itself,
+   * with its own rule for pulling a payload out of an event. That left the
+   * library with two event-normalisation implementations, and they disagreed
+   * exactly where it mattered: the pool's rule was `e?.data !== undefined ?
+   * e.data : e`, which is right for a browser `MessageEvent` and **wrong for
+   * Node**, because `worker.on('message', value)` delivers the payload itself.
+   * A worker replying with `{ data: rows, id: 7 }` therefore reached
+   * `awaitResponse` as `rows` — every sibling field silently dropped, no error,
+   * no counter. Verified against a real `worker_threads` worker; see
+   * `test/powerPool.workerAgnostic.test.js`, which pins both runtimes.
+   *
+   * `WorkerAgnostic` has one rule and it is the right one in both: unwrap
+   * `.data` only where the platform wraps a value in an event, and never on the
+   * EventEmitter model, where there is no wrapper to unwrap.
+   *
+   * Creation still resolves the same way and still throws the same errors, so
+   * the pool's own `workerSource` validation (and `WorkerAgnostic`'s) are
+   * unchanged by this.
    *
    * @private
-   * @returns {Worker|any} The underlying worker instance or factory result.
+   * @returns {WorkerAgnostic} The wrapper; `.worker` is the raw native worker.
    * @throws {Error} When `workerSource` is invalid or worker construction fails.
    */
   _createWorkerInstance() {
-    // WorkerAgnostic.create resolves the source into the correct native worker
-    // for the current environment and preserves the same contract violations
-    // (throwing an `Invalid workerSource` error) that the pool relies on.
-    return WorkerAgnostic.create(this._workerSource, this._workerOptions);
+    return new WorkerAgnostic(this._workerSource, {
+      ...this._workerOptions,
+      // `onError` is this library's own option, not the platform's, so it is
+      // the pool's to fill in. See `_onWorkerListenerError` for why a worker
+      // listener error goes to the logger and nowhere else.
+      // Annotated here rather than only on `_onWorkerListenerError`: the implicit-any
+      // is reported on this arrow's own parameters, so a JSDoc on the method alone
+      // leaves it red.
+      onError: (
+        /** @type {*} */ err,
+        /** @type {{type?: string, listener?: Function}} */ context
+      ) => this._onWorkerListenerError(err, context),
+    });
+  }
+
+  /**
+   * Report a worker event handler that threw.
+   *
+   * The pool's own `message`/`error` handlers guard every caller-supplied
+   * callback individually, so anything arriving here is a bug in this file
+   * rather than in user code — an unhandled decode failure, a throw from a
+   * capability announcement. It goes to the logger and the debug log and
+   * nowhere else: **not** to `_bus.emit('pool:error')`, because this runs
+   * *inside* the dispatch loop that emit would re-enter, and a second failure
+   * inside error reporting is the one outcome worse than the original.
+   *
+   * Without a handler here the failure would be silent, which is the defect
+   * WRK-003 recorded for this class: a listener that stops being called looks
+   * exactly like a worker that went quiet.
+   *
+   * @param {*} err - What the handler threw.
+   * @param {{type?: string, listener?: Function}} [context] - Which event.
+   * @private
+   * @returns {void}
+   */
+  _onWorkerListenerError(err, context) {
+    this._logger.error(err, `worker ${context?.type ?? 'event'} handler failed`);
+    this._debugLog?.(err, `_onWorkerListenerError: worker ${context?.type ?? 'event'}`);
   }
 
   _deleteWorkerUnderlyingMapping(workerObj) {
@@ -2281,13 +2345,31 @@ export class PowerPool {
    */
   _addWorkerInstance(id) {
     if (id == null) id = this._nextWorkerId++;
-    const underlying = this._createWorkerInstance();
+    const agnostic = this._createWorkerInstance();
+    // The raw native worker underneath the wrapper, and the `WorkerWrapper`
+    // wraps **this** rather than the `WorkerAgnostic`. That is deliberate, not
+    // incidental: the wrapper decides its own transfer list (an array *or* any
+    // iterable or array-like, and it may add a buffer of its own encoding),
+    // whereas `WorkerAgnostic.postMessage` normalises its argument down to an
+    // array or a `{ transfer }` bag and would **drop** an array-like list on the
+    // floor. Routing sends through the class would quietly stop transferring.
+    // Events are the other way round: they are where the two runtimes disagree,
+    // so they go through the class. See `_createWorkerInstance` (WRK-004).
+    const underlying = agnostic.worker;
 
     const worker = new WorkerWrapper(underlying, this._logger, this);
 
     const workerObj = {
       id,
       worker,
+      // The event-normalisation wrapper for this worker. Held so `_terminateWorker`
+      // can release what it attached: `WorkerAgnostic.dispose()` detaches the
+      // native listeners, and nothing else in the tree does. That method was added
+      // by WRK-002 and this is its only in-repo consumer, which is why it went
+      // unused: nothing that owned a worker ever called it. Without the call the
+      // terminated native worker keeps a listener that closes over the pool, so a
+      // pool that resized once stayed reachable from every worker it retired.
+      _agnostic: agnostic,
       tasks: 0,
       lastActive: nowMs(),
       latencyEwma: null,
@@ -2478,16 +2560,22 @@ export class PowerPool {
      */
     // forward underlying events, decoding binary payloads to JS objects
     /**
-     * Handle a raw message event from the underlying Worker and decode
-     * binary payloads back to JS values before forwarding to the wrapper
-     * `worker.onmessage` handler.
+     * Handle a normalised `message` event from this worker's underlying Worker
+     * and decode binary payloads back to JS values before forwarding to the
+     * wrapper `worker.onmessage` handler.
+     *
+     * `event` is `WorkerAgnostic`'s `{ data, originalEvent }`, not the platform's
+     * event: the class has already decided whether the value arrived wrapped in
+     * a `MessageEvent` (browser) or bare (Node). The pool used to make that
+     * decision itself, and got Node wrong — see `_createWorkerInstance`.
      *
      * @private
-     * @param {MessageEvent|any} e - The raw event or message payload.
+     * @param {{data: *, originalEvent: *}} event - The normalised event.
      */
-    const _handleMessage = (e) => {
-      // support both browser-like MessageEvent (with .data) and Node 'message' callbacks (data passed directly)
-      const data = e?.data !== undefined ? e.data : e;
+    const _handleMessage = (event) => {
+      // Already normalised, so there is no unwrapping here and no way for the two
+      // runtimes to drift apart again.
+      const data = event?.data;
       let decoded = data;
       /** @type {any} - the native envelope, when the reply arrived on that carrier */
       let inboundMeta = null;
@@ -2527,8 +2615,23 @@ export class PowerPool {
           decoded = data;
         }
       }
+      // When nothing was decoded, forward `WorkerAgnostic`'s object as it stands;
+      // when the payload was unwrapped from a frame or an envelope, forward a new
+      // one. Either way `correlationId`/`duration` land on **our** event object
+      // rather than on the platform's, which the old code did by mutating a real
+      // `MessageEvent` — a message that a browser may hand to more than one
+      // listener. `originalEvent` is how a caller still reaches `origin`/`target`.
+      // Typed rather than inferred: `correlationId`/`duration` are written onto
+      // whichever object is forwarded, and `WorkerAgnostic`'s payload type has
+      // only `data`/`originalEvent`, so an inferred type made both writes errors.
+      /** @type {{data: *, originalEvent: *, correlationId?: string, duration?: number}} */
       const ev =
-        e?.data !== undefined && decoded === data ? e : { data: decoded, originalEvent: e };
+        decoded === data
+          ? /** @type {*} */ (event)
+          : {
+              data: decoded,
+              originalEvent: event && 'originalEvent' in event ? event.originalEvent : event,
+            };
       if (inboundMeta) {
         // Pool bookkeeping the reply would otherwise lose. Read by correlation
         // matching and the latency sampler; see the comment at the unwrap above
@@ -2591,57 +2694,22 @@ export class PowerPool {
       this._bus.emit('messageerror', e);
     };
 
-    // Attach handlers in a cross-platform way (Worker in browsers and Node.js worker_threads)
-    if (typeof underlying.addEventListener === 'function') {
-      try {
-        underlying.addEventListener('message', _handleMessage);
-      } catch (e) {
-        this._debugLog?.(e, 'attach addEventListener message');
-      }
-      try {
-        underlying.addEventListener('error', _handleError);
-      } catch (e) {
-        this._debugLog?.(e, 'attach addEventListener error');
-      }
-      try {
-        underlying.addEventListener('messageerror', _handleMessageError);
-      } catch (e) {
-        this._debugLog?.(e, 'attach addEventListener messageerror');
-      }
-    } else if (typeof underlying.on === 'function') {
-      try {
-        underlying.on('message', _handleMessage);
-      } catch (e) {
-        this._debugLog?.(e, 'attach underlying.on message');
-      }
-      try {
-        underlying.on('error', _handleError);
-      } catch (e) {
-        this._debugLog?.(e, 'attach underlying.on error');
-      }
-      try {
-        underlying.on('messageerror', _handleMessageError);
-      } catch (e) {
-        this._debugLog?.(e, 'attach underlying.on messageerror');
-      }
-    } else {
-      // last-resort assignments
-      try {
-        underlying.onmessage = _handleMessage;
-      } catch (e) {
-        this._debugLog?.(e, 'assign underlying.onmessage');
-      }
-      try {
-        underlying.onerror = _handleError;
-      } catch (e) {
-        this._debugLog?.(e, 'assign underlying.onerror');
-      }
-      try {
-        underlying.onmessageerror = _handleMessageError;
-      } catch (e) {
-        this._debugLog?.(e, 'assign underlying.onmessageerror');
-      }
-    }
+    // Registration, and **not** attachment. The 51 lines this replaced picked a
+    // native model by hand — `addEventListener`, else `.on`, else property
+    // assignment — and `WorkerAgnostic._wireEvents` picks the same three, in the
+    // same order, for the same reason. Two copies of that ladder is how the two
+    // copies of the unwrap drifted apart in the first place (WRK-004), so the
+    // ladder lives in the class now and the pool only says *which* events it
+    // wants. `.on` and `.addEventListener` are aliases here, so the choice is
+    // cosmetic; `.on` reads as "subscribe" and is what a Node-shaped caller
+    // expects to see.
+    //
+    // `addEventListener` returns `this` and cannot throw for a non-function
+    // handler, so none of these three calls is guarded the way the block above
+    // guarded its nine — there was nothing to guard.
+    agnostic.on('message', _handleMessage);
+    agnostic.on('error', _handleError);
+    agnostic.on('messageerror', _handleMessageError);
 
     return workerObj;
   }

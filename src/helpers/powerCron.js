@@ -1,5 +1,6 @@
 import { MS_PER_MIN } from './constants.js';
 import { nowMs } from '../utils/now.js';
+import { isError } from '../utils/errors.js';
 import { assertFunction, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
 /**
@@ -351,7 +352,12 @@ export class PowerCron {
   _report(err, where) {
     if (this._onError) {
       try {
-        this._onError(err instanceof Error ? err : new Error(String(err)));
+        // `isError()` rather than `instanceof Error`. A cross-realm `err` failed
+        // `instanceof` and was **replaced** by `new Error(String(err))`, which
+        // stringifies to `"TypeError: …"` and discards the caller's `code` and
+        // stack — so `onError` was told the cron entry failed rather than why.
+        // WRK-007, and the same substitution `powerBulkhead` was fixed for.
+        this._onError(isError(err) ? err : new Error(String(err)));
         return;
       } catch (e) {
         // A throwing onError must not become an unhandled rejection of its own.

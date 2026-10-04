@@ -299,7 +299,29 @@ recreateWorkers: false })` clears the interval without clearing the policy —
 
 ## Events and handlers
 
-`onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers. `onidle` and `'idle'` listeners receive an event with `data.type === 'pool:idle'` and two separate payloads:
+`onmessage`, `onerror`, `onidle` — setter/getter properties for convenient handlers.
+
+### What a `message` event is
+
+`onmessage` and `'message'` listeners receive an event object with `data` set to the worker's
+reply. That event is the pool's own, **not** the platform's `MessageEvent`:
+
+- `data` — the decoded reply.
+- `correlationId`, `duration` — present when the reply arrived on the native envelope carrier.
+- `originalEvent` — the platform event the reply arrived on, when there was one. In a browser that
+  is a real `MessageEvent`, so `event.originalEvent.origin` still works. In Node there is no
+  wrapper and this is the posted value.
+
+This changed in 2.0. The pool used to forward the browser's `MessageEvent` itself and write
+`correlationId` onto it, which meant a second listener on the same event saw fields the pool had
+invented. Nothing is lost except that one hop: read `originalEvent` where you used to read the
+event's own `origin`, `target` or `lastEventId`.
+
+`error` and `messageerror` are forwarded **as the platform delivered them** — only `message` is
+normalised, because only `message` carries a payload to normalise.
+
+`onidle` and `'idle'` listeners receive an event with `data.type === 'pool:idle'` and two separate
+payloads:
 
 - `data.workers` — the per-worker snapshot: an array of `{ id, tasks, lastActive }`. This is the pool's account of _which_ workers it believes are idle. A worker with `tasks !== 0` here means the pool's active-task accounting has drifted from the per-worker counts, so this is the field to log when investigating a drain that never settles.
 - `data.stats` — the aggregate `getStats()` summary: `{ status, performance, queueLength, activeTasks, workerCount, ... }`.

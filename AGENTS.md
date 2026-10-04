@@ -180,6 +180,28 @@ comment that blurs it is worse than no comment.
 do not loosen it.** A timing assertion that passed with the fix reverted was
 removed rather than given a bigger threshold.
 
+**A cross-realm type test needs an internal-slot check, not `instanceof` and not
+`Symbol.toStringTag`.** Both of the obvious answers are wrong, and this project
+has now walked into both. `instanceof` compares against _this realm's_
+prototype, so it is `false` for a value from another `vm` context, an iframe, or
+a `node:vm` sandbox — `errors.js`, `powerMessageCodec` and `powerBuffer` each
+carried a site where that turned a caller's error into a substitute or, worse,
+silently dropped a payload. `Object.prototype.toString.call(v) ===
+'[object ArrayBuffer]'` **is** realm-independent, and it is also **spoofable**: a
+plain `{ [Symbol.toStringTag]: 'ArrayBuffer', byteLength: 8 }` reports
+`[object ArrayBuffer]` _and is accepted by `new Uint8Array()`_, so a `toString`
+check converts an impostor into silent corruption rather than a rejection. What
+ships is `Reflect.get(ArrayBuffer.prototype, 'byteLength', value)` — the spec's
+own accessor, which performs the internal-slot check, returns the length for a
+real buffer and **throws `TypeError`** for the impostor, cross-realm included.
+`ArrayBuffer.isView()` is already realm-independent and is the right test for a
+view. Two of the three defects above were in code that had _already_ been fixed
+for this class, because `isView` covered views and the author read that as
+covering the file. **When you fix one site of a defect class, grep for the class
+and not for the site** — and prefer a test whose fixture is a real second realm
+(`node:vm`), since a hand-rolled `{ byteLength: n }` stand-in is _accepted_ by
+`new Uint8Array()` and would pass for the wrong reason.
+
 **A guard that has never been observed failing is a hypothesis, and a guard that
 prints `ok` while checking nothing is worse than one that is absent.** The first
 version of `docs:claims` matched the JSDoc spelling of a typedef (`@typedef

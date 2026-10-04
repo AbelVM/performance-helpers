@@ -53,7 +53,7 @@
  * @module powerMessageCodec
  * @public
  */
-import { o2u8, u82o } from './powerBuffer.js';
+import { isArrayBuffer, o2u8, u82o } from './powerBuffer.js';
 import { assertLimitRequired } from '../utils/options.js';
 
 /** Current protocol version written into every frame. */
@@ -143,10 +143,16 @@ export function canUseNativeClone() {
  * @returns {boolean}
  */
 export function isRawPayload(value) {
-  return (
-    value instanceof ArrayBuffer ||
-    (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value))
-  );
+  // **`isArrayBuffer()` rather than `instanceof ArrayBuffer`**, and this was the
+  // worst instance of the pair. A *bare* `ArrayBuffer` from another realm failed
+  // both tests here, so `selectCodec` answered `'json'`, `JSON.stringify` turned
+  // the buffer into `{}`, and the frame came back as an empty object that
+  // **decoded successfully** — the caller's payload gone with no error anywhere.
+  // Views were always fine: `ArrayBuffer.isView` is realm-independent, which is
+  // why the sibling fix in `frameEncodedJson` looked like it covered this file.
+  // Measured before the fix: `encodeMessage(foreignBare)` produced 8 bytes that
+  // decoded to `{}` where the payload was `{"a":1}`. WRK-006.
+  return isArrayBuffer(value) || (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(value));
 }
 
 /**
@@ -186,10 +192,14 @@ export function encodeMessage(value, options = {}) {
         'PowerMessageCodec: the "raw" codec requires an ArrayBuffer or a typed array'
       );
     }
-    payload =
-      value instanceof ArrayBuffer
-        ? new Uint8Array(value)
-        : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    // `isArrayBuffer()` here is not a tidy-up: it is where the corruption
+    // happened. A bare cross-realm buffer failed `instanceof`, took the **view**
+    // branch, and `value.buffer` on a buffer *is* `undefined` — so the payload
+    // became an empty `Uint8Array` and the frame decoded to `{}`. Measured: 6
+    // bytes where the payload was 7. WRK-006.
+    payload = isArrayBuffer(value)
+      ? new Uint8Array(value)
+      : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   } else {
     payload = o2u8(value);
   }
@@ -885,7 +895,7 @@ export function decodeInbound(data) {
   if (isNativeEnvelope(data)) {
     return { codec: 'native', value: data.value, correlationId: data.correlationId };
   }
-  if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+  if (isArrayBuffer(data) || ArrayBuffer.isView(data)) {
     const bytes = toBytes(data);
     // Only a body that *claims* to be version 1 is decoded as a frame, so a
     // version-2 frame or a truncated one reports the error it actually is
@@ -947,12 +957,14 @@ function canStartJsonDocument(byte) {
  * Coerce the accepted binary inputs to a `Uint8Array` without copying when
  * possible.
  * @private
- * @param {Uint8Array|ArrayBuffer|DataView} input
+ * @param {Uint8Array|ArrayBuffer|ArrayBufferView} input - `ArrayBufferView` rather
+ *   than `DataView` because the `ArrayBuffer.isView` branch below accepts any view,
+ *   and `decodeInbound` narrows to it before calling. WRK-006.
  * @returns {Uint8Array}
  */
 function toBytes(input) {
   if (input instanceof Uint8Array) return input;
-  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  if (isArrayBuffer(input)) return new Uint8Array(input);
   if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(input)) {
     return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
   }

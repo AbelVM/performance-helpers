@@ -662,20 +662,56 @@ export class PowerPool {
      */
     resize(n: number): void;
     /**
-     * Create a new worker instance using the configured source.
+     * Create a new worker for this pool, wrapped for the current runtime.
      *
-     * Worker creation is delegated to `WorkerAgnostic`, which transparently
-     * resolves the configured `workerSource` (a Worker constructor, a factory
-     * function, or a path/URL string) into the appropriate native worker for the
-     * current runtime — Node.js `worker_threads` or a Web Worker — without any
-     * environment-specific branching in this pool. Throws when `workerSource`
-     * is neither a function nor a string.
+     * **This returns the `WorkerAgnostic` wrapper, not the raw native worker**
+     * (WRK-004). It used to return `WorkerAgnostic.create(...)` — the class's
+     * *static* helper, which resolves the source and hands back the bare native
+     * worker — so the pool then wired `message`/`error`/`messageerror` itself,
+     * with its own rule for pulling a payload out of an event. That left the
+     * library with two event-normalisation implementations, and they disagreed
+     * exactly where it mattered: the pool's rule was `e?.data !== undefined ?
+     * e.data : e`, which is right for a browser `MessageEvent` and **wrong for
+     * Node**, because `worker.on('message', value)` delivers the payload itself.
+     * A worker replying with `{ data: rows, id: 7 }` therefore reached
+     * `awaitResponse` as `rows` — every sibling field silently dropped, no error,
+     * no counter. Verified against a real `worker_threads` worker; see
+     * `test/powerPool.workerAgnostic.test.js`, which pins both runtimes.
+     *
+     * `WorkerAgnostic` has one rule and it is the right one in both: unwrap
+     * `.data` only where the platform wraps a value in an event, and never on the
+     * EventEmitter model, where there is no wrapper to unwrap.
+     *
+     * Creation still resolves the same way and still throws the same errors, so
+     * the pool's own `workerSource` validation (and `WorkerAgnostic`'s) are
+     * unchanged by this.
      *
      * @private
-     * @returns {Worker|any} The underlying worker instance or factory result.
+     * @returns {WorkerAgnostic} The wrapper; `.worker` is the raw native worker.
      * @throws {Error} When `workerSource` is invalid or worker construction fails.
      */
     private _createWorkerInstance;
+    /**
+     * Report a worker event handler that threw.
+     *
+     * The pool's own `message`/`error` handlers guard every caller-supplied
+     * callback individually, so anything arriving here is a bug in this file
+     * rather than in user code — an unhandled decode failure, a throw from a
+     * capability announcement. It goes to the logger and the debug log and
+     * nowhere else: **not** to `_bus.emit('pool:error')`, because this runs
+     * *inside* the dispatch loop that emit would re-enter, and a second failure
+     * inside error reporting is the one outcome worse than the original.
+     *
+     * Without a handler here the failure would be silent, which is the defect
+     * WRK-003 recorded for this class: a listener that stops being called looks
+     * exactly like a worker that went quiet.
+     *
+     * @param {*} err - What the handler threw.
+     * @param {{type?: string, listener?: Function}} [context] - Which event.
+     * @private
+     * @returns {void}
+     */
+    private _onWorkerListenerError;
     _deleteWorkerUnderlyingMapping(workerObj: any): void;
     /**
      * Add and wire a new worker instance into the pool.

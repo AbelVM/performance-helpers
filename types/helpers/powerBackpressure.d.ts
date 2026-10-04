@@ -39,6 +39,11 @@ export class PowerBackpressure extends PowerPermitGate {
      */
     acquire(options?: Object): Promise<PowerReleaseFn>;
     /**
+     * Try to acquire a permit immediately.
+     * @returns {PowerReleaseFn|null} Release callback, or `null` if no permit is available.
+     */
+    tryAcquire(): PowerReleaseFn | null;
+    /**
      * Reset the controller to its initial capacity and clear waiting producers.
      */
     reset(): void;

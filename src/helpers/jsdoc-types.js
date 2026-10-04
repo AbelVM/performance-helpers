@@ -215,6 +215,12 @@
  * @typedef {Object} WorkerObj
  * @property {number} id - Numeric id for the worker entry.
  * @property {WorkerLike} worker - The underlying Worker instance or worker-like object.
+ * @property {import('./WorkerAgnostic.js').default} [_agnostic] - The
+ *   `WorkerAgnostic` wrapper that owns this worker's event normalisation, and
+ *   the only handle that can detach the native listeners it wired at
+ *   construction. `_terminateWorker` disposes it; a worker entry whose wrapper
+ *   has been disposed no longer receives messages, which is what keeps a
+ *   retired worker from reaching back into the pool. WRK-004.
  * @property {number} tasks - Number of active tasks currently assigned.
  * @property {number} lastActive - Timestamp (ms) of last activity on this worker.
  * @property {number} [completedTasks] - Tasks this worker finished over its lifetime, carried so a
