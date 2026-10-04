@@ -333,6 +333,42 @@ Style that is deliberate here, not incidental:
     not rewrite shared history to fix its message; say so, and let the release
     notes carry the record instead. The changeset is the artefact that survives a
     misleading commit, which is part of why it is mandatory.
+
+  - `81fbe8d` (`refactor: ten dispose() methods now neutralise through one
+helper`) carries `src/helpers/powerRTCChannel.js` — **783 lines**, an entire
+    new helper — plus `powerRateLimit.js`, `jsdoc-types.js` and their generated
+    types and docs, all belonging to a concurrent session's in-flight work. The
+    cause was `git add -- src/helpers/`: **a directory, which is `git add -A`
+    scoped to one folder.** This is the fifth occurrence, and the first one where
+    the guard _passed_ — the staged set and the commit did match each other. The
+    set was simply the wrong set, and content verification cannot see that.
+  - **Never stage a directory on a shared tree.** Stage ten explicit paths, not
+    the folder they happen to share. `commit-guard.mjs` now takes
+    `--expect path,path`, which compares the index against a declaration of
+    intent **before** the commit runs, so this class is refused rather than
+    reported afterwards. Use it for any commit touching shared code.
+
+- **Regenerate `types/` _and_ `docs/` before you stage, never after.** The
+  pre-commit hook refreshes `types/` and the visible page for the file you
+  changed, but **not** `docs/docs-typedoc.json` — the aggregated comment index,
+  where every source line shift invalidates a line reference. So any JSDoc edit
+  leaves it stale and `verify` fails at step 11 with the other ten green. Twice,
+  both times mine.
+
+- **Lint-staged reads the _staged_ copy, and names the wrong task when it
+  fails.** An edit made after staging is invisible to the hook. And with several
+  tasks configured, one failure kills its siblings, so the message names a task
+  that was merely collateral: `Task killed: prettier --write` was really an
+  `eslint` error four lines above it. **Run `npx lint-staged` directly to see
+  the real error** — I blamed load average 15, waited for it to fall, retried,
+  and was wrong twice before reading the actual output.
+
+- **When the type ratchet goes red, get the per-file listing before deciding
+  whose it is.** The ratchet summary prints a _total and a sample_, and the
+  sample points at whichever file sorts first — which was `WorkerAgnostic.js`
+  both times, so I attributed my own three errors to a concurrent session twice.
+  `npm run typecheck` prints per file. **Check your own files first**, then
+  theirs.
 - **Do not edit `review.md` with a multi-step script, and do not trust one that
   reported success.** It is 450 KB+, gitignored — so `git checkout` cannot undo a
   bad edit and no commit ever holds it — and a markdown table row cannot contain
