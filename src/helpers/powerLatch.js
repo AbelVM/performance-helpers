@@ -15,6 +15,7 @@
  */
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { PowerDefer } from './powerDefer.js';
+import { setSafeTimeout } from '../utils/timers.js';
 
 export class PowerLatch {
   /**
@@ -149,7 +150,20 @@ export class PowerLatch {
 
     // register timeout
     if (typeof timeout === 'number' && timeout > 0) {
-      waiter.timer = setTimeout(() => {
+      // RES-015. `setSafeTimeout`, not `setTimeout`: a plain timer is *ref'd*, so it
+      // keeps the Node event loop alive. One pending waiter with a timeout therefore
+      // held a process open for the whole timeout after the latch had been disposed or
+      // opened - measured in a subprocess: exit 124 (killed at 4s) for a single
+      // `wait({ timeout: 5000 })` on a closed latch, against exit 0 for a bare control,
+      // and exit 124 for a bare `setTimeout(fn, 5000)` proving the harness could detect
+      // a hold. A latch is the shape most likely to be abandoned mid-wait - a request
+      // handler that gave up, a test that finished - so this is the case where the
+      // process should be free to leave.
+      //
+      // `setSafeTimeout` also `unref`s rather than allocating to ask, which is what
+      // stopped 200 000 calls producing 400 000 live `Timeout` objects when it was
+      // written; see `src/utils/timers.js`.
+      waiter.timer = setSafeTimeout(() => {
         this._removeWaiter(token);
         defer.reject(Object.assign(new Error('Timeout'), { code: 'ETIMEOUT' }));
       }, timeout);

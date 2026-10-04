@@ -8073,3 +8073,41 @@ count `_encodeCache.size` and `_encodeCacheBytes` rather than timing anything: t
 about whether an entry is inserted, and an entry count is exact where a duration is noise.
 
 **Mutation-checked:** removing the bypass fails 4 of the 6.
+
+## `PowerLatch`: a pending waiter with a timeout no longer holds the process open
+
+**RES-015's second half, and the first half was already done.** `PowerSemaphore` has
+accepted `queueCapacity` for some time — positionally _and_ through an options object,
+guarded by `assertKnownOptions` — so that half of the row was stale. The other half was
+live: `PowerLatch.wait` armed its timeout with a plain `setTimeout`, which is **ref'd**.
+
+**One pending waiter kept a Node event loop alive for the whole timeout**, after the latch
+had already been opened or disposed. Measured in a subprocess: a single
+`wait({ timeout: 5000 })` on a closed latch exited **124** — killed at 4 s — against exit 0
+for the same script once fixed, and exit 124 for a bare `setTimeout(fn, 5000)`, which is
+the control proving the harness could detect a hold at all.
+
+`setSafeTimeout` `unref`s the handle instead. A latch is the shape most likely to be
+abandoned mid-wait — a request handler that gave up, a test that finished — so this is
+exactly the case where the process should be free to leave. `setSafeTimeout` also `unref`s
+by probing the handle it was handed rather than allocating to ask, which is what stopped
+200 000 calls producing 400 000 live `Timeout` objects when it was written.
+
+**The test has to be a subprocess test**, and that is the interesting constraint: the
+property is about whether the _process_ exits, so nothing inside a vitest worker can
+observe it — the worker is already running and something else decides its lifetime.
+
+**Two fixture mistakes are recorded in the test file, because both produced a confidently
+wrong answer first.** `new PowerLatch(false)` is already open, so `wait()` returns at
+`_count === 0` and **arms no timer at all** — the first version measured a clean exit and
+concluded there was nothing to fix. And `wait(5000)` is not `wait({ timeout: 5000 })`: the
+parameter is `opts`, and a number is only unpacked at `powerLatch.js:133`. The fixture must
+be a **closed** latch reached through the options object.
+
+**Mutation-checked, and the assertion order matters:** reverting to plain `setTimeout` must
+fail with `expected 124 to be 0`. A killed child loses its stdout, so an "armed" assertion
+placed first fails with `expected '' to contain 'armed'` — true, but it says nothing about
+process lifetime. The exit code is asserted first for that reason, and the `armed` check
+follows on the passing path to prove the probe armed something rather than exiting because
+it never started. A third case asserts the timeout still fires and still rejects with
+`ETIMEDOUT`, so an `unref`'d timer that never ran could not satisfy the first.
