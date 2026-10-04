@@ -900,7 +900,12 @@ console.log(tc.get('k'));
 
 ### Notes
 
-- `PowerTimedCache` delegates all public `PowerCache` instance methods (for example `get`, `set`, `delete`, `clear`, `entries`, `stats`) to the underlying cache. Use `tc.cache` to access the raw `PowerCache` instance when you need advanced operations.
+- `PowerTimedCache` delegates **every** public `PowerCache` instance method to the underlying cache — `get`, `set`, `delete`, `clear`, `entries`, `stats`, and also `peek`, `touch`, `resize`, `getOrSet`, `getOrSetAsync`, `setMany`, `getMany` and `hasEqual`. Until CACHE-013 that sentence was aspirational: the eight latter methods existed only on the inner cache, and the first eight were the whole list. They are now bare forwards, so a wrapper-only option cannot disagree with the cache behind it. `tc.cache` still reaches the raw `PowerCache` when you want the object itself.
+- `cacheOptions` accepts **every option `PowerCache` accepts** except `defaultTTL`. It previously accepted only `ttl`, `weight` and `cacheOptions` — a list copied from `PowerMemoizer` — which meant the `weightFn` / `maxWeight` / `rejectOversized` example in the table above **threw**, and a weighted TTL cache could not be built at all. The list is now derived from the inner cache's rather than restated, so the two cannot drift apart silently.
+- `defaultTTL` is the one omission, and it is deliberate: the constructor's `ttl` _is_ the default TTL, assigned after `cacheOptions` is copied, so accepting the option would mean accepting one that is ignored. It is rejected with a message naming it. Nothing could pass it before, so this breaks no caller.
+- `staleWhileRevalidate` on `getOrSet` / `getOrSetAsync` needs `allowStale` and `staleTtl` in `cacheOptions`. Both are now reachable; before, `staleTtl` was not, so the flag silently did nothing — `_staleServable` reads only `staleTtl`, which defaulted to 0, and `now <= expiresAt + 0` is false for every expired entry.
+- `set()` and `setMany()` return **this wrapper**, not the underlying `PowerCache`, so a chain stays a `PowerTimedCache` and a TypeScript caller gets the class the types promised. `set()` still returns `false` when the entry is refused as oversized.
+- Per-entry `{ ttl }` is ignored: the constructor's TTL is the default for every entry.
 - The wrapper exposes synchronous and async disposal hooks (`[Symbol.dispose]` and `[Symbol.asyncDispose]`) which delegate to the underlying cache
 
 ## Recommendations

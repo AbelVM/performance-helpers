@@ -155,6 +155,47 @@ const ALIASED_FIELDS = Object.freeze([
  * @class PowerCache
  * @public
  */
+/**
+ * Every option `PowerCache` accepts, in one place.
+ *
+ * CACHE-013: `PowerTimedCache` needs to validate the `cacheOptions` it forwards, and
+ * the first version of that fix hand-copied this list. It was wrong in four places —
+ * it carried `ttl`, `weight`, `keyResolver` and `cacheOptions`, none of which this
+ * constructor accepts, and it **omitted `seed`** — so a wrapper advertised options the
+ * cache behind it rejected. Two numbers in one file disagreeing is the failure this
+ * repository keeps paying for; a *third* copy of a 22-item list would guarantee it.
+ *
+ * `PowerTimedCache` therefore derives its own allowlist from this array rather than
+ * restating it, and `test/powerTimedCache.delegation.test.js` checks the two against
+ * each other through the error message, which prints the enforced set.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+const POWER_CACHE_OPTIONS = Object.freeze([
+  'maxEntries',
+  'maxInflightRefreshes',
+  'maxWeight',
+  'weightFn',
+  'defaultTTL',
+  'maxPoolSize',
+  'rejectOversized',
+  'onEvict',
+  'onExpire',
+  'initialPoolSize',
+  'maxCleanupPerTick',
+  'defaultAsyncTimeout',
+  'now',
+  'onError',
+  'admission',
+  'windowSize',
+  'seed',
+  'policy',
+  'allowStale',
+  'staleTtl',
+  'fetchMethod',
+  'observability',
+]);
+
 export class PowerCache {
   /**
    * Create a PowerCache.
@@ -171,34 +212,7 @@ export class PowerCache {
    * @throws {TypeError} When a non-object is provided as the options argument.
    */
   constructor(options = {}) {
-    assertKnownOptions(
-      options,
-      [
-        'maxEntries',
-        'maxInflightRefreshes',
-        'maxWeight',
-        'weightFn',
-        'defaultTTL',
-        'maxPoolSize',
-        'rejectOversized',
-        'onEvict',
-        'onExpire',
-        'initialPoolSize',
-        'maxCleanupPerTick',
-        'defaultAsyncTimeout',
-        'now',
-        'onError',
-        'admission',
-        'windowSize',
-        'seed',
-        'policy',
-        'allowStale',
-        'staleTtl',
-        'fetchMethod',
-        'observability',
-      ],
-      'PowerCache'
-    );
+    assertKnownOptions(options, POWER_CACHE_OPTIONS, 'PowerCache');
     const {
       maxEntries = Infinity,
       // No default here on purpose: `undefined` is what tells the constructor the
@@ -3475,7 +3489,31 @@ export class PowerTimedCache {
    * @param {PowerTimedCacheOptions} [options]
    */
   constructor(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions = {} } = {}) {
-    assertKnownOptions(cacheOptions, ['ttl', 'weight', 'cacheOptions'], 'PowerTimedCache');
+    // CACHE-013: this allowlist was `['ttl', 'weight', 'cacheOptions']` — which is
+    // `PowerMemoizer`'s list minus `keyResolver`, so a copy from the wrong class
+    // rather than a decision. It left 21 of the inner cache's options unreachable,
+    // and two of those made the delegated methods inert:
+    //
+    // - `maxWeight` / `rejectOversized` — a *weighted* TTL cache was inexpressible.
+    // - `staleTtl` — `_staleServable` reads only `staleTtl`, which defaults to 0, and
+    //   `now <= expiresAt + 0` is false for every expired entry. So the
+    //   `staleWhileRevalidate` option `getOrSet` accepts was **silently a no-op**: a
+    //   caller passing it got ordinary expiry and no error.
+    //
+    // **Derived, not restated.** The first version of this fix hand-copied the inner
+    // list and got it wrong in four places while omitting `seed`, so the wrapper
+    // advertised options the cache behind it rejects. One list, filtered.
+    //
+    // `defaultTTL` is the one omission, and deliberately: this constructor's `ttl` is
+    // the default TTL by construction, assigned after the copy below, so accepting it
+    // would be an option that is accepted and ignored — refused instead, because the
+    // pattern this review treats as a defect is a documented option that does nothing.
+    // Nothing could pass it before this change, so refusing it breaks no caller.
+    assertKnownOptions(
+      cacheOptions,
+      POWER_CACHE_OPTIONS.filter((option) => option !== 'defaultTTL'),
+      'PowerTimedCache'
+    );
     if (!Number.isFinite(+ttl) || ttl <= 0) throw new TypeError('ttl must be a positive number');
     const cfg = Object.assign({}, cacheOptions);
     if (maxEntries !== undefined) cfg.maxEntries = maxEntries;
@@ -3513,7 +3551,14 @@ export class PowerTimedCache {
    * @returns {false|PowerTimedCache}
    */
   set(key, value, options = {}) {
-    return this.cache.set(key, value, options);
+    // CACHE-013: the inner `set` returns `this` — the **`PowerCache`**, not this
+    // wrapper — and returning it unchanged made the published type a lie: the JSDoc
+    // said `false|PowerTimedCache`, so `timed.set('a', 1).set('b', 2)` type-checked as
+    // a `PowerTimedCache` chain and then ran on the inner object, where any
+    // TimedCache-only behaviour would be absent. The inner result is truthy on
+    // success and exactly `false` on the oversize refusal, so one conditional
+    // restores both the type and the chain.
+    return this.cache.set(key, value, options) ? this : false;
   }
   /**
    * @param {any} key
@@ -3534,6 +3579,135 @@ export class PowerTimedCache {
   }
   stats() {
     return this.cache.stats();
+  }
+
+  // CACHE-013: the rest of the `PowerCache` surface, delegated.
+  //
+  // This class was already a thin wrapper forwarding fifteen methods, so the line
+  // it drew was arbitrary rather than designed: `peek`, `touch`, `resize`,
+  // `getOrSet`, `getOrSetAsync`, `setMany`, `getMany` and `hasEqual` all existed on
+  // the inner cache and not here. The row's own complaint — "a TTL cache with no
+  // `touch()` is a surprise" — is the whole case, and the alternative the row also
+  // offered, *documenting the subset*, costs **more** surface rather than less: eight
+  // documented absences on a class whose entire purpose is to be a `PowerCache` with
+  // a constructor-supplied TTL.
+  //
+  // Each is a bare forward. **None of them needs TTL-specific logic**, which is the
+  // test that decided delegation over reimplementation: `touch` forwards its optional
+  // per-call TTL, so a wrapper that dropped it would silently give every entry the
+  // constructor's TTL instead — a bug that would not throw, only expire things at the
+  // wrong time.
+  //
+  // Per-entry `{ttl}` is ignored wherever the instance was constructed with a
+  // non-null TTL, because `cfg.defaultTTL` is what the inner cache applies. That is
+  // pre-existing `set()` behaviour, now stated on the methods that also accept one.
+
+  /**
+   * Read a value **without** promoting it to most-recently-used, and without
+   * counting a hit. For when the value matters but the access pattern does not.
+   * @param {*} key
+   * @returns {*|undefined}
+   */
+  peek(key) {
+    return this.cache.peek(key);
+  }
+
+  /**
+   * Extend (or shorten) one entry's TTL without reading or writing its value.
+   * @param {*} key
+   * @param {number} [ttl] Per-call TTL in ms. `null`/`Infinity` disables expiry.
+   * @returns {boolean} True if the entry existed and had not expired.
+   */
+  touch(key, ttl = undefined) {
+    return this.cache.touch(key, ttl);
+  }
+
+  /**
+   * Change the capacity of a live cache. Takes effect on the next insertion.
+   * @param {Object} options
+   * @param {number} [options.maxEntries]
+   * @param {number} [options.maxWeight]
+   */
+  resize({ maxEntries, maxWeight } = {}) {
+    return this.cache.resize({ maxEntries, maxWeight });
+  }
+
+  /**
+   * Read through to a factory on a miss. The common idiom, and previously absent
+   * here — so a TTL cache could not do the one thing callers reach a cache for.
+   * @param {*} key
+   * @param {Function|*} factory - A function producing the value, or the value itself.
+   * @param {Object} [options]
+   * @param {number} [options.ttl] Ignored when this instance has a constructor TTL.
+   * @param {number} [options.weight]
+   * @param {boolean} [options.staleWhileRevalidate=false] Return an expired value
+   *   immediately and refresh in the background.
+   * @returns {*|Promise<*>}
+   */
+  getOrSet(key, factory, options = {}) {
+    return this.cache.getOrSet(key, factory, options);
+  }
+
+  /**
+   * `getOrSet` with an async factory. See the `PowerCache` guide for the
+   * single-flight and `defaultAsyncTimeout` semantics.
+   * @param {*} key
+   * @param {Function} asyncFactory - Returns a promise, or a value.
+   * @param {Object} [options]
+   * @param {number} [options.ttl] Ignored when this instance has a constructor TTL.
+   * @param {number} [options.weight]
+   * @param {boolean} [options.staleWhileRevalidate=false]
+   * @param {number} [options.timeout] Per-call override of `defaultAsyncTimeout`.
+   * @returns {Promise<*>}
+   */
+  getOrSetAsync(key, asyncFactory, options = {}) {
+    return this.cache.getOrSetAsync(key, asyncFactory, options);
+  }
+
+  /**
+   * Insert many entries in one pass.
+   * @param {Iterable<[*,*]>} entries
+   * @param {Object} [options]
+   * @param {number} [options.ttl] Ignored when this instance has a constructor TTL.
+   * @param {number} [options.weight]
+   * @returns {PowerTimedCache} `this`, so a batch insert can be chained — **not** the
+   *   inner `PowerCache`, which is what CACHE-013 had to correct in `set()`.
+   */
+  setMany(entries, { ttl = undefined, weight = undefined } = {}) {
+    this.cache.setMany(entries, { ttl, weight });
+    return this;
+  }
+
+  /**
+   * Read many keys in one pass. **Misses and expired entries are omitted**, not
+   * returned as `undefined` — the inner loop does `if (!node) continue` — so the
+   * result is smaller than the input and its keys are the resolved ones, in input
+   * order. Use `has()` per key if you need to align positions.
+   * @param {Iterable<*>} keys
+   * @param {Object} [options]
+   * @param {boolean} [options.ignoreExpiry=false]
+   * @returns {Map<string, *>} The resolved entries, in input order.
+   */
+  getMany(keys, { ignoreExpiry = false } = {}) {
+    return this.cache.getMany(keys, { ignoreExpiry });
+  }
+
+  /**
+   * Test a value by **deep** comparison without promoting the entry to
+   * most-recently-used. Not a reference test: after the reference and primitive
+   * fast paths it falls through to a `deepEqual` walk, so a stored `{deep: 1}` does
+   * match an incoming `{deep: 1}`. `compareFn` and `maxNodes` bound the walk.
+   *
+   * The one quirk worth naming, because it is inherited by being the same code
+   * rather than reimplemented: it does **not** touch recency, so a `hasEqual` sweep
+   * leaves the eviction order untouched.
+   * @param {*} key
+   * @param {*} value
+   * @param {{ignoreExpiry?: boolean, maxNodes?: number, compareFn?: function(any, any): boolean}} [options]
+   * @returns {boolean}
+   */
+  hasEqual(key, value, options = {}) {
+    return this.cache.hasEqual(key, value, options);
   }
 
   /**

@@ -290,6 +290,34 @@ pipeline.
   `PowerWebSocketClient`'s job); and `send()` on a stream is synchronous-and-refusing rather than
   queued, so a caller wanting fire-and-forget there must await `drain()` and retry.
 
+- **The rate limiters and `PowerCircuit` now read a monotonic clock, so faking
+  `Date.now()` no longer drives them.** `PowerGCRA`, `PowerThrottle`,
+  `PowerSlidingWindow` and `PowerCircuit` measure everything as a difference
+  between two readings, and they now take those readings from the new
+  `monoMs()` instead of `nowMs()`. `nowMs()` cross-checks the high-resolution
+  clock against `Date.now()` so a test harness can drive it — and the
+  cost of that is that an NTP adjustment of more than a second silently became
+  elapsed time inside a limiter. Measured, with **zero** real milliseconds
+  elapsed and only the wall clock moved: a saturated
+  `PowerGCRA({rate:10, per:1000, burst:1})` went from `available()` `0` to `2`
+  and admitted — `2` is `_ceiling()`, so the whole burst — and a
+  `PowerCircuit` opened with `timeout: 60000` reported `half-open` after a 60 s
+  step, offering a trial call to a dependency that had been failing for a
+  millisecond. A step **backwards** was always harmless (`PowerGCRA` clamps with
+  `Math.max(now, _tat)`); it is the forward step that hands out budget nobody
+  spent.
+
+  **What breaks:** a test that controlled a limiter's clock by faking
+  `Date.now()` stops working. Use the `now` constructor option, which has always
+  won over the built-in clock, or the per-call `{ now }` for a composition.
+  `PowerCircuit` has no `now` option — it had no documented way in before
+  either, so set a small `timeout` and wait the window out.
+
+  **What does not change:** both clocks are still epoch timestamps, so
+  `PowerGCRA.stats().tat` and `tryReserve().runAt` remain instants;
+  `PowerCron.nextRunAt` is untouched and still tracks the wall clock, because it
+  is documented as epoch milliseconds. See `guides/now.md` and ADR 0009.
+
 **Fixed**
 
 - **`PowerScheduler`'s `scheduling: 'macrotask'` no longer pays Node's timer clamp.** It posted via `setTimeout(fn, 0)`, and Node clamps a zero timeout to **1 ms**, so every flush cost a full millisecond. It now posts to a `MessageChannel` — a real macrotask with no clamping floor, available in Node and every browser — falling back to `setImmediate` and only then to `setTimeout`. Measured over 10 000 macrotasks in this runtime: **37 ms against 10 554 ms**. The port is created once at module scope rather than per flush, and each post adds a listener that removes itself when it fires, so `flush()` and `cancel()` detach a pending post rather than leaving it queued.
@@ -391,6 +419,17 @@ required is the worker reply shape.
   queued caller with a cancellation they did not ask for.
 
 **Added**
+
+- **`monoMs()` — a monotonic clock, exported beside `nowMs()`.** Same ladder, same
+  sources, same epoch mapping, and one difference: it never reads `Date.now()`.
+  That is what makes it immune to a wall-clock adjustment, and it is also one
+  clock read instead of two. Use it for **durations** — anything computed
+  as `b - a` — and `nowMs()` for **instants**, which is what `PowerCron.nextRunAt`,
+  a log line and an HTTP `Retry-After` need. The four helpers that only subtract
+  (`PowerGCRA`, `PowerThrottle`, `PowerSlidingWindow`, `PowerCircuit`) now use it;
+  see the **Breaking** note above. Being a separate export also means a caller
+  writing their own limiter does not have to re-derive which clock they need —
+  see `guides/now.md` and ADR 0009.
 
 - **`PowerObserver` derived observables** — `derive(fn)`, `filter(predicate)`, `distinct()` and a static
   `PowerObserver.combineLatest(a, b, …)`. `map()` mutates the observer's mapping and returns nothing, so these are the
@@ -8597,3 +8636,71 @@ present and correct.
 
 All three killed on mutation: the off-by-two reinstated (2 failures), stdin never read (3),
 and stdin read but not forwarded (3).
+
+## `PowerTimedCache` is no longer a subset of the cache it wraps
+
+**CACHE-013.** The row asked for delegation or a documented subset. It is delegation, and
+the guide had been promising delegation **and** promising options the constructor rejected.
+
+**Eight methods were missing.** `peek`, `touch`, `resize`, `getOrSet`, `getOrSetAsync`,
+`setMany`, `getMany` and `hasEqual` all existed on the inner `PowerCache` and not on the
+wrapper, which already forwarded fifteen others — so the line was arbitrary rather than
+drawn. The row's own complaint was "a TTL cache with no `touch()` is a surprise", and the
+alternative it offered, _documenting the subset_, costs **more** surface: eight documented
+absences on a class whose whole purpose is to be a `PowerCache` with a constructor TTL.
+
+Each is a bare forward, and the test that decided delegation over reimplementation is that
+**none of them needs TTL-specific logic**. The sharpest case is `touch(key, ttl)`: a
+wrapper that forgot to pass the per-call TTL would not throw, it would silently extend every
+entry to the constructor's TTL — expiring things at the wrong time, which is why that
+mutant is pinned rather than assumed.
+
+**`set()` returned the wrong object.** `PowerCache.set` returns `this` — the inner cache —
+and `PowerTimedCache.set` forwarded it unchanged while its JSDoc promised
+`{false|PowerTimedCache}`. So `timed.set('a', 1).set('b', 2)` type-checked as a wrapper chain
+and ran on the inner object. Not a crash: the inner cache is the same store, so the data
+lands. It is a published type that lied about which class you were holding — the same
+failure AGENTS.md records for nine hand-copied `getStats()` return shapes. `setMany` returns
+`{this}` on the inner cache and would have inherited the identical lie, so both are fixed.
+`set()` still returns `false` on the oversize refusal, which a truthiness rewrite would have
+turned into a chainable success.
+
+**The option surface was the larger half.** `cacheOptions` was validated against
+`['ttl', 'weight', 'cacheOptions']` — which is `PowerMemoizer`'s list minus `keyResolver`, so
+a copy from the wrong class rather than a decision. It left **21 of the inner cache's 22
+options unreachable**, and two of those made the newly delegated methods inert:
+
+- `maxWeight` / `rejectOversized` — a **weighted** TTL cache was inexpressible. The guide's
+  own option table listed `weightFn`, `maxWeight` and `rejectOversized` as examples, so the
+  documented example **threw**.
+- `staleTtl` — `_staleServable` reads only `staleTtl`, which defaults to 0, and
+  `now <= expiresAt + 0` is false for every expired entry. So the `staleWhileRevalidate`
+  option that `getOrSet` accepts was **silently a no-op**: a caller passing it got ordinary
+  expiry and no error.
+
+`defaultTTL` is the one option still refused, deliberately: the constructor's `ttl` _is_ the
+default TTL, assigned after the copy, so accepting it would mean accepting one that is
+ignored. Nothing could pass it before, so this breaks no caller.
+
+**The fourth copy of the option list was itself the bug.** Widening the wrapper's list by
+hand produced a list wrong in four places — carrying `ttl`, `weight`, `keyResolver` and
+`cacheOptions`, none of which the inner constructor accepts — while **omitting `seed`**. So
+the wrapper advertised options the cache behind it rejected. `PowerCache`'s options are now
+one frozen `POWER_CACHE_OPTIONS` array that the constructor validates against and
+`PowerTimedCache` **derives** from, and the test checks the two against each other _through
+the inner cache's own error message_, so the oracle is the contract and cannot drift.
+
+22 tests, **9 of 9 mutants killed** — including reverting `set` to the wrong object, the
+unconditional-`this` rewrite that loses the oversize refusal, `touch` dropping its TTL,
+`getMany` hard-coding `ignoreExpiry`, `resize` dropping `maxWeight`, and the allowlist
+reverting to the `PowerMemoizer` copy.
+
+**Two of my own mistakes, both caught by running rather than reading.** I documented
+`getMany` as returning one entry per requested key and `hasEqual` as prototype-strict; the
+first omits misses (`if (!node) continue`) and the second falls through to a `deepEqual`
+walk, so a stored `{deep: 1}` _does_ match an incoming `{deep: 1}`. Both descriptions were
+wrong in the JSDoc I had just written, which is the same failure the row is about one level
+up. And the `ignoreExpiry` test asserted `get(a)` "to show it is expired" **first** — a
+plain read on an expired entry _removes_ it, so the control destroyed its own subject and
+the forwarding assertion could never pass. The long cleanup interval added to compensate was
+also wrong: no sweep had run, and the removal was mine.

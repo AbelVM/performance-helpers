@@ -175,6 +175,126 @@ Iteration order, forwarded verbatim to
 
 ***
 
+### getMany()
+
+> **getMany**(`keys`, `options?`): `Map`\<`string`, `any`\>
+
+Read many keys in one pass. **Misses and expired entries are omitted**, not
+returned as `undefined` — the inner loop does `if (!node) continue` — so the
+result is smaller than the input and its keys are the resolved ones, in input
+order. Use `has()` per key if you need to align positions.
+
+#### Parameters
+
+##### keys
+
+`Iterable`\<`any`, `any`, `any`\>
+
+##### options?
+
+###### ignoreExpiry?
+
+`boolean` = `false`
+
+#### Returns
+
+`Map`\<`string`, `any`\>
+
+The resolved entries, in input order.
+
+***
+
+### getOrSet()
+
+> **getOrSet**(`key`, `factory`, `options?`): `any`
+
+Read through to a factory on a miss. The common idiom, and previously absent
+here — so a TTL cache could not do the one thing callers reach a cache for.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### factory
+
+`any`
+
+A function producing the value, or the value itself.
+
+##### options?
+
+###### staleWhileRevalidate?
+
+`boolean`
+
+Return an expired value
+  immediately and refresh in the background.
+
+###### ttl?
+
+`number`
+
+Ignored when this instance has a constructor TTL.
+
+###### weight?
+
+`number`
+
+#### Returns
+
+`any`
+
+***
+
+### getOrSetAsync()
+
+> **getOrSetAsync**(`key`, `asyncFactory`, `options?`): `Promise`\<`any`\>
+
+`getOrSet` with an async factory. See the `PowerCache` guide for the
+single-flight and `defaultAsyncTimeout` semantics.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### asyncFactory
+
+`Function`
+
+Returns a promise, or a value.
+
+##### options?
+
+###### staleWhileRevalidate?
+
+`boolean`
+
+###### timeout?
+
+`number`
+
+Per-call override of `defaultAsyncTimeout`.
+
+###### ttl?
+
+`number`
+
+Ignored when this instance has a constructor TTL.
+
+###### weight?
+
+`number`
+
+#### Returns
+
+`Promise`\<`any`\>
+
+***
+
 ### getStats()
 
 > **getStats**(): `object`
@@ -289,6 +409,49 @@ which is the property a consumer relies on.
 
 ***
 
+### hasEqual()
+
+> **hasEqual**(`key`, `value`, `options?`): `boolean`
+
+Test a value by **deep** comparison without promoting the entry to
+most-recently-used. Not a reference test: after the reference and primitive
+fast paths it falls through to a `deepEqual` walk, so a stored `{deep: 1}` does
+match an incoming `{deep: 1}`. `compareFn` and `maxNodes` bound the walk.
+
+The one quirk worth naming, because it is inherited by being the same code
+rather than reimplemented: it does **not** touch recency, so a `hasEqual` sweep
+leaves the eviction order untouched.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### value
+
+`any`
+
+##### options?
+
+###### compareFn?
+
+(`arg0`, `arg1`) => `boolean`
+
+###### ignoreExpiry?
+
+`boolean`
+
+###### maxNodes?
+
+`number`
+
+#### Returns
+
+`boolean`
+
+***
+
 ### keys()
 
 > **keys**(`order?`): `IterableIterator`\<`any`, `any`, `any`\>
@@ -302,6 +465,49 @@ which is the property a consumer relies on.
 #### Returns
 
 `IterableIterator`\<`any`, `any`, `any`\>
+
+***
+
+### peek()
+
+> **peek**(`key`): `any`
+
+Read a value **without** promoting it to most-recently-used, and without
+counting a hit. For when the value matters but the access pattern does not.
+
+#### Parameters
+
+##### key
+
+`any`
+
+#### Returns
+
+`any`
+
+***
+
+### resize()
+
+> **resize**(`options?`): `void`
+
+Change the capacity of a live cache. Takes effect on the next insertion.
+
+#### Parameters
+
+##### options?
+
+###### maxEntries?
+
+`number`
+
+###### maxWeight?
+
+`number`
+
+#### Returns
+
+`void`
 
 ***
 
@@ -336,6 +542,39 @@ Per-entry TTL in ms and
 #### Returns
 
 `false` \| `PowerTimedCache`
+
+***
+
+### setMany()
+
+> **setMany**(`entries`, `options?`): `PowerTimedCache`
+
+Insert many entries in one pass.
+
+#### Parameters
+
+##### entries
+
+`Iterable`\<\[`any`, `any`\], `any`, `any`\>
+
+##### options?
+
+###### ttl?
+
+`number` = `undefined`
+
+Ignored when this instance has a constructor TTL.
+
+###### weight?
+
+`number` = `undefined`
+
+#### Returns
+
+`PowerTimedCache`
+
+`this`, so a batch insert can be chained — **not** the
+  inner `PowerCache`, which is what CACHE-013 had to correct in `set()`.
 
 ***
 
@@ -420,6 +659,32 @@ Per-entry TTL in ms and
 #### Returns
 
 `void`
+
+***
+
+### touch()
+
+> **touch**(`key`, `ttl?`): `boolean`
+
+Extend (or shorten) one entry's TTL without reading or writing its value.
+
+#### Parameters
+
+##### key
+
+`any`
+
+##### ttl?
+
+`number` = `undefined`
+
+Per-call TTL in ms. `null`/`Infinity` disables expiry.
+
+#### Returns
+
+`boolean`
+
+True if the entry existed and had not expired.
 
 ***
 
