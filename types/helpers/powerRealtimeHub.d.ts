@@ -10,7 +10,6 @@ export class PowerRealtimeHub {
     _batchDelayMs: number;
     _codec: "json" | "raw";
     _onError: ((arg0: Error, arg1: object) => void) | null;
-    _now: () => number;
     /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
     _topics: Map<string, Map<string, HubSubscriber>>;
     /** @type {Map<string, HubSubscriber>} subscriberId -> sub */
@@ -266,9 +265,13 @@ export type HubSubscriber = {
      */
     dropped: number;
     /**
-     * - Approximate bytes currently buffered.
+     * - Bytes of framed payload handed to this
+     * subscriber's transport so far. Exact, and free: the frame was built for this
+     * flush anyway, so this is one addition against an already-computed
+     * `frame.length`. It is **not** a count of what is sitting in `queue` — see
+     * {@link HubSubscriberStat.bytesSent}.
      */
-    bytesQueued: number;
+    bytesSent: number;
     /**
      * - Sends currently awaiting the transport.
      */
@@ -337,6 +340,18 @@ export type HubSubscriberStat = {
      */
     queued: number;
     dropped: number;
+    /**
+     * - Bytes handed to this subscriber's transport so
+     * far. **This is the per-subscriber share of `stats().bytesOut`, and the two
+     * reconcile exactly:** the hub adds `frame.length` to both in the same
+     * statement, so `bytesOut === Σ list[].bytesSent` for any set of subscribers
+     * still attached. RT-026 replaced a field called `bytesQueued` here that was
+     * initialised to `0` and never written, which made it the second
+     * permanently-zero advertisement in a class whose entire job is to let a
+     * caller see how far behind a subscriber is. The reconcilable pair is what
+     * makes this one real; a counter nothing can check is decoration.
+     */
+    bytesSent: number;
     inFlight: number;
     maxQueue: number;
     slowConsumer: SlowConsumerPolicy;
@@ -374,13 +389,6 @@ export type HubStats = {
 export type HubOptions = {
     /**
      * - Required
-     */
-    send: (arg0: object, arg1: Uint8Array) => (void | Promise<void>);
-    /**
-     * - Opt in to
-     * metrics: `true` registers this helper in the shared collector, or pass a
-     * collector of your own. Off by default, so the common case allocates nothing.
-     * See `guides/metrics.md`.
      * transport adapter, called as `send(subscriber, frame)`. Return a promise if
      * the transport is async; the hub tracks in-flight sends per subscriber.
      *
@@ -390,6 +398,13 @@ export type HubOptions = {
      * subscriber's message. Copy it if the transport needs to own it.
      * `stats().encoded` makes a violation visible: it counts real encodes, so it
      * stays at one per flush however many subscribers the topic has.
+     */
+    send: (arg0: object, arg1: Uint8Array) => (void | Promise<void>);
+    /**
+     * - Opt in to
+     * metrics: `true` registers this helper in the shared collector, or pass a
+     * collector of your own. Off by default, so the common case allocates nothing.
+     * See `guides/metrics.md`.
      */
     observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
@@ -421,8 +436,4 @@ export type HubOptions = {
      * adapter rejects or throws, instead of leaving an unhandled rejection.
      */
     onError?: ((arg0: Error, arg1: object) => void) | undefined;
-    /**
-     * - Clock override, for tests.
-     */
-    now?: (() => number) | undefined;
 };

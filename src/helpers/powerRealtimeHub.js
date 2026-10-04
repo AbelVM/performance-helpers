@@ -28,7 +28,6 @@
  * @public
  */
 import { encodeMessage, frameEncodedJson } from './powerMessageCodec.js';
-import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
@@ -66,7 +65,11 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  *   abstract buffer (the previous declaration) had no `.length` at any of the
  *   five places that check it before enqueueing.
  * @property {number} dropped - Messages discarded by the slow-consumer policy.
- * @property {number} bytesQueued - Approximate bytes currently buffered.
+ * @property {number} bytesSent - Bytes of framed payload handed to this
+ *   subscriber's transport so far. Exact, and free: the frame was built for this
+ *   flush anyway, so this is one addition against an already-computed
+ *   `frame.length`. It is **not** a count of what is sitting in `queue` — see
+ *   {@link HubSubscriberStat.bytesSent}.
  * @property {number} inFlight - Sends currently awaiting the transport.
  * @property {Promise<void>|null} [_inflightChain] - The promise for the send
  *   currently in flight, **including any follow-up flush it chained**, so
@@ -107,6 +110,15 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {string} topic
  * @property {number} queued - Messages waiting for this subscriber right now.
  * @property {number} dropped
+ * @property {number} bytesSent - Bytes handed to this subscriber's transport so
+ *   far. **This is the per-subscriber share of `stats().bytesOut`, and the two
+ *   reconcile exactly:** the hub adds `frame.length` to both in the same
+ *   statement, so `bytesOut === Σ list[].bytesSent` for any set of subscribers
+ *   still attached. RT-026 replaced a field called `bytesQueued` here that was
+ *   initialised to `0` and never written, which made it the second
+ *   permanently-zero advertisement in a class whose entire job is to let a
+ *   caller see how far behind a subscriber is. The reconcilable pair is what
+ *   makes this one real; a counter nothing can check is decoration.
  * @property {number} inFlight
  * @property {number} maxQueue
  * @property {SlowConsumerPolicy} slowConsumer
@@ -126,10 +138,6 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 /**
  * @typedef {object} HubOptions
  * @property {function(object, Uint8Array):(void|Promise<void>)} send - Required
- * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
- *   metrics: `true` registers this helper in the shared collector, or pass a
- *   collector of your own. Off by default, so the common case allocates nothing.
- *   See `guides/metrics.md`.
  *   transport adapter, called as `send(subscriber, frame)`. Return a promise if
  *   the transport is async; the hub tracks in-flight sends per subscriber.
  *
@@ -139,6 +147,10 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  *   subscriber's message. Copy it if the transport needs to own it.
  *   `stats().encoded` makes a violation visible: it counts real encodes, so it
  *   stays at one per flush however many subscribers the topic has.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this helper in the shared collector, or pass a
+ *   collector of your own. Off by default, so the common case allocates nothing.
+ *   See `guides/metrics.md`.
  * @property {function(object, string):(void|Promise<void>)} [close] - Optional
  *   adapter called when the hub closes a subscriber for falling behind or on
  *   `close()`. Takes the same `(subscriber, reason)` pair as `send` plus why
@@ -153,7 +165,6 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {'json'|'raw'} [codec='json'] - Payload codec for outgoing frames.
  * @property {function(Error, object):void} [onError] - Called when the `send`
  *   adapter rejects or throws, instead of leaving an unhandled rejection.
- * @property {() => number} [now] - Clock override, for tests.
  */
 
 let _nextSubId = 0;
@@ -175,18 +186,10 @@ export class PowerRealtimeHub {
   constructor(options) {
     assertKnownOptions(
       options,
-      ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError', 'now'],
+      ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError'],
       'PowerRealtimeHub'
     );
-    const {
-      send,
-      close,
-      batch = true,
-      batchDelayMs = 0,
-      codec = 'json',
-      onError,
-      now,
-    } = options || {};
+    const { send, close, batch = true, batchDelayMs = 0, codec = 'json', onError } = options || {};
 
     if (typeof send !== 'function') {
       throw new TypeError('PowerRealtimeHub: a `send(subscriber, frame)` adapter is required');
@@ -216,7 +219,18 @@ export class PowerRealtimeHub {
     });
     this._codec = codec;
     this._onError = typeof onError === 'function' ? onError : null;
-    this._now = typeof now === 'function' ? now : nowMs;
+    // RT-026: `options.now` is gone. It was documented as "Clock override, for
+    // tests", accepted by `assertKnownOptions`, destructured, stored on
+    // `this._now` — and never called by anything, because no code path in this
+    // class measures elapsed time: the slow-consumer policy is driven by
+    // `queue.length` against `maxQueue`, and every counter is an event count
+    // rather than a duration. So an injected clock had nothing to drive, which
+    // made it worse than an undocumented leftover: `assertKnownOptions` accepts
+    // it, the guide's option list is generated from the typedef, and a caller
+    // who passed `now` got a silent no-op instead of a complaint. Deleted
+    // rather than wired up, because the honest fix is the smaller one — no
+    // measurement here needs a clock, and inventing one to justify an existing
+    // parameter is how an option stays dead for another release.
 
     /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
     this._topics = new Map();
@@ -333,7 +347,7 @@ export class PowerRealtimeHub {
       inFlight: 0,
       /** @type {?Promise<void>} */
       _inflightChain: null,
-      bytesQueued: 0,
+      bytesSent: 0,
       dropped: 0,
       closed: false,
       // Transport details a user may need (a socket, a stream, a peer id).
@@ -475,6 +489,7 @@ export class PowerRealtimeHub {
         topic: s.topic,
         queued: s.queue.length,
         dropped: s.dropped,
+        bytesSent: s.bytesSent,
         inFlight: s.inFlight,
         maxQueue: s.maxQueue,
         slowConsumer: s.slowConsumer,
@@ -759,7 +774,6 @@ export class PowerRealtimeHub {
       this._notify(err, sub);
       return Promise.resolve();
     }
-    this._counters.bytesOut += frame.length;
     this._counters.delivered += batch.length;
 
     let result;
@@ -770,6 +784,31 @@ export class PowerRealtimeHub {
       this._notify(err, sub);
       return Promise.resolve();
     }
+    // RT-026: the byte counters move **after** the adapter has taken the frame,
+    // not before, so "bytes sent" means the transport accepted them. Placing them
+    // ahead of the `try` counted a frame whose `send()` threw — bytes attributed
+    // to a transport that never received them, in both the per-subscriber field
+    // and the global one. A *rejected* promise still counts, correctly: the
+    // adapter did take the frame, and the rejection is about what happens next.
+    //
+    // **The deliberate divergence from `delivered`,** which is *not* moved and
+    // still counts a `send()` that threw. That is pre-existing behaviour and this
+    // row does not widen to change it, so under a throwing adapter the two
+    // numbers differ: `delivered` 1 with `bytesSent` 0. Recorded as a quirk and
+    // pinned by a test rather than left to be found later as an inconsistency —
+    // `delivered` counts messages *offered*, `bytesSent` counts bytes *taken*.
+    //
+    // RT-006 encodes one frame per `(topic, batch)` and hands the *same* buffer
+    // to every subscriber on the topic, so `frame.length` is the exact byte count
+    // for each of them — which is what makes the per-subscriber half of this
+    // pair free. The two counters are incremented in one statement on purpose:
+    // `stats().bytesOut === Σ stats().list[].bytesSent` is then true by
+    // construction rather than by coincidence, and that identity is what makes
+    // `bytesSent` a measurement instead of a second permanently-zero field
+    // (it replaced `bytesQueued`, which was initialised to 0 and never written).
+    sub.bytesSent += frame.length;
+    this._counters.bytesOut += frame.length;
+
     const chain = Promise.resolve(result)
       .then(
         () => {

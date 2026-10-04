@@ -19,11 +19,15 @@ The promise for the send
 
 ***
 
-### bytesQueued
+### bytesSent
 
-> **bytesQueued**: `number`
+> **bytesSent**: `number`
 
-Approximate bytes currently buffered.
+Bytes of framed payload handed to this
+  subscriber's transport so far. Exact, and free: the frame was built for this
+  flush anyway, so this is one addition against an already-computed
+  `frame.length`. It is **not** a count of what is sitting in `queue` — see
+  [HubSubscriberStat.bytesSent](HubSubscriberStat.md#bytessent).
 
 ***
 

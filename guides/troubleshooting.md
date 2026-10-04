@@ -222,6 +222,57 @@ conclusion for cross-context eventing.
 
 ---
 
+## "Should the pool use `SharedArrayBuffer`?"
+
+No, and the reason is a measurement rather than a preference — so this section exists to
+stop the question being re-asked with a new rationale each time. Run it yourself:
+`node bench/claims.js permit`.
+
+`PowerPool` gates every dispatch with `tasks < this._maxTasksPerWorker`: a plain field
+read. A shared-memory permit pool makes the same decision through an atomic. Measured over
+2 000 000 operations:
+
+| operation                | cost     | vs the field read |
+| ------------------------ | -------- | ----------------- |
+| plain field read (today) | 1.91 ns  | —                 |
+| `Atomics.load`           | 12.02 ns | **6.3×**          |
+| `Atomics.add`            | 11.04 ns | **5.8×**          |
+
+A proposal once called this "the one change that could move the pool's floor cost". It is
+6.3× **more** expensive than the field read already in the path.
+
+**The blocking mechanism is the harder no.** `Atomics.wait` parked the thread for its
+full timeout — 1054 ms for 1000 × 1 ms waits — and it is forbidden on a browser main
+thread and requires cross-origin isolation. `PowerSemaphore` documents itself as an async
+gate that does not block the event loop, so the one mechanism that would block is the one
+you would have to use. `Atomics.waitAsync` does not block, which means it is a timer, and
+a timer adds nothing an async queue does not already do (0.9 ms for the same 1000 waits).
+
+**When it would be worth it**, if you are building the browser app rather than using this
+library: a large, string-heavy per-message payload — the measurement puts the crossover at
+roughly **32 KB**, where gzip's ratio flattens out at about 0.08 — **and** you control your
+own headers, so you can serve `Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`. Without those headers `SharedArrayBuffer` is
+not merely slow, it is absent.
+
+**When it is definitely not worth it**, which is most of the time:
+
+- **Node.** The permit decision is 6.3× more expensive and there is no shipping blocker
+  to trade against.
+- **Small payloads.** Below the ~32 KB crossover there is nothing to save; above it,
+  compression is the wrong tool for a thread boundary anyway. `node bench/claims.js
+payload`: at 652 781 bytes gzip costs **1207 µs** in the sender to save 92 % of the
+  bytes, brotli costs **419 ms**, and simply _transferring_ the same payload rather than
+  copying it costs **29.1 µs** — which the pool already does. There is no size at which
+  compression pays, because a `Worker` port does not charge per byte.
+- **Deeply nested payloads.** Carrier overhead scales with structure, not bytes — see
+  `node bench/claims.js carrier`.
+
+If you have measured your own workload and the pool is genuinely the bottleneck, that is a
+real result and it belongs in an ADR. What does not belong is re-deriving the ratio above.
+
+---
+
 ## A scheduled job drifts, or fires several times at once
 
 If you reached for `setInterval` — that is the usual cause, not this library.

@@ -62,18 +62,6 @@ Payload codec for outgoing frames.
 
 ***
 
-### now?
-
-> `optional` **now?**: () => `number`
-
-Clock override, for tests.
-
-#### Returns
-
-`number`
-
-***
-
 ### observability?
 
 > `optional` **observability?**: `boolean` \| [`MetricsCollector`](../../helpers/metrics/classes/MetricsCollector.md)
@@ -82,15 +70,6 @@ Opt in to
   metrics: `true` registers this helper in the shared collector, or pass a
   collector of your own. Off by default, so the common case allocates nothing.
   See `guides/metrics.md`.
-  transport adapter, called as `send(subscriber, frame)`. Return a promise if
-  the transport is async; the hub tracks in-flight sends per subscriber.
-
-  **The `frame` is shared and must be treated as read-only.** RT-006 encodes one
-  frame per `(topic, batch)` and hands the same buffer to every subscriber on
-  the topic, so a transport that writes into `frame` corrupts every other
-  subscriber's message. Copy it if the transport needs to own it.
-  `stats().encoded` makes a violation visible: it counts real encodes, so it
-  stays at one per flush however many subscribers the topic has.
 
 ***
 
@@ -122,6 +101,15 @@ Called when the `send`
 > **send**: (`arg0`, `arg1`) => `void` \| `Promise`\<`void`\>
 
 Required
+  transport adapter, called as `send(subscriber, frame)`. Return a promise if
+  the transport is async; the hub tracks in-flight sends per subscriber.
+
+  **The `frame` is shared and must be treated as read-only.** RT-006 encodes one
+  frame per `(topic, batch)` and hands the same buffer to every subscriber on
+  the topic, so a transport that writes into `frame` corrupts every other
+  subscriber's message. Copy it if the transport needs to own it.
+  `stats().encoded` makes a violation visible: it counts real encodes, so it
+  stays at one per flush however many subscribers the topic has.
 
 #### Parameters
 

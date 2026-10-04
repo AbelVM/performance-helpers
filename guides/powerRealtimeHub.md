@@ -147,7 +147,7 @@ options against this list.
 - `flush()` → `Promise<void>`, drains every subscriber immediately, bypassing batching. Resolves once every subscriber's queue has reached the transport — including a subscriber that already had a send in flight, which is **waited for** rather than skipped.
 - **One frame at a time per subscriber.** A second frame is not handed to the transport while the previous one is still outstanding, so frames for one subscription reach it in the order they were published. Work that arrives meanwhile waits for the outstanding send and is then drained; it is never dropped and never reordered.
 - `unsubscribe(id)` → `boolean`.
-- `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, encoded, list }`, where `list` has per-subscriber `queued` / `dropped` / `inFlight`. `encoded` counts frame encodes rather than deliveries, so it is one per flush and does not grow with the subscriber count — see [the frame is read-only](#the-frame-is-read-only).
+- `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, encoded, list }`, where `list` has per-subscriber `queued` / `dropped` / `bytesSent` / `inFlight`. `encoded` counts frame encodes rather than deliveries, so it is one per flush and does not grow with the subscriber count — see [the frame is read-only](#the-frame-is-read-only).
 - `close()` / `[Symbol.dispose]()` — detaches everything and calls your `close` adapter with a reason (`'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`).
 - `await hub[Symbol.asyncDispose]()` — **flushes the pending batch, then closes**. The difference is not cosmetic, and it is the reason `await using` exists for this helper:
 
@@ -186,6 +186,24 @@ setInterval(() => {
       s.list.filter((x) => x.dropped > 0)
     );
 }, 10_000);
+```
+
+### Per-subscriber bytes
+
+Each entry in `list` carries `bytesSent`: the bytes of framed payload handed to **that** subscriber's transport so far. It is exact, and it is free — the frame was built for the flush anyway, and because one frame is shared across a topic, `bytesSent` is the same figure for every subscriber on it. Use it with `queued` and `dropped` together, which is the combination that separates the two reasons a subscriber is not keeping up:
+
+| `queued` | `bytesSent` | `dropped` | what it means                                             |
+| -------- | ----------- | --------- | --------------------------------------------------------- |
+| low      | flat        | 0         | healthy — nothing is accumulating                         |
+| high     | flat        | 0         | the transport is slow; the hub is buffering, not shedding |
+| low      | flat        | > 0       | falling behind and **already** losing messages            |
+
+Two things it is not. It is **not** a count of what is sitting in the queue: `queued` already counts that, in messages, and counting it in bytes would mean encoding every message twice. And it is **not** what a `send()` that _threw_ produced — the counter moves only once the adapter has taken the frame, so a transport that rejects synchronously adds nothing. That is the one place it disagrees with `delivered`, which counts messages _offered_ rather than taken.
+
+The two reconcile, which is what makes the per-subscriber number worth trusting:
+
+```javascript
+hub.stats().bytesOut === hub.stats().list.reduce((n, s) => n + s.bytesSent, 0); // true
 ```
 
 ## Example

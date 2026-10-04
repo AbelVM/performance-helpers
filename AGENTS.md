@@ -52,11 +52,31 @@ npm run docs:drift      # fails if docs/ is out of date
 npm run mutants:servo   # 18 PowerServo mutants, each killed by a named test
 ```
 
-The gate is `scripts/verify.mjs`, and it is the **only** list of checks — ten
+The gate is `scripts/verify.mjs`, and it is the **only** list of checks — eleven
 steps. CI calls it rather than keeping its own copy: it did once, and the copies
 drifted until CI was running neither `test:types` nor `check:bundle` (see the
 comment at the top of `.github/workflows/ci.yml`). **To add a check, add it to
 that script**, not to the workflow.
+
+**Two scripts in `scripts/` look like gates and are not.** A script shaped like
+a check but wired to nothing is worse than no script, because it reads as
+coverage:
+
+- **`npm run review:check` gates nothing.** It is not in `scripts/verify.mjs`,
+  not in `.husky/pre-commit`, and not in CI — and it cannot be, because
+  `review.md` is **gitignored**, so in a clean checkout the file it reads does
+  not exist and `test/reviewTable.test.js` skips itself. There is nothing for a
+  gate to assert against. Run it by hand, before you close a row, because it is
+  the only thing that will tell you a table row has the wrong number of columns
+  or a duplicate id.
+- **`npm run audit:exports` is a diagnostic, not a check.** It prints an export
+  inventory for a human to read. It asserts nothing and exits 0 on a tree full
+  of surprises. Do not add it to `verify.mjs` expecting it to catch something; if
+  you want it to catch something, that is new work and it belongs in
+  `test/apiSurface.test.js`, which _does_ pin the export list deliberately.
+
+If you add a real gate, add it to `scripts/verify.mjs` — that is the one place
+that decides.
 
 `docs:drift` is the one step that **rewrites a committed tree** before comparing
 it. `typedoc.json` sets `cleanOutputDir: true`, so it regenerates all 1.7 MB and
