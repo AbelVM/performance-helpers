@@ -16,11 +16,12 @@
  *    against fresh or stale `dist/` depended on filesystem state.
  * 3. The sandbox and the global-extraction expression drifted between files.
  *
- * This module centralises all of it. The build itself now happens once, in
- * `test/globalSetup.js`, before any test runs.
+ * This module centralises all of it. The build happens once, in
+ * `test/globalSetup.js`, before any test runs — and **this module no longer
+ * builds anything**, which is the fourth and worst of those flake sources. See
+ * {@link loadBundleCode}.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
 import { vi } from 'vitest';
@@ -30,20 +31,46 @@ const DIST_FILE = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
 let cachedCode = null;
 
 /**
- * Build the UMD bundle if it is missing, then return its source.
+ * Return the UMD bundle's source, built once by `test/globalSetup.js`.
  *
- * Normally called after `globalSetup` has already built it, so this is a cheap
- * synchronous read. The build fallback is kept for running a single test file
- * directly without the global setup.
+ * **This used to build the bundle itself if `dist/` was missing**, on the stated
+ * grounds that it is "kept for running a single test file directly without the
+ * global setup". That fallback is the reason `npm run verify` step 5 was flaky,
+ * and it is worth being precise about why, because the justification looks
+ * reasonable and is not:
+ *
+ * - **It is unreachable by design.** This module imports `vitest`, so it is
+ *   vitest-only, and `vitest run <one file>` still runs `globalSetup`. There is
+ *   no supported path that reaches the fallback.
+ * - **When it *did* run, it ran concurrently.** `globalSetup` deletes `dist/`
+ *   before building, on the good grounds that a stale bundle is "the same flake
+ *   wearing a different hat". So every parallel worker whose file reached the
+ *   fallback started its own full Vite build into a directory another build was
+ *   rewriting. Symptoms: `ENOENT: dist/performance-helpers.js`, and
+ *   `test/index.test.js` reporting `.cjs must exist`.
+ * - **It made the failure unreproducible.** Restoring `vitest.config.js` from
+ *   `HEAD` and re-running produced *ten* failures where the same tree produced
+ *   five a moment earlier — a gate whose result depends on timing teaches people
+ *   to retry it.
+ *
+ * So the failure mode now names itself instead of silently rebuilding.
  *
  * @returns {string} The UMD bundle source.
+ * @throws {Error} If the bundle is absent, naming `globalSetup` as the builder.
  */
 export function loadBundleCode() {
   if (cachedCode !== null) return cachedCode;
-  if (!existsSync(DIST_FILE)) {
-    execSync('npm run build', { stdio: 'inherit' });
+  try {
+    cachedCode = readFileSync(DIST_FILE, 'utf8');
+  } catch (cause) {
+    throw new Error(
+      `umd-bundle: ${DIST_FILE} is missing or unreadable. It is built once per run by ` +
+        'test/globalSetup.js, which runs before any test file - including a single file. ' +
+        'Nothing here builds it, on purpose: a fallback that builds on demand races every ' +
+        "other worker's build into the same directory. Run the suite through vitest.",
+      { cause }
+    );
   }
-  cachedCode = readFileSync(DIST_FILE, 'utf8');
   return cachedCode;
 }
 

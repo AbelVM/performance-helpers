@@ -1,18 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
-import { execSync } from 'child_process';
 import vm from 'vm';
-import path from 'path';
-import { waitForBundleValue, receivedCountExpression } from './helpers/umdBundle.js';
+import {
+  loadBundleCode,
+  bundlePath,
+  waitForBundleValue,
+  receivedCountExpression,
+} from './helpers/umdBundle.js';
 
 describe('UMD bundle', () => {
   it('builds UMD bundle and exposes expected globals and APIs', () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) {
-      execSync('npm run build', { stdio: 'inherit' });
-    }
-
-    const code = readFileSync(distFile, 'utf8');
+    // Built once by `test/globalSetup.js`; this file used to shell out to
+    // `npm run build` itself, which under parallel workers raced the other nine.
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     // create a sandbox with basic browser-like globals
     const sandbox = {
@@ -64,11 +64,8 @@ describe('UMD bundle', () => {
   });
 
   it('PowerPool from UMD bundle works with a mock underlying worker', async () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) {
-      execSync('npm run build', { stdio: 'inherit' });
-    }
-    const code = readFileSync(distFile, 'utf8');
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     // new sandbox for pool test
     const sandbox2 = {
@@ -142,11 +139,8 @@ describe('UMD bundle', () => {
   });
 
   it('PowerPool supports string workerSource via sandbox Worker', async () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) {
-      execSync('npm run build', { stdio: 'inherit' });
-    }
-    const code = readFileSync(distFile, 'utf8');
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     const sandbox3 = {
       console,
@@ -219,11 +213,8 @@ describe('UMD bundle', () => {
   });
 
   it('PowerPool.postMessage returns false when underlying.postMessage throws', () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) {
-      execSync('npm run build', { stdio: 'inherit' });
-    }
-    const code = readFileSync(distFile, 'utf8');
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     const sandbox4 = {
       console,

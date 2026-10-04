@@ -1,14 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
-import { execSync } from 'child_process';
 import vm from 'vm';
-import path from 'path';
+import { loadBundleCode, bundlePath } from './helpers/umdBundle.js';
 
 describe('UMD bundle - branches', () => {
   it('loads under CommonJS (module.exports) branch and encodes/decodes via Buffer when TextEncoder missing', () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
-    const code = readFileSync(distFile, 'utf8');
+    // Built once by `test/globalSetup.js`; this file used to shell out to
+    // `npm run build` at both of its bundle loads, racing other workers.
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     const sandbox = { console, setTimeout, clearTimeout, setInterval, clearInterval };
     // Provide Buffer and Uint8Array but intentionally omit TextEncoder/TextDecoder
@@ -33,9 +32,10 @@ describe('UMD bundle - branches', () => {
   });
 
   it('loads under AMD (define.amd) branch', () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
-    const code = readFileSync(distFile, 'utf8');
+    // Built once by `test/globalSetup.js`; this file used to shell out to
+    // `npm run build` at both of its bundle loads, racing other workers.
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     const sandbox = {
       console,
@@ -63,9 +63,10 @@ describe('UMD bundle - branches', () => {
   });
 
   it('throws when no TextEncoder or Buffer is available for o2u8', () => {
-    const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-    if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
-    const code = readFileSync(distFile, 'utf8');
+    // Built once by `test/globalSetup.js`; this file used to shell out to
+    // `npm run build` at both of its bundle loads, racing other workers.
+    const distFile = bundlePath();
+    const code = loadBundleCode();
 
     const sandbox = {
       console,

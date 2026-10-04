@@ -1,13 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, readFileSync } from 'fs';
-import { execSync } from 'child_process';
 import vm from 'vm';
-import path from 'path';
-import { waitForBundleValue, receivedCountExpression } from './helpers/umdBundle.js';
+import {
+  loadBundleCode,
+  bundlePath,
+  waitForBundleValue,
+  receivedCountExpression,
+} from './helpers/umdBundle.js';
 
-const distFile = path.resolve(process.cwd(), 'dist', 'performance-helpers.js');
-if (!existsSync(distFile)) execSync('npm run build', { stdio: 'inherit' });
-const code = readFileSync(distFile, 'utf8');
+// Built once by `test/globalSetup.js`. This file used to shell out to
+// `npm run build` itself at import time, which raced every other worker into
+// the same output directory; see `loadBundleCode`.
+const distFile = bundlePath();
+const code = loadBundleCode();
 
 describe('UMD bundle exhaustive branches', () => {
   it('global context with TextEncoder/TextDecoder exercises many APIs', async () => {
