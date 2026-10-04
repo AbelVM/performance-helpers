@@ -323,4 +323,32 @@ describe('RT-034: retain must replay, and one unsubscribe must not wipe the topi
     expect(hub._retained.get('cfg')).toHaveLength(32);
     hub.close();
   });
+
+  it('a late subscriber receives the bounded log, not every retained publish', async () => {
+    // RT-011, which claimed "a late subscriber received all 50 retained messages" —
+    // i.e. that the bound is not enforced on replay. **It does not reproduce.**
+    // Replay iterates the bounded log, so 50 retained publishes deliver 32. Measured
+    // across 10 / 32 / 50 / 200 publishes: delivered 10 / 32 / 32 / 32.
+    //
+    // **This assertion did not exist, and that is why the row was filed.** The test
+    // above pins the *log*; the replay test above it publishes only two messages,
+    // under the bound. So "the log is clamped" and "a subscriber receives at most
+    // the clamp" were both individually true and jointly unpinned, and the gap
+    // between them is exactly what a caller can observe.
+    const hub = new PowerRealtimeHub({ send: () => {} });
+    for (let i = 0; i < 50; i += 1) hub.publish('cfg', i, { retain: true });
+
+    const seen = [];
+    const late = hub.subscribe('cfg', (m) => seen.push(m));
+    await hub.flush();
+
+    expect(seen).toHaveLength(32);
+    // The **newest** 32, not the oldest. A replay that clamped from the wrong end
+    // would deliver 0..31, which is stale configuration — precisely the thing a
+    // retained log exists to avoid — and `toHaveLength` alone would pass it.
+    expect(seen[0]).toBe(18);
+    expect(seen[31]).toBe(49);
+    late();
+    hub.close();
+  });
 });
