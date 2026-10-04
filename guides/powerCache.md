@@ -787,8 +787,8 @@ accidents.
   sweep. A caller watching memory cannot otherwise tell a policy eviction from an
   explicit one — and both _did_ free a node and notify you.
 
-The row that asked for this also asked for `entriesAscending()` and
-`entriesDescending()`, and those were **declined**: `entries(order)` already takes
+The row that asked for this also asked for `entriesAscending` and
+`entriesDescending`, and those were **declined**: `entries(order)` already takes
 `'LRU'` and `'MRU'`, so an alias pair would be a second spelling of one decision
 and a second thing to document, type and keep in sync.
 

@@ -51,8 +51,9 @@ Four rules, three of which are decisions:
 
 `PowerSemaphore` and `PowerBackpressure` share this implementation and take the
 same `weight`. `PowerBulkhead` passes it through per partition
-(`run(key, fn, { weight })`), and `PowerQueue` has a related but different
-`totalWeight` — see [Bulk removal and weighted limits](powerCache.md#bulk-removal-invalidate-and-evict)
+(a `weight` option on the bulkhead's `run`), and `PowerQueue` has a related but
+different `totalWeight` — see
+[Bulk removal and weighted limits](powerCache.md#bulk-removal-invalidate-and-evict)
 for the cache's own `weightFn`.
 
 ### Cancelling a wait
