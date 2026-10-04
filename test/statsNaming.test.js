@@ -50,6 +50,12 @@ const REPORTERS = [
   ['PowerEventLoopMonitor', () => new index.PowerEventLoopMonitor({ intervalMs: 1000 })],
   ['PowerGCRA', () => new index.PowerGCRA({ rate: 10, per: 1000 })],
   ['PowerRetryBudget', () => new index.PowerRetryBudget()],
+  // The three limiters, which gained `stats()`/`getStats()` last (RES-034). Each
+  // needs a real argument, which is why this list grew in a second commit rather
+  // than alongside the other nine.
+  ['PowerThrottle', () => new index.PowerThrottle({ capacity: 10 })],
+  ['PowerSlidingWindow', () => new index.PowerSlidingWindow({ capacity: 10 })],
+  ['PowerRateLimit', () => new index.PowerRateLimit([new index.PowerThrottle({ capacity: 10 })])],
 ];
 
 describe('stats()/getStats() parity', () => {
@@ -60,7 +66,7 @@ describe('stats()/getStats() parity', () => {
     // checked on their prototypes below instead: three of them need a live
     // socket or hub to instantiate, and a prototype check is the stronger
     // assertion for them anyway.
-    expect(REPORTERS.length).toBe(7);
+    expect(REPORTERS.length).toBe(10);
     for (const [name, make] of REPORTERS) {
       expect(typeof index[name], `${name} should be exported`).toBe('function');
       expect(make(), `${name} should be constructible`).toBeTruthy();
@@ -208,6 +214,9 @@ describe('getStats is declared in the published types', () => {
     ['powerRetry.d.ts', 'PowerRetryBudget'],
     ['powerSocketAdapter.d.ts', 'PowerSocketAdapter'],
     ['powerWebSocketClient.d.ts', 'PowerWebSocketClient'],
+    ['powerThrottle.d.ts', 'PowerThrottle'],
+    ['powerSlidingWindow.d.ts', 'PowerSlidingWindow'],
+    ['powerRateLimit.d.ts', 'PowerRateLimit'],
   ];
 
   it('read the generated types it claims to', () => {

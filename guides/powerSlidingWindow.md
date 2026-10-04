@@ -4,11 +4,12 @@ A sliding-window rate limiter that allows up to `capacity` events per `windowMs`
 
 ## Constructor
 
-| option     |                 type |   default | description                                                                                        |
-| ---------- | -------------------: | --------: | -------------------------------------------------------------------------------------------------- |
-| `capacity` |             `number` |       `1` | Maximum allowed events in a window.                                                                |
-| `windowMs` |             `number` |    `1000` | Window size in milliseconds.                                                                       |
-| `now`      | `function(): number` | `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| option          |                                          type |   default | description                                                                                        |
+| --------------- | --------------------------------------------: | --------: | -------------------------------------------------------------------------------------------------- |
+| `capacity`      |                                      `number` |       `1` | Maximum allowed events in a window.                                                                |
+| `windowMs`      |                                      `number` |    `1000` | Window size in milliseconds.                                                                       |
+| `now`           |                          `function(): number` | `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| `observability` | `boolean` \| [`MetricsCollector`](metrics.md) |   `false` | Opt in to metrics. Off by default. See [Metrics](#metrics).                                        |
 
 ## API
 
@@ -19,6 +20,10 @@ A sliding-window rate limiter that allows up to `capacity` events per `windowMs`
 - `reset()` — Clear internal state and timestamp queue, effectively refilling the window. **The ring buffer is kept**, so this is cheap enough for a hot path; see [reset versus dispose](#reset-versus-dispose).
 
 - `dispose()` — Release everything the instance holds, including the ring buffer. Use at teardown, including `using` / `await using` scope exit.
+
+- `stats()` — Serializable snapshot of `{ capacity, windowMs, used, available }`. **It prunes first**, so `used` reflects the window as of _now_. See [Metrics](#metrics).
+
+- `getStats()` — Alias for `stats()`.
 
 ## Reset versus dispose
 
@@ -141,3 +146,29 @@ Note the sharp edge: a threaded `now` is **authoritative**, so a value far in th
 future will legitimately empty a sliding window. That is correct — it is what a
 real clock jumping would do — but it is why a caller should thread one instant
 for the whole composition rather than letting each leg drift.
+
+## Metrics
+
+```javascript
+const window = new PowerSlidingWindow({ capacity: 1000, windowMs: 60_000, observability: true });
+```
+
+Off by default. See [`metrics.md`](metrics.md).
+
+**`stats()` prunes before it reports.** Nothing evicts an expired timestamp
+except a prune, so a window that has gone quiet still holds every entry it ever
+recorded. Reading the queue length directly would report a window as full long
+after the events behind it fell out — wrong in the same direction as a stale token
+count on `PowerThrottle`, and for the same reason.
+
+Pruning here is **not** strictly read-only, and that is safe to say plainly: it
+can only remove timestamps that have already left the window, so it cannot change
+any future admission decision. `available()` has pruned on every read for the same
+reason and longer, so this is not a new hazard.
+
+**There are no allow/refuse counters**, for the same reason as on every other
+helper here: a field increment on `tryConsume` is cost paid on the hot path by a
+feature that is off by default.
+
+`dispose()` detaches as well as releasing the ring, so a torn-down window stops
+being sampled.

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The completeness guard below reads the helpers to count who attaches, so it
-// needs the directory rather than a fixed list of nine.
+// needs the directory rather than a fixed list of helpers.
 const HELPERS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'helpers');
 import {
   MetricsCollector,
@@ -23,6 +23,9 @@ import { PowerSocketAdapter } from '../src/helpers/powerSocketAdapter.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 import { PowerWebSocketClient } from '../src/helpers/powerWebSocketClient.js';
 import { PowerRTCChannel } from '../src/helpers/powerRTCChannel.js';
+import { PowerThrottle } from '../src/helpers/powerThrottle.js';
+import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
+import { PowerRateLimit } from '../src/helpers/powerRateLimit.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -221,16 +224,16 @@ describe('against the real helpers', () => {
 });
 
 describe('observability: true on the helpers', () => {
-  // FEAT-007 part two. The point of the "all nine or none" rule is that
+  // FEAT-007 part two. The point of the "all of them or none" rule is that
   // `observability: true` means the same thing everywhere, so this is a test
   // over the whole set rather than per helper: a helper that drifts out of the
   // agreement fails here rather than in a dashboard.
   //
-  // **All nine, and the nine are counted from the source rather than from this
+  // **Every one of them, counted from the source rather than from this
   // list** — `rg "attach\(this, '" src/helpers/*.js` is what the rule means, and
   // the assertion below re-checks that count so the list cannot quietly fall
   // behind a tenth helper. The previous version of this file was titled "all
-  // nine or none" and tested four; five were untested, and three of the five
+  // or none" and tested four; five were untested, and three of the five
   // needed a real constructor argument rather than an empty options bag, which
   // is a good part of why they were skipped.
   const HELPERS = [
@@ -284,6 +287,22 @@ describe('observability: true on the helpers', () => {
       'PowerRTCChannel',
       () => new PowerRTCChannel(metricsDataChannel(), { observability: true }),
       'rtc',
+    ],
+    // The three limiters, which took `observability` last (RES-034). Each needs a
+    // real argument rather than an empty options bag — the same reason five of
+    // the earlier entries were skipped when this list was first written, and the
+    // reason it is worth stating that a `it.each` row is cheap but a
+    // *constructible* one is not.
+    ['PowerThrottle', () => new PowerThrottle({ capacity: 10, observability: true }), 'throttle'],
+    [
+      'PowerSlidingWindow',
+      () => new PowerSlidingWindow({ capacity: 10, observability: true }),
+      'slidingWindow',
+    ],
+    [
+      'PowerRateLimit',
+      () => new PowerRateLimit([new PowerThrottle({ capacity: 10 })], { observability: true }),
+      'rateLimit',
     ],
   ];
 
@@ -349,7 +368,7 @@ describe('observability: true on the helpers', () => {
   });
 
   it('covers every helper that attaches, and no others', () => {
-    // **This is the guard the "all nine or none" rule actually needed**, and the
+    // **This is the guard the "all of them or none" rule actually needed**, and the
     // first version of it did not work: it asserted `prefixes.size ===
     // HELPERS.length` and that nothing was left registered, which is trivially
     // true and stays true when five entries are deleted from the list. Removing

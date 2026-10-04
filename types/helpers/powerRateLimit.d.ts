@@ -41,6 +41,10 @@ export class PowerRateLimit {
     buckets: number;
     /** @type {Array<RateLimiterLike[]|null>} */
     _slots: Array<RateLimiterLike[] | null>;
+    _metrics: {
+        unregister: () => boolean;
+        name: string;
+    } | null;
     /**
      * The limiter set for `key`, building it on first use.
      *
@@ -213,6 +217,51 @@ export class PowerRateLimit {
      */
     reset(): void;
     /**
+     * Serializable snapshot of the composition's shape and, where there is one
+     * answer, its headroom.
+     *
+     * **`available` is `null` for a keyed composer, and that is the interesting
+     * field.** Each key has its own budget and a snapshot has no key to measure, so
+     * there is no single number. The obvious alternative — measure the shared
+     * default slot, as `tryConsume` does when no key is given — would report one
+     * arbitrary tenant's allowance as *the composition's*, and that is the number
+     * least likely to be believed and most likely to be believed wrongly. `null`
+     * is the honest reading, and `toSeries` already preserves it as an explicit
+     * absence rather than dropping the key, which is the same treatment
+     * `PowerGCRA.stats()` gives an unset `tat`. Use `available({ context })` for a
+     * specific key.
+     *
+     * `builtSlots` is the count of hash slots that have actually been built, which
+     * for a keyed composer is the number of tenants the instance is currently
+     * holding budgets for. `builtSlots / buckets` is the occupancy; at 1.0 every
+     * slot has been touched and further tenants share budgets with existing ones.
+     *
+     * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null}}
+     */
+    stats(): {
+        legs: number;
+        atomic: boolean;
+        keyed: boolean;
+        buckets: number;
+        builtSlots: number;
+        available: number | null;
+    };
+    /**
+     * Alias for {@link stats}, so a caller who learned `getStats()` from
+     * `PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+     *
+     * No `@returns` tag on purpose — see `PowerThrottle.getStats()` for why the
+     * shape is inferred rather than copied.
+     */
+    getStats(): {
+        legs: number;
+        atomic: boolean;
+        keyed: boolean;
+        buckets: number;
+        builtSlots: number;
+        available: number | null;
+    };
+    /**
      * Release every resource this instance holds, so it can take part in `using` /
      * `await using` and a DI container's teardown like every other long-lived
      * limiter here.
@@ -244,6 +293,11 @@ export class PowerRateLimit {
      * they belong to the caller; the unkeyed path resets them, which is what
      * {@link PowerRateLimit#reset} already does, and leaves the caller's objects
      * usable.
+     *
+     * A metrics registration is released here too, for the same reason the slots
+     * are: the collector holds a closure over this instance, so a disposed
+     * composer would be sampled forever — and it still answers `stats()`
+     * afterwards, so nothing fails visibly while the series reports a dead object.
      *
      * @returns {void}
      */

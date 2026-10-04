@@ -6827,6 +6827,60 @@ measures a 28.61 % median min/max spread and anything finer is noise. The clock
 is pinned too, since a test cannot assert a comment: `dispose()` leaves `_now` and
 `_nowExplicit` exactly as the caller supplied them.
 
+## The three limiters now report themselves under `observability: true`
+
+`PowerThrottle`, `PowerSlidingWindow` and `PowerRateLimit` accept `observability`,
+joining the ten helpers that already did. Off by default, so the common case
+allocates nothing and creates no closure. This is the half of RES-034 that was
+deferred because it needed an edit to the same `PREFIXES` list RT-017 needed, and
+it could not land as a separate green commit on a shared index until RT-017 was
+in.
+
+**Two of the three `stats()` methods do real work before reporting, and that is
+the design decision here.** Each store is only advanced by the operation that
+also _reads_ it, so a field read would be stale by construction:
+
+| helper               | field    | a plain read would report      |
+| -------------------- | -------- | ------------------------------ |
+| `PowerThrottle`      | `tokens` | the count at the **last** read |
+| `PowerSlidingWindow` | `used`   | every timestamp ever recorded  |
+
+Both are wrong in the same direction, and it is the direction that costs: a
+dashboard showing an exhausted bucket, or a saturated window, that will both
+happily admit the next request sends someone to debug a limiter that is working.
+So `PowerThrottle.stats()` refills and `PowerSlidingWindow.stats()` prunes first,
+which is the same question `available()` already asks. The sliding window's prune
+is not strictly read-only — it can only remove timestamps that have already left
+the window, so it cannot change any future admission decision, and `available()`
+has done it on every read for longer.
+
+**`PowerRateLimit.stats().available` is `null` when `keyFn` is set.** Each key has
+its own budget and a snapshot has no key to measure. The obvious alternative —
+measure the shared default slot, as `tryConsume` does without a key — would report
+one arbitrary tenant's allowance as _the composition's_, which is the number least
+likely to be believed and most likely to be believed wrongly. `null` is preserved
+through `toSeries` as an explicit absence, so it stays distinguishable from a field
+that was never measured. Use `available({ context })` for one key, or
+`builtSlots / buckets` for occupancy.
+
+**None of the three counts allowed or refused requests.** That would mean
+incrementing a field on `tryConsume`, the hot synchronous path, for a feature that
+is off by default. The limiter's own state is the measurement; how many requests
+arrived is the caller's to count. This follows `PowerGCRA.stats()`, which reports
+configuration and TAT for the same reason, and a test pins the exact field set so
+adding a counter has to be argued for rather than drifted into.
+
+`getStats()` is an alias on all three, inferred rather than annotated — see the
+note on `PowerGCRA.getStats()` for why a hand-copied return shape is the thing to
+avoid.
+
+**6 mutants, all 6 killed.** Dropping the refill fails the refill test; dropping
+the prune fails the prune test; reporting the shared slot instead of `null` fails
+three; and removing the detach from each of the three `dispose()` methods fails
+the teardown test. Every assertion runs on an injected clock — nothing sleeps and
+nothing measures elapsed time, because the harness reports a 28.61 % median
+min/max spread and a duration-shaped assertion about refills would be a coin flip.
+
 ## `PowerRateLimit` can now be disposed
 
 `PowerRateLimit` was the last limiter in the library that could not take part in

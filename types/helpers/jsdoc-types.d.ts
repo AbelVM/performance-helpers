@@ -597,11 +597,19 @@ export type PowerThrottleOptions = {
     tokens?: number | undefined;
     /**
      * Tokens added per second.
+     */
+    refillRate?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this limiter in the shared collector, or pass a collector of
+     * your own. Off by default, so the common case allocates nothing. `stats()` reports the
+     * bucket as of *now* rather than as of the last read, so a snapshot never shows an
+     * exhausted bucket that has since refilled.
      *
      * A limiter constructed with its own `now` ignores any per-call value a
      * composition threads in - see `LimiterNowOptions`.
      */
-    refillRate?: number | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * - Clock override in ms. Defaults to the
      * library's `nowMs()`. Injected for tests and for compositions; it outranks
@@ -702,11 +710,19 @@ export type PowerSlidingWindowOptions = {
     capacity?: number | undefined;
     /**
      * Window size in milliseconds.
+     */
+    windowMs?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this limiter in the shared collector, or pass a collector of
+     * your own. Off by default, so the common case allocates nothing. `stats()` prunes
+     * expired timestamps first, so `used` reflects the window as of *now* rather than
+     * as of the last read.
      *
      * A limiter constructed with its own `now` ignores any per-call value a
      * composition threads in - see `LimiterNowOptions`.
      */
-    windowMs?: number | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
     /**
      * - Clock override in ms. Defaults to the
      * library's `nowMs()`. Injected for tests and for compositions; it outranks
@@ -1708,6 +1724,15 @@ export type PowerRateLimitOptions = {
      * per-key limiter would discard that key's consumed budget and hand it a fresh
      * allowance. The cost is that two keys hashing to the same slot **share a
      * budget**.
+     */
+    buckets?: number | undefined;
+    /**
+     * - Opt in to
+     * metrics: `true` registers this composition in the shared collector, or pass a collector
+     * of your own. Off by default. Note that `stats().available` is **`null` whenever `keyFn`
+     * is set**: each key has its own budget and a snapshot has no key to measure, so there is
+     * no single number. `builtSlots` over `buckets` gives occupancy instead, and
+     * `available({ context })` measures one key.
      *
      * Per-call `tryConsume(n, options)` also accepts a `{ context }` value, which is
      * what `keyFn` is called with, and a `{ now }` number - read
@@ -1717,7 +1742,7 @@ export type PowerRateLimitOptions = {
      * the same class is a trap. The composer needs no injected clock of its own,
      * because the per-call value covers every use the limiters' injection does.
      */
-    buckets?: number | undefined;
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
 };
 /**
  * Per-call options for `PowerCache.getOrFetch(key, factory?, options?)`.

@@ -24,6 +24,8 @@ Options:
 - `tryConsume(n?)` — returns `true` only when every underlying limiter permits consuming `n` tokens.
 - `reset()` — calls `reset()` on underlying limiters where present.
 - `dispose()` — releases what the composer built, and supports `using`. See [Disposal](#disposal).
+- `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available }`. See [Metrics](#metrics).
+- `getStats()` — Alias for `stats()`.
 - `limitersFor(key)` — with `keyFn`, the limiter set for one key, so you can inspect or drive that key directly (for a `Retry-After` header, say). Returns `null` without `keyFn`.
 
 ## Per-key limiting
@@ -158,6 +160,36 @@ memory a dispose exists to release.
 So: **treat `dispose()` as teardown.** If you want to pause a limiter for a while,
 use `reset()`, which is reversible and deliberately does not unregister or drop
 anything.
+
+`dispose()` also detaches any metrics registration, so a torn-down composer stops
+being sampled — see below.
+
+## Metrics
+
+```javascript
+const limit = new PowerRateLimit([new PowerThrottle({ capacity: 100 })], { observability: true });
+```
+
+Off by default, so the common case allocates nothing. See
+[`metrics.md`](metrics.md).
+
+**`stats().available` is `null` whenever `keyFn` is set, and that is the field
+worth reading twice.** Each key has its own budget and a snapshot has no key to
+measure, so there is no single number. The obvious alternative — measure the
+shared default slot, as `tryConsume` does when no key is given — would report one
+arbitrary tenant's allowance as _the composition's_, which is the number least
+likely to be believed and most likely to be believed wrongly.
+
+`null` is the honest reading, and the collector preserves it as an explicit
+absence rather than dropping the key, so "this composition has no single
+availability" stays distinguishable from "this field was never measured". For one
+key, use `available({ context })`; for a picture of how many tenants are being
+tracked, `builtSlots / buckets` is the occupancy, and at `1.0` every slot has been
+touched and further tenants share budgets with existing ones.
+
+There are no allow/refuse counters, for the same reason as on every other helper
+here: a field increment on `tryConsume` is cost paid on the hot synchronous path
+by a feature that is off by default.
 
 ## Clocks
 

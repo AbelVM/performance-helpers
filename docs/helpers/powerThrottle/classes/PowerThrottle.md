@@ -34,6 +34,12 @@ the published type and the destructuring drift apart in the first place.
 
 ***
 
+### \_metrics
+
+> **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
+
+***
+
 ### \_now
 
 > **\_now**: () => `number`
@@ -147,9 +153,48 @@ process lifetime, and without `dispose()` it cannot take part in `using` /
 `await using` or a DI container's teardown — the one shape every other
 long-lived helper here supports.
 
+A metrics registration is one of the things it releases. The collector holds
+a closure over this instance, so an observability-enabled throttle that is
+disposed without unregistering is sampled forever — and a throttle still
+answers `stats()` afterwards, so nothing fails visibly while the series
+quietly reports a dead object. Safe to call on a throttle that never
+attached: `detach(null)` returns `false`.
+
 #### Returns
 
 `void`
+
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+
+**No `@returns` tag, and that is load-bearing.** See `PowerGCRA.getStats()`:
+a hand-copied return shape drifts the moment `stats()` changes, and a test
+asserting the two stay in sync only papers over the duplication. Inference
+gives a byte-identical published type that cannot drift, and
+`test/types.test-d.ts` asserts the two are mutually assignable — the property
+a consumer relies on.
+
+#### Returns
+
+`object`
+
+##### capacity
+
+> **capacity**: `number`
+
+##### refillRate
+
+> **refillRate**: `number`
+
+##### tokens
+
+> **tokens**: `number`
 
 ***
 
@@ -251,6 +296,45 @@ Alias of [PowerThrottle#release](#release).
 #### Returns
 
 `void`
+
+***
+
+### stats()
+
+> **stats**(): `object`
+
+Serializable snapshot of the bucket's configuration and current state.
+
+**It refills first, which is the whole reason this is not a field read.**
+`this.tokens` is only ever correct as of the last read: nothing advances it
+between calls, so a snapshot taken a minute after the last `tryConsume`
+would report an exhausted bucket that has in fact refilled to capacity. That
+is the wrong direction to be wrong in — a dashboard showing "0 tokens
+available" for a bucket that will admit a request is a page that sends
+someone to debug a limiter that is working — so this asks the bucket what it
+holds now, the same question `available()` asks.
+
+Reported as configuration plus one state field rather than as allow/refuse
+counters, and that follows `PowerGCRA.stats()` deliberately: a counter would
+mean incrementing a field on `tryConsume`, the hot synchronous path, for
+something that is off by default. The bucket's own state is the measurement;
+how many requests arrived is the caller's to count.
+
+#### Returns
+
+`object`
+
+##### capacity
+
+> **capacity**: `number`
+
+##### refillRate
+
+> **refillRate**: `number`
+
+##### tokens
+
+> **tokens**: `number`
 
 ***
 

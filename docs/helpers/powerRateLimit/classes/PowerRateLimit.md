@@ -45,6 +45,12 @@ Limiter instances to compose. Each
 
 ## Properties
 
+### \_metrics
+
+> **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
+
+***
+
 ### \_slots
 
 > **\_slots**: (`RateLimiterLike`[] \| `null`)[]
@@ -175,9 +181,54 @@ they belong to the caller; the unkeyed path resets them, which is what
 [PowerRateLimit#reset](#reset) already does, and leaves the caller's objects
 usable.
 
+A metrics registration is released here too, for the same reason the slots
+are: the collector holds a closure over this instance, so a disposed
+composer would be sampled forever — and it still answers `stats()`
+afterwards, so nothing fails visibly while the series reports a dead object.
+
 #### Returns
 
 `void`
+
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+
+No `@returns` tag on purpose — see `PowerThrottle.getStats()` for why the
+shape is inferred rather than copied.
+
+#### Returns
+
+`object`
+
+##### atomic
+
+> **atomic**: `boolean`
+
+##### available
+
+> **available**: `number` \| `null`
+
+##### buckets
+
+> **buckets**: `number`
+
+##### builtSlots
+
+> **builtSlots**: `number`
+
+##### keyed
+
+> **keyed**: `boolean`
+
+##### legs
+
+> **legs**: `number`
 
 ***
 
@@ -333,6 +384,59 @@ Same argument shape as `release`.
 #### Returns
 
 `void` \| `Promise`\<`void`\>
+
+***
+
+### stats()
+
+> **stats**(): `object`
+
+Serializable snapshot of the composition's shape and, where there is one
+answer, its headroom.
+
+**`available` is `null` for a keyed composer, and that is the interesting
+field.** Each key has its own budget and a snapshot has no key to measure, so
+there is no single number. The obvious alternative — measure the shared
+default slot, as `tryConsume` does when no key is given — would report one
+arbitrary tenant's allowance as *the composition's*, and that is the number
+least likely to be believed and most likely to be believed wrongly. `null`
+is the honest reading, and `toSeries` already preserves it as an explicit
+absence rather than dropping the key, which is the same treatment
+`PowerGCRA.stats()` gives an unset `tat`. Use `available({ context })` for a
+specific key.
+
+`builtSlots` is the count of hash slots that have actually been built, which
+for a keyed composer is the number of tenants the instance is currently
+holding budgets for. `builtSlots / buckets` is the occupancy; at 1.0 every
+slot has been touched and further tenants share budgets with existing ones.
+
+#### Returns
+
+`object`
+
+##### atomic
+
+> **atomic**: `boolean`
+
+##### available
+
+> **available**: `number` \| `null`
+
+##### buckets
+
+> **buckets**: `number`
+
+##### builtSlots
+
+> **builtSlots**: `number`
+
+##### keyed
+
+> **keyed**: `boolean`
+
+##### legs
+
+> **legs**: `number`
 
 ***
 

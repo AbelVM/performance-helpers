@@ -437,6 +437,11 @@ export {};
  * @property {number} [capacity=1] Maximum tokens in the bucket.
  * @property {number} [tokens] Initial tokens. Defaults to `capacity`.
  * @property {number} [refillRate=0] Tokens added per second.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this limiter in the shared collector, or pass a collector of
+ *   your own. Off by default, so the common case allocates nothing. `stats()` reports the
+ *   bucket as of *now* rather than as of the last read, so a snapshot never shows an
+ *   exhausted bucket that has since refilled.
  *
  * A limiter constructed with its own `now` ignores any per-call value a
  * composition threads in - see `LimiterNowOptions`.
@@ -518,6 +523,11 @@ export {};
  * @typedef {Object} PowerSlidingWindowOptions
  * @property {number} [capacity=1] Max events allowed in window.
  * @property {number} [windowMs=1000] Window size in milliseconds.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this limiter in the shared collector, or pass a collector of
+ *   your own. Off by default, so the common case allocates nothing. `stats()` prunes
+ *   expired timestamps first, so `used` reflects the window as of *now* rather than
+ *   as of the last read.
  *
  * A limiter constructed with its own `now` ignores any per-call value a
  * composition threads in - see `LimiterNowOptions`.
@@ -1247,6 +1257,12 @@ export {};
  *   per-key limiter would discard that key's consumed budget and hand it a fresh
  *   allowance. The cost is that two keys hashing to the same slot **share a
  *   budget**.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
+ *   metrics: `true` registers this composition in the shared collector, or pass a collector
+ *   of your own. Off by default. Note that `stats().available` is **`null` whenever `keyFn`
+ *   is set**: each key has its own budget and a snapshot has no key to measure, so there is
+ *   no single number. `builtSlots` over `buckets` gives occupancy instead, and
+ *   `available({ context })` measures one key.
  *
  * Per-call `tryConsume(n, options)` also accepts a `{ context }` value, which is
  * what `keyFn` is called with, and a `{ now }` number - read

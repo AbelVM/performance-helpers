@@ -39,6 +39,7 @@
 
 import { resolveComposerNow } from '../utils/limiterClock.js';
 import { assertCount, assertKnownOptions } from '../utils/options.js';
+import { attach, detach } from './metrics.js';
 
 /** @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions */
 
@@ -78,7 +79,7 @@ export class PowerRateLimit {
    *   guaranteed the call returns `false`.
    */
   constructor(limiters = [], options = {}) {
-    assertKnownOptions(options, ['atomic', 'keyFn', 'buckets'], 'PowerRateLimit');
+    assertKnownOptions(options, ['atomic', 'keyFn', 'buckets', 'observability'], 'PowerRateLimit');
     if (!Array.isArray(limiters)) throw new TypeError('limiters must be an array');
     // `Array<Object>` was the declared type, and the body then calls
     // `tryConsume`, `reserve` and reads `available` on each element - none of
@@ -146,6 +147,8 @@ export class PowerRateLimit {
       /** @type {Array<RateLimiterLike[]|null>} */
       this._slots = new Array(buckets).fill(null);
     }
+    // Opt-in metrics. Off by default, so the common case allocates nothing.
+    this._metrics = attach(this, 'rateLimit', options);
   }
 
   /**
@@ -594,6 +597,55 @@ export class PowerRateLimit {
   }
 
   /**
+   * Serializable snapshot of the composition's shape and, where there is one
+   * answer, its headroom.
+   *
+   * **`available` is `null` for a keyed composer, and that is the interesting
+   * field.** Each key has its own budget and a snapshot has no key to measure, so
+   * there is no single number. The obvious alternative — measure the shared
+   * default slot, as `tryConsume` does when no key is given — would report one
+   * arbitrary tenant's allowance as *the composition's*, and that is the number
+   * least likely to be believed and most likely to be believed wrongly. `null`
+   * is the honest reading, and `toSeries` already preserves it as an explicit
+   * absence rather than dropping the key, which is the same treatment
+   * `PowerGCRA.stats()` gives an unset `tat`. Use `available({ context })` for a
+   * specific key.
+   *
+   * `builtSlots` is the count of hash slots that have actually been built, which
+   * for a keyed composer is the number of tenants the instance is currently
+   * holding budgets for. `builtSlots / buckets` is the occupancy; at 1.0 every
+   * slot has been touched and further tenants share budgets with existing ones.
+   *
+   * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null}}
+   */
+  stats() {
+    const keyed = this.keyFn !== null;
+    let builtSlots = 0;
+    if (keyed) {
+      for (const slot of this._slots) if (slot) builtSlots += 1;
+    }
+    return {
+      legs: this.limiters.length,
+      atomic: this.atomicDefault,
+      keyed,
+      buckets: keyed ? this.buckets : 0,
+      builtSlots,
+      available: keyed ? null : this.available(),
+    };
+  }
+
+  /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+   *
+   * No `@returns` tag on purpose — see `PowerThrottle.getStats()` for why the
+   * shape is inferred rather than copied.
+   */
+  getStats() {
+    return this.stats();
+  }
+
+  /**
    * Release every resource this instance holds, so it can take part in `using` /
    * `await using` and a DI container's teardown like every other long-lived
    * limiter here.
@@ -626,9 +678,16 @@ export class PowerRateLimit {
    * {@link PowerRateLimit#reset} already does, and leaves the caller's objects
    * usable.
    *
+   * A metrics registration is released here too, for the same reason the slots
+   * are: the collector holds a closure over this instance, so a disposed
+   * composer would be sampled forever — and it still answers `stats()`
+   * afterwards, so nothing fails visibly while the series reports a dead object.
+   *
    * @returns {void}
    */
   dispose() {
+    detach(this._metrics);
+    this._metrics = null;
     if (this.keyFn) {
       // In place, rather than `this._slots = []`. **These are equivalent, and
       // that was measured rather than assumed**: `_slotFor` reads and writes by

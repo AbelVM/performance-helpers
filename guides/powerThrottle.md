@@ -4,12 +4,13 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 
 ## Constructor
 
-| option       |                 type |    default | description                                                                                        |
-| ------------ | -------------------: | ---------: | -------------------------------------------------------------------------------------------------- |
-| `capacity`   |             `number` |        `1` | Maximum tokens the bucket can hold.                                                                |
-| `tokens`     |             `number` | `capacity` | Initial token count (clamped to `capacity`).                                                       |
-| `refillRate` |             `number` |        `0` | Tokens added per second (fractional accumulation supported).                                       |
-| `now`        | `function(): number` |  `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| option          |                                          type |    default | description                                                                                        |
+| --------------- | --------------------------------------------: | ---------: | -------------------------------------------------------------------------------------------------- |
+| `capacity`      |                                      `number` |        `1` | Maximum tokens the bucket can hold.                                                                |
+| `tokens`        |                                      `number` | `capacity` | Initial token count (clamped to `capacity`).                                                       |
+| `refillRate`    |                                      `number` |        `0` | Tokens added per second (fractional accumulation supported).                                       |
+| `now`           |                          `function(): number` |  `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| `observability` | `boolean` \| [`MetricsCollector`](metrics.md) |    `false` | Opt in to metrics. Off by default, so the common case allocates nothing. See [Metrics](#metrics).  |
 
 ## API
 
@@ -26,6 +27,12 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 - `release(tokenOrN)` — Release a prior reservation token or numeric token count back into the bucket. Accepts either a token returned from `reserve()` or a numeric value.
 
 - `rollback(nOrToken)` — Alias for `release()` for compatibility with undo patterns.
+
+- `stats()` — Serializable snapshot of `{ capacity, tokens, refillRate }`. **It refills first**, so `tokens` is what the bucket holds _now_ rather than what it held at the last read. See [Metrics](#metrics).
+
+- `getStats()` — Alias for `stats()`.
+
+- `dispose()` — Reset the bucket and release any metrics registration. Use at teardown, including `using` / `await using` scope exit.
 
 ## Example
 
@@ -190,3 +197,30 @@ Note the sharp edge: a threaded `now` is **authoritative**, so a value far in th
 future will legitimately empty a sliding window. That is correct — it is what a
 real clock jumping would do — but it is why a caller should thread one instant
 for the whole composition rather than letting each leg drift.
+
+## Metrics
+
+```javascript
+const throttle = new PowerThrottle({ capacity: 100, refillRate: 10, observability: true });
+```
+
+Off by default, so the common case allocates nothing and creates no closure. See
+[`metrics.md`](metrics.md) for the collector, and note what this helper does
+**not** report.
+
+**`stats()` refills before it reports.** The bucket's `tokens` field is only ever
+advanced by a read, so a snapshot taken after a quiet spell would otherwise
+report an exhausted bucket that has since refilled to capacity — the wrong
+direction to be wrong in, because a dashboard showing "0 available" sends someone
+to debug a limiter that is working. `stats()` asks the bucket what it holds now,
+the same question `available()` asks.
+
+**There are no allow/refuse counters, and that is deliberate.** Counting requests
+would mean incrementing a field on `tryConsume`, the hot synchronous path, for a
+feature that is off by default. The bucket's own state is the measurement; how
+many requests arrived is yours to count. The same reasoning is why
+`PowerGCRA.stats()` reports configuration and TAT rather than admission counts.
+
+`dispose()` detaches, so a torn-down throttle stops being sampled — and one still
+answers `stats()` afterwards, so a missed detach would be a series that looks
+live and is not, with no error anywhere.

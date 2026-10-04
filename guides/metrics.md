@@ -144,8 +144,29 @@ So the pairing is:
 ### Which helpers take it
 
 `PowerCache`, `PowerPool`, `PowerBulkhead`, `PowerGCRA`, `PowerEventLoopMonitor`,
-`PowerRealtimeHub`, `PowerSocketAdapter`, `PowerWebSocketClient` and
-`PowerRetryBudget`.
+`PowerRealtimeHub`, `PowerSocketAdapter`, `PowerWebSocketClient`,
+`PowerRetryBudget`, `PowerRTCChannel`, `PowerThrottle`, `PowerSlidingWindow` and
+`PowerRateLimit`.
+
+The three limiters were the last to get it, and their `stats()` differ from the
+rest in a way worth knowing before you read a series:
+
+- **`PowerThrottle`** reports `tokens` **as of the snapshot, not as of the last
+  read** — `stats()` refills first, so a bucket that has recovered never looks
+  exhausted.
+- **`PowerSlidingWindow`** reports `used` after pruning expired timestamps, for
+  the same reason: a window that has gone quiet still holds every timestamp it
+  recorded until something prunes them.
+- **`PowerRateLimit` reports `available: null` whenever `keyFn` is set.** Each key
+  has its own budget and a snapshot has no key to measure, so there is no single
+  number to report — `null` says "no single answer" instead of naming one
+  arbitrary tenant's allowance as the composition's. Use
+  `available({ context })` for a specific key, or read `builtSlots / buckets` for
+  occupancy.
+
+None of the three counts allowed/refused requests. That would mean incrementing a
+field on `tryConsume` — the hot synchronous path — for something that is off by
+default; the limiter's own state is the measurement.
 
 ## See also
 

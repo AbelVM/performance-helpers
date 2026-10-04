@@ -11,6 +11,7 @@ import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js'
 import { MS_PER_SEC, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
 import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+import { attach, detach } from './metrics.js';
 
 export class PowerSlidingWindow {
   /**
@@ -18,7 +19,11 @@ export class PowerSlidingWindow {
    *   and `windowMs` to one second.
    */
   constructor(options = {}) {
-    assertKnownOptions(options, ['capacity', 'windowMs', 'now'], 'PowerSlidingWindow');
+    assertKnownOptions(
+      options,
+      ['capacity', 'windowMs', 'observability', 'now'],
+      'PowerSlidingWindow'
+    );
     const { capacity = 1, windowMs = MS_PER_SEC, now } = options;
     // `Math.max(0, Number(capacity) || 0)` accepted `capacity: 0`, producing a
     // window that refuses everything, and coerced NaN to 0 rather than
@@ -47,6 +52,8 @@ export class PowerSlidingWindow {
     attachLimiterClock(this, nowMs, { now }, 'PowerSlidingWindow');
     // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
     this._timestamps = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
+    // Opt-in metrics. Off by default, so the common case allocates nothing.
+    this._metrics = attach(this, 'slidingWindow', options);
   }
 
   /**
@@ -154,6 +161,48 @@ export class PowerSlidingWindow {
   }
 
   /**
+   * Serializable snapshot of the window's configuration and current occupancy.
+   *
+   * **It prunes first, and that is what makes `used` mean anything.** Nothing
+   * evicts an expired timestamp except a prune, so a window that has gone quiet
+   * still holds every entry it ever recorded. Reading `_timestamps.length`
+   * directly would therefore report a window as full long after the events
+   * behind it fell out of it — the same failure a stale token count is on
+   * `PowerThrottle`, and wrong in the same direction: a dashboard showing a
+   * saturated window that will in fact admit the request.
+   *
+   * Pruning is **not** strictly read-only here, and that is safe to say plainly:
+   * it can only remove timestamps that have already left the window, so it cannot
+   * change any future admission decision. `available()` has pruned on every read
+   * for the same reason and longer; this is not a new hazard, it is the existing
+   * one being visible from a second angle.
+   *
+   * @returns {{capacity:number, windowMs:number, used:number, available:number}}
+   */
+  stats() {
+    this._prune(this._now());
+    const used = this._timestamps.length;
+    return {
+      capacity: this.capacity,
+      windowMs: this.windowMs,
+      used,
+      available: Math.max(0, this.capacity - used),
+    };
+  }
+
+  /**
+   * Alias for {@link stats}, so a caller who learned `getStats()` from
+   * `PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+   *
+   * No `@returns` tag on purpose — see `PowerThrottle.getStats()` and
+   * `PowerGCRA.getStats()` for why a hand-written copy of the shape is the thing
+   * to avoid.
+   */
+  getStats() {
+    return this.stats();
+  }
+
+  /**
    * Release every resource this instance holds.
    *
    * The window holds a `PowerQueue` of timestamps and a clock reference. Neither
@@ -179,11 +228,18 @@ export class PowerSlidingWindow {
    * injected, so replacing either would discard caller configuration rather than
    * release a resource. There is no accumulated clock state here to clear.
    *
+   * A metrics registration is released here for the same reason the ring is: the
+   * collector holds a closure over this instance, so leaving it registered means
+   * a disposed window is sampled forever, and one still answers `stats()`
+   * afterwards so nothing fails visibly.
+   *
    * @returns {void}
    */
   dispose() {
     // `PowerQueue` has had a `clear()` since it had a `reset()`, and this comment
     // claimed otherwise — a stale note that is what kept an O(n) drain in place.
+    detach(this._metrics);
+    this._metrics = null;
     this._timestamps.clear();
     // Teardown, so the ring goes back to its initial capacity instead of sitting
     // at whatever the window grew to. `shrink()` is a no-op when the current

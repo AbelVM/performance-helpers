@@ -27,6 +27,12 @@
 
 ## Properties
 
+### \_metrics
+
+> **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
+
+***
+
 ### \_now
 
 > **\_now**: () => `number`
@@ -145,9 +151,47 @@ The **clock is not re-seeded**, contrary to what this comment used to say.
 injected, so replacing either would discard caller configuration rather than
 release a resource. There is no accumulated clock state here to clear.
 
+A metrics registration is released here for the same reason the ring is: the
+collector holds a closure over this instance, so leaving it registered means
+a disposed window is sampled forever, and one still answers `stats()`
+afterwards so nothing fails visibly.
+
 #### Returns
 
 `void`
+
+***
+
+### getStats()
+
+> **getStats**(): `object`
+
+Alias for [stats](#stats), so a caller who learned `getStats()` from
+`PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+
+No `@returns` tag on purpose — see `PowerThrottle.getStats()` and
+`PowerGCRA.getStats()` for why a hand-written copy of the shape is the thing
+to avoid.
+
+#### Returns
+
+`object`
+
+##### available
+
+> **available**: `number`
+
+##### capacity
+
+> **capacity**: `number`
+
+##### used
+
+> **used**: `number`
+
+##### windowMs
+
+> **windowMs**: `number`
 
 ***
 
@@ -169,6 +213,48 @@ case expensive to fix the expensive one.
 #### Returns
 
 `void`
+
+***
+
+### stats()
+
+> **stats**(): `object`
+
+Serializable snapshot of the window's configuration and current occupancy.
+
+**It prunes first, and that is what makes `used` mean anything.** Nothing
+evicts an expired timestamp except a prune, so a window that has gone quiet
+still holds every entry it ever recorded. Reading `_timestamps.length`
+directly would therefore report a window as full long after the events
+behind it fell out of it — the same failure a stale token count is on
+`PowerThrottle`, and wrong in the same direction: a dashboard showing a
+saturated window that will in fact admit the request.
+
+Pruning is **not** strictly read-only here, and that is safe to say plainly:
+it can only remove timestamps that have already left the window, so it cannot
+change any future admission decision. `available()` has pruned on every read
+for the same reason and longer; this is not a new hazard, it is the existing
+one being visible from a second angle.
+
+#### Returns
+
+`object`
+
+##### available
+
+> **available**: `number`
+
+##### capacity
+
+> **capacity**: `number`
+
+##### used
+
+> **used**: `number`
+
+##### windowMs
+
+> **windowMs**: `number`
 
 ***
 
