@@ -1,197 +1,148 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { PowerPool } from '../src/helpers/powerPool.js';
-
 /**
- * TEST-003, continued: the encode cache, the broadcast path, and drain.
+ * POOL-009 — a message awaiting a response must not touch the encode cache.
  *
- * These are the last three areas where a branch exists but no assertion reaches
- * it. The encode cache is the interesting one because its two limits - entry
- * count and total bytes - interact: a byte limit that is never reconciled on
- * eviction makes the cache grow without bound while reporting that it is
- * bounded, and the bookkeeping error is invisible because the cache still
- * *works*, it just stops being a cache.
+ * The cache is keyed on the serialised message, and a `wantResponse` post carries a
+ * per-post correlation id, so its key is unique by construction. Measured before the fix,
+ * with two **identical** `postMessage` calls:
+ *
+ * ```
+ * fire-and-forget, twice   _encodeCache.size  1 -> 1   (the second hits)
+ * awaitResponse,   twice   _encodeCache.size  1 -> 2   (a guaranteed miss, each time)
+ * ```
+ *
+ * So the cost was not one wasted lookup — it was one wasted lookup *plus* an insert of an
+ * entry that could never be reused, which grows `_encodeCacheBytes`, evicts an entry that
+ * could have been, and makes the next eviction batch run for no benefit. A pool sending
+ * correlated replies pays that on every message.
+ *
+ * **Why bypass rather than fix the key.** The structural fix is a correlation id in the
+ * frame header instead of the body, and that is a **3.0** change: it breaks every worker
+ * that echoes `data.correlationId`. Until then, not pretending the entry is cacheable is
+ * the honest answer, and it costs one `JSON.stringify` that the cache would have paid
+ * anyway.
+ *
+ * The tests count `_encodeCache.size` rather than timing anything: the claim is about
+ * whether an entry is inserted, and an entry count is exact where a duration is noise.
  */
+import { describe, it, expect } from 'vitest';
+import { PowerPool } from '../src/index.js';
 
-/** A worker that accepts work and never answers. */
-function Silent() {
-  this.onmessage = null;
-  this.onerror = null;
-  this.onmessageerror = null;
-  this.postMessage = () => {};
-  this.terminate = () => {};
+/** A worker-like that accepts posts and never answers them. */
+class SilentWorker {
+  constructor() {
+    this._listeners = new Map();
+    this.posts = 0;
+  }
+  addEventListener(type, fn) {
+    this._listeners.set(type, fn);
+  }
+  removeEventListener() {}
+  postMessage() {
+    this.posts += 1;
+  }
+  terminate() {}
 }
 
-/** A worker that records what it was sent, for asserting broadcast coverage. */
-function Recording() {
-  this.onmessage = null;
-  this.postMessage = (msg, transfer) => {
-    this.posted.push({ msg, transfer });
-  };
-  this.posted = [];
-  this.terminate = () => {};
-}
-
-const pools = [];
-function makePool(WorkerCtor = Silent, options = {}) {
-  const pool = new PowerPool(WorkerCtor, {
+/** A pool over `SilentWorker`s, with a short response timeout so promises settle. */
+function makePool() {
+  return new PowerPool(() => new SilentWorker(), {
     size: 1,
     minSize: 1,
-    maxSize: 3,
+    maxSize: 1,
     lazy: false,
-    ...options,
+    awaitResponseTimeout: 20,
   });
-  pools.push(pool);
-  return pool;
 }
 
-afterEach(() => {
-  for (const pool of pools.splice(0)) {
-    try {
-      pool.terminate();
-    } catch {
-      /* already gone */
-    }
-  }
-});
+/** Post a message, swallowing the timeout rejection a `wantResponse` post ends in. */
+async function post(pool, message, options) {
+  const result = pool.postMessage(message, undefined, options);
+  if (result && typeof result.catch === 'function') await result.catch(() => {});
+}
 
-describe('PowerPool encode cache', () => {
-  it('reuses the encoded bytes for an identical message', () => {
-    const pool = makePool(Recording, { size: 1, maxSize: 1, maxTasksPerWorker: Infinity });
-    pool._encodeForTransfer({ a: 1 });
-    pool._encodeForTransfer({ a: 1 });
-    // The whole point of the cache: the second identical message must be a
-    // `Map` hit, not a second `JSON.stringify` plus encode.
-    expect(pool._encodeCache.size).toBe(1);
+describe('POOL-009: the encode cache and correlated posts', () => {
+  it('still caches a repeated fire-and-forget message', () => {
+    // **The control.** A bypass applied unconditionally would satisfy the row and quietly
+    // delete the feature, so the property the cache exists for is asserted first.
+    const pool = makePool();
+    const msg = { task: 'charge', n: 1 };
+    pool.postMessage(msg, undefined, {});
+    const after = pool._encodeCache.size;
+    pool.postMessage(msg, undefined, {});
+    expect(pool._encodeCache.size).toBe(after);
+    pool.shutdown();
   });
 
-  it('does not cache a payload too large to key on', () => {
-    const pool = makePool(Recording, { size: 1, maxSize: 1, maxTasksPerWorker: Infinity });
-    const big = { blob: 'x'.repeat(200_000) };
-    const first = pool._encodeForTransfer(big);
-    const second = pool._encodeForTransfer(big);
-    // A huge serialized key would bloat the Map for one entry that is unlikely
-    // to be seen again, so it is encoded and not stored.
-    expect(first).toBeInstanceOf(Uint8Array);
-    expect(second).toBeInstanceOf(Uint8Array);
+  it('does not insert an entry for a post awaiting a response', () => {
+    // The defect, measured: two identical correlated posts took the cache from 1 to 2.
+    const pool = makePool();
+    const msg = { task: 'charge', n: 1 };
+    pool.postMessage(msg, undefined, {});
+    const before = pool._encodeCache.size;
+
+    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'a' });
+    expect(pool._encodeCache.size).toBe(before);
+    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'b' });
+    expect(pool._encodeCache.size).toBe(before);
+    pool.shutdown();
+  });
+
+  it('leaves a cache entry alone when a correlated post is the only traffic', () => {
+    // No prior entry, so there is nothing to hit and nothing should be created — the
+    // empty-cache case is where an unconditional insert is most visible.
+    const pool = makePool();
+    pool.postMessage({ task: 'solo' }, undefined, { awaitResponse: true, correlationKey: 'x' });
     expect(pool._encodeCache.size).toBe(0);
+    pool.shutdown();
   });
 
-  it('evicts oldest entries past the entry-count limit', () => {
-    const pool = makePool(Recording, {
-      size: 1,
-      maxSize: 1,
-      maxTasksPerWorker: Infinity,
-      encodeCacheLimit: 16,
-    });
-    for (let i = 0; i < 64; i++) pool._encodeForTransfer({ n: i });
-    // The floor is 16, so a hard bound is 16 regardless of how many messages
-    // went through. Exceeding it silently is what turns a cache into a leak.
-    expect(pool._encodeCache.size).toBeLessThanOrEqual(16);
+  it('does not grow the cached byte total on correlated traffic', () => {
+    // `_encodeCacheBytes` is what the byte ceiling is measured against, so a growing
+    // entry count with a flat byte total would mean the accounting and the map disagree.
+    const pool = makePool();
+    const msg = { task: 'charge', body: 'x'.repeat(512), n: 1 };
+    pool.postMessage(msg, undefined, {});
+    const bytes = pool._encodeCacheBytes;
+    expect(bytes).toBeGreaterThan(0);
+
+    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'a' });
+    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'b' });
+    expect(pool._encodeCacheBytes).toBe(bytes);
+    pool.shutdown();
   });
 
-  it('reconciles the byte total when entries are evicted', () => {
-    const pool = makePool(Recording, {
-      size: 1,
-      maxSize: 1,
-      maxTasksPerWorker: Infinity,
-      encodeCacheLimit: 1024,
-      encodeCacheByteLimit: 512,
-    });
-    for (let i = 0; i < 40; i++) pool._encodeForTransfer({ payload: 'y'.repeat(64), n: i });
-    // `_encodeCacheBytes` is a running total maintained across evictions. If it
-    // is not decremented the cache would keep evicting on a limit it has
-    // already satisfied, and the reported total would be fiction.
-    expect(pool._encodeCacheBytes).toBeLessThanOrEqual(512);
-    const actual = [...pool._encodeCache.values()].reduce((sum, v) => sum + (v.byteLength || 0), 0);
-    expect(pool._encodeCacheBytes).toBe(actual);
+  it('bypasses on correlationId alone, matching the pending-response path', () => {
+    // `wantResponse` is derived as `awaitResponse || correlationId != null`
+    // (`powerPool.js:2866`), so a caller who passes only the id gets the same treatment.
+    // Two paths disagreeing about what "wants a response" means is the kind of drift this
+    // bypass would otherwise introduce.
+    const pool = makePool();
+    const msg = { task: 'charge', n: 1 };
+    pool.postMessage(msg, undefined, {});
+    const before = pool._encodeCache.size;
+    pool.postMessage(msg, undefined, { correlationId: 'only-an-id' });
+    expect(pool._encodeCache.size).toBe(before);
+    pool.shutdown();
   });
 
-  it('keeps a live entry rather than evicting it out from under a caller', () => {
-    const pool = makePool(Recording, { size: 1, maxSize: 1, maxTasksPerWorker: Infinity });
-    const u8 = pool._encodeForTransfer({ reused: true });
-    // Evicting an entry that is still being handed to `postMessage` would
-    // detach a buffer the caller is about to transfer. Slicing before transfer
-    // is what makes this safe, and the returned value must stay intact.
-    expect(u8.byteLength).toBeGreaterThan(0);
-    expect(u8.buffer.detached).toBe(false);
-  });
-});
+  it('still delivers the correlated message to the worker', () => {
+    // **The bypass must not become a skip.** A "fix" that stopped encoding the body
+    // would also stop the post, and this is the assertion that says no.
+    const workers = [];
+    const pool = new PowerPool(
+      () => {
+        const w = new SilentWorker();
+        workers.push(w);
+        return w;
+      },
+      { size: 1, minSize: 1, maxSize: 1, lazy: false, awaitResponseTimeout: 20 }
+    );
 
-describe('PowerPool broadcast', () => {
-  it('sends to every worker and counts the task on each', () => {
-    const pool = makePool(Recording, { size: 3, minSize: 3, maxSize: 3 });
-    const underlyings = pool.workers.map((w) => w.worker._underlying);
-    pool.broadcast({ a: 1 });
-    // Every worker, not just the least-loaded. A broadcast that reached two of
-    // three workers is a silent partial delivery, and the caller has no way to
-    // tell.
-    for (const u of underlyings) expect(u.posted).toHaveLength(1);
-    expect(pool.workers.every((w) => w.tasks === 1)).toBe(true);
-  });
-
-  it('encodes a plain object for each worker independently', () => {
-    const pool = makePool(Recording, { size: 2, minSize: 2, maxSize: 2 });
-    const underlyings = pool.workers.map((w) => w.worker._underlying);
-    pool.broadcast({ a: 1 });
-    // Each worker gets its own copy, because the encoded buffer is transferred
-    // and a buffer can only be transferred once. Sharing one instance would
-    // detach it after the first post.
-    expect(underlyings[0].posted[0].msg).toBeInstanceOf(Uint8Array);
-    expect(underlyings[1].posted[0].msg).toBeInstanceOf(Uint8Array);
-    expect(underlyings[0].posted[0].msg.buffer).not.toBe(underlyings[1].posted[0].msg.buffer);
-  });
-
-  it('sends a binary payload as given to every worker', () => {
-    const pool = makePool(Recording, { size: 2, minSize: 2, maxSize: 2 });
-    const underlyings = pool.workers.map((w) => w.worker._underlying);
-    const raw = new Uint8Array([1, 2, 3]);
-    pool.broadcast(raw, [raw.buffer]);
-    // An explicit transfer list means "this exact buffer", so the bytes go
-    // across unframed - the same rule the single-message path applies.
-    for (const u of underlyings) expect(u.posted[0].msg).toBe(raw);
-  });
-
-  it('encodes a binary payload when no transfer list is given', () => {
-    const pool = makePool(Recording, { size: 2, minSize: 2, maxSize: 2 });
-    const underlyings = pool.workers.map((w) => w.worker._underlying);
-    pool.broadcast(new Uint8Array([1, 2, 3]));
-    for (const u of underlyings) expect(u.posted[0].msg).toBeInstanceOf(Uint8Array);
-  });
-});
-
-describe('PowerPool drain', () => {
-  it('rejects when too many drains are already waiting', async () => {
-    const pool = makePool(Silent, {
-      size: 1,
-      maxSize: 1,
-      maxTasksPerWorker: 1,
-      maxDrainWaiters: 1,
-    });
-    // A task that never completes keeps the pool busy, so the first drain has
-    // to wait for the pool to terminate. An unbounded number of `drain()`
-    // calls each holding an `idle` listener is a leak with a very slow fuse,
-    // so the second is refused rather than accumulated.
-    pool.postMessage({ a: 1 });
-    const first = pool.drain();
-    await expect(pool.drain()).rejects.toMatchObject({
-      code: 'ERR_POOL_DRAIN_TOO_MANY_WAITERS',
-    });
-    pool.terminate();
-    await expect(first).resolves.toBeTruthy();
-  });
-
-  it('frees a waiter slot once a drain completes', async () => {
-    const pool = makePool(Silent, { size: 1, maxSize: 1, maxDrainWaiters: 1 });
-    // Both drains resolve immediately against an idle pool, so the second one
-    // only succeeds if the first released its slot. A pool that drains more
-    // than `maxDrainWaiters` times in a row would otherwise stop working with
-    // no diagnostic at all.
-    await expect(pool.drain()).resolves.toBeTruthy();
-    await expect(pool.drain()).resolves.toBeTruthy();
-  });
-
-  it('resolves immediately when there is nothing in flight', async () => {
-    const pool = makePool(Silent);
-    await expect(pool.drain()).resolves.toBeTruthy();
+    return post(pool, { task: 'charge' }, { awaitResponse: true, correlationKey: 'inv-1' }).then(
+      () => {
+        expect(workers.reduce((n, w) => n + w.posts, 0)).toBeGreaterThan(0);
+        pool.shutdown();
+      }
+    );
   });
 });

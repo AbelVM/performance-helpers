@@ -8010,3 +8010,40 @@ the throw case, and dropping the `hasOutstanding` check so the deadline re-arms 
 fails the arm-once case. 14 tests in `test/liveness.test.js`, covering all four outcomes of
 each function — including the stamp-before-ping ordering, without which a socket replying
 inline would be recorded as a stray pong and its RTT dropped.
+
+## `PowerPool`: a correlated post no longer inserts a cache entry it can never hit
+
+The encode cache is keyed on the serialised message, and a post awaiting a response carries
+a per-post correlation id — so its key is unique by construction. Measured with two
+**identical** `postMessage` calls:
+
+```
+fire-and-forget, twice    _encodeCache.size  1 -> 1   (the second hits)
+awaitResponse,    twice    _encodeCache.size  1 -> 2   (a guaranteed miss, each time)
+```
+
+So the cost was not one wasted lookup. It was one wasted lookup **plus an insert of an
+entry that could never be reused** — which grows `_encodeCacheBytes`, evicts an entry that
+could have been, and makes the next eviction batch run for no benefit. A pool sending
+correlated replies paid that on every message.
+
+Such posts now bypass the cache entirely, on both the direct and the queued path.
+
+**Why bypass rather than fix the key.** The structural fix is a correlation id in the frame
+header rather than the body, and that is a **3.0** change: it breaks every worker that
+echoes `data.correlationId`. Until then, not pretending the entry is cacheable is the honest
+answer — and it costs one `JSON.stringify` the cache would have paid anyway.
+
+**The bypass is matched on the same two fields the pending-response path uses**
+(`awaitResponse || correlationId != null`, as at `powerPool.js:2866`), so the two cannot
+drift into disagreeing about what "wants a response" means. A test pins the
+`correlationId`-only case for that reason.
+
+**Two properties pinned alongside the fix, because a bypass is easy to over-apply:** a
+repeated fire-and-forget message **still hits** — a bypass applied unconditionally would
+satisfy the row and quietly delete the feature — and a correlated post **is still
+delivered**, which is the assertion that says the bypass did not become a skip. Six tests
+count `_encodeCache.size` and `_encodeCacheBytes` rather than timing anything: the claim is
+about whether an entry is inserted, and an entry count is exact where a duration is noise.
+
+**Mutation-checked:** removing the bypass fails 4 of the 6.

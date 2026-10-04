@@ -941,7 +941,11 @@ export class PowerPool {
       const native = this._encodeNativeForWorker(prepared);
       if (native) return native;
     }
-    return this._frameObjectForTransfer(prepared.message, prepared.transfer);
+    // POOL-009: a queued item carrying a correlation id is uncacheable for the same
+    // reason a direct one is - the id makes the encoded key unique per post.
+    return this._frameObjectForTransfer(prepared.message, prepared.transfer, {
+      cache: prepared.correlationId == null,
+    });
   }
 
   /**
@@ -1165,7 +1169,11 @@ export class PowerPool {
     // single-worker batch fast path bypassed `postMessage` and so bypassed the
     // only place that knew about the marker.
     const item = prepared.deferred
-      ? { ...this._frameObjectForTransfer(prepared.message, prepared.transfer) }
+      ? {
+          ...this._frameObjectForTransfer(prepared.message, prepared.transfer, {
+            cache: prepared.correlationId == null,
+          }),
+        }
       : prepared;
 
     const { worker } = workerObj;
@@ -1751,8 +1759,20 @@ export class PowerPool {
    * @param {Uint8Array} body - Encoded JSON payload.
    * @returns {Uint8Array} The framed message.
    */
-  _encodeForTransfer(obj) {
+  _encodeForTransfer(obj, { cache: useCache = true } = {}) {
     try {
+      // POOL-009. **A message awaiting a response never hits this cache, so consulting
+      // it is pure cost and inserting is worse than cost.** Measured with two identical
+      // `postMessage` calls: two fire-and-forget posts leave `_encodeCache.size` at 1 -
+      // the second hits. Two posts with `awaitResponse` take it to 2: a unique key per
+      // post, so every one is a guaranteed miss that also *inserts*, evicting an entry
+      // that could have been reused and growing `_encodeCacheBytes`.
+      //
+      // Bypassed rather than fixed at the key. The structural fix - a correlation id in
+      // the frame header rather than the body - is a 3.0 change: it breaks every worker
+      // that echoes `data.correlationId`. Until then the honest answer is not to pretend
+      // the entry is cacheable.
+      if (!useCache) return o2u8(obj);
       const s = JSON.stringify(obj);
       // Avoid caching extremely large JSON keys which could bloat the
       // encode cache. For very large serialized payloads, skip caching
@@ -2004,7 +2024,12 @@ export class PowerPool {
       if (this._messageCodec === 'negotiated') {
         return { message: msg, transfer: tr, deferred: true };
       }
-      return this._frameObjectForTransfer(msg, tr);
+      // POOL-009. `opts` is the caller's own options, and `awaitResponse` there is what
+      // makes the encoded key unique per post. Matched on the same two fields the
+      // pending-response path uses (`powerPool.js:2866`), so the two cannot disagree
+      // about what "wants a response" means.
+      const wantsResponse = Boolean(opts?.awaitResponse || opts?.correlationId != null);
+      return this._frameObjectForTransfer(msg, tr, { cache: !wantsResponse });
     }
     return { message: msg, transfer: tr };
   }
@@ -2021,12 +2046,15 @@ export class PowerPool {
    * @param {TransferList|undefined} tr
    * @returns {PreparedItem}
    */
-  _frameObjectForTransfer(msg, tr) {
+  _frameObjectForTransfer(msg, tr, opts) {
     try {
       // `_encodeForTransfer` returns the cached JSON body; framing is a cheap
       // header wrap, so the encode cache is still what absorbs the
       // stringify/encode cost.
-      const body = this._encodeForTransfer(msg);
+      //
+      // `opts.cache` is POOL-009's bypass, threaded from the caller that knows whether
+      // this message carries a per-post correlation id.
+      const body = this._encodeForTransfer(msg, { cache: opts?.cache });
       // `'negotiated'` reaches here only for a worker that did not advertise,
       // and for that worker the answer is the frame — the same bytes a
       // `'framed'` pool posts. Branching on `!== 'legacy'` rather than
