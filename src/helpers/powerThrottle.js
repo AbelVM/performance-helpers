@@ -20,7 +20,7 @@
  * @typedef {import('./jsdoc-types.js').PowerThrottleToken} PowerThrottleToken
  * @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions
  */
-import { nowMs } from '../utils/now.js';
+import { monoMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { attach, detach } from './metrics.js';
@@ -70,10 +70,10 @@ export class PowerThrottle {
      * must outrank a value threaded in by a composition.
      * @type {(() => number)}
      */
-    this._now = nowMs;
+    this._now = monoMs;
     /** @type {boolean} */
     this._nowExplicit = false;
-    attachLimiterClock(this, nowMs, { now }, 'PowerThrottle');
+    attachLimiterClock(this, monoMs, { now }, 'PowerThrottle');
 
     // track last refill timestamp (ms)
     this._lastRefill = this._now();

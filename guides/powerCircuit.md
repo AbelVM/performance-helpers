@@ -8,11 +8,11 @@ Simple circuit breaker primitive to protect external services from cascading fai
 
 ## Options
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `threshold` | `number` | `5` | Consecutive failure threshold to open the circuit. |
-| `timeout` | `number` (ms) | `30000` | **Base** milliseconds to keep the circuit open before allowing a trial (`half-open`) call. Consecutive trips grow this exponentially and jitter the result — see [The open window](#the-open-window). |
-| `maxTimeout` | `number` (ms) | `timeout * 16` | Ceiling for the grown open window. |
+| Option       |          Type |        Default | Description                                                                                                                                                                                           |
+| ------------ | ------------: | -------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `threshold`  |      `number` |            `5` | Consecutive failure threshold to open the circuit.                                                                                                                                                    |
+| `timeout`    | `number` (ms) |        `30000` | **Base** milliseconds to keep the circuit open before allowing a trial (`half-open`) call. Consecutive trips grow this exponentially and jitter the result — see [The open window](#the-open-window). |
+| `maxTimeout` | `number` (ms) | `timeout * 16` | Ceiling for the grown open window.                                                                                                                                                                    |
 
 ### Options are validated, not coerced
 
@@ -38,7 +38,7 @@ now throw a `TypeError` naming the option.
 
 ### The open window
 
-`timeout` is the *base*, not the only window. A circuit that trips once opens for `timeout` (jittered); consecutive trips without an intervening success double it — `2x`, `4x`, … — up to `maxTimeout`. A successful trial resets the counter, so the next outage starts from the base again.
+`timeout` is the _base_, not the only window. A circuit that trips once opens for `timeout` (jittered); consecutive trips without an intervening success double it — `2x`, `4x`, … — up to `maxTimeout`. A successful trial resets the counter, so the next outage starts from the base again.
 
 The jitter matters as much as the growth. With a fixed window, every circuit guarding the same dependency opened on the same tick and retried on the same tick, so the first request after the timeout arrived as an N-wide burst that re-tripped every breaker before the dependency had recovered — a self-inflicted thundering herd, and precisely the failure the breaker exists to prevent. The window is drawn **once**, when the circuit opens, and held for the duration of that open period: it is read by every `call()` and every `state` read, so a per-call draw would fluctuate the window and make the breaker flap rather than hold.
 
@@ -90,6 +90,32 @@ async function doWork() {
   }
 }
 ```
+
+## Clocks
+
+The open window is measured with **`monoMs()`**, the monotonic clock, not
+`nowMs()`. The breaker subtracts two readings and never needs to know what time
+it is, so there is no reason for it to be movable — and before 2.0 it
+was.
+
+The defect, measured with **zero** real milliseconds elapsed and only the wall
+clock moved: a breaker opened with `timeout: 60000` reported `half-open`
+immediately after the system clock stepped forward 60 s. A dependency that had
+been failing for a millisecond was offered a trial call, and a trial that fails
+re-opens the window — so a clock step could hold a dependency in
+`half-open` indefinitely, hammering it once per window.
+
+A step **backwards** was always harmless here: `nowMs() - _openedAt <
+_openWindowMs` keeps reading an earlier instant as "not much time has passed". It
+is the forward step that hands out a trial nobody waited for.
+
+**This class has no `now` option.** The three rate limiters do, and it is the
+supported way to drive their clock; here the window is measured from the real
+monotonic clock, so a test that needs to reach `half-open` waits out the drawn
+window (`circuit._openWindowMs`) rather than moving a clock. Set a small
+`timeout` instead of reaching into the clock.
+
+See [`now.md`](now.md) for the two clocks and when each is the right one.
 
 ## Observability example
 

@@ -42,4 +42,5 @@ export function measureAsync(fn: Function | Promise<any> | any): Promise<{
     end: number;
 }>;
 export function nowMs(): number;
+export function monoMs(): number;
 export default nowMs;

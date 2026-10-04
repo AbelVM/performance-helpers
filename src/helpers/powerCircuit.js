@@ -21,7 +21,7 @@
  * @typedef {import('./jsdoc-types.js').CircuitOpenError} CircuitOpenError
  */
 import { PowerEventBus } from './powerEventBus.js';
-import { nowMs } from '../utils/now.js';
+import { monoMs } from '../utils/now.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { neutralise } from '../utils/neutralise.js';
 import {
@@ -190,7 +190,7 @@ export class PowerCircuit {
     if (prev === newState) return;
     this._state = newState;
     if (newState === 'open') {
-      this._openedAt = nowMs();
+      this._openedAt = monoMs();
       // Draw from the *pre-increment* count, so the very first trip uses the
       // base `timeout` unchanged and the second consecutive one doubles it.
       // Incrementing first would silently make even the first trip 2x, which
@@ -261,7 +261,7 @@ export class PowerCircuit {
   get state() {
     // If open and the *drawn* window has elapsed, expose as 'half-open' logically
     if (this._state === 'open' && this._openedAt != null) {
-      if (nowMs() - this._openedAt >= this._openWindowMs) {
+      if (monoMs() - this._openedAt >= this._openWindowMs) {
         // Announce it, once per outage. Reading `state` is what a dashboard does
         // to notice, so the observer that polls is the one that gets told — and a
         // reader that only ever looks at `_state` (as the request path does)
@@ -303,7 +303,7 @@ export class PowerCircuit {
     // opened. Reading `_timeout` here would ignore the backoff entirely and
     // also disagree with the `state` getter above.
     if (this._state === 'open') {
-      if (nowMs() - Number(this._openedAt) < this._openWindowMs) {
+      if (monoMs() - Number(this._openedAt) < this._openWindowMs) {
         throw circuitOpenError();
       }
       // else allow half-open trial

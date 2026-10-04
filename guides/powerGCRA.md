@@ -34,17 +34,17 @@ limiter.tryConsume(); // true
 Two consequences worth knowing:
 
 - **`retryAfter(n)` grows with `n`**, by `(n - 1) * emissionInterval` beyond the single-operation wait. An earlier version reported the single-operation wait for every `n`, which under-waited and was refused — the caller would wake up early and retry, forever.
-- **`retryAfter(n)` throws a `RangeError` when `n` is above the ceiling.** A batch past `burst + 1` can never be admitted at *any* wait, because the ceiling comes from `burst` and not from the state of the TAT. Returning a finite wait for it would be the worst option available: a retry loop would wait, be refused, and wait again. Split the batch, or raise `burst`. `take(n)` propagates rather than inventing a wait.
+- **`retryAfter(n)` throws a `RangeError` when `n` is above the ceiling.** A batch past `burst + 1` can never be admitted at _any_ wait, because the ceiling comes from `burst` and not from the state of the TAT. Returning a finite wait for it would be the worst option available: a retry loop would wait, be refused, and wait again. Split the batch, or raise `burst`. `take(n)` propagates rather than inventing a wait.
 
 ## Constructor
 
-| Option    |                 Type |   Default | Description                                                                                        |
-| --------- | -------------------: | --------: | -------------------------------------------------------------------------------------------------- |
-| `rate`    |             `number` |         — | **Required.** Sustained rate in operations per `per` unit. Must be finite and `> 0`.               |
-| `per`     |             `number` |    `1000` | The unit `rate` is measured against, in milliseconds.                                              |
-| `burst`   |             `number` |       `0` | Extra tolerance above the steady-state rate, in operations. Fractional values are allowed and floor. |
-| `onError` |      `function(err)` |    `null` | Called instead of throwing when the **internal clock moves backwards** — NTP, a suspended host, or a test driving an injected clock by hand. Receives the offending reading. It is **not** called when the limiter refuses a request: refusing is what a rate limiter is for, and reporting it made a correctly rate-limiting limiter look broken to anything watching.                                                                                               |
-| `now`     | `function(): number` | `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| Option    |                 Type |    Default | Description                                                                                                                                                                                                                                                                                                                                                             |
+| --------- | -------------------: | ---------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rate`    |             `number` |          — | **Required.** Sustained rate in operations per `per` unit. Must be finite and `> 0`.                                                                                                                                                                                                                                                                                    |
+| `per`     |             `number` |     `1000` | The unit `rate` is measured against, in milliseconds.                                                                                                                                                                                                                                                                                                                   |
+| `burst`   |             `number` |        `0` | Extra tolerance above the steady-state rate, in operations. Fractional values are allowed and floor.                                                                                                                                                                                                                                                                    |
+| `onError` |      `function(err)` |     `null` | Called instead of throwing when the **internal clock moves backwards** — NTP, a suspended host, or a test driving an injected clock by hand. Receives the offending reading. It is **not** called when the limiter refuses a request: refusing is what a rate limiter is for, and reporting it made a correctly rate-limiting limiter look broken to anything watching. |
+| `now`     | `function(): number` | `monoMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks).                                                                                                                                                                                                                                                                      |
 
 Invalid options throw a `TypeError` at construction.
 
@@ -61,17 +61,17 @@ Invalid options throw a `TypeError` at construction.
 
 ## Request counts
 
-A count argument is validated, not coerced. `tryConsume(NaN)` used to return `true` having consumed nothing, because `Math.floor(NaN) || 0` makes the count `0` and `0` is the *admit* case — a rate limiter answering "how many?" with "zero" is a limiter that has been bypassed. Now:
+A count argument is validated, not coerced. `tryConsume(NaN)` used to return `true` having consumed nothing, because `Math.floor(NaN) || 0` makes the count `0` and `0` is the _admit_ case — a rate limiter answering "how many?" with "zero" is a limiter that has been bypassed. Now:
 
-| Input                        | Behaviour                                       |
-| ---------------------------- | ----------------------------------------------- |
-| non-finite (`NaN`, `±Infinity`) | throws `TypeError`                              |
-| not a number (`'many'`)       | throws `TypeError`                              |
-| fractional (`3.9`)            | floors to `3`                                    |
-| numeric string (`'3'`)        | read as `3`                                      |
-| `0` or negative               | no-op, returns `true`                            |
+| Input                           | Behaviour             |
+| ------------------------------- | --------------------- |
+| non-finite (`NaN`, `±Infinity`) | throws `TypeError`    |
+| not a number (`'many'`)         | throws `TypeError`    |
+| fractional (`3.9`)              | floors to `3`         |
+| numeric string (`'3'`)          | read as `3`           |
+| `0` or negative                 | no-op, returns `true` |
 
-The fractional case is deliberately *not* an error, unlike a fractional **limit**. `capacity: 2.5` has to throw because the first consumer rounds it up and over-issues; a request count rounds down and can only under-charge. `0` stays a no-op because refusing to admit nothing would be a behaviour change with no defect behind it.
+The fractional case is deliberately _not_ an error, unlike a fractional **limit**. `capacity: 2.5` has to throw because the first consumer rounds it up and over-issues; a request count rounds down and can only under-charge. `0` stays a no-op because refusing to admit nothing would be a behaviour change with no defect behind it.
 
 ## Example
 
@@ -117,11 +117,11 @@ if (limiter.tryConsume()) doWork();
 
 Note that `PowerRateLimit`'s pre-check reads `available()` and refuses without calling `tryConsume()` when it is below the ask. That is why `available()` must report `burst + 1` at an idle instant — reporting `0` on a fresh limiter would make GCRA refuse everything once composed.
 
-It is also why `tryConsume(n)` and `available()` must agree *exactly*, including in the last bit of a floating-point comparison. They are now computed by one shared helper for that reason; see [Batches](#batches) and the note on `available()` below.
+It is also why `tryConsume(n)` and `available()` must agree _exactly_, including in the last bit of a floating-point comparison. They are now computed by one shared helper for that reason; see [Batches](#batches) and the note on `available()` below.
 
 ## Notes
 
-- The limiter is driven by `nowMs()`, which prefers a high-resolution clock. Under fake timers, prefer `vi.advanceTimersByTime(...)` over `vi.setSystemTime(...)`: the latter moves `Date.now()` but not `performance.now()`, and the two can drift apart.
+- The limiter is driven by `monoMs()` by default, which reads only a monotonic clock. Under fake timers, prefer `vi.advanceTimersByTime(...)` over `vi.setSystemTime(...)`: the latter moves `Date.now()` alone and no longer reaches this limiter at all. Inject `now` to drive the clock yourself — see [Which clock](#which-clock).
 - `retryAfter()` works in fractional milliseconds (e.g. `142.857…` at 7/s), so round **up** if you feed it to a timer that only accepts whole milliseconds.
 - `retryAfter(n)` **does** grow with `n`, by `(n - 1) * emissionInterval`. See [Batches](#batches).
 - `available()` reports `burst + 1` at an idle instant for every `rate`. It is answered from `burst` directly rather than by dividing `delayTolerance` back by `emissionInterval`, because that division does not round-trip: at `rate: 3, burst: 7` it reads `6.999999999999999` and under-reports by one. A composition holding a saturated GCRA limiter would then refuse a batch the limiter itself admits.
@@ -129,11 +129,13 @@ It is also why `tryConsume(n)` and `available()` must agree *exactly*, including
 
 ## Clocks
 
-Every limiter reads time, and `nowMs()` is not cheap: it reads **two** clocks
-per call — the high-resolution one and `Date.now()`, the second purely to check
-the two have not diverged under a test harness — and measures about **141 ns**.
-Against a whole `tryConsume` of ~120-165 ns, deciding what time it is was most
-of the work.
+Every limiter reads time, and the clock it reads is **`monoMs()`, not
+`nowMs()`** (RES-019). `nowMs()` is two clock reads per call — the
+high-resolution one and `Date.now()`, the second purely to check the two have
+not diverged under a test harness — and measures about **141 ns**.
+`monoMs()` reads **one**, because it never consults `Date.now()` at all, and that
+is not only cheaper: it is what stops an NTP adjustment from becoming elapsed
+time inside the limiter. See [Which clock](#which-clock) below.
 
 Two knobs address that, and they are deliberately not symmetric:
 
@@ -166,3 +168,30 @@ Note the sharp edge: a threaded `now` is **authoritative**, so a value far in th
 future will legitimately empty a sliding window. That is correct — it is what a
 real clock jumping would do — but it is why a caller should thread one instant
 for the whole composition rather than letting each leg drift.
+
+### Which clock
+
+A limiter subtracts readings; it never needs to know what time it is. So its
+default clock is `monoMs()`, anchored to the monotonic source
+(`performance.now()`, or `process.hrtime.bigint()` on Node) with an epoch offset
+captured once at module load. The value is still an epoch timestamp, so
+`stats().tat` and `tryReserve().runAt` remain the instants they are documented to
+be — but a **wall-clock adjustment cannot move it**.
+
+Measured, with zero real milliseconds elapsed:
+
+| What moved                 | Before                                        | Now                    |
+| -------------------------- | --------------------------------------------- | ---------------------- |
+| wall clock +5 s            | `available()` 0 -> 2, the whole burst granted | stays 0, still refused |
+| `PowerCircuit` open window | `open` -> `half-open` on a +60 s step         | stays `open`           |
+
+The direction matters, because the intuitive version is backwards: a step
+_backwards_ was always harmless here (`PowerGCRA` clamps with
+`Math.max(now, _tat)`). It is a step **forwards** that hands out budget nobody
+spent.
+
+**What this costs you:** faking `Date.now()` no longer drives a limiter. If you
+need to control the clock, inject it — the `now` constructor option, or
+the per-call `{ now }` for a composition. That has always been the supported
+route and it still wins over everything. `PowerCircuit` has no `now` option, so
+for that class there was never a documented way in.

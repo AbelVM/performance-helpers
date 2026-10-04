@@ -32,7 +32,7 @@ export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./hel
 export { default as WorkerAgnostic, detectEnv, preloadNode } from "./helpers/WorkerAgnostic.js";
 export { MetricsCollector, defaultMetrics, toSeries, METRICS_VERSION } from "./helpers/metrics.js";
 export { normalizeError, formatErrorObj } from "./utils/errors.js";
-export { nowMs, measureSync, measureAsync } from "./utils/now.js";
+export { nowMs, monoMs, measureSync, measureAsync } from "./utils/now.js";
 export { PowerRetry, PowerRetryBudget } from "./helpers/powerRetry.js";
 export { PowerWebSocketClient, READY_STATE } from "./helpers/powerWebSocketClient.js";
 export { PowerSocketAdapter, detectSocketKind } from "./helpers/powerSocketAdapter.js";

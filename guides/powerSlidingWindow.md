@@ -4,12 +4,12 @@ A sliding-window rate limiter that allows up to `capacity` events per `windowMs`
 
 ## Constructor
 
-| option          |                                          type |   default | description                                                                                        |
-| --------------- | --------------------------------------------: | --------: | -------------------------------------------------------------------------------------------------- |
-| `capacity`      |                                      `number` |       `1` | Maximum allowed events in a window.                                                                |
-| `windowMs`      |                                      `number` |    `1000` | Window size in milliseconds.                                                                       |
-| `now`           |                          `function(): number` | `nowMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
-| `observability` | `boolean` \| [`MetricsCollector`](metrics.md) |   `false` | Opt in to metrics. Off by default. See [Metrics](#metrics).                                        |
+| option          |                                          type |    default | description                                                                                        |
+| --------------- | --------------------------------------------: | ---------: | -------------------------------------------------------------------------------------------------- |
+| `capacity`      |                                      `number` |        `1` | Maximum allowed events in a window.                                                                |
+| `windowMs`      |                                      `number` |     `1000` | Window size in milliseconds.                                                                       |
+| `now`           |                          `function(): number` | `monoMs()` | Clock override in ms. Ignores any per-call value a composition threads in — see [Clocks](#clocks). |
+| `observability` | `boolean` \| [`MetricsCollector`](metrics.md) |    `false` | Opt in to metrics. Off by default. See [Metrics](#metrics).                                        |
 
 ## API
 
@@ -109,11 +109,13 @@ pool.terminate();
 
 ## Clocks
 
-Every limiter reads time, and `nowMs()` is not cheap: it reads **two** clocks
-per call — the high-resolution one and `Date.now()`, the second purely to check
-the two have not diverged under a test harness — and measures about **141 ns**.
-Against a whole `tryConsume` of ~120-165 ns, deciding what time it is was most
-of the work.
+Every limiter reads time, and the clock it reads is **`monoMs()`, not
+`nowMs()`** (RES-019). `nowMs()` is two clock reads per call — the
+high-resolution one and `Date.now()`, the second purely to check the two have
+not diverged under a test harness — and measures about **141 ns**.
+`monoMs()` reads **one**, because it never consults `Date.now()` at all, and that
+is not only cheaper: it is what stops an NTP adjustment from becoming elapsed
+time inside the limiter. See [Which clock](#which-clock) below.
 
 Two knobs address that, and they are deliberately not symmetric:
 
@@ -146,6 +148,33 @@ Note the sharp edge: a threaded `now` is **authoritative**, so a value far in th
 future will legitimately empty a sliding window. That is correct — it is what a
 real clock jumping would do — but it is why a caller should thread one instant
 for the whole composition rather than letting each leg drift.
+
+### Which clock
+
+A limiter subtracts readings; it never needs to know what time it is. So its
+default clock is `monoMs()`, anchored to the monotonic source
+(`performance.now()`, or `process.hrtime.bigint()` on Node) with an epoch offset
+captured once at module load. The value is still an epoch timestamp, so
+`stats().tat` and `tryReserve().runAt` remain the instants they are documented to
+be — but a **wall-clock adjustment cannot move it**.
+
+Measured, with zero real milliseconds elapsed:
+
+| What moved                 | Before                                        | Now                    |
+| -------------------------- | --------------------------------------------- | ---------------------- |
+| wall clock +5 s            | `available()` 0 -> 2, the whole burst granted | stays 0, still refused |
+| `PowerCircuit` open window | `open` -> `half-open` on a +60 s step         | stays `open`           |
+
+The direction matters, because the intuitive version is backwards: a step
+_backwards_ was always harmless here (`PowerGCRA` clamps with
+`Math.max(now, _tat)`). It is a step **forwards** that hands out budget nobody
+spent.
+
+**What this costs you:** faking `Date.now()` no longer drives a limiter. If you
+need to control the clock, inject it — the `now` constructor option, or
+the per-call `{ now }` for a composition. That has always been the supported
+route and it still wins over everything. `PowerCircuit` has no `now` option, so
+for that class there was never a documented way in.
 
 ## Metrics
 

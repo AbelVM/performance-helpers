@@ -174,6 +174,12 @@ Re-exports [MetricsCollector](../helpers/metrics/classes/MetricsCollector.md)
 
 ***
 
+### monoMs
+
+Re-exports [monoMs](../utils/now/functions/monoMs.md)
+
+***
+
 ### NATIVE\_ENVELOPE\_KEY
 
 Re-exports [NATIVE_ENVELOPE_KEY](../powerMessageCodec/variables/NATIVE_ENVELOPE_KEY.md)

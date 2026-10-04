@@ -121,6 +121,7 @@ describe('API surface', () => {
         'NATIVE_PROTOCOL_VERSION',
         'measureAsync',
         'measureSync',
+        'monoMs',
         'normalizeError',
         'nowMs',
         'o2b',

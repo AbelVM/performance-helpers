@@ -30,7 +30,7 @@
  * @module powerGCRA
  * @public
  */
-import { nowMs } from '../utils/now.js';
+import { monoMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
@@ -108,10 +108,10 @@ export class PowerGCRA {
      * must outrank a value threaded in by a composition.
      * @type {(() => number)}
      */
-    this._now = nowMs;
+    this._now = monoMs;
     /** @type {boolean} */
     this._nowExplicit = false;
-    attachLimiterClock(this, nowMs, /** @type {any} */ (options), 'PowerGCRA');
+    attachLimiterClock(this, monoMs, /** @type {any} */ (options), 'PowerGCRA');
     // The last clock reading this limiter saw, or `null` before the first one.
     // It is what `onError` compares against, so that a report means "the clock
     // moved backwards" rather than "the limiter is rate-limiting" — see the

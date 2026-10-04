@@ -61,33 +61,56 @@ describe('PowerThrottle / PowerSlidingWindow rate invariants', () => {
   }, 10_000);
 
   it('PowerSlidingWindow tracks exactly the timestamps inside the window', () => {
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 5 }),
-        fc.array(fc.nat({ max: 3000 }), { minLength: 1, maxLength: 60 }),
-        (limit, times) => {
-          // `limit` is not an option of `PowerSlidingWindow` - it reads
-          // `capacity`, and passing `limit` alone left the limiter at the
-          // default capacity of 1, so this property was only ever checking
-          // capacity 1 regardless of the generated `limit`.
-          const win = new PowerSlidingWindow({ capacity: limit, windowMs: 1000 });
-          let clock = 0;
-          let model = [];
-          for (const t of times) {
-            clock += t;
-            vi.setSystemTime(clock);
-            // Reference: how many of the recorded times are within the window.
-            model = model.filter((x) => clock - x < 1000);
-            if (model.length < limit) {
-              if (win.tryConsume()) model.push(clock);
-            } else {
-              expect(win.tryConsume()).toBe(false);
+    // Fake timers, and the reason is the clock rather than the timers. This
+    // property used to run on **real** timers and drive time with
+    // `vi.setSystemTime` alone, which moves `Date.now()` and nothing else. That
+    // worked only because `nowMs()` cross-checks the high-resolution source
+    // against the wall clock and therefore *followed* `Date.now()` out to the
+    // model's small timestamps. RES-019 moved the limiters onto `monoMs()`,
+    // which reads only the monotonic clock and cannot be pointed at a model,
+    // so the window has to be driven by the harness's own clock instead.
+    //
+    // Under `vi.useFakeTimers()` both clocks start at 0 and
+    // `advanceTimersByTime` moves `performance.now()` and `Date.now()` together,
+    // so the limiter's clock and the reference model's `clock` accumulate the
+    // same gaps from the same origin and agree exactly.
+    vi.useFakeTimers();
+    try {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 5 }),
+          fc.array(fc.nat({ max: 3000 }), { minLength: 1, maxLength: 60 }),
+          (limit, times) => {
+            // `limit` is not an option of `PowerSlidingWindow` - it reads
+            // `capacity`, and passing `limit` alone left the limiter at the
+            // default capacity of 1, so this property was only ever checking
+            // capacity 1 regardless of the generated `limit`.
+            const win = new PowerSlidingWindow({ capacity: limit, windowMs: 1000 });
+            let clock = 0;
+            let model = [];
+            for (const t of times) {
+              clock += t;
+              // `advanceTimersByTime`, **not** `setSystemTime`, which moves
+              // `Date.now()` alone and therefore no longer reaches the limiters
+              // at all. `clock` stays the reference model's own timestamp: the
+              // model is arithmetic and has to keep advancing whatever the
+              // harness does.
+              vi.advanceTimersByTime(t);
+              // Reference: how many of the recorded times are within the window.
+              model = model.filter((x) => clock - x < 1000);
+              if (model.length < limit) {
+                if (win.tryConsume()) model.push(clock);
+              } else {
+                expect(win.tryConsume()).toBe(false);
+              }
             }
           }
-        }
-      ),
-      { numRuns: RUNS }
-    );
+        ),
+        { numRuns: RUNS }
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   }, 15_000);
 });
 

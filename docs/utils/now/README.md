@@ -10,6 +10,7 @@
 
 - [measureAsync](functions/measureAsync.md)
 - [measureSync](functions/measureSync.md)
+- [monoMs](functions/monoMs.md)
 - [nowMs](functions/nowMs.md)
 
 ## References

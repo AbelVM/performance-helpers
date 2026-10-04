@@ -6,7 +6,7 @@
 /**
  * @typedef {import('./jsdoc-types.js').PowerSlidingWindowOptions} PowerSlidingWindowOptions
  */
-import { nowMs } from '../utils/now.js';
+import { monoMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { MS_PER_SEC, POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
 import { PowerQueue } from './powerQueue.js';
@@ -46,10 +46,10 @@ export class PowerSlidingWindow {
      * must outrank a value threaded in by a composition.
      * @type {(() => number)}
      */
-    this._now = nowMs;
+    this._now = monoMs;
     /** @type {boolean} */
     this._nowExplicit = false;
-    attachLimiterClock(this, nowMs, { now }, 'PowerSlidingWindow');
+    attachLimiterClock(this, monoMs, { now }, 'PowerSlidingWindow');
     // timestamp queue (ms) backed by PowerQueue for O(1) enqueue/dequeue
     this._timestamps = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
     // Opt-in metrics. Off by default, so the common case allocates nothing.

@@ -70,6 +70,15 @@ const BUILTIN_GLOBALS = new Set([
 /** Imported from `src/utils/`, so named in a guide but not defined in a helper. */
 const SHARED_UTILS = new Set([
   'nowMs',
+  // The monotonic sibling of `nowMs`, added with RES-019. Same category exactly:
+  // a module-level export from `src/utils/now.js`, not a member of any helper
+  // class, so the per-guide rule cannot resolve a backticked call to it from
+  // `guides/powerGCRA.md`, `powerThrottle.md`, `powerSlidingWindow.md` or
+  // `powerRateLimit.md`. Those four now name it as the limiters' default clock,
+  // which is a real API with a real contract - it is the one reading a wall-clock
+  // adjustment cannot move - so it is listed rather than the guides reworded
+  // around a name they need.
+  'monoMs',
   'hrtimeMs',
   'setSafeTimeout',
   'setSafeInterval',
@@ -157,6 +166,13 @@ const CROSS_CLASS = new Set([
   'broadcast',
   // Rate limiters, referenced from powerRateLimit and powerGCRA.
   'addTokens',
+  // `PowerGCRA.tryReserve`, referenced from powerRateLimit, powerThrottle and
+  // powerSlidingWindow. All four limiter guides share one Clocks section, and
+  // naming `stats().tat` and `tryReserve().runAt` there is how the section says
+  // the new monotonic clock is still epoch-mapped - so the claim that survives a
+  // wall-clock step is not a broken one. A method of `PowerGCRA` appearing in
+  // three other guides, which is what `CROSS_CLASS` is for.
+  'tryReserve',
   // Web streams, referenced from powerSocketAdapter.
   'getWriter',
   'releaseLock',
