@@ -150,9 +150,71 @@ const commands = {
    * message. It exists so the mistake is *detectable* rather than silent.
    */
   commit(argv) {
+    // `--expect a.js,b.js` declares what this commit is *for*, independently of
+    // what the index happens to hold. It is checked BEFORE the commit, because the
+    // post-commit digest comparison can only report that the index was not what you
+    // meant — by then the commit exists.
+    //
+    // **This exists because it was needed.** A commit titled "ten dispose()
+    // methods now neutralise through one helper" was made after `git add --
+    // src/helpers/`: a directory, functionally `git add -A` scoped to one folder.
+    // It swept in three files a concurrent session had in flight and that the
+    // author had never opened — an entire 783-line helper — and the digest check
+    // passed, because the staged set and the commit did match each other. The set
+    // was simply the wrong set. Verifying content cannot catch that; an
+    // independent declaration of intent can.
+    const expectAt = argv.indexOf('--expect');
+    let expected = null;
+    let rest = argv;
+    if (expectAt !== -1) {
+      const raw = argv[expectAt + 1];
+      if (raw === undefined) {
+        console.error('commit-guard: --expect needs a comma-separated list of paths.');
+        return 1;
+      }
+      expected = new Set(
+        raw
+          .split(',')
+          .map((p) => p.trim())
+          .filter(Boolean)
+      );
+      rest = argv.filter((_, i) => i !== expectAt && i !== expectAt + 1);
+    }
+
     const before = stagedSet();
     const beforeDigest = digest(before);
     const recorded = readRecord();
+
+    if (expected) {
+      // `stagedSet()` returns `name\u0000blobhash` lines joined by newlines, not a bare
+      // list of names, so both the separator and the line split matter here. Getting
+      // this wrong turns the check into a set of *characters*.
+      const staged = new Set(
+        before
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => line.split('\u0000')[0])
+      );
+      const missing = [...expected].filter((p) => !staged.has(p));
+      const extra = [...staged].filter((p) => !expected.has(p));
+      if (missing.length || extra.length) {
+        console.error(
+          'commit-guard: REFUSING to commit \u2014 the index is not what --expect declared.'
+        );
+        if (extra.length) {
+          console.error('  staged but NOT declared:');
+          for (const p of extra) console.error(`    ${p}`);
+        }
+        if (missing.length) {
+          console.error('  declared but NOT staged:');
+          for (const p of missing) console.error(`    ${p}`);
+        }
+        console.error('A staged path you did not intend is how another session work gets');
+        console.error('committed under your message. Add the paths you mean and commit again.');
+        return 1;
+      }
+      console.log(`commit-guard: index matches the ${expected.size} declared path(s).`);
+    }
 
     if (recorded && recorded.digest !== beforeDigest) {
       console.error('commit-guard: REFUSING to commit — the index differs from your snapshot.');
@@ -174,7 +236,7 @@ const commands = {
     // committed *nothing* and reported an empty message — found by using the tool
     // on its own first commit, which is the only way it shows up.
     let commitInput;
-    const usesStdin = argv.some((a, i) =>
+    const usesStdin = rest.some((a, i) =>
       a === '-F' || a === '--file' ? argv[i + 1] === '-' : a === '--file=-'
     );
     if (usesStdin) {
@@ -187,7 +249,7 @@ const commands = {
 
     let commitOutput;
     try {
-      commitOutput = execFileSync('git', ['commit', ...argv], {
+      commitOutput = execFileSync('git', ['commit', ...rest], {
         encoding: 'utf8',
         stdio: 'pipe',
         ...(commitInput === undefined ? {} : { input: commitInput }),

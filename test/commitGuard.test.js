@@ -178,3 +178,30 @@ describe('commit-guard', () => {
     expect(stderr).toContain('Usage: commit-guard.mjs');
   });
 });
+
+describe('--expect declares what a commit is for, and is checked before it', () => {
+  // Added after a commit titled 'ten dispose() methods now neutralise through one
+  // helper' turned out to contain an entire 783-line helper a concurrent session had
+  // in flight: `git add -- src/helpers/` staged a **directory**, which is `git add -A`
+  // scoped to one folder. The digest check passed, because the staged set and the
+  // commit did match — the set was simply the wrong set. Verifying content cannot catch
+  // that; declaring intent can.
+  it('refuses when the index holds a path --expect did not declare', () => {
+    write('mine.js', '// mine');
+    write('theirs.js', '// theirs');
+    const head = git(['rev-parse', 'HEAD']);
+    const stderr = guardFail(['commit', '--expect', 'mine.js', '-m', 'only mine']);
+    expect(stderr).toMatch(/NOT declared/);
+    expect(stderr).toMatch(/theirs\.js/);
+    // The whole point: refused **before** the commit, so nothing was created.
+    expect(git(['rev-parse', 'HEAD'])).toBe(head);
+  });
+
+  it('commits when the index matches, and does not pass --expect to git', () => {
+    write('only.js', '// only');
+    guard(['commit', '--expect', 'only.js', '-m', 'just the one']);
+    expect(git(['log', '-1', '--pretty=%s'])).toBe('just the one');
+    // If the flag leaked through, git would have rejected it as unknown.
+    expect(git(['show', '--stat', '--pretty=%s', 'HEAD'])).toContain('only.js');
+  });
+});
