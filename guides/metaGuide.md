@@ -524,7 +524,7 @@ This section is intentionally concise. Use it as a directory, not as the primary
 
 ### Caching
 
-- `PowerCache`: LRU cache with TTL, size controls, and inflight dedupe.
+- `PowerCache`: LRU cache with TTL, size controls, bulk removal by predicate or count, and inflight dedupe.
 - `PowerMemoizer`: Function-shaped memoization on top of `PowerCache`.
 - `PowerTimedCache`: Convenience wrapper for simple TTL caching.
 - `PowerTTLMap`: Lightweight expiring key-value store.
