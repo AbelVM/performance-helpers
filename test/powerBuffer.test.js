@@ -181,6 +181,24 @@ describe('the encoder/decoder verdict is not cached as permanently unavailable',
   // permanently denied.
   //
   // The positive result is still cached, so this asserts recoverability only.
+  it('throws from u82o when there is no decoder, rather than falling back', async () => {
+    // PERF-004. `u82o` carried a second fallback guarded by
+    // `typeof TextDecoder !== 'undefined'`, on the line *after* the one that
+    // returns `null` — and `getDecoder()` returns `null` only when the runtime has
+    // neither `TextDecoder` nor `Buffer`, so the guard could never be true.
+    // Deleting it leaves this as the one live no-decoder path, and pinning that
+    // is what makes the deletion intentional rather than incidental.
+    vi.resetModules();
+    vi.stubGlobal('TextDecoder', undefined);
+    vi.stubGlobal('Buffer', undefined);
+    const { u82o } = await import('../src/helpers/powerBuffer.js');
+    expect(() => u82o(new Uint8Array([49])), 'no decoder').toThrow(
+      /No TextDecoder or Buffer available to decode object/
+    );
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
   it('recovers once an encoder exists again', async () => {
     // A fresh module instance, because the *positive* result is still cached —
     // which is the other half of the contract, and without a reset this test

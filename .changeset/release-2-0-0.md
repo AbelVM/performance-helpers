@@ -5240,6 +5240,30 @@ cost the second reading — so a test asserts the two agree on **384 decisions**
 `rate` 1-40 × `burst` 0-12 × `n` 1-16, on twin limiters driven by the same clock sequence.
 That is the drift guard; mutation-checked.
 
+### `u82o`: an unreachable fallback removed (patch)
+
+`u82o` carried a second decoding path directly after the one that can return nothing:
+
+```js
+const dec = getDecoder();
+if (typeof dec?.decode === 'function') return JSON.parse(dec.decode(u8));
+if (typeof TextDecoder !== 'undefined') return JSON.parse(new TextDecoder().decode(u8));
+```
+
+**It could not run.** `getDecoder()` returns `null` only when the runtime has neither `TextDecoder`
+nor Node's `Buffer`, so reaching that line means `TextDecoder` is undefined — which is the
+negation of its own guard.
+
+It also contradicted this file's header, which promises a _module-level_ `TextDecoder` reused to
+avoid per-call allocations; a fresh `new TextDecoder()` per call is the opposite. `o2u8` never
+had the mirror-image line, which is what made this read as a leftover rather than a deliberate
+second path.
+
+No behaviour change, and deliberately **no mutation check is claimed**: restoring an unreachable
+line is unobservable, which is precisely what made it dead code. What is pinned instead is the
+branch that _is_ live — with both globals absent, `u82o` throws the documented error rather than
+falling back.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

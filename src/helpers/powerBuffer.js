@@ -181,7 +181,24 @@ export const u82o = (buf) => {
 
   const dec = getDecoder();
   if (typeof dec?.decode === 'function') return JSON.parse(dec.decode(u8));
-  if (typeof TextDecoder !== 'undefined') return JSON.parse(new TextDecoder().decode(u8));
+  // PERF-004. This used to carry a second fallback:
+  //
+  //     if (typeof TextDecoder !== 'undefined') return JSON.parse(new TextDecoder().decode(u8));
+  //
+  // **It was unreachable.** `getDecoder()` returns `null` only when the runtime has
+  // neither `TextDecoder` nor Node's `Buffer`, so reaching that line means
+  // `TextDecoder` is undefined — and the line's own guard is
+  // `typeof TextDecoder !== 'undefined'`. It could not run, and reading it suggests
+  // a second decoding path that does not exist.
+  //
+  // It also contradicted this file's own header, which promises a *module-level*
+  // `TextEncoder`/`TextDecoder` reused to avoid per-call allocations: a fresh
+  // `new TextDecoder()` per call is the opposite of that promise. `o2u8` never had
+  // the mirror-image line, which is what made this look like a leftover rather
+  // than a deliberate second path.
+  //
+  // Verified by reaching the branch that *is* live: with both globals absent,
+  // `u82o` throws the error below rather than taking any fallback.
   throw new Error('No TextDecoder or Buffer available to decode object');
 };
 
