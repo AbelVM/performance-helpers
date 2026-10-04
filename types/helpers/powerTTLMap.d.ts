@@ -28,6 +28,7 @@ export class PowerTTLMap {
     _expirations: Map<any, number>;
     _nextExpiryAt: number;
     _nextExpiryDirty: boolean;
+    _disposed: boolean;
     /**
      * Resolve a TTL argument that may be either a positional number or an
      * options object `{ ttl }` (matching the `PowerCache.set` convention).
@@ -211,6 +212,12 @@ export class PowerTTLMap {
      * Idempotent, and safe to call while the instance is idle. Exists so the
      * instance works with `using` / `await using` and gives callers an explicit
      * name to call.
+     *
+     * **Afterwards the map is inert rather than reusable: `set()` throws.** That is
+     * the fix in CACHE-014, and it is a deliberate choice against the alternative of
+     * leaving the instance writable. `dispose()` neutralises `clear()` so a second
+     * call is a no-op, so an instance that still accepted writes would hold entries
+     * the caller had no way to remove. Reads keep working and report an empty map.
      *
      * @returns {void}
      */

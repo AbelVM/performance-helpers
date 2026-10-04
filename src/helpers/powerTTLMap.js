@@ -54,6 +54,9 @@ export class PowerTTLMap {
     this._expirations = new Map();
     this._nextExpiryAt = 0;
     this._nextExpiryDirty = false;
+    // Set by `dispose()`. Read on the `set()` hot path, so it is a plain boolean
+    // field and one branch rather than a method call or a symbol lookup.
+    this._disposed = false;
   }
 
   /**
@@ -107,6 +110,26 @@ export class PowerTTLMap {
    * @returns {this}
    */
   set(key, value, ttl) {
+    // **CACHE-014.** A disposed map refuses writes, loudly.
+    //
+    // It used to accept them, and the result was the worst combination available:
+    // `dispose()` calls `clear()` and then neutralises `clear`, so a write that
+    // arrived afterwards was stored *and could not be cleared* — the caller held
+    // an entry it had no way to remove, short of waiting for its TTL. A released
+    // resource that quietly accepts writes is worse than one that throws, and this
+    // library throws on a wrong value, a negative TTL and a non-finite count, so
+    // refusing here is the consistent answer rather than a new one.
+    //
+    // **`set()` is the only method that needs the guard.** `touch()` and
+    // `delete()` both return early on a key the emptied map does not hold, so they
+    // mutate nothing and cannot strand state; reads see an empty map, which is
+    // the right answer and needs no guard.
+    if (this._disposed) {
+      throw new TypeError(
+        'PowerTTLMap: cannot `set()` after `dispose()`. The instance is released; ' +
+          'construct a new PowerTTLMap, or use `clear()` before disposing if you meant to reuse it.'
+      );
+    }
     const ms = this._resolveTtl(ttl, this._defaultTTL);
     // add a small slack (+1ms) to account for timer scheduling jitter
     const expiresAt = ms > 0 ? this._now() + ms + 1 : 0;
@@ -423,9 +446,21 @@ export class PowerTTLMap {
    * instance works with `using` / `await using` and gives callers an explicit
    * name to call.
    *
+   * **Afterwards the map is inert rather than reusable: `set()` throws.** That is
+   * the fix in CACHE-014, and it is a deliberate choice against the alternative of
+   * leaving the instance writable. `dispose()` neutralises `clear()` so a second
+   * call is a no-op, so an instance that still accepted writes would hold entries
+   * the caller had no way to remove. Reads keep working and report an empty map.
+   *
    * @returns {void}
    */
   dispose() {
+    // Guarded so the flag is set exactly once, on the first call. Assigning it
+    // unconditionally would be equivalent here — it is idempotent — but the
+    // `clear()` below is not, and reading the two together is how the next reader
+    // works out why order matters.
+    if (this._disposed) return;
+    this._disposed = true;
     this.clear();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.

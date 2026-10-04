@@ -30,6 +30,52 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 - `expiredCount` (getter) — How many resident entries are past their expiry and awaiting collection. The live count is `size - expiredCount`. Read-only: does not sweep and does not fire `onExpire`, so it is safe as a diagnostic. O(k) in the number of entries that have a TTL, which is why the hot path reads `size` and this is for reporting.
 - `purge()` — Collect every entry already past its expiry, firing `onExpire` for each. Returns how many were removed. The explicit form of what `size` used to do implicitly.
 
+- `dispose()` — Release the instance. Works with `using` / `await using`. **Afterwards `set()` throws** — see [Disposal](#disposal).
+
+- `[Symbol.dispose]()` — Alias for `dispose()`, so `using map = new PowerTTLMap(…)` releases it at scope exit.
+
+## Disposal
+
+```javascript
+{
+  using map = new PowerTTLMap(1000);
+  map.set('a', 1);
+} // dispose() runs here
+```
+
+**A disposed map is inert, not reusable: `set()` throws a `TypeError`.**
+
+That is worth stating plainly because it used to be the opposite, and the
+intermediate state was the worst of the available options. `dispose()` calls
+`clear()` and then neutralises `clear` so a second call is a no-op — so an
+instance that still accepted writes would accept an entry it could then **never
+be emptied of**, short of waiting out that entry's TTL:
+
+```javascript
+const map = new PowerTTLMap(1000);
+map.dispose();
+map.set('b', 2); // used to succeed
+map.clear(); // neutered: does nothing
+map.get('b'); // 2, and no way to remove it
+```
+
+Refusing loudly beats accepting quietly, and it is consistent with the rest of
+this class: `set()` already throws a `TypeError` on an unusable `ttl` and a
+`RangeError` on a negative one. If you meant to keep using the map, call
+`clear()` **before** disposing, or construct a new one.
+
+**Reads keep working** and report an empty map — `get`, `has`, `size` and the
+iterators do not throw. An emptied map reporting itself as empty is the truthful
+answer, and a reader on a scope-exit path should not have to guard.
+
+`touch()` and `delete()` also stay quiet rather than throwing. Both return early
+on a key the emptied map does not hold, so neither can strand state — and a
+`delete()` that threw after teardown would break the ordinary
+`for (const k of map.keys()) map.delete(k)` cleanup loop.
+
+The guard is one property read and one branch in `set()`, which is the hot path,
+so the cost of the fix is one boolean field and a predictable branch.
+
 - Iteration helpers: `entries()`, `keys()`, `values()` — Iterators over non-expired entries/keys/values respectively. These **collect** expired entries as they iterate, firing `onExpire`. That is deliberate and differs from `size`: iteration is an observable operation, so a caller can see it happen, whereas a property read cannot. `forEach(cb, thisArg?)` iterates non-expired entries calling `cb(value, key, map)`. `[Symbol.iterator]()` is an alias for `entries()`.
 
 ## Example

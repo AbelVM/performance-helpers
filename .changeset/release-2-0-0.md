@@ -6940,6 +6940,58 @@ what it does verify. This is the shape of it worth keeping: **a mutant that
 survives is evidence about the claim, not just a gap in the test**, and the claim
 is the thing that was wrong.
 
+## A disposed `PowerTTLMap` refuses writes
+
+**Breaking, in the smallest way available.** `set()` after `dispose()` now throws a
+`TypeError` instead of storing the value.
+
+The behaviour it replaces was the worst combination the class could have taken.
+`dispose()` calls `clear()` and then neutralises `clear`, so an instance that still
+accepted writes would accept an entry it could then **never be emptied of**:
+
+```js
+const m = new PowerTTLMap(1000);
+m.dispose();
+m.set('b', 2); // stored
+m.clear(); // neutered: does nothing
+m.get('b'); // 2 — and no way to remove it short of waiting out the TTL
+```
+
+The two coherent alternatives were to refuse the write or to leave the instance
+fully usable, and refusing is the one consistent with the class: `set()` already
+throws a `TypeError` on an unusable `ttl` and a `RangeError` on a negative one. A
+silent no-op would keep the call quiet and the caller would believe it had stored
+something.
+
+**Only `set()` needed the guard, and that is not an oversight.** `touch()` and
+`delete()` both return early on a key the emptied map does not hold, so they mutate
+nothing and cannot strand state. Guarding `delete()` would have been actively wrong:
+it would break `for (const k of map.keys()) m.delete(k)` on a map being torn down.
+Reads keep working and report an empty map, which is the truthful answer, so a
+reader on a scope-exit path does not have to guard.
+
+**The second half of this row was already fixed and the row did not know.** It also
+claimed "a negative TTL means never expires and the map's keys are never pruned
+from the retention index". A negative TTL now throws a `RangeError` — CACHE-015
+replaced the `|| 0` that granted it, in the same file, and its comment says so. The
+row predates that fix. Verified rather than assumed: the first probe of this claim
+passed `{ ttl: -1 }` as the _constructor options object_, where the key is
+`defaultTTL` and `ttl` is never read, so it proved nothing.
+
+The row also could not see that `guides/powerTTLMap.md` never documented
+`dispose()` at all, so the "drop the `clear()` neutering and document it" option was
+not on the table for a reader who had no idea the neutering existed.
+
+**3 mutants, all 3 killed.** Restoring the original defect fails 4 tests; making the
+guard `if (false)` so the write lands before the throw fails 4 — which is the half
+that matters, since a throw that still stored the value would satisfy a
+message-shape assertion and keep the defect; and setting the flag in the constructor
+so every instance is inert fails 4 more.
+
+`docs:claims` did not catch the undocumented method because it checks the other
+direction — that a documented option exists in the types — not that a public method
+is documented.
+
 ## `await using` now works on the hub and the WebSocket client
 
 **21 of the 23 helpers implementing `[Symbol.dispose]` did not implement

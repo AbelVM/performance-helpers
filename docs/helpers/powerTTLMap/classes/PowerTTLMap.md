@@ -47,6 +47,12 @@ Options object (used when the first arg is a number).
 
 ***
 
+### \_disposed
+
+> **\_disposed**: `boolean`
+
+***
+
 ### \_expirations
 
 > **\_expirations**: `Map`\<`any`, `number`\>
@@ -276,6 +282,12 @@ Release every resource this instance holds.
 Idempotent, and safe to call while the instance is idle. Exists so the
 instance works with `using` / `await using` and gives callers an explicit
 name to call.
+
+**Afterwards the map is inert rather than reusable: `set()` throws.** That is
+the fix in CACHE-014, and it is a deliberate choice against the alternative of
+leaving the instance writable. `dispose()` neutralises `clear()` so a second
+call is a no-op, so an instance that still accepted writes would hold entries
+the caller had no way to remove. Reads keep working and report an empty map.
 
 #### Returns
 
