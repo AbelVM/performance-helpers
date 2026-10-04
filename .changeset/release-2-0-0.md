@@ -8521,3 +8521,79 @@ Also fixes `poolRefusal`'s error-code idiom: the `@type` annotation form declare
 Lint: `no-unused-vars` in `bench/` and `examples/` is at zero. Four counters that existed only to hold a comment's premise are now assertions that hold it; `BENCH_AUTOSCALE_CACHE_KEYS`, documented in `bench/README.md`, was read but never consumed and is gone from both. Nine `require-atomic-updates` warnings in tests are fixed with `vi.stubGlobal`/`vi.spyOn`, which also stops a failed assertion from leaking a stubbed `Date.now` or a present-but-`undefined` `global.Buffer` into later tests.
 
 No runtime behaviour changes.
+
+## The commit guard could not see which file you deleted
+
+**GATE-019.** Found by _using_ `scripts/commit-guard.mjs` on a commit that deleted two files —
+the second time this repository has produced a finding that way rather than by testing.
+
+`stagedSet()` built its content digest from `git diff --cached --name-only` plus one
+`git rev-parse :<path>` per entry. **A staged deletion has no index entry**, so `rev-parse`
+exits 128 — and `execFileSync` **inherits stderr by default**, so a failure the caller
+_tolerated_ printed `fatal: ambiguous argument` into the middle of a **successful** commit.
+Three lines of `c755cd4` were noise from its own guard.
+
+**The consequence underneath the noise is worse than the noise.** The blob degraded to the
+literal `'?'`, so the deleted file's contents were **absent from the digest entirely**. Two
+sessions deleting _different_ content at the same path produced the **same** digest —
+precisely the substitution content-addressing exists to catch. The docstring's own claim,
+"content-addressed rather than path-only", was false for every deletion.
+
+Now a single `git diff --cached --raw -z`, which carries both blob hashes for every case, so
+a deletion records its **pre-image** and the claim holds. Renames and copies emit two paths
+under `-z` and are recorded as the delete-then-add they actually are, so one digest line
+still means one path.
+
+**Three adjacent findings, same pass:**
+
+- **`allowFail` is deleted** rather than left as an unused option. Its only caller was the
+  loop that went away, and an escape hatch nothing reaches is the same "written but never
+  read" shape this release audits the helpers for.
+- **`git()` keeps only git's first stderr line**, because a bad flag or a missing repository
+  sends it its entire `diff --help`. Outside a repository the guard **already exited 1**, so
+  it was never vacuous — it did so by throwing a 200-line stack trace around a one-line
+  reason.
+- **The CLI now catches**, so that failure reads
+  `commit-guard: git diff --cached --raw -z failed: error: unknown option 'cached'` — one line.
+
+**Three of my own mistakes, all caught by running rather than by reading.** I guessed git's
+`--raw` layout as **six** fields; the colon is glued to the first mode, so it is **five**, and
+`status` came back `undefined`. My first deletion test was **decoration**: it snapshotted two
+states differing in three other files, so the digests differed for unrelated reasons and it
+**passed against the broken guard** — rewritten to vary only the deleted blob, and only then
+did the mutant die. And a "prints no git diagnostics" test passed **vacuously** once no git
+call could fail, so it was replaced with one that drives a genuine failure outside a
+repository.
+
+18 tests, **6 of 7 mutants killed**. The seventh is left uncovered deliberately: the five-field
+assertion on git's record layout has no reachable test, since there is no seam to inject a
+malformed record, so it is documented in place as diagnosability rather than detection.
+
+### And a second bug in the same tool, found the same way
+
+The commit above was **refused** by its own guard — correctly, and with the staged set left
+intact — but for the wrong reason: _"Aborting commit due to empty commit message"_. The
+message never reached git.
+
+`-F -` reads a commit message from stdin, which `execFileSync` does not forward, so the guard
+reads it itself. The lookahead that detects the form indexed **`argv`** with a position taken
+from **`rest`** — and `--expect a,b` removes two entries from `argv` to build `rest`, so the
+index was off by two and landed on the declared paths. `usesStdin` was therefore false
+whenever `--expect` was present, no message was read, and the heredoc form committed nothing.
+
+Worth being precise about how this failed, because it is the good version. The guard
+**refused** rather than committing something wrong. The defect is that **`AGENTS.md`
+prescribes exactly this combination** for a shared working tree — `commit-guard commit
+--expect a,b` with a heredoc message — so the documented workflow was the broken one, and the
+pre-existing stdin test passes because it does not use `--expect`.
+
+Three tests, and the second one exists because fixing the lookahead must not quietly turn
+`--expect` into a no-op whenever the message arrives on a pipe: a wrong index is still
+refused **before** the commit, with a heredoc, and `HEAD` does not move. The third asserts
+the interior of a multi-line message survives exactly — compared with trailing whitespace
+stripped, because **git** normalises the final newline off `%B`. Asserting the raw form
+tested git rather than the guard, and that draft failed while the interior newlines were
+present and correct.
+
+All three killed on mutation: the off-by-two reinstated (2 failures), stdin never read (3),
+and stdin read but not forwarded (3).
