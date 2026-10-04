@@ -649,7 +649,9 @@ export class PowerCache {
      * was checked.
      *
      * @private
-     * @param {*} key
+     * @param {*} node - The already-fetched node from `_map`, passed in rather than
+     *   re-fetched. This used to take a `key` and call `this._map.get(key)` itself,
+     *   which made every caller read the map twice — see PERF-003 at the call site.
      * @param {*} value
      * @param {number} w - Already-computed weight.
      * @param {number} expiresAt - Already-computed absolute expiry.

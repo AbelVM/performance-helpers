@@ -1681,8 +1681,24 @@ export class PowerCache {
     const w = this._computeWeight(value, weight);
     if (this._rejectIfOversized(key, value, w)) return false;
 
-    if (this._map.has(key)) {
-      this._updateExisting(key, value, w, expiresAt);
+    // **PERF-003: one lookup instead of two.** This read `has(key)` and then
+    // `_updateExisting` read the same key again, so a hit cost two reads of one map.
+    // A single `get` answers it, and unambiguously: `_map` holds *nodes*, which are
+    // objects, so `undefined` means absent **even when the stored value is
+    // `undefined`** — which is the case that would break a naive `get(key) !==
+    // undefined` test on a value map, and is why this is safe here and would not be
+    // on `get(key)` itself. Both readers looked at the raw `_map`, so expiry
+    // semantics are untouched: `has()` never filtered expired entries either.
+    //
+    // The saving is on the **hit path only** — a miss was already one lookup. And it
+    // is not a measurable end-to-end win: at a 44–55 % hit rate this saves roughly
+    // one `Map.get` on half the calls, which lands far inside the 28 % median
+    // min/max spread BENCH-001 measures on this machine. It is taken because it is
+    // strictly less work with identical semantics and a counter can prove it, not
+    // because it makes `set` faster by a number anyone could observe.
+    const existing = this._map.get(key);
+    if (existing !== undefined) {
+      this._updateExisting(existing, value, w, expiresAt);
     } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
       // Refused by the admission filter. The key is deliberately *not*
       // recorded in the sketch: it did not reach the cache, and counting a
@@ -1705,14 +1721,15 @@ export class PowerCache {
    * was checked.
    *
    * @private
-   * @param {*} key
+   * @param {*} node - The already-fetched node from `_map`, passed in rather than
+   *   re-fetched. This used to take a `key` and call `this._map.get(key)` itself,
+   *   which made every caller read the map twice — see PERF-003 at the call site.
    * @param {*} value
    * @param {number} w - Already-computed weight.
    * @param {number} expiresAt - Already-computed absolute expiry.
    * @returns {void}
    */
-  _updateExisting(key, value, w, expiresAt) {
-    const node = this._map.get(key);
+  _updateExisting(node, value, w, expiresAt) {
     this._currentWeight -= node.weight || 0;
     node.value = value;
     node.weight = w;
@@ -1899,8 +1916,10 @@ export class PowerCache {
       const w = this._computeWeight(value, weight);
       if (this._rejectIfOversized(key, value, w)) continue;
 
-      if (this._map.has(key)) {
-        this._updateExisting(key, value, w, expiresAt);
+      // PERF-003, as in `set`: one lookup rather than `has` then `get`.
+      const existing = this._map.get(key);
+      if (existing !== undefined) {
+        this._updateExisting(existing, value, w, expiresAt);
       } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
         continue;
       }

@@ -6940,6 +6940,43 @@ what it does verify. This is the shape of it worth keeping: **a mutant that
 survives is evidence about the claim, not just a gap in the test**, and the claim
 is the thing that was wrong.
 
+## `PowerCache.set` reads its node map once
+
+`set` and `setMany` read the node map **twice** on the hit path — once as
+`this._map.has(key)` to choose the branch, and again inside `_updateExisting` as
+`this._map.get(key)` to fetch the node it was about to be handed. Two reads of one
+key, on the hot path, for every overwrite. Now one.
+
+The collapse is only sound because `_map` holds **nodes**, which are objects, so
+`undefined` from `get` means absent _even when the stored value is `undefined`_.
+That is not a hypothetical: it is the case that makes the obvious form of this
+optimisation a bug. On a map of raw values,
+`if (this._map.get(key) !== undefined)` takes the **insert** branch for a key
+holding `undefined`, inserts a second entry, and leaves the original in place —
+silently, with no error. A test pins exactly that, and a mutant that branches on
+`existing.value` instead of the node is killed by it.
+
+Both readers looked at the raw `_map`, so expiry semantics are untouched: `has()`
+never filtered expired entries either.
+
+**The performance claim is withdrawn rather than asserted.** Measured on the real
+call path with the node map instrumented: an overwrite was `has` 1 + `get` 1, a
+miss was `has` 1 + `get` 0. So this saves exactly one `Map.get` **on the hit path
+only**, and at the 44–55 % hit rate `node bench/claims.js zipf` reports, roughly
+half of calls. `set` is ~120–165 ns, so this is a few percent — far inside the
+**28 % median min/max spread BENCH-001 measures on this machine**, and that bench
+mode's own header calls its timing column uninformative below that spread. It
+cannot be observed end to end.
+
+It is taken because it is _strictly less work with identical semantics_, provable
+by a counter, not because it makes `set` faster by a number anyone could see. The
+test asserts the number of reads rather than a duration, because a change that put
+the `has` back would pass any timing assertion writable at this effect size and
+fail this one.
+
+**2 mutants, both killed**: reinstating `has()` before `get()`, and branching on
+the stored value rather than the node.
+
 ## A disposed `PowerTTLMap` refuses writes
 
 **Breaking, in the smallest way available.** `set()` after `dispose()` now throws a
@@ -8304,3 +8341,129 @@ process lifetime. The exit code is asserted first for that reason, and the `arme
 follows on the passing path to prove the probe armed something rather than exiting because
 it never started. A third case asserts the timeout still fires and still rejects with
 `ETIMEDOUT`, so an `unref`'d timer that never ran could not satisfy the first.
+
+## The hub stopped advertising a byte count it never computed, and a clock it never read
+
+**RT-026, and both halves were true at once.**
+
+`bytesQueued` was declared on `HubSubscriber`, initialised to `0` in `subscribe()`, and
+written by nothing. A subscriber record is handed to your `send(subscriber, frame)` adapter —
+the one place a byte count is actually useful, because the adapter is what holds the socket —
+and it advertised a number that was permanently `0`. A caller reading it could not tell
+"this subscriber has nothing queued" from "this library does not count".
+
+**It was not repairable at enqueue time, which is why this is a rename and not an
+implementation.** `queue` holds un-encoded message _objects_, so a byte count at `_enqueue`
+means `JSON.stringify` per message per subscriber — strictly more work than the single
+encode-per-batch that RT-006 introduced in order to remove exactly that cost, and it would
+have undone RT-006 on the path RT-006 was written for. What _is_ free is the bytes handed to
+the transport, because that frame was built for the flush regardless.
+
+So the field is now **`bytesSent`**, incremented from the already-computed `frame.length`.
+Because RT-006 hands the **same** buffer to every subscriber on a topic, one `frame.length` is
+the exact figure for all of them — the number is exact rather than approximate, and the cost
+is one addition.
+
+**The increment moved to after the `send` call**, which is the part with teeth. Ahead of the
+`try`, a `send()` that _threw_ attributed bytes to a transport that never received them. A
+_rejected_ promise still counts, correctly: the adapter did take the frame, and the rejection
+is about what happens next.
+
+**`delivered` was deliberately not moved**, so under a throwing adapter the two disagree:
+`delivered: 1, bytesSent: 0`. `delivered` counts messages _offered_, `bytesSent` counts bytes
+_taken_. That is pre-existing behaviour and this change does not widen to alter it, so it is
+documented at the increment, in the guide, and pinned by a test rather than left to be found
+later as an inconsistency.
+
+**What makes the new field a measurement rather than a second permanently-zero one** is that
+`sub.bytesSent` and `_counters.bytesOut` are incremented in the same statement, so
+`stats().bytesOut === Σ stats().list[].bytesSent` holds by construction:
+
+```javascript
+hub.stats().bytesOut === hub.stats().list.reduce((n, s) => n + s.bytesSent, 0); // true
+```
+
+A counter nothing can reconcile against anything else is decoration, and this row exists
+because a number nobody could check turned out to be zero. The reconcile test is the guard.
+
+**`options.now` is removed — breaking.** It was documented as "Clock override, for tests",
+accepted by `assertKnownOptions`, destructured, stored on `this._now`, and **never called**:
+no path in this class measures elapsed time, because the slow-consumer policy is `queue.length`
+against `maxQueue` and every counter is an event count rather than a duration. An injected
+clock had nothing to drive, which made it worse than an undocumented leftover —
+`assertKnownOptions` accepted it, the guide's option list is generated from the typedef, and a
+caller who passed `now` got a silent no-op instead of a complaint. Deleted rather than wired
+up, because the honest fix is the smaller one: inventing a use for an existing parameter is
+how an option stays dead for another release. **If you were passing `now`, it is now a
+`TypeError` naming the option** — which is the correct outcome for a knob that did nothing.
+
+Also repaired in the same pass: `HubOptions`' JSDoc had the whole `send` description orphaned
+under `observability`, so the required adapter was documented with an empty body and the
+optional metrics option carried text about framing. The generated docs and the guide's option
+list both inherited it.
+
+## `PowerSubscriberSet.delete()` no longer scans the set
+
+**OBS-010.** `delete(fn)` walked `_listeners` comparing `entry === target`. In the default
+mode the stored entry _is_ the listener, so that comparison was the only test the scan
+performed — and it is exactly the question `Set.prototype.delete` answers from the hash
+table in constant time.
+
+Both halves were measured before anything was written, because a performance claim with no
+measurement behind it is a hypothesis:
+
+- **Work, counted exactly.** With `_listeners` wrapped in a counting `Set` iterator,
+  deleting the newest-registered listener of an N-entry set visited **exactly N** entries:
+  1, 2, 4, 8, 16, 64, 256, 1024, 4096. Not "about N".
+- **Time.** Median of 9 runs, ~6 ns per entry scanned, linear throughout: **99 ns at N=1,
+  223 at N=16, 451 at N=64, 1577 at N=256, 6195 at N=1024, 23 859 at N=4096** — a **240x
+  spread** end to end. That is what a hub, or a socket server with one subscription per
+  connection, paid per unsubscribe.
+
+Non-weak mode now returns `Set.prototype.delete(target)` directly and visits **zero**
+entries. Weak mode deliberately still scans: with `WeakRef` entries a stored entry is a
+handle rather than the listener, so identity cannot answer the question, and the walk is
+also what reclaims collected refs — the memory bound you chose weak mode for.
+
+**The guard is `!this._weak`, not a test of the entry's own type.** Weak mode _without_ a
+`WeakRef` also stores the listener directly (`_makeEntry`'s documented fallback), so "not
+a `WeakRef`" does not imply "found by identity" — an entry-type guard would have silently
+disabled the sweep in exactly the mode that needs it.
+
+**Two probes of this row were wrong before the row was, and both looked fine.** Both
+registered the _same_ `noop` function as every bystander. A `Set` holds distinct values, so
+the "4096-subscriber" set actually held **two**, the scan cost was flat in N, and the
+honest reading of that data was "the row is wrong". The fixture, not the row. Every
+fixture in the new test file asserts `set.size === N` before it measures or counts anything,
+and one test pins that assertion as a live guard — it is the whole difference between a
+measurement and a confident wrong answer.
+
+## `PowerRTCChannel`: one `RTCDataChannel` behind the `PowerSocketAdapter` shape
+
+Add `PowerRTCChannel` — one `RTCDataChannel` behind the same shape as `PowerSocketAdapter`, for use as a `PowerRealtimeHub` transport.
+
+RT-017's four premise claims were verified against MDN and the WebRTC 1.0 spec before any code was written. Two held as written, one held with a wrong citation, and the difference that mattered most was missing.
+
+`RTCDataChannel.readyState` is the **string** `'open'`, while `READY_STATE.OPEN` is `1` — so the guard every other transport in this library satisfies, and that this library's own code is full of, is silently false on a healthy channel, with no error to trace. The class reads that string once and maintains a numeric copy from events. Reading it once is a requirement rather than an optimisation: getting `readyState` on a **detached** channel (one transferred to another realm) throws, and a transferred channel is exactly what this helper exists to serve.
+
+`bufferedAmountLowThreshold` + `bufferedamountlow` are real, and the row was right that the client's `bufferedAmount` poll emulates a signal a data channel pushes. What the row did not say is what that costs the caller: `PowerWebSocketClient` needs four watermark options and a backing-off timer for it. This needs one option, no timer, and a boolean read — `highWaterMarkBytes` is written to the platform's own threshold, and `isBackpressured` is raised by `send()` and cleared by the event.
+
+The omission that governed the API shape: **a `WebSocket` buffers an oversize frame and gets slower; a data channel throws**, because SCTP caps a single message. So `send()` has two refusals that must differ. Not open returns `false` — transient, consistent with `PowerSocketAdapter`, and correct, since an `onError` per frame during a connect race is noise. Over the SCTP ceiling it **throws**, because `PowerRealtimeHub` increments `delivered` before calling its `send` adapter and reports failure only through a throw: an adapter that refused by returning `false` would lose the frame with `delivered` already incremented. The ceiling defaults to the negotiated `RTCSctpTransport.maxMessageSize` and is enforced, not reported — the opposite of the inbound `maxPayloadSizeBytes` on the two socket helpers, and `unsendableFrameError` exists as a second message for that reason rather than reusing a sentence that is false outbound.
+
+Two claims from the row are corrected in the docs: the citation (RFC 8831 is RTP media transport and says nothing about data channels; the semantics are WebRTC 1.0's and the wire format RFC 8841's), and the implication that this helper delivers UDP-like semantics. It cannot — `ordered` and `maxRetransmits` are fixed by `createDataChannel()` — so `expectUnreliable` asserts the configuration and `stats()` reports what the channel actually is. `binaryType` is genuinely `arraybuffer` by default, so RT-002's fix is not repeated; `stats().binaryType` reports it rather than assuming it holds.
+
+Also closes RT-018's outstanding half: the `bufferedAmount`-after-close trap, documented in the new guide for this transport and gated in the adapter. A producer reading `dc.bufferedAmount` directly waits on a figure that never falls.
+
+No changes to existing helpers beyond the shared `errors.js` gaining one factory.
+
+## The published `.d.ts` was missing options, and 27 lint warnings were load-bearing
+
+Fix option and error types the published `.d.ts` was missing, and cut lint warnings 49 → 22.
+
+A TypeScript consumer passing `stepUp`/`stepDown` to `autoScale`, `correlationId` to `postMessage`, or reading `completedTasks`/`protocol` off a `WorkerObj` was rejected by the shipped declarations, because the JSDoc typedefs omitted properties the code actually reads. Those typedefs now declare them, and `startCleanup` and `send` take the option shapes they document instead of a bare `{Object}` — the previous spelling was forced by a `TS8032` limitation that a spelled-out type expression removes rather than works around.
+
+Also fixes `poolRefusal`'s error-code idiom: the `@type` annotation form declares the type rather than casting the initializer, so `const err = new Error(…)` annotated as `Error & {code}` was itself an error. The five sites that used it — including `poolRefusal`, which predates this change — were trading a `TS2339` for a `TS2322`. They now cast the initializer, matching `src/utils/errors.js`.
+
+Lint: `no-unused-vars` in `bench/` and `examples/` is at zero. Four counters that existed only to hold a comment's premise are now assertions that hold it; `BENCH_AUTOSCALE_CACHE_KEYS`, documented in `bench/README.md`, was read but never consumed and is gone from both. Nine `require-atomic-updates` warnings in tests are fixed with `vi.stubGlobal`/`vi.spyOn`, which also stops a failed assertion from leaking a stubbed `Date.now` or a present-but-`undefined` `global.Buffer` into later tests.
+
+No runtime behaviour changes.
