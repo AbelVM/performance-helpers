@@ -10,35 +10,6 @@
 // an invalid *limit* throws with a message naming the option and the class.
 
 /**
- * Coerce to a finite number, or return `fallback` when not possible.
- * @param {any} value
- * @param {number} fallback
- * @returns {number}
- * @private
- */
-export function num(value, fallback = 0) {
-  if (value === undefined || value === null) return fallback;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-/**
- * Coerce to an integer in `[min, Infinity)`. Non-finite input yields `min`.
- * Use {@link assertLimit} when a nonsensical limit should be an error rather
- * than a silent clamp.
- * @param {any} value
- * @param {number} [min=0]
- * @param {number} [fallback]
- * @returns {number}
- * @private
- */
-export function intAtLeast(value, min = 0, fallback = min) {
-  const n = num(value, NaN);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.floor(n));
-}
-
-/**
  * Validate a numeric limit option.
  *
  * Accepts `Infinity` when `allowInfinity` is set (a legitimate "no limit"

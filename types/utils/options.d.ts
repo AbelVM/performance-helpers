@@ -1,23 +1,4 @@
 /**
- * Coerce to a finite number, or return `fallback` when not possible.
- * @param {any} value
- * @param {number} fallback
- * @returns {number}
- * @private
- */
-export function num(value: any, fallback?: number): number;
-/**
- * Coerce to an integer in `[min, Infinity)`. Non-finite input yields `min`.
- * Use {@link assertLimit} when a nonsensical limit should be an error rather
- * than a silent clamp.
- * @param {any} value
- * @param {number} [min=0]
- * @param {number} [fallback]
- * @returns {number}
- * @private
- */
-export function intAtLeast(value: any, min?: number, fallback?: number): number;
-/**
  * Validate a numeric limit option.
  *
  * Accepts `Infinity` when `allowInfinity` is set (a legitimate "no limit"
