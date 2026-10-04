@@ -54,10 +54,27 @@ function makePool() {
   });
 }
 
-/** Post a message, swallowing the timeout rejection a `wantResponse` post ends in. */
+/**
+ * Post a message and **swallow whatever it ends in**.
+ *
+ * `awaitResponse` posts return a promise that ends in a rejection — a response timeout,
+ * or `ERR_POOL_TERMINATED` when the pool is shut down underneath it. Every test here
+ * shuts its pool down, so a discarded promise is an **unhandled rejection**, and vitest
+ * counts those: the suite reports every assertion as passing and still exits non-zero on
+ * `Errors  N errors`. That is not a flake and it is not cosmetic; it is the difference
+ * between a green gate and a red one.
+ *
+ * So every post in this file goes through here, and the one test that cares about
+ * delivery awaits it explicitly.
+ *
+ * @param {PowerPool} pool
+ * @param {*} message
+ * @param {object} [options]
+ * @returns {Promise<*>} Resolves once the post's own outcome is settled.
+ */
 async function post(pool, message, options) {
   const result = pool.postMessage(message, undefined, options);
-  if (result && typeof result.catch === 'function') await result.catch(() => {});
+  if (result && typeof result.then === 'function') await result.catch(() => {});
 }
 
 describe('POOL-009: the encode cache and correlated posts', () => {
@@ -66,34 +83,40 @@ describe('POOL-009: the encode cache and correlated posts', () => {
     // delete the feature, so the property the cache exists for is asserted first.
     const pool = makePool();
     const msg = { task: 'charge', n: 1 };
-    pool.postMessage(msg, undefined, {});
-    const after = pool._encodeCache.size;
-    pool.postMessage(msg, undefined, {});
-    expect(pool._encodeCache.size).toBe(after);
-    pool.shutdown();
+    return post(pool, msg)
+      .then(() => post(pool, msg))
+      .then(() => {
+        expect(pool._encodeCache.size).toBe(1);
+        pool.shutdown();
+      });
   });
 
   it('does not insert an entry for a post awaiting a response', () => {
     // The defect, measured: two identical correlated posts took the cache from 1 to 2.
     const pool = makePool();
     const msg = { task: 'charge', n: 1 };
-    pool.postMessage(msg, undefined, {});
-    const before = pool._encodeCache.size;
-
-    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'a' });
-    expect(pool._encodeCache.size).toBe(before);
-    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'b' });
-    expect(pool._encodeCache.size).toBe(before);
-    pool.shutdown();
+    return post(pool, msg)
+      .then(() => {
+        const before = pool._encodeCache.size;
+        return post(pool, msg, { awaitResponse: true, correlationKey: 'a' }).then(() => {
+          expect(pool._encodeCache.size).toBe(before);
+          return post(pool, msg, { awaitResponse: true, correlationKey: 'b' });
+        });
+      })
+      .then(() => {
+        expect(pool._encodeCache.size).toBe(1);
+        pool.shutdown();
+      });
   });
 
   it('leaves a cache entry alone when a correlated post is the only traffic', () => {
     // No prior entry, so there is nothing to hit and nothing should be created — the
     // empty-cache case is where an unconditional insert is most visible.
     const pool = makePool();
-    pool.postMessage({ task: 'solo' }, undefined, { awaitResponse: true, correlationKey: 'x' });
-    expect(pool._encodeCache.size).toBe(0);
-    pool.shutdown();
+    return post(pool, { task: 'solo' }, { awaitResponse: true, correlationKey: 'x' }).then(() => {
+      expect(pool._encodeCache.size).toBe(0);
+      pool.shutdown();
+    });
   });
 
   it('does not grow the cached byte total on correlated traffic', () => {
@@ -101,14 +124,18 @@ describe('POOL-009: the encode cache and correlated posts', () => {
     // entry count with a flat byte total would mean the accounting and the map disagree.
     const pool = makePool();
     const msg = { task: 'charge', body: 'x'.repeat(512), n: 1 };
-    pool.postMessage(msg, undefined, {});
-    const bytes = pool._encodeCacheBytes;
-    expect(bytes).toBeGreaterThan(0);
-
-    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'a' });
-    pool.postMessage(msg, undefined, { awaitResponse: true, correlationKey: 'b' });
-    expect(pool._encodeCacheBytes).toBe(bytes);
-    pool.shutdown();
+    let bytes = 0;
+    return post(pool, msg)
+      .then(() => {
+        bytes = pool._encodeCacheBytes;
+        expect(bytes).toBeGreaterThan(0);
+        return post(pool, msg, { awaitResponse: true, correlationKey: 'a' });
+      })
+      .then(() => post(pool, msg, { awaitResponse: true, correlationKey: 'b' }))
+      .then(() => {
+        expect(pool._encodeCacheBytes).toBe(bytes);
+        pool.shutdown();
+      });
   });
 
   it('bypasses on correlationId alone, matching the pending-response path', () => {
@@ -118,11 +145,13 @@ describe('POOL-009: the encode cache and correlated posts', () => {
     // bypass would otherwise introduce.
     const pool = makePool();
     const msg = { task: 'charge', n: 1 };
-    pool.postMessage(msg, undefined, {});
-    const before = pool._encodeCache.size;
-    pool.postMessage(msg, undefined, { correlationId: 'only-an-id' });
-    expect(pool._encodeCache.size).toBe(before);
-    pool.shutdown();
+    return post(pool, msg).then(() => {
+      const before = pool._encodeCache.size;
+      return post(pool, msg, { correlationId: 'only-an-id' }).then(() => {
+        expect(pool._encodeCache.size).toBe(before);
+        pool.shutdown();
+      });
+    });
   });
 
   it('still delivers the correlated message to the worker', () => {
