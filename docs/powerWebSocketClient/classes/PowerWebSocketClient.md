@@ -46,6 +46,12 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 ***
 
+### \_binaryTypeUnsupported
+
+> **\_binaryTypeUnsupported**: `boolean`
+
+***
+
 ### \_closedByUser
 
 > **\_closedByUser**: `boolean`
@@ -293,6 +299,12 @@ decorrelated-jitter backoff cursor, in ms
 ### \_reconnectTimer
 
 > **\_reconnectTimer**: `any`
+
+***
+
+### \_reportedBinaryTypeUnsupported
+
+> **\_reportedBinaryTypeUnsupported**: `boolean`
 
 ***
 

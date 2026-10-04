@@ -52,6 +52,8 @@ export class PowerWebSocketClient {
     _writer: WritableStreamDefaultWriter | null;
     /** @type {ReadableStreamDefaultReader|null} */
     _streamReader: ReadableStreamDefaultReader | null;
+    _binaryTypeUnsupported: boolean;
+    _reportedBinaryTypeUnsupported: boolean;
     /** @type {0|1|2|3} */
     _state: 0 | 1 | 2 | 3;
     _closedByUser: boolean;

@@ -555,6 +555,13 @@ export class PowerWebSocketClient {
     // Held so `close()` can cancel it. The streams tier's inbound path depends on
     // this existing at all: nothing else in the class ever takes a reader.
     this._streamReader = null;
+    // Set when the platform refuses `binaryType = 'arraybuffer'`, which is the
+    // only way this class learns it will be handed `Blob`s it cannot read. RT-036.
+    this._binaryTypeUnsupported = false;
+    // Makes the report **once**: the same platform will refuse again on every
+    // reconnect, and a per-connection repeat is the same wall of noise one
+    // layer down.
+    this._reportedBinaryTypeUnsupported = false;
     // Field declaration for the checker only: an `@type` on the initializer
     // narrows `_state` to the literal `3`, which made every
     // `_state === READY_STATE.X` comparison an "unintentional comparison"
@@ -1017,17 +1024,25 @@ export class PowerWebSocketClient {
           // and a client that cannot connect is worse than one that connects with
           // the platform default.
           //
-          // Swallowed rather than reported. `_debugLog` is a `PowerPool` field
-          // and this class has no such member, so calling it here would have been
-          // a no-op that *looked* like a diagnostic — and the type-debt ratchet
-          // caught exactly that, which is the gate working as intended. The
-          // condition is not worth an `error` event either: the connection is
-          // fine, and an implementation that cannot hold an `ArrayBuffer`
-          // preference is that implementation's business.
+          // Swallowed rather than reported at *this* point, but **remembered**,
+          // because the consequence is not local. If the override is refused the
+          // platform default for a binary frame is a `Blob`, there is no
+          // `Blob`-to-bytes conversion anywhere in this library, and so every
+          // inbound frame then fails in `decodeMessage` with
+          // `expected a Uint8Array` — which says nothing about the real cause and
+          // arrives once per frame. RT-036.
+          //
+          // So the failure is kept and reported **once**, by `_handleMessage`,
+          // in terms of the actual problem. Not emitted here: the connection is
+          // fine and may never receive a binary frame at all, so an `error` at
+          // connect time would report a problem the caller may not have. The
+          // per-frame codec error is the thing that has to go, because it is
+          // both the misleading one and the one that repeats.
           try {
             this._socket.binaryType = 'arraybuffer';
           } catch {
             /* platform does not accept a binaryType override; the default applies */
+            this._binaryTypeUnsupported = true;
           }
           // Register through exactly ONE mechanism. Doing both would deliver
           // every event twice on a socket that supports both, silently
@@ -1223,6 +1238,31 @@ export class PowerWebSocketClient {
         'error',
         oversizedFrameError('PowerWebSocketClient', size, this._maxPayloadSizeBytes)
       );
+    }
+
+    // RT-036. When `binaryType` was refused, a binary frame arrives as a `Blob`,
+    // `decodeMessage` cannot read one, and the error it raises names the codec
+    // rather than the cause. Reported once, in the terms of the actual problem,
+    // and the codec error is suppressed so the caller sees one diagnosis instead
+    // of that diagnosis buried under one copy per frame.
+    if (this._binaryTypeUnsupported) {
+      // Every frame is counted, and the codec is never reached: reaching it is
+      // what produces the misleading per-frame error this replaces. The report
+      // itself is one-shot.
+      this._counters.decodeErrors += 1;
+      if (this._reportedBinaryTypeUnsupported) return;
+      this._reportedBinaryTypeUnsupported = true;
+      this._emit(
+        'error',
+        new Error(
+          'PowerWebSocketClient: this platform refused binaryType="arraybuffer", so binary ' +
+            'frames arrive as Blob and cannot be decoded. Pass a WebSocketImpl that honours ' +
+            'binaryType, or send text frames. Not converting the Blob here is deliberate: ' +
+            'decoding is synchronous and the conversion is not, so it would make the inbound ' +
+            'order an implementation detail.'
+        )
+      );
+      return;
     }
 
     let message;

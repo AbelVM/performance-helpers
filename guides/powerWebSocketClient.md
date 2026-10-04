@@ -230,6 +230,14 @@ const client = new PowerWebSocketClient({
 
 **Read the option name as what it is.** By the time a `message` event fires, the platform has already received and materialised the whole frame — a `Blob` in a browser, an `ArrayBuffer` once `binaryType` is set. Nothing at this layer can stop that allocation, so `maxPayloadSizeBytes` **counts** the frame (`stats().oversizeFrames`) and emits an `error` naming the size and the limit, then decodes and delivers it as usual.
 
+### If the platform refuses `binaryType`
+
+The client sets `binaryType = 'arraybuffer'` at connect and **remembers if that is refused** — a getter-only accessor throws on assignment, and the platform default for a binary frame is then a `Blob`. This library has no `Blob`-to-bytes conversion anywhere (`frameSize` only _sizes_ one), so such a frame cannot be decoded.
+
+When that happens you get **one** `error`, naming the cause and what to do about it, and `stats().decodeErrors` counts every frame it could not read. You do **not** get the codec's `expected a Uint8Array` once per frame, which named the codec rather than the reason. The report is one-shot across reconnects, because the platform will refuse again on every connection and a repeat per connection is the same noise one layer down.
+
+Converting the `Blob` instead is `await blob.arrayBuffer()`, and that is **deliberately not done**: the inbound path is synchronous, so an `await` there would make delivery order an implementation detail. The fix is to pass a `WebSocketImpl` that honours `binaryType`, or to send text frames. A measured cost is not the objection — `arrayBuffer()` is ~0.045 ms for a 64 KiB frame — the ordering contract is.
+
 That is why it is described this way in the option, in the error message, and here. A number that reads like a limit and is not one is worse than no number, because a deployment sets it, believes it is protected, and is not. **Prevention belongs at the peer that produces the frame.**
 
 `0` disables the report, the same convention `highWaterMarkBytes: 0` uses, and the limit is inclusive — a frame exactly at the limit is not over it. A **text** frame is measured in UTF-16 code units rather than UTF-8 bytes, because an exact figure would cost a `TextEncoder` per frame; binary frames, the ones this is for, are exact.

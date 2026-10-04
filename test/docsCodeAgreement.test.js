@@ -135,6 +135,11 @@ const CROSS_CLASS = new Set([
   // this tier a reader at all.
   'read',
   'cancel',
+  // `Blob.arrayBuffer()`, named by RT-036's guide section while explaining why
+  // the client does **not** call it. A guide that says "we could convert the Blob
+  // with `arrayBuffer()`" has to name it, and it is a member of `Blob` — nothing
+  // in this helper. Same category as the two above.
+  'arrayBuffer',
   // PowerMemoizer, referenced from powerCache. `memoize` is a method of it, and
   // `memo` is the *value that method returns* — the memoized wrapper a guide
   // example then calls. A local binding rather than a member, so no source
