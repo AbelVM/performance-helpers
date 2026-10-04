@@ -41,7 +41,25 @@ async function tripAndWaitOut(circuit) {
   for (let i = 0; i < THRESHOLD; i += 1) {
     await attempt().catch(() => {});
   }
-  expect(circuit.state).toBe('open');
+  // The **internal** `_state`, not the `state` getter, and that distinction is the
+  // fix for FLAKE-001.
+  //
+  // `state` computes `'half-open'` *logically* the moment the drawn window has
+  // elapsed, so asserting `'open'` through it is a wall-clock assertion about a
+  // 10 ms window. Under load the awaits above take longer than the window, the
+  // getter reports `'half-open'`, and **6 of the 7 tests in this file fail** — the
+  // row recorded one of them. Reproduced deterministically by blocking 60 ms
+  // between the trip and this line, which fails every test that calls this helper.
+  //
+  // `_state` is what the precondition actually means — "the breaker tripped" — and
+  // no amount of elapsed time can change it.
+  //
+  // Reading the getter here was also doing active damage: that read is itself the
+  // announcement, so on a slow run it fired `'half-open'` before the test had set up
+  // its expectation, and the first assertion in every test below
+  // (`not.toContain('half-open')`) then failed for a reason that has nothing to do
+  // with the event it is checking.
+  expect(circuit._state).toBe('open');
   // The drawn window, plus a margin so the elapsed comparison has definitely
   // crossed. This is a wait for a state to exist, not a duration assertion.
   const window = circuit._openWindowMs;
