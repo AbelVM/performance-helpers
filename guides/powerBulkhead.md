@@ -13,6 +13,33 @@ Use `PowerBulkhead` when you need to protect critical work from a noisy producer
 | `queueCapacity`  |   `number` |   `100` | Maximum number of tasks that may wait **in one partition**. The bulkhead can hold `queueCapacity * partitions` in total. |
 | `partitioner`    | `Function` |  `null` | Optional function `(key) => partitionIndex` used to route a task based on a custom key.                                  |
 
+## Weighted tasks
+
+**New in 2.0.** `maxConcurrency` counts slots; `run` and `tryRun` take an
+optional `weight` so one task can reserve more than one slot of its partition.
+
+```javascript
+const bulkhead = new PowerBulkhead({ maxConcurrency: 10 });
+
+await bulkhead.run('tenant-7', heavyJob, { weight: 5 });
+// five of that partition's ten slots are held while `heavyJob` runs
+```
+
+- **`weight` must be a whole number `>= 1`**, as on
+  [the gate](powerPermitGate.md#weighted-permits-weight). `0`, a negative, a
+  fraction, `NaN` and `Infinity` are refused.
+- **`weight > maxConcurrency` rejects with a `TypeError`.** That task can never
+  run in any partition, so queueing it would be a hang — the partition's
+  `queueCapacity` would eventually reject it, but only after filling a queue with
+  work that was never going to happen.
+- **Weight is per partition, not global.** A `weight: 5` task on a
+  `maxConcurrency: 10` bulkhead consumes five slots in _its own_ partition and
+  touches nothing in the other three, which is the whole point of partitioning.
+- **`queueCapacity` still counts tasks, not slots.** A partition's queue is
+  bounded the same way whether the waiting tasks weigh 1 or 5.
+- Defaults to `1`, so `run(key, fn)` and `run(key, fn, {})` behave exactly as
+  before.
+
 ## API
 
 - `run(task, options)` — Enqueue a task for execution. When the chosen partition has available concurrency, the task runs immediately; otherwise it waits in that partition's queue. `options.signal` aborts the _wait_: the promise rejects with an `AbortError` and the task never runs. A task that already holds a permit is not interrupted — cancelling the queueing is not cancelling the work. See [cancelling a wait](powerPermitGate.md#cancelling-a-wait).

@@ -12,6 +12,49 @@ Low-level permit queue helper for building semaphore-like concurrency primitives
 | `queueCapacity` | `number` | `Infinity` | Maximum number of waiting callers allowed in the queue.     |
 | `initialTokens` | `number` | `capacity` | Number of permits available immediately after construction. |
 
+### Weighted permits: `weight`
+
+**New in 2.0.** `capacity` counts **permits**, and `acquire({ weight })` lets one
+caller take more than one. "This job costs 5 units" is otherwise inexpressible
+in this library — `weightFn` existed on `PowerCache` and on no gate.
+
+```javascript
+const gate = new PowerPermitGate({ capacity: 10 });
+
+const release = await gate.acquire({ weight: 5 });
+// … five units are held. `gate.active` reads 5, `gate.available` reads 5.
+release(); // returns the five units it took
+```
+
+`tryAcquire(weight)` and `release(count)` take the count **positionally** —
+`tryAcquire` returns `null` rather than waiting, `release(n)` returns `n` units.
+Both default to `1`.
+
+Four rules, three of which are decisions:
+
+- **`weight` must be a whole number `>= 1`.** `0`, a negative, a fraction, `NaN`
+  and `Infinity` are refused.
+- **`weight > capacity` rejects with a `TypeError`, immediately.** Such a waiter
+  can never be granted, and `queueCapacity` defaults to `Infinity`, so queueing
+  it would be a hang with no error ever — a `TypeError` where the caller wrote
+  the number is the better failure.
+- **Waiters are still served in FIFO order, but a heavier waiter can be skipped
+  over only when it could not fit anyway.** Serving strictly in order would mean
+  one `weight: 5` waiter at the head blocks every `weight: 1` behind it until it
+  is granted; skipping only the ones that cannot fit preserves fairness where
+  fairness is meaningful and avoids head-of-line blocking where it is not.
+- **`active` and `available` count units, not holders.** With the default
+  `weight: 1` the two are the same number, so nothing observable changes for
+  existing code — and the invariant `available + active === capacity` holds
+  either way. `pending` still counts **waiters**, not units, because that is what
+  `queueCapacity` limits.
+
+`PowerSemaphore` and `PowerBackpressure` share this implementation and take the
+same `weight`. `PowerBulkhead` passes it through per partition
+(`run(key, fn, { weight })`), and `PowerQueue` has a related but different
+`totalWeight` — see [Bulk removal and weighted limits](powerCache.md#bulk-removal-invalidate-and-evict)
+for the cache's own `weightFn`.
+
 ### Cancelling a wait
 
 `acquire({ signal })` stops waiting. The returned promise rejects with an

@@ -191,16 +191,36 @@ export class PowerBulkhead {
    *   rejects with an `AbortError` and the task never runs. Cancelling the *wait*
    *   is not cancelling the *work* - a task that already holds a permit runs to
    *   completion.
+   * @param {number} [options.weight=1] Number of capacity units the task needs
+   *   from its partition's `maxConcurrency`. Must be a whole number >= 1. A
+   *   weight exceeding `maxConcurrency` is rejected with a `TypeError`, because
+   *   such a task can never run.
    * @returns {Promise<any>} Promise resolving or rejecting with task result.
    */
   run(task, options = {}) {
     if (typeof task !== 'function') {
       return Promise.reject(new TypeError('PowerBulkhead.run() requires a function'));
     }
-
+    const weight = assertLimitRequired(options?.weight, {
+      name: 'weight',
+      className: 'PowerBulkhead',
+      min: 1,
+      integer: true,
+      fallback: 1,
+    });
     const partition = this._choosePartition(options.partitionKey);
     const bucket = this._buckets[partition];
-    const willQueue = bucket.gate.available === 0;
+    // A task heavier than the partition can never run: reject rather than
+    // queueing something that can never be served.
+    if (weight > bucket.gate.capacity) {
+      return Promise.reject(
+        new TypeError(
+          `PowerBulkhead: \`weight\` (${weight}) exceeds partition \`maxConcurrency\` (${bucket.gate.capacity}). ` +
+            'A task that needs more slots than a partition can hold can never run.'
+        )
+      );
+    }
+    const willQueue = bucket.gate.available < weight;
     // Against **this partition's** queue, not the bulkhead's total. The total
     // is a sum over partitions that are independently bounded, so comparing a
     // global pending count against one partition's budget is what let a noisy
@@ -212,7 +232,7 @@ export class PowerBulkhead {
     this._outstanding += 1;
     if (!willQueue) this._activeCount += 1;
 
-    const permit = bucket.gate.acquire({ signal: options.signal });
+    const permit = bucket.gate.acquire({ signal: options.signal, weight });
     const result = permit.then(
       (release) => {
         if (willQueue) {
@@ -262,15 +282,24 @@ export class PowerBulkhead {
    * @param {Function} task
    * @param {Object} [options]
    * @param {any} [options.partitionKey]
+   * @param {number} [options.weight=1] Number of capacity units to reserve from
+   *   the partition. Must be a whole number >= 1.
    * @returns {Promise<any>|null}
    */
   tryRun(task, options = {}) {
     if (typeof task !== 'function') {
       throw new TypeError('PowerBulkhead.tryRun() requires a function');
     }
+    const weight = assertLimitRequired(options?.weight, {
+      name: 'weight',
+      className: 'PowerBulkhead',
+      min: 1,
+      integer: true,
+      fallback: 1,
+    });
     const partition = this._choosePartition(options.partitionKey);
     const bucket = this._buckets[partition];
-    const release = bucket.gate.tryAcquire();
+    const release = bucket.gate.tryAcquire(weight);
     if (!release) return null;
     this._outstanding += 1;
     this._activeCount += 1;

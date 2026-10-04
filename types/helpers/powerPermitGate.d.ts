@@ -5,20 +5,25 @@ export class PowerPermitGate {
      *   {@link PowerPermitGateOptions}.
      */
     constructor(options?: PowerPermitGateOptions);
+    _className: string;
     _capacity: number;
     _queueCapacity: number;
     _available: number;
     _waiters: PowerQueue;
     /**
-     * Permits that have been granted and not yet returned.
+     * Capacity units that have been granted and not yet returned.
      *
      * The single count of outstanding work in this class, and the reason
      * {@link PowerPermitGate#reset} can no longer mint a permit. The invariant
      * it maintains is `_available + _held === _capacity`; `reset()` may only set
      * `_available` up to `capacity - _held`, so a holder that is still running
-     * keeps occupying its permit across a reset instead of the reset handing
+     * keeps occupying its unit across a reset instead of the reset handing
      * out a second one. Both grant paths go through `_grantTo`, so there is no
-     * way for a permit to exist without being counted here.
+     * way for a unit to exist without being counted here.
+     *
+     * With weights this is the sum of all outstanding `weight` values, not the
+     * number of holders: a caller that acquired `weight: 3` occupies three units
+     * in this counter.
      *
      * `protected` rather than `private`: `PowerBackpressure` reads it for its
      * heartbeat termination condition and for its `_inFlight` view, and
@@ -56,9 +61,12 @@ export class PowerPermitGate {
     /** True when the waiting queue is saturated. */
     get isFull(): boolean;
     /**
-     * Number of permits currently held by callers that have not released yet.
+     * Number of capacity units currently held by callers that have not released yet.
      *
-     * Read from `_held` rather than computed as `capacity - available`. The two are
+     * This is the sum of `weight` across all outstanding holders: with the default
+     * `weight` of 1 it equals the holder count, but a caller that acquired with
+     * `weight: 3` occupies three units. Read from `_held` rather than computed as
+     * `capacity - available`. The two are
      * the same number whenever `capacity` is a ceiling on concurrent holders -
      * which it is for this class, for `PowerSemaphore` and for `PowerBulkhead`, and
      * there the difference is invisible. It stops being the same for a subclass
@@ -70,22 +78,38 @@ export class PowerPermitGate {
      */
     get active(): number;
     /**
-     * Acquire a permit asynchronously.
-     * Resolves immediately when a permit is available; otherwise waits in FIFO order.
-     * @param {{signal?: AbortSignal}} [options] `signal` aborts the *wait* for a
+     * Acquire a permit asynchronously, optionally requesting more than one unit of
+     * capacity at once.
+     *
+     * Resolves immediately when enough capacity is available; otherwise waits in
+     * FIFO order. A `weight` heavier than `capacity` is rejected up front: a waiter
+     * that can never be granted has no business entering the queue.
+     *
+     * @param {Object} [options]
+     * @param {AbortSignal} [options.signal] `signal` aborts the *wait* for a
      *   permit, not any work started once one is held — see `src/utils/abort.js`.
      *   Checked before the fast path, so an already-aborted signal rejects rather
      *   than resolving because a permit happened to be free.
-     * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
+     * @param {number} [options.weight=1] Number of capacity units to acquire. Must
+     *   be a whole number >= 1. A weight exceeding `capacity` is rejected with a
+     *   `TypeError`, because such a waiter can never be granted and would otherwise
+     *   hang or fail only later via queue-full.
+     * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback
+     *   that returns exactly `weight` units when called.
      */
     acquire(options?: {
-        signal?: AbortSignal;
+        signal?: AbortSignal | undefined;
+        weight?: number | undefined;
     }): Promise<PowerReleaseFn>;
     /**
-     * Try to acquire a permit without waiting.
+     * Try to acquire permits without waiting, optionally requesting more than one
+     * unit of capacity at once.
+     * @param {number} [weight=1] Number of capacity units to acquire. Must be a
+     *   whole number >= 1; a weight exceeding `capacity` returns `null` because
+     *   such a waiter can never be served.
      * @returns {PowerReleaseFn|null} Release callback when acquired, otherwise `null`.
      */
-    tryAcquire(): PowerReleaseFn | null;
+    tryAcquire(weight?: number): PowerReleaseFn | null;
     /**
      * Release one or more permits back to the gate.
      *
@@ -123,7 +147,7 @@ export class PowerPermitGate {
         available?: number | undefined;
         reason?: Error | undefined;
     }): void;
-    _makeRelease(): () => void;
+    _makeRelease(weight?: number): () => void;
     /**
      * The fast-path grant: a permit that was already available is taken now.
      *
@@ -145,12 +169,12 @@ export class PowerPermitGate {
      * `_held` a count of reality rather than a count of the easy path. The AIMD
      * signal reads it, and two of the three routes used to bypass it entirely.
      *
-     * @param {{resolve: (fn: PowerReleaseFn) => void}} entry
+     * @param {{resolve: (fn: PowerReleaseFn) => void, weight?: number}} entry
      * @param {boolean} fromAvailable - `true` when the permit was already counted
      *   into `_available` and must be drawn back out of it (a refill tick mints
      *   into the pool, then hands out what it minted); `false` when the permit is
-     *   being transferred directly from a holder and never passes through the
-     *   pool (a `release()`). See {@link PowerPermitGate#_serveWaiters}.
+     *   being transferred directly from a holder without ever entering it (a
+     *   `release()`). See {@link PowerPermitGate#_serveWaiters}.
      * @returns {void}
      * @private
      */
@@ -167,18 +191,23 @@ export class PowerPermitGate {
      *
      * Aborted entries are compacted here rather than on the abort path, on
      * purpose: removing by reference from a ring buffer is O(n) per cancellation,
-     * and a cancellation storm is exactly when an O(n) walk per cancelled waiter
-     * is least affordable. The `_cancelledWaiters` counter keeps
+     * and a cancellation storm is exactly the case where an O(n) walk per cancelled
+     * waiter is least affordable. The `_cancelledWaiters` counter keeps
      * {@link PowerPermitGate#pending} and {@link PowerPermitGate#isFull} honest in
      * the meantime.
      *
-     * @param {number} permits - Maximum number of waiters to serve.
+     * With weights, each waiter consumes `entry.weight` units when served. A waiter
+     * whose weight exceeds the remaining permits is **not** skipped — FIFO order
+     * means no waiter behind it can advance either, so the loop stops and leaves
+     * it in the queue for the next release.
+     *
+     * @param {number} permits - Maximum number of units to distribute.
      * @param {boolean} fromAvailable - Whether the served permits are drawn from
      *   `_available` (they were counted into the pool first) or transferred
      *   straight from a holder without ever entering it. See
      *   {@link PowerPermitGate#_grantTo}; the two routes differ only in that
      *   flag, and conflating them is what put `_available` below zero.
-     * @returns {number} How many were served.
+     * @returns {number} How many units were served.
      * @protected
      */
     protected _serveWaiters(permits: number, fromAvailable: boolean): number;

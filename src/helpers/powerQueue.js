@@ -1,5 +1,20 @@
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { POWER_QUEUE_INITIAL_CAPACITY } from './constants.js';
+
+/**
+ * Read the weight of an item, defaulting to 1 for items without a numeric
+ * `weight` property.
+ * @param {any} item
+ * @returns {number}
+ * @private
+ */
+function itemWeight(item) {
+  if (item == null) return 1;
+  const w = item.weight;
+  if (typeof w === 'number' && Number.isFinite(w)) return w;
+  return 1;
+}
+
 /**
  * PowerQueue
  *
@@ -59,6 +74,7 @@ export class PowerQueue {
     this._head = 0; // index of next to shift
     this._tail = 0; // index to write next
     this._size = 0;
+    this._totalWeight = 0;
   }
 
   /**
@@ -71,6 +87,7 @@ export class PowerQueue {
     this._buffer[this._tail] = item;
     this._tail = (this._tail + 1) & this._mask;
     this._size++;
+    this._totalWeight += itemWeight(item);
     return this._size;
   }
 
@@ -84,6 +101,7 @@ export class PowerQueue {
     this._buffer[this._head] = undefined;
     this._head = (this._head + 1) & this._mask;
     this._size--;
+    this._totalWeight -= itemWeight(v);
     return v;
   }
 
@@ -124,6 +142,7 @@ export class PowerQueue {
     }
     this._head = this._tail = 0;
     this._size = 0;
+    this._totalWeight = 0;
   }
 
   /**
@@ -204,12 +223,14 @@ export class PowerQueue {
       integer: true,
       fallback: 0,
     });
+    const w = itemWeight(item) * n;
     for (let i = 0; i < n; i++) {
       if (this._size === this._capacity) this._grow();
       this._buffer[this._tail] = item;
       this._tail = (this._tail + 1) & this._mask;
       this._size++;
     }
+    this._totalWeight += w;
     return this._size;
   }
 
@@ -350,6 +371,9 @@ export class PowerQueue {
     }
 
     this._size = need;
+    for (let i = 0; i < items.length; i++) {
+      this._totalWeight += itemWeight(items[i]);
+    }
     return this._size;
   }
 
@@ -359,6 +383,17 @@ export class PowerQueue {
    */
   get length() {
     return this._size;
+  }
+
+  /**
+   * Sum of `weight` across all queued items, where each item's weight is its
+   * numeric `weight` property or `1` when absent. With weight-less items this
+   * is identical to `length`, which is what keeps the default path at zero extra
+   * cost in reasoning.
+   * @returns {number}
+   */
+  get totalWeight() {
+    return this._totalWeight;
   }
 
   /**
@@ -380,6 +415,9 @@ export class PowerQueue {
     }
     this._head = start;
     this._size = need;
+    for (let i = 0; i < items.length; i++) {
+      this._totalWeight += itemWeight(items[i]);
+    }
     return this._size;
   }
 }

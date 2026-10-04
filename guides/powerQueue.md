@@ -22,6 +22,8 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 - `length` (getter) — Current number of items in the queue (`number`).
 
+- `totalWeight` (getter) — **New in 2.0.** Sum of the queued items' weights, where an item's weight is its numeric `weight` property or `1` when it has none (`number`). With weight-less items this is identical to `length`. Maintained incrementally on `push`, `shift`, `fill`, `pushMany`, `unshiftMany` and `clear`, so reading it costs nothing. See [Weighted queues](#weighted-queues) below.
+
 - `capacity` (getter) — Internal buffer capacity (power-of-two sized) used by the ring buffer (`number`).
 
 - `isEmpty` (getter) — `true` when the queue contains no items.
@@ -34,6 +36,34 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 - `shrink(minimum = 16)` — Give back the memory a burst grew, and return the
   capacity afterwards.
+
+### Weighted queues
+
+**New in 2.0.** `PowerQueue` bounds **items**; `totalWeight` reports the sum of
+the items' weights so a caller can reason about the work queued rather than the
+number of envelopes.
+
+```javascript
+const queue = new PowerQueue();
+queue.push({ id: 'a', weight: 5 });
+queue.push({ id: 'b' }); // no `weight`, counts 1
+queue.totalWeight; // 6, while queue.length is 2
+```
+
+Three things to know:
+
+- **A non-numeric, non-finite or absent `weight` counts as `1`.** So
+  `{weight: 0}`, `{weight: -3}`, `{weight: NaN}` and `{weight: '5'}` are all `1`.
+  This is a **queue**, not a gate: nothing is granted here, so there is nothing to
+  reject and no caller waiting on a number. A weight the queue cannot honour is
+  counted as one item rather than dropped or throwing — see
+  [Weighted permits](powerPermitGate.md#weighted-permits-weight) if you want the
+  refusing behaviour, which is what a gate needs because a waiter that can never
+  be granted would hang.
+- **It is maintained incrementally**, not recomputed by a walk. `totalWeight` is
+  therefore O(1) and safe to read in a hot loop or a monitor tick.
+- **`length` is unchanged and still counts items.** The two are equal for
+  weight-less items, so existing code is unaffected.
 
 ### Reclaiming a burst
 

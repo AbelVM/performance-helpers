@@ -78,6 +78,12 @@ Initial capacity (rounded up to power-of-two).
 
 > **\_tail**: `number`
 
+***
+
+### \_totalWeight
+
+> **\_totalWeight**: `number`
+
 ## Accessors
 
 ### capacity
@@ -115,6 +121,23 @@ Whether the queue is empty.
 > **get** **length**(): `number`
 
 Number of items currently queued.
+
+##### Returns
+
+`number`
+
+***
+
+### totalWeight
+
+#### Get Signature
+
+> **get** **totalWeight**(): `number`
+
+Sum of `weight` across all queued items, where each item's weight is its
+numeric `weight` property or `1` when absent. With weight-less items this
+is identical to `length`, which is what keeps the default path at zero extra
+cost in reasoning.
 
 ##### Returns
 

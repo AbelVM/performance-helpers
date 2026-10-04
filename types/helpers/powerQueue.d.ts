@@ -27,6 +27,7 @@ export class PowerQueue {
     _head: number;
     _tail: number;
     _size: number;
+    _totalWeight: number;
     /**
      * Enqueue an item at the tail.
      * @param {any} item Item to enqueue.
@@ -162,6 +163,14 @@ export class PowerQueue {
      * @returns {number}
      */
     get length(): number;
+    /**
+     * Sum of `weight` across all queued items, where each item's weight is its
+     * numeric `weight` property or `1` when absent. With weight-less items this
+     * is identical to `length`, which is what keeps the default path at zero extra
+     * cost in reasoning.
+     * @returns {number}
+     */
+    get totalWeight(): number;
     /**
      * Prepend multiple items to the head of the queue.
      * The first element of `items` will become the next value returned by `shift()`.

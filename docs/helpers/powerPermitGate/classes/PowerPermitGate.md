@@ -44,19 +44,29 @@
 
 ***
 
+### \_className
+
+> **\_className**: `string`
+
+***
+
 ### \_held
 
 > `protected` **\_held**: `number`
 
-Permits that have been granted and not yet returned.
+Capacity units that have been granted and not yet returned.
 
 The single count of outstanding work in this class, and the reason
 [PowerPermitGate#reset](#reset) can no longer mint a permit. The invariant
 it maintains is `_available + _held === _capacity`; `reset()` may only set
 `_available` up to `capacity - _held`, so a holder that is still running
-keeps occupying its permit across a reset instead of the reset handing
+keeps occupying its unit across a reset instead of the reset handing
 out a second one. Both grant paths go through `_grantTo`, so there is no
-way for a permit to exist without being counted here.
+way for a unit to exist without being counted here.
+
+With weights this is the sum of all outstanding `weight` values, not the
+number of holders: a caller that acquired `weight: 3` occupies three units
+in this counter.
 
 `protected` rather than `private`: `PowerBackpressure` reads it for its
 heartbeat termination condition and for its `_inFlight` view, and
@@ -84,9 +94,12 @@ a subclass reading a base field is precisely what the tag describes.
 
 > **get** **active**(): `number`
 
-Number of permits currently held by callers that have not released yet.
+Number of capacity units currently held by callers that have not released yet.
 
-Read from `_held` rather than computed as `capacity - available`. The two are
+This is the sum of `weight` across all outstanding holders: with the default
+`weight` of 1 it equals the holder count, but a caller that acquired with
+`weight: 3` occupies three units. Read from `_held` rather than computed as
+`capacity - available`. The two are
 the same number whenever `capacity` is a ceiling on concurrent holders -
 which it is for this class, for `PowerSemaphore` and for `PowerBulkhead`, and
 there the difference is invisible. It stops being the same for a subclass
@@ -174,7 +187,13 @@ Maximum number of waiters allowed in the queue.
 
 ### \_makeRelease()
 
-> **\_makeRelease**(): () => `void`
+> **\_makeRelease**(`weight?`): () => `void`
+
+#### Parameters
+
+##### weight?
+
+`number` = `1`
 
 #### Returns
 
@@ -197,10 +216,15 @@ with a live waiter still queued, and every refill tick short-circuited on
 
 Aborted entries are compacted here rather than on the abort path, on
 purpose: removing by reference from a ring buffer is O(n) per cancellation,
-and a cancellation storm is exactly when an O(n) walk per cancelled waiter
-is least affordable. The `_cancelledWaiters` counter keeps
+and a cancellation storm is exactly the case where an O(n) walk per cancelled
+waiter is least affordable. The `_cancelledWaiters` counter keeps
 [PowerPermitGate#pending](#pending) and [PowerPermitGate#isFull](#isfull) honest in
 the meantime.
+
+With weights, each waiter consumes `entry.weight` units when served. A waiter
+whose weight exceeds the remaining permits is **not** skipped — FIFO order
+means no waiter behind it can advance either, so the loop stops and leaves
+it in the queue for the next release.
 
 #### Parameters
 
@@ -208,7 +232,7 @@ the meantime.
 
 `number`
 
-Maximum number of waiters to serve.
+Maximum number of units to distribute.
 
 ##### fromAvailable
 
@@ -224,7 +248,7 @@ Whether the served permits are drawn from
 
 `number`
 
-How many were served.
+How many units were served.
 
 ***
 
@@ -245,27 +269,41 @@ deterministically at scope exit.
 
 > **acquire**(`options?`): `Promise`\<`PowerReleaseFn`\>
 
-Acquire a permit asynchronously.
-Resolves immediately when a permit is available; otherwise waits in FIFO order.
+Acquire a permit asynchronously, optionally requesting more than one unit of
+capacity at once.
+
+Resolves immediately when enough capacity is available; otherwise waits in
+FIFO order. A `weight` heavier than `capacity` is rejected up front: a waiter
+that can never be granted has no business entering the queue.
 
 #### Parameters
 
 ##### options?
+
+###### signal?
+
+`AbortSignal`
 
 `signal` aborts the *wait* for a
   permit, not any work started once one is held — see `src/utils/abort.js`.
   Checked before the fast path, so an already-aborted signal rejects rather
   than resolving because a permit happened to be free.
 
-###### signal?
+###### weight?
 
-`AbortSignal`
+`number`
+
+Number of capacity units to acquire. Must
+  be a whole number >= 1. A weight exceeding `capacity` is rejected with a
+  `TypeError`, because such a waiter can never be granted and would otherwise
+  hang or fail only later via queue-full.
 
 #### Returns
 
 `Promise`\<`PowerReleaseFn`\>
 
-Promise resolving to a release callback.
+Promise resolving to a release callback
+  that returns exactly `weight` units when called.
 
 ***
 
@@ -354,9 +392,20 @@ Optional rejection reason for queued waiters.
 
 ### tryAcquire()
 
-> **tryAcquire**(): `PowerReleaseFn` \| `null`
+> **tryAcquire**(`weight?`): `PowerReleaseFn` \| `null`
 
-Try to acquire a permit without waiting.
+Try to acquire permits without waiting, optionally requesting more than one
+unit of capacity at once.
+
+#### Parameters
+
+##### weight?
+
+`number` = `1`
+
+Number of capacity units to acquire. Must be a
+  whole number >= 1; a weight exceeding `capacity` returns `null` because
+  such a waiter can never be served.
 
 #### Returns
 

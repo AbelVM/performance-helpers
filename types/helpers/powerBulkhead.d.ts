@@ -77,21 +77,29 @@ export class PowerBulkhead {
      *   rejects with an `AbortError` and the task never runs. Cancelling the *wait*
      *   is not cancelling the *work* - a task that already holds a permit runs to
      *   completion.
+     * @param {number} [options.weight=1] Number of capacity units the task needs
+     *   from its partition's `maxConcurrency`. Must be a whole number >= 1. A
+     *   weight exceeding `maxConcurrency` is rejected with a `TypeError`, because
+     *   such a task can never run.
      * @returns {Promise<any>} Promise resolving or rejecting with task result.
      */
     run(task: Function, options?: {
         partitionKey?: any;
         signal?: AbortSignal | undefined;
+        weight?: number | undefined;
     }): Promise<any>;
     /**
      * Try to execute immediately without queuing.
      * @param {Function} task
      * @param {Object} [options]
      * @param {any} [options.partitionKey]
+     * @param {number} [options.weight=1] Number of capacity units to reserve from
+     *   the partition. Must be a whole number >= 1.
      * @returns {Promise<any>|null}
      */
     tryRun(task: Function, options?: {
         partitionKey?: any;
+        weight?: number | undefined;
     }): Promise<any> | null;
     /**
      * Wait for all active and queued tasks to complete.

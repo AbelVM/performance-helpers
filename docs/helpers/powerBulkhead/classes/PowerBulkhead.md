@@ -415,6 +415,15 @@ Abort while queued: the returned promise
   is not cancelling the *work* - a task that already holds a permit runs to
   completion.
 
+###### weight?
+
+`number`
+
+Number of capacity units the task needs
+  from its partition's `maxConcurrency`. Must be a whole number >= 1. A
+  weight exceeding `maxConcurrency` is rejected with a `TypeError`, because
+  such a task can never run.
+
 #### Returns
 
 `Promise`\<`any`\>
@@ -476,6 +485,13 @@ Try to execute immediately without queuing.
 ###### partitionKey?
 
 `any`
+
+###### weight?
+
+`number`
+
+Number of capacity units to reserve from
+  the partition. Must be a whole number >= 1.
 
 #### Returns
 
