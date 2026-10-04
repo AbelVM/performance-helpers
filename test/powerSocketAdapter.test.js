@@ -804,32 +804,61 @@ describe('PowerSocketAdapter drain invariants', () => {
   });
 
   it('never delivers more messages than the rate limit allows in a window', () => {
-    fc.assert(
-      fc.property(
-        fc.record({
-          limit: fc.integer({ min: 1, max: 8 }),
-          windowMs: fc.integer({ min: 1, max: 50 }),
-          messages: fc.array(fc.boolean(), { minLength: 0, maxLength: 40 }),
-        }),
-        ({ limit, windowMs, messages }) => {
-          const ws = new FakeWsSocket();
-          const adapter = new PowerSocketAdapter(ws, {
-            onMessage: () => {},
-            rateLimit: { limit, windowMs },
-          });
-          // Every message in the same tick, so the window cannot have rolled
-          // over: the *delivered* count must not exceed the limit. `messages`
-          // counts every frame that arrived, refused ones included, so it is
-          // the wrong thing to assert against.
-          for (let i = 0; i < messages.length; i++) ws.emit('message', String(i), false);
-          const s = adapter.stats();
-          expect(s.messages).toBe(messages.length);
-          expect(s.handled + s.rateLimited).toBe(messages.length);
-          expect(s.handled).toBeLessThanOrEqual(limit);
-          adapter.dispose();
-        }
-      ),
-      { numRuns: 100 }
-    );
+    // **The clock is frozen, and that is a correction rather than tidying.**
+    //
+    // This test's premise was "every message in the same tick, so the window
+    // cannot have rolled over". It is false: `ws.emit()` in a loop is
+    // synchronous, but the limiter reads `nowMs()` on every call, and a
+    // millisecond boundary can fall between two iterations of a loop that is
+    // doing real work — most reliably when 272 test files are running in
+    // parallel and the process is descheduled. With `windowMs` as low as 1 that
+    // is enough for the window to roll and admit one extra message, so the test
+    // failed roughly once per full-suite run, on real code that was correct.
+    //
+    // The failure was `expected 3 to be less than or equal to 2` inside this
+    // file, on a property I had not touched. It is recorded here because a test
+    // that fails intermittently for a reason unrelated to its subject is worse
+    // than one that never fails: the next person to see it blames whatever they
+    // changed. Note also that `PowerSocketAdapter` builds its `PowerSlidingWindow`
+    // internally with no `now` passthrough, so freezing is the only lever a test
+    // has — the alternative was deleting the case, which throws away a real
+    // property.
+    vi.useFakeTimers();
+    try {
+      fc.assert(
+        fc.property(
+          fc.record({
+            limit: fc.integer({ min: 1, max: 8 }),
+            windowMs: fc.integer({ min: 1, max: 50 }),
+            messages: fc.array(fc.boolean(), { minLength: 0, maxLength: 40 }),
+          }),
+          ({ limit, windowMs, messages }) => {
+            const ws = new FakeWsSocket();
+            const adapter = new PowerSocketAdapter(ws, {
+              onMessage: () => {},
+              rateLimit: { limit, windowMs },
+            });
+            // Every message at one instant, which is now **actually** true
+            // rather than approximately true: the clock cannot advance, so the
+            // window provably cannot roll over and the delivered count must not
+            // exceed the limit. `messages` counts every frame that arrived,
+            // refused ones included, so it is the wrong thing to assert against.
+            for (let i = 0; i < messages.length; i++) ws.emit('message', String(i), false);
+            const s = adapter.stats();
+            expect(s.messages).toBe(messages.length);
+            expect(s.handled + s.rateLimited).toBe(messages.length);
+            expect(s.handled).toBeLessThanOrEqual(limit);
+            adapter.dispose();
+          }
+        ),
+        { numRuns: 100 }
+      );
+    } finally {
+      // `finally`, not a trailing call: an assertion failure inside `fc.assert`
+      // leaves the clock frozen for every later test in the file, which is the
+      // same class of leak the `Date.now` stubbing cleanup in
+      // `typed-options-and-lint` was about.
+      vi.useRealTimers();
+    }
   });
 });

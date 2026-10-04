@@ -165,6 +165,14 @@ const CROSS_CLASS = new Set([
   // abort listener is the caller's own risk") is only meaningful against the
   // platform's own method.
   'abort',
+  // `RTCPeerConnection.createDataChannel()`, named in the RT-017 guide's usage
+  // and worker sections. It is the platform's own method and **not** a member of
+  // `PowerRTCChannel`, which deliberately takes an existing channel rather than
+  // creating one — so the per-guide rule cannot resolve it. Listed explicitly
+  // rather than loosened globally, because the guide's whole claim is that this
+  // library does *not* call it: a reader who found `createDataChannel` on the
+  // adapter would be reading a false API.
+  'createDataChannel',
 ]);
 
 /** Everything this test is willing to accept without it being a method. */

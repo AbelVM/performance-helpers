@@ -13,3 +13,4 @@
 - [normalizeError](functions/normalizeError.md)
 - [oversizedFrameError](functions/oversizedFrameError.md)
 - [queueFullError](functions/queueFullError.md)
+- [unsendableFrameError](functions/unsendableFrameError.md)

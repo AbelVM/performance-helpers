@@ -184,3 +184,53 @@ export function oversizedFrameError(className, size, limit) {
   typed.limit = limit;
   return typed;
 }
+
+/**
+ * The error for an **outbound** frame the transport can never carry.
+ *
+ * ## Why this is not {@link oversizedFrameError}
+ *
+ * That factory's sentence — *"detection, not prevention — the frame was already
+ * received and buffered before this was checked"* — is true of an **inbound**
+ * frame and **false** here. `PowerRTCChannel` measures before it calls
+ * `send()`, so the platform never saw the frame at all: this is prevention, and
+ * reusing the other message would have told a caller debugging a refused send
+ * that their oversized frame had already been put on the wire.
+ *
+ * The condition also earns its own message because it is a different failure.
+ * An over-size inbound frame is a peer bug worth alerting on. An over-size
+ * outbound one is a local payload the caller should have bounded at the edge,
+ * and the remedy is the same sentence for a different reason — bound it at the
+ * peer that produces it.
+ *
+ * The `code` is deliberately the **same** `'ERR_FRAME_TOO_LARGE'`, so one
+ * `onError` handler filters the same way across all three helpers. The direction
+ * is what differs, and it is stated in the text rather than encoded, because a
+ * second code would split that one handler in two for no operational gain.
+ *
+ * A test pins both messages against being merged into one factory; that is the
+ * only thing standing between this and a shared-helper refactor that silently
+ * turns a prevention into a report.
+ *
+ * @param {string} className - The reporting helper, for a message that says where.
+ * @param {number} size - The frame's length in bytes.
+ * @param {number} limit - The ceiling it exceeded — the negotiated SCTP message
+ *   size for a data channel.
+ * @returns {Error & {code: 'ERR_FRAME_TOO_LARGE', size: number, limit: number}}
+ *   The same shape {@link oversizedFrameError} returns, so a caller does not
+ *   branch on which helper produced it.
+ */
+export function unsendableFrameError(className, size, limit) {
+  const err = new Error(
+    `${className}: refused a ${size}-byte frame, over this channel's message-size limit of ${limit}. ` +
+      'Unlike an inbound over-size frame, this one was stopped before send() — the transport never saw it. ' +
+      'It is not a slow path and retrying will not help, so send() throws rather than returning false. ' +
+      'Bound the payload at the peer that produces it.'
+  );
+  /** @type {Error & {code: 'ERR_FRAME_TOO_LARGE', size: number, limit: number}} */
+  const typed = /** @type {any} */ (err);
+  typed.code = 'ERR_FRAME_TOO_LARGE';
+  typed.size = size;
+  typed.limit = limit;
+  return typed;
+}

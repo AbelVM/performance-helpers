@@ -62,8 +62,9 @@ export class PowerRTCChannel {
     /**
      * Everything this class attached to the caller's channel, so `dispose()` can
      * undo all of it. A listener nobody remembers to remove is the leak this
-     * field exists to make impossible, and `test/powerRTCChannel.dispose.test.js`
-     * asserts the count is back to zero.
+     * field exists to make impossible, and the listener count in
+     * `test/powerRTCChannel.test.js` asserts it is back to zero — six on the way
+     * in, which is what makes a seventh addition a deliberate edit.
      * @type {Array<[string, (any: any) => void]>}
      */
     _listeners: Array<[string, (any: any) => void]>;
@@ -174,16 +175,22 @@ export class PowerRTCChannel {
      *   `PowerSocketAdapter.send`, whose documented contract is "false means not
      *   now", and it is the guard that keeps a `connecting` channel from throwing
      *   `InvalidStateError` out of {@link send}.
+     *
+     *   **A hub cannot see it.** `PowerRealtimeHub` increments `delivered` *before*
+     *   calling a `send(sub, frame)` adapter and invokes the subscriber's handler
+     *   on the success path of whatever the adapter returned — so a `false` is not
+     *   a rejection, and the consumer is told it processed a frame that never left
+     *   the process. `PowerSocketAdapter` has the same property. The only trace is
+     *   `stats().sendRefusals`, so if a caller is wiring this straight into a hub
+     *   they must watch it; the guide says so and
+     *   `test/powerRTCChannel.hub.test.js` pins it.
      * - **Over the message-size ceiling → `throw`.** Permanent. No amount of
      *   retrying makes an oversized frame small, so a caller looping on `false`
-     *   would spin on it forever. Throwing is also what makes it *visible* to
-     *   `PowerRealtimeHub`: the hub increments `delivered` **before** calling a
-     *   `send(sub, frame)` adapter and only reports a failure through a **throw**,
-     *   so an adapter that refused an oversize frame by returning `false` would lose
-     *   it with `stats().delivered` incremented — a silent drop behind a counter
-     *   that says it arrived. The hub guide's own rule is that `send` returns a
-     *   promise for the transport, and this is the one case where "not now" is not
-     *   what happened.
+     *   would spin on it forever. Throwing is also the only thing a hub can
+     *   observe: it routes a throw to `onError` and leaves `delivered` uncounted
+     *   for that batch, whereas a `false` would lose the frame with `delivered`
+     *   already incremented. So the throw is not a stricter contract for its own
+     *   sake — it is the only outcome that reaches anyone.
      *
      * The frame is handed to the platform **without a copy**, which is safe because
      * `RTCDataChannel.send()` serialises synchronously — the same guarantee
@@ -254,13 +261,21 @@ export class PowerRTCChannel {
      */
     dispose(): void;
     /**
-     * Subscribe to the five events this class needs, and record how to undo it.
+     * Subscribe to the six events this class needs, and record how to undo it.
      *
      * `addEventListener` rather than the `onopen`/`onmessage` properties: the
      * `on*` form **overwrites** whatever the caller had already assigned, so
      * adopting a caller's channel would silently disable their own handlers. A
      * `WebSocket` would behave the same way, and `PowerSocketAdapter` uses
      * `addEventListener` for exactly this reason.
+     *
+     * **`closing` is one of the six and not an optional extra.** The module
+     * docblock lists `closing` as one of the four states being normalised, and
+     * omitting the event meant a channel in that state reported `OPEN` — the exact
+     * "reports itself healthy" failure the class exists to prevent. The platform
+     * throws `InvalidStateError` from `send()` while `closing`, so the frame did
+     * not vanish, but every frame during a teardown produced a spurious
+     * `onError`, and `stats().state` lied for the whole of it.
      *
      * @private
      */

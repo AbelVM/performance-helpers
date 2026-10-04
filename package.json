@@ -141,6 +141,11 @@
       "import": "./src/helpers/powerSocketAdapter.js",
       "default": "./src/helpers/powerSocketAdapter.js"
     },
+    "./powerRTCChannel": {
+      "types": "./types/helpers/powerRTCChannel.d.ts",
+      "import": "./src/helpers/powerRTCChannel.js",
+      "default": "./src/helpers/powerRTCChannel.js"
+    },
     "./powerHistogram": {
       "types": "./types/helpers/powerHistogram.d.ts",
       "import": "./src/helpers/powerHistogram.js",

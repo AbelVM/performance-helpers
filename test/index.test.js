@@ -85,6 +85,7 @@ describe('package entry point', () => {
       'PowerRealtimeHub',
       'PowerWebSocketClient',
       'PowerSocketAdapter',
+      'PowerRTCChannel',
       'encodeMessage',
       'decodeMessage',
       'frameEncodedJson',
@@ -135,6 +136,7 @@ describe('package entry point', () => {
       'PowerRealtimeHub',
       'PowerWebSocketClient',
       'PowerSocketAdapter',
+      'PowerRTCChannel',
       'WorkerAgnostic',
     ];
     for (const name of classes) {
@@ -208,6 +210,7 @@ describe('barrel and package.json exports agree', () => {
       ['./powerRealtimeHub', ['PowerRealtimeHub']],
       ['./powerWebSocketClient', ['PowerWebSocketClient', 'READY_STATE']],
       ['./powerSocketAdapter', ['PowerSocketAdapter', 'detectSocketKind', 'READY_STATE']],
+      ['./powerRTCChannel', ['PowerRTCChannel']],
     ];
     for (const [subpath, names] of cases) {
       const mod = await import(`../src/helpers/${subpath.replace('./', '')}.js`);

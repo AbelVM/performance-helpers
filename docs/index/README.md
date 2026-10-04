@@ -360,6 +360,12 @@ Re-exports [PowerRetryBudget](../powerRetry/classes/PowerRetryBudget.md)
 
 ***
 
+### PowerRTCChannel
+
+Re-exports [PowerRTCChannel](../helpers/powerRTCChannel/classes/PowerRTCChannel.md)
+
+***
+
 ### PowerScheduler
 
 Re-exports [PowerScheduler](../helpers/powerScheduler/classes/PowerScheduler.md)

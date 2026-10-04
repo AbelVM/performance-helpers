@@ -107,7 +107,12 @@ describe('stats()/getStats() parity', () => {
     // Checked without instantiating: these need a live socket, a running hub or
     // an adapter, and a prototype check covers the actual risk — the alias
     // failing to install — without standing up three fixtures.
-    for (const name of ['PowerRealtimeHub', 'PowerSocketAdapter', 'PowerWebSocketClient']) {
+    for (const name of [
+      'PowerRealtimeHub',
+      'PowerSocketAdapter',
+      'PowerWebSocketClient',
+      'PowerRTCChannel',
+    ]) {
       expect(typeof index[name], `${name} exported`).toBe('function');
       expect(typeof index[name].prototype.getStats, `${name}.prototype.getStats`).toBe('function');
     }

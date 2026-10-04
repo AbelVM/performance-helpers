@@ -22,6 +22,7 @@ import { PowerEventLoopMonitor } from '../src/helpers/powerEventLoopMonitor.js';
 import { PowerSocketAdapter } from '../src/helpers/powerSocketAdapter.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 import { PowerWebSocketClient } from '../src/helpers/powerWebSocketClient.js';
+import { PowerRTCChannel } from '../src/helpers/powerRTCChannel.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -273,6 +274,17 @@ describe('observability: true on the helpers', () => {
         }),
       'pool',
     ],
+    // RT-017. Needs a live data channel rather than a URL, so the factory is a
+    // minimal EventTarget-shaped double — the class only reads `readyState`,
+    // `addEventListener`, `send` and `close`, and `metrics` is opt-in, so the
+    // double exists to satisfy the constructor rather than to exercise the
+    // transport. Everything else about this helper is tested in
+    // `test/powerRTCChannel*.test.js`.
+    [
+      'PowerRTCChannel',
+      () => new PowerRTCChannel(metricsDataChannel(), { observability: true }),
+      'rtc',
+    ],
   ];
 
   // Every prefix this describe block mutates, torn down after each test.
@@ -290,6 +302,23 @@ describe('observability: true on the helpers', () => {
   // *before* its own `dispose()` cannot leave a registration behind for the
   // cases after it. That is worth having in a file whose whole subject is a
   // shared mutable singleton, and it is claimed as nothing more than that.
+  /**
+   * The bare minimum `PowerRTCChannel` reads: a string `readyState`, an
+   * `EventTarget` pair, and the two transport methods.
+   *
+   * Kept to five members on purpose. A richer double would make this test depend
+   * on behaviour it is not about — the point of the case is that `attach` fires
+   * and that `dispose()` unregisters it, and anything more would be a second
+   * subject to keep correct.
+   */
+  const metricsDataChannel = () => ({
+    readyState: 'open',
+    send: () => {},
+    close: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  });
+
   const PREFIXES = HELPERS.map((h) => h[2]);
 
   afterEach(() => {
