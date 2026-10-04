@@ -23,6 +23,7 @@ Options:
 
 - `tryConsume(n?)` — returns `true` only when every underlying limiter permits consuming `n` tokens.
 - `reset()` — calls `reset()` on underlying limiters where present.
+- `dispose()` — releases what the composer built, and supports `using`. See [Disposal](#disposal).
 - `limitersFor(key)` — with `keyFn`, the limiter set for one key, so you can inspect or drive that key directly (for a `Retry-After` header, say). Returns `null` without `keyFn`.
 
 ## Per-key limiting
@@ -112,6 +113,51 @@ if (limit.tryConsume()) {
   // proceed: all underlying limiters allowed consumption
 }
 ```
+
+## Disposal
+
+`PowerRateLimit` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown, like every other
+long-lived limiter here.
+
+```javascript
+{
+  using limit = new PowerRateLimit([() => new PowerGCRA({ rate: 10, per: 1000 })], {
+    keyFn: (ctx) => ctx.tenant,
+  });
+  limit.tryConsume(1, { context: { tenant: 'acme' } });
+} // dispose() runs here
+```
+
+**There is no timer to cancel.** Each leg refills lazily, computing elapsed time
+from a stored timestamp whenever it is read, so `dispose()` is a state release
+rather than a cleanup. Saying it "cancels the interval" would describe work that
+is not happening.
+
+**With `keyFn`, it drops the lazily built per-slot limiter sets** — the largest
+thing a rate limiter in this library holds, since slots are addressed by a hash of
+a key the caller usually derived from a request header. `reset()` alone cannot
+release them: it walks every built slot calling `reset()` on each leg and leaves
+all of them resident.
+
+Your own `limiters` are reset, not discarded. They were passed in, so they are
+yours to reuse.
+
+### Disposing and reusing a keyed composer resets every tenant
+
+Worth stating plainly, because it is the one sharp edge here: after `dispose()`, a
+later call rebuilds its slot as a **fresh, empty** limiter. So dispose-then-reuse
+hands every built key a full allowance.
+
+That is the same "eviction is a reset" bypass [slots are never evicted](#why-keys-are-hashed-into-slots-and-not-stored)
+to avoid, and it is allowed here only because the two situations differ: a slot
+is never discarded _while the instance is live_, whereas `dispose()` is the
+caller saying it is finished. Keeping slots resident after teardown would be the
+memory a dispose exists to release.
+
+So: **treat `dispose()` as teardown.** If you want to pause a limiter for a while,
+use `reset()`, which is reversible and deliberately does not unregister or drop
+anything.
 
 ## Clocks
 

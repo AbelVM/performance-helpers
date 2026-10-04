@@ -6827,6 +6827,65 @@ measures a 28.61 % median min/max spread and anything finer is noise. The clock
 is pinned too, since a test cannot assert a comment: `dispose()` leaves `_now` and
 `_nowExplicit` exactly as the caller supplied them.
 
+## `PowerRateLimit` can now be disposed
+
+`PowerRateLimit` was the last limiter in the library that could not take part in
+`using` / `await using` or a DI teardown. It gained `dispose()` and
+`[Symbol.dispose]`.
+
+**The row this came from asserted something that had stopped being true.** It
+claimed `dispose`, `[Symbol.dispose]` and `observability` were all missing from
+`PowerThrottle`, `PowerSlidingWindow` and `PowerRateLimit` alike. By the time the
+row was picked up, `PowerThrottle` had `dispose()` (from `32955d1`) and
+`PowerSlidingWindow` had it plus a real fix (`fa1defb`, which made `dispose()`
+release the ring buffer it had grown). So the live gap was one class, not three —
+and the row's own note, "verified absence", was the kind of claim that decays
+silently once two commits land. Verified against the code rather than the row.
+
+**`dispose()` is a state release, not a cleanup.** No timer is cancelled because
+there is none: every leg refills lazily from a stored timestamp whenever it is
+read. Describing it as cancelling an interval would document work that is not
+happening, which is the defect this project has already removed from
+`PowerSlidingWindow`'s docblock and from `PowerRetry`'s constructor.
+
+**With `keyFn`, it drops the lazily built per-slot limiter sets**, and that is the
+part worth having. Slots are addressed by a hash of a key the caller usually
+derived from a request header, so a composer that has seen real traffic is holding
+up to `buckets` (default 1024) limiter sets — the largest thing a rate limiter in
+this library holds. `reset()` cannot release them: it walks every built slot
+calling `reset()` on each leg and leaves all of them resident. A dispose that only
+reset would report doing its job while the memory it exists to free stayed.
+
+Callers' own `limiters` are reset rather than discarded. They were passed in, so
+they belong to the caller, and dropping the reference would leave them holding a
+silently dead object.
+
+**The judgement call: disposing and reusing a keyed composer resets every tenant.**
+It is allowed, and it is the same "eviction is a reset" bypass the constructor
+refuses to commit to. It differs in that a slot is never discarded _while the
+instance is live_ — a tenant evicted while quiet returns to a full allowance,
+which is rate limiting that can be skipped — whereas `dispose()` is the caller
+saying it is finished, and keeping slots resident after teardown is the memory a
+dispose exists to release. So `guides/powerRateLimit.md` states it as a sharp edge
+and says to treat `dispose()` as teardown and use `reset()` to pause.
+
+**6 mutants, 4 killed.** Dropping the `fill(null)` fails 2; removing
+`[Symbol.dispose]` fails 2 (one at parse time, which no runtime `typeof` check can
+detect); dropping the `reset()` call fails 1; poisoning the instance after dispose
+fails 2.
+
+**Two mutants survived, and they took a comment with them.** Replacing
+`fill(null)` with `= new Array(buckets).fill(null)` — and with `= []` — both passed
+the whole file. They are genuinely equivalent: `_slotFor` addresses slots by index
+and nothing in the class inspects `_slots.length`, so emptying and reallocating
+behave identically, including for dispose-then-reuse. The original comment claimed
+a rebuild would "write past the end or throw", which is false; assigning
+`_slots[5]` on an empty array extends it. The comment now says what is actually
+true, and the assertion that was written to support the false claim was reduced to
+what it does verify. This is the shape of it worth keeping: **a mutant that
+survives is evidence about the claim, not just a gap in the test**, and the claim
+is the thing that was wrong.
+
 ## `await using` now works on the hub and the WebSocket client
 
 **21 of the 23 helpers implementing `[Symbol.dispose]` did not implement

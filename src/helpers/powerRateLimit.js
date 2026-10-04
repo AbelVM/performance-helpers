@@ -630,9 +630,15 @@ export class PowerRateLimit {
    */
   dispose() {
     if (this.keyFn) {
-      // `fill(null)` rather than a rebuild of the array: this keeps the same
-      // `buckets` entries, so a disposed-then-reused composer still addresses
-      // slots in range instead of throwing on an index past the end.
+      // In place, rather than `this._slots = []`. **These are equivalent, and
+      // that was measured rather than assumed**: `_slotFor` reads and writes by
+      // index and nothing in this class inspects `_slots.length`, so emptying and
+      // reallocating produce identical behaviour for every operation including
+      // dispose-then-reuse. The first version of this comment claimed a rebuild
+      // would "write past the end" or throw, which is not true — assigning
+      // `this._slots[5]` on an empty array extends it. `fill(null)` is kept
+      // because it drops the whole graph without reallocating the backing store,
+      // not because it prevents anything.
       this._slots.fill(null);
     }
     this.reset();
