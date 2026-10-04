@@ -6986,6 +6986,46 @@ hand-rolled `{byteLength: n}` stand-in would be _accepted_ by `new Uint8Array()`
 and pass for the wrong reason. Before and after: a foreign bare buffer now
 produces a frame byte-identical to the local one.
 
+## A refused `binaryType` said nothing, and then said the wrong thing once per frame
+
+**A platform that refuses `binaryType = 'arraybuffer'` produced no diagnosis at
+all, followed by a misleading one for every frame after it.** The assignment is
+wrapped in a `try`/`catch` that swallows — correctly, in that a connection that
+cannot hold an `ArrayBuffer` preference is otherwise fine and may never receive a
+binary frame. But the consequence is not local: the platform default for a binary
+frame is a `Blob`, **this library has no `Blob`-to-bytes conversion anywhere**
+(`src/utils/frameSize.js` only _sizes_ one, while `decodeMessage` takes views and
+`ArrayBuffer`), and so every inbound frame then failed in the codec with
+`expected a Uint8Array`.
+
+That error named the codec rather than the cause, and it arrived **once per
+frame**. `test/powerWebSocketClient.maxPayload.test.js` had documented this as
+"pre-existing behaviour … a client has to set `binaryType` to get bytes rather
+than a Blob"; this is the first change to what the caller actually sees.
+
+**Now: one `error`, naming the cause and the two ways out** (pass a
+`WebSocketImpl` that honours `binaryType`, or send text frames), with
+`stats().decodeErrors` still counting every frame that could not be read — so the
+counter remains a measure of data loss rather than of messages reported. The
+codec is never reached on that path, because reaching it is what produced the
+error this replaces. The report is one-shot **across reconnects**: the platform
+will refuse again on every connection, and a repeat per connection is the same
+wall of noise one layer down.
+
+**Blobs are still not decoded, on purpose.** `await blob.arrayBuffer()` is the
+conversion, and the inbound path is synchronous, so awaiting there would make
+**delivery order an implementation detail**. Cost is not the objection — measured
+at 0.045 ms for a 64 KiB frame, 0.101 ms on the first call — the ordering
+contract is. That is the remaining half of RT-036, kept as a separate decision
+rather than folded in here.
+
+**5 tests, 3 mutants, all caught:** forgetting the refusal kills 3, reporting per
+frame rather than once kills 2, and letting the codec run anyway kills 2. The last
+mutant is the one worth noting — an earlier draft of this change suppressed only
+the _new_ message and still let `decodeMessage` throw underneath it, so three
+frames produced three errors and only the first was the right one. Counting
+always, reporting once, and never reaching the codec is what actually fixes it.
+
 ## `maxReconnectAttempts` still defaults to `Infinity`, and 2.0 says so on purpose
 
 **GAP-010 is half shipped by decision, not by omission.** `maxReconnectElapsedMs`
@@ -9101,3 +9141,49 @@ now says so: they need a real pure-ESM process, `vi.stubGlobal('require')` does 
 because vitest injects `require` into the module _scope_, and `test/workerAgnostic.esm.test.js`
 exercises the behaviour in a real subprocess instead. Do not "fix" the gap with
 `coverage.exclude` — that would delete the number instead of explaining it.
+
+## CI's coverage gate was flaky, and it was four leftover build fallbacks
+
+`VERIFY_TEST=test:coverage` — what CI runs — failed intermittently on a tree with
+nothing wrong in it: between one and ten failures, including
+`ENOENT: dist/performance-helpers.js`, `test/index.test.js` reporting
+`.cjs must exist`, and `Command failed: npm run build`. Verified pre-existing by
+restoring `vitest.config.js` from `HEAD` and reproducing it, and _worse_ there,
+which is what identified timing rather than configuration as the variable.
+
+`test/globalSetup.js` builds the UMD bundle once and **deletes `dist/` first**, on the
+good grounds that a stale bundle survives across runs and the suite then silently tests
+yesterday's `src/`. That is right, and it is also not enough: **four fallback builds
+survived the fix this file already records as complete** — one in the shared
+`test/helpers/umdBundle.js` and three in `umd.bundle.*` files, one of them at import
+time. So any worker that reached a fallback started its own full Vite build into a
+directory another build was rewriting.
+
+The helper's fallback justified itself as existing "for running a single test file
+directly without the global setup". The module imports `vitest`, so it is vitest-only,
+and `vitest run <one file>` still runs `globalSetup` — **the fallback was unreachable by
+design and harmful whenever reached.** It now throws an error naming `globalSetup` as the
+builder, and the three `umd.bundle.*` files read through the shared helper.
+
+`test/umdBundle.buildOwnership.test.js` asserts the invariant as a **property rather than
+a site list**, because the sites move and the regression is "a test builds the bundle".
+It reads source rather than timing a build, because the regression is structural and exact
+while its symptom is neither. Three tests, **3 of 3 mutants killed**: the fallback
+restored verbatim, a fifth site in a file the guard never named, and `globalSetup`
+silently ceasing to delete `dist/`.
+
+**Three of my own mistakes, all caught by running rather than by reading.** The first scan
+matched `execSync|spawnSync` and flagged two innocent files — `test/commitGuard.test.js`
+shells out to **git**, and the guard matched its own regex literal — so it now matches the
+build command, which is the only way to spell the _action_ rather than the tool. It then
+flagged itself again and needed an exemption. And the assertion that `globalSetup` deletes
+`dist/` used a regex that could not span `path.resolve`'s own closing paren, so it **never
+matched anything** — the failure mode where a guard looks like it is guarding.
+
+**The measurement is incomplete and is recorded as such.** Three consecutive coverage runs
+after the fix measured 12 failures, then 2885/2885, then 1 — and those failures were
+`docsCodeAgreement` reporting a `powerWebSocketClient.md` reference from a concurrent
+session's uncommitted edit, not this defect. What can be said: the `ENOENT` /
+`.cjs must exist` / `Command failed: npm run build` class did not reappear in any run after
+the fix, and it was present in every run before it. Re-running the three on a quiet tree
+would close it completely.
