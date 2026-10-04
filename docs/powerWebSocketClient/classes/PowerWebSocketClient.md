@@ -180,6 +180,12 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 
 ***
 
+### \_nonRetryableCloseCodes
+
+> **\_nonRetryableCloseCodes**: `number`[]
+
+***
+
 ### \_on
 
 > **\_on**: `object`
@@ -302,6 +308,12 @@ decorrelated-jitter backoff cursor, in ms
 
 ***
 
+### \_streamReader
+
+> **\_streamReader**: `ReadableStreamDefaultReader`\<`any`\> \| `null`
+
+***
+
 ### \_writer
 
 > **\_writer**: `WritableStreamDefaultWriter`\<`any`\> \| `null`
@@ -419,6 +431,22 @@ The socket's ready state, mirroring the platform
   `_state === READY_STATE.X` comparison), and the next used the DOM alias.
 
 ## Methods
+
+### \_handleMessage()
+
+> **\_handleMessage**(`event`): `void`
+
+#### Parameters
+
+##### event
+
+`any`
+
+#### Returns
+
+`void`
+
+***
 
 ### \[asyncDispose\]()
 
@@ -550,7 +578,7 @@ Remove a registered handler.
 
 ##### type
 
-`"message"` \| `"open"` \| `"close"` \| `"error"` \| `"pause"` \| `"resume"`
+`"message"` \| `"error"` \| `"open"` \| `"close"` \| `"pause"` \| `"resume"`
 
 #### Returns
 
@@ -568,7 +596,7 @@ Register a lifecycle handler.
 
 ##### type
 
-`"message"` \| `"open"` \| `"close"` \| `"error"` \| `"pause"` \| `"resume"`
+`"message"` \| `"error"` \| `"open"` \| `"close"` \| `"pause"` \| `"resume"`
 
 ##### handler
 

@@ -84,6 +84,13 @@ client.backpressureMode; // 'streams' | 'watermark' | 'none'
 
 With the Streams tier there is no polling at all: `send()` awaits `writer.ready`, so the returned promise resolves only when the socket has room. That is a stronger guarantee than a watermark, because there is no window in which a message can be queued into a full buffer.
 
+Inbound works the other way round, and it is worth knowing that it is a **reader**: once the connection opens the client takes a reader from `readable` and pumps frames through the same decode path the socket tier uses. Two consequences you can observe:
+
+- A `WebSocketStream` has no `message` event, so nothing arrives unless someone takes that reader. The client does, on every connection — including reconnects — and holds the handle so `close()` can `cancel()` it. A pending `read()` keeps the stream locked, so dropping the handle would leak the lock and leave the _next_ connection unable to supply a reader at all.
+- `close()` cancels the reader before aborting the writer, because aborting the write side does not release a read lock.
+
+A `read()` that rejects is reported as an `error` event rather than thrown, and deliberately does **not** trigger a reconnect: synthesising a close would invent a `close` event and a close code the peer never sent. The trade-off is that a stream failing _after_ it opened leaves a deaf open socket — a real limitation, not a settled design.
+
 ## What back-pressure you actually get
 
 Worth being precise, because it is the part people get wrong:
@@ -164,6 +171,45 @@ When a run ends because a bound was reached, `stats().reconnectExhaustedBy` says
 
 Both default to `Infinity`, which is the documented anti-pattern for an always-on connection: _"Should I reconnect a WebSocket forever? No… Retrying forever wastes mobile battery and server resources with no benefit."_ The finite defaults are a **3.0** change, because turning them on by default closes sockets that currently stay open — a behaviour change this release does not make silently. Set at least one bound explicitly.
 
+### Declaring a close code non-retryable
+
+**New in 2.0, opt-in, default `[]`.** Backoff bounds _how long_ a client keeps trying; they do not stop it from trying at all. A peer that closes with **1008** (policy violation), **1001** (going away) or **1002** (protocol error) is telling you something specific, and reconnecting immediately — with the decorrelated jitter, so within a second or two — means every client in your fleet re-offers the same connection the server just refused. That is the stampede the backoff exists to prevent, arriving through the one door the backoff does not close.
+
+```javascript
+new PowerWebSocketClient({
+  url,
+  nonRetryableCloseCodes: [1008, 1001, 1002],
+});
+```
+
+What a matching close does:
+
+- **No reconnect timer is armed.** The check runs ahead of every reconnect input —
+  `autoReconnect`, `maxReconnectAttempts`, `maxReconnectElapsedMs` — so a bound
+  cannot re-enable it, and a future `shouldReconnect` callback cannot outrank a
+  code you declared terminal.
+- **`readyState` goes to `CLOSED`** and the `close` event **is** emitted with the
+  original event, so an `onClose` handler still runs.
+- **It is not latched.** `connect()` afterwards works, because a code can be
+  terminal for one close and wrong for the next.
+- `stats()` records `reconnects: 0`, `reconnectAttempts: 0` and
+  **`reconnectExhaustedBy: 'close-code'`** — a third value alongside `'attempts'`
+  and `'elapsed'`. It is the only thing that distinguishes "stopped because you
+  said so" from "stopped because `autoReconnect: false`", and the three mean
+  different things to whoever is alerting.
+
+Validation: a non-array throws, and so does an entry that is not a close code.
+Duplicates are legal and order is irrelevant — the array is copied at
+construction, so mutating yours afterwards does not change the client's mind.
+Numeric strings match (`'1008'` matches `1008`); everything else is compared
+numerically against `event.code`.
+
+Note what this does **not** do: it does not make the close _recoverable_. A
+declared code is a decision that reconnecting is wrong, not an instruction to
+open a new connection later on a schedule. If you want "stop now, try again in
+30 seconds", that is a `close` handler of your own calling `connect()` on a
+timer.
+
 ## Connect timeout
 
 `connectTimeoutMs` (default 10 s) aborts an attempt that never completes, rejecting with `ERR_WS_CONNECT_TIMEOUT`. Without it, a silently-failing DNS or a black-holed TCP connect hangs the promise forever.
@@ -201,7 +247,7 @@ That is why it is described this way in the option, in the error message, and he
 - `await client[Symbol.asyncDispose]()` — present so `await using` works. **A delegation to `dispose()`, not a graceful path**: this client's teardown is `close()`, which is synchronous and already complete, so there is nothing to await. Compare `PowerRealtimeHub`, whose `asyncDispose` flushes pending frames first because it has some.
 - `on(type, handler)` → one-shot unsubscribe; `off(type)`. Types: `message`, `open`, `close`, `error`, `pause`, `resume`. One handler per event; registering again replaces.
 - `ping()` — application-level ping, for protocols that expose one.
-- `stats()` → `{ readyState, backpressureMode, paused, bufferedAmount, highWaterMark, lowWaterMark, reconnectAttempts, reconnectExhaustedBy, sent, received, drops, decodeErrors, oversizeFrames, reconnects, heartbeatTimeouts, heartbeats, rtt }`. `reconnectExhaustedBy` is `'attempts'`, `'elapsed'`, or `null`.
+- `stats()` → `{ readyState, backpressureMode, paused, bufferedAmount, highWaterMark, lowWaterMark, reconnectAttempts, reconnectExhaustedBy, sent, received, drops, decodeErrors, oversizeFrames, reconnects, heartbeatTimeouts, heartbeats, rtt }`. `reconnectExhaustedBy` is `'attempts'`, `'elapsed'`, `'close-code'`, or `null`.
 - Getters: `isOpen`, `paused`, `bufferedAmount`, `readyState`, `backpressureMode`.
 
 ## Error handling

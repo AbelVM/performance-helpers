@@ -133,6 +133,47 @@ export { READY_STATE };
  * @property {number} [reconnectBaseMs=500] - Base delay for the backoff.
  * @property {number} [reconnectMaxMs=30000] - Ceiling for the backoff.
  * @property {boolean} [autoReconnect=true] - Reconnect on an unexpected close.
+ * @property {number[]} [nonRetryableCloseCodes=[]] - Close codes that **end**
+ *   the client rather than being retried. RT-014.
+ *
+ *   **Opt-in, and `[]` by default, so nothing changes until it is configured.**
+ *   A `close` event whose `code` is in this list skips the whole reconnect
+ *   decision: no attempt is counted, no backoff delay is armed, and
+ *   `stats().reconnectExhaustedBy` becomes `'close-code'`. The client is left
+ *   exactly where a caller-initiated `close()` leaves it — `readyState` `3`
+ *   (`CLOSED`), the `close` event already emitted, no timer pending.
+ *
+ *   The reason it exists is the stampede the backoff cannot prevent. A `1008`
+ *   (policy violation), `1001` (going away) or `1002` (protocol error) close is
+ *   the *same* answer for every client of a service, delivered immediately, so
+ *   decorrelated jitter has nothing to decorrelate — it spreads the retries
+ *   after the decision, not the decision itself. Declaring the code makes "this
+ *   is not retryable" a property of the application rather than a property of
+ *   the outage.
+ *
+ *   **The check runs before every other input to the reconnect decision** —
+ *   `autoReconnect`, `maxReconnectAttempts`, `maxReconnectElapsedMs` — and so
+ *   before any future `shouldReconnect` callback, because a caller's own
+ *   predicate must not be able to re-enable a reconnect on a code the caller
+ *   just declared non-retryable. No `shouldReconnect` option exists on this
+ *   class today, so the inputs being short-circuited are the built-in ones.
+ *
+ *   **A numeric string in the list matches the numeric `event.code`**, so
+ *   `'1008'` and `1008` behave identically. A list that silently matched
+ *   nothing is the one failure direction this option must not have: a code
+ *   read out of JSON, an environment variable or a query string arrives as a
+ *   string, and an ineffective list is indistinguishable from no list at all —
+ *   the client reconnects for ever, which is the defect being fixed. For the
+ *   same reason RT-013 validates `maxReconnectAttempts` rather than coercing
+ *   it, an entry that is not a code (`NaN`, `null`, `''`, `'close'`, an object)
+ *   **throws** at construction instead of being dropped: a dropped entry is a
+ *   list the caller believes in and the client ignores. Duplicates and `[]`
+ *   are legal.
+ *
+ *   A pending `connect()` promise is unaffected. A close arriving before `open`
+ *   settles it with the close event — the pre-existing RT-001 path, unchanged —
+ *   and a close after `open` has nothing left to settle. Call `connect()` again
+ *   to retry deliberately; the client is not latched.
  * @property {boolean} [reconnectOnHeartbeatTimeout=true] - Reconnect when a
  *   heartbeat goes unanswered. A TCP connection that is silently dead is common
  *   behind proxies and load balancers, and a socket can sit in `OPEN` forever
@@ -158,6 +199,59 @@ export { READY_STATE };
  *   metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Off by default, so the common case allocates nothing.
  */
+
+/**
+ * RT-014: the one place a close code is read as a number.
+ *
+ * **A numeric string is accepted, and this is the only place that decision is
+ * made** — both the constructor's validation and the close handler go through
+ * it, so "does `'1008'` match `1008`?" has exactly one answer in the codebase.
+ * The reasoning is on the option: a list that silently matches nothing is
+ * indistinguishable from no list, and the failure it produces is the
+ * reconnect-for-ever behaviour the option exists to stop. The dangerous
+ * direction is a lenient read; a strict one would need a `close`-code list
+ * written in exactly one type, which is not something a JSON config or a query
+ * string can be relied on to do.
+ *
+ * `NaN` is returned for anything that is not a code, and that is the right
+ * "no code" value rather than a sentinel: `NaN === NaN` is false, so a bad
+ * entry cannot match a bad `event.code` either, and it keeps the two traps
+ * `Number()` falls into — `Number(null) === 0` would let a stray `null` match
+ * close code 0, `Number([]) === 0` likewise — out of reach. `±Infinity` goes the
+ * same way even though it is a `number`: a close code is a `uint16`, so it can
+ * never be an infinite one, and accepting it would store an entry that can never
+ * match anything — the same "looks configured, does nothing" shape as a bad one.
+ *
+ * @param {*} value A close code as the caller configured it, or the `code` from
+ *   a `CloseEvent`.
+ * @returns {number} The code, or `NaN` when the value is not one.
+ * @private
+ */
+function closeCodeNumber(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : Number.NaN;
+  // `trim() !== ''` is what rejects `''` and `'  '`, which `Number()` answers
+  // with 0 — the same trap as `null`, arrived at from the other direction.
+  if (typeof value === 'string' && value.trim() !== '') return Number(value);
+  return Number.NaN;
+}
+
+/**
+ * Whether an incoming close code is one the caller declared non-retryable.
+ *
+ * @param {readonly number[]} codes Already normalised by the constructor, which
+ *   is why the scan compares numbers with `===` and does no coercion of its own.
+ * @param {*} code The `CloseEvent.code`, or `undefined` on a synthetic close.
+ * @returns {boolean}
+ * @private
+ */
+function matchesCloseCode(codes, code) {
+  const target = closeCodeNumber(code);
+  if (Number.isNaN(target)) return false;
+  for (const candidate of codes) {
+    if (candidate === target) return true;
+  }
+  return false;
+}
 
 /**
  * Reconnecting WebSocket client with explicit back-pressure.
@@ -199,6 +293,7 @@ export class PowerWebSocketClient {
         'reconnectBaseMs',
         'reconnectMaxMs',
         'autoReconnect',
+        'nonRetryableCloseCodes',
         'reconnectOnHeartbeatTimeout',
         'dropOnBackpressure',
         'onMessage',
@@ -230,6 +325,7 @@ export class PowerWebSocketClient {
       reconnectBaseMs = 500,
       reconnectMaxMs = 30_000,
       autoReconnect = true,
+      nonRetryableCloseCodes = [],
       reconnectOnHeartbeatTimeout = true,
       onMessage,
       onOpen,
@@ -251,6 +347,17 @@ export class PowerWebSocketClient {
       throw new TypeError(
         'PowerWebSocketClient: `lowWaterMarkBytes` must be <= `highWaterMarkBytes` ' +
           '(otherwise the socket would pause and never resume)'
+      );
+    }
+    // RT-014. A non-array throws rather than being coerced, in the same shape as
+    // the option checks above: `null` and a bare number both reach here (the
+    // destructuring default only covers `undefined`) and both would otherwise be
+    // iterated or length-read into a decision nobody made.
+    if (!Array.isArray(nonRetryableCloseCodes)) {
+      throw new TypeError(
+        'PowerWebSocketClient: `nonRetryableCloseCodes` must be an array of close codes ' +
+          `(received ${String(nonRetryableCloseCodes)}). An entry that is not a code ` +
+          'matches nothing, which is indistinguishable from not configuring the option.'
       );
     }
 
@@ -408,6 +515,28 @@ export class PowerWebSocketClient {
       })
     );
     this._autoReconnect = autoReconnect !== false;
+    // RT-014. Normalised **once**, into a fresh array, so the close path is a
+    // plain number comparison — a close event can arrive for the life of the
+    // process, and re-reading strings on it would be work the constructor
+    // already had the chance to do. A copy, because the caller's array is still
+    // theirs: mutating the list after construction must not silently change
+    // which codes end the client. Duplicates are left in place — a scan does not
+    // care, and dropping them would imply a de-duplication this does not promise.
+    this._nonRetryableCloseCodes = nonRetryableCloseCodes.map((code, i) => {
+      const n = closeCodeNumber(code);
+      // Throws rather than skipping, which is the `maxReconnectAttempts: NaN`
+      // lesson (RT-013) applied to a list: a silently dropped entry is a code
+      // the caller believes is protected and is not.
+      if (Number.isNaN(n)) {
+        throw new TypeError(
+          `PowerWebSocketClient: \`nonRetryableCloseCodes[${i}]\` must be a close code as ` +
+            `a number or a numeric string (received ${String(code)}). An entry that is not ` +
+            'a code matches nothing, so the client would reconnect exactly as if the list ' +
+            'were empty.'
+        );
+      }
+      return n;
+    });
     this._reconnectOnHeartbeatTimeout = reconnectOnHeartbeatTimeout !== false;
 
     this._on = {
@@ -422,6 +551,10 @@ export class PowerWebSocketClient {
     this._socket = null;
     /** @type {WritableStreamDefaultWriter|null} */
     this._writer = null;
+    /** @type {ReadableStreamDefaultReader|null} */
+    // Held so `close()` can cancel it. The streams tier's inbound path depends on
+    // this existing at all: nothing else in the class ever takes a reader.
+    this._streamReader = null;
     // Field declaration for the checker only: an `@type` on the initializer
     // narrows `_state` to the literal `3`, which made every
     // `_state === READY_STATE.X` comparison an "unintentional comparison"
@@ -541,6 +674,18 @@ export class PowerWebSocketClient {
   close(code = 1000, reason = '') {
     this._closedByUser = true;
     this._clearTimers();
+    if (this._streamReader) {
+      // Cancel before the writer: a pending `read()` holds the stream lock, and
+      // aborting the write side does not release it. Left uncancelled, every
+      // reconnect leaks a lock and the replacement stream cannot hand out a
+      // reader — so the next connection would be deaf for a different reason.
+      try {
+        this._streamReader.cancel?.();
+      } catch (e) {
+        this._emit('error', e);
+      }
+      this._streamReader = null;
+    }
     if (this._writer) {
       try {
         this._writer.abort?.();
@@ -737,6 +882,14 @@ export class PowerWebSocketClient {
       // count suggests the peer is refusing; one stopped by the clock suggests
       // the outage outlived the budget. `Infinity` on both defaults means neither
       // can fire, so this stays `null` for the default configuration.
+      //
+      // RT-014 adds a third value, `'close-code'`, for a close whose code is in
+      // `nonRetryableCloseCodes`. It is not a bound that ran out — nothing was
+      // attempted — but it answers the same question ("why did it stop?"), and
+      // without it a declared non-retryable close is indistinguishable from
+      // `autoReconnect: false` or a caller-initiated `close()`. The most recent
+      // terminal reason is the one reported, so a code arriving after an
+      // exhausted budget overwrites `'attempts'`.
       reconnectExhaustedBy: this._reconnectExhaustedBy ?? null,
       ...this._counters,
       rtt: {
@@ -822,7 +975,26 @@ export class PowerWebSocketClient {
           this._socket = new this._WSStream(this.url, this.protocols);
           this._writer = this._socket.writable?.getWriter?.() || null;
           this._socket.opened
-            ?.then(() => this._handleOpen(done))
+            ?.then(() => {
+              this._handleOpen(done);
+              // **The read side, which this tier did not have.** `writable` was
+              // acquired two lines up and `message` is wired only in the
+              // `WebSocket` branch below, so before this the streams tier
+              // opened, sent and received nothing — with no error and no
+              // counter, because nothing ever looked. `PowerSocketAdapter` had
+              // already hit the identical shape and fixed it by detecting the
+              // tier on `readable.getReader` rather than on truthiness (its
+              // `readable`/`writable` *booleans* on a Node `Duplex` matched
+              // every TCP socket in existence); see `guides/powerSocketAdapter.md`.
+              // Detection is not the problem here — `_WSStream` is a constructor,
+              // not a flag — so the missing half was simply the reader.
+              //
+              // Started after `opened` because a `WebSocketStream` reports
+              // `readable: null` until the connection opens, and that object is
+              // still a stream. Waiting is not optional: acquiring a reader
+              // earlier throws.
+              this._startStreamPump();
+            })
             .catch((/** @type {any} */ e) => {
               this._handleError(e);
               done(e);
@@ -971,6 +1143,60 @@ export class PowerWebSocketClient {
    *   the caller delivers one directly - hence `event?.data ?? event`.
    * @private
    */
+  /**
+   * Read the streams tier's inbound frames until the stream ends.
+   *
+   * A `WebSocketStream` has no `message` event: inbound frames arrive from
+   * `readable`, so **nothing arrives unless someone takes a reader.** That is
+   * the whole of the fix — the loop itself is ordinary.
+   *
+   * Two decisions worth stating:
+   *
+   * - **The reader is retained**, as `_streamReader`, so `close()` can cancel it.
+   *   A pending `read()` keeps the stream locked; dropping the handle would leak
+   *   the lock on every reconnect, and the replacement stream would then fail to
+   *   hand out a reader at all.
+   * - **A read failure is reported, not thrown, and deliberately does not open a
+   *   reconnect.** `error` is what the caller already handles, and synthesising a
+   *   close would invent a `close` event and a close code the peer never sent.
+   *   The trade-off is that a stream that fails *after* opening leaves a deaf
+   *   open socket, which is the shape this method exists to remove — so it is a
+   *   real limitation rather than a settled design, and it needs a decision about
+   *   what a fabricated close should look like before it can be changed. Recorded
+   *   in the audit that found it rather than settled here.
+   *
+   * @private
+   * @returns {void}
+   */
+  _startStreamPump() {
+    const readable = this._socket?.readable;
+    if (!readable || typeof readable.getReader !== 'function') return;
+    let reader;
+    try {
+      reader = readable.getReader();
+    } catch (e) {
+      this._handleError(e);
+      return;
+    }
+    this._streamReader = reader;
+    void (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          // The stream yields the frame itself, so there is no event to unwrap.
+          // `_handleMessage` reads `event?.data ?? event`, which passes a
+          // `Uint8Array` straight through and unwraps a real `MessageEvent` on
+          // the socket tier — the same call serves both, which is why the tier
+          // does not need its own decode path.
+          this._handleMessage(value);
+        }
+      } catch (e) {
+        this._handleError(e);
+      }
+    })();
+  }
+
   _handleMessage(event) {
     const data = event?.data ?? event;
 
@@ -1023,6 +1249,7 @@ export class PowerWebSocketClient {
     this._stopPoll();
     this._setPaused(false);
     this._writer = null;
+    this._streamReader = null;
     this._state = READY_STATE.CLOSED;
     this._emit('close', event, this);
     // The reconnect run begins at the **outage**, not at the first retry, which
@@ -1032,6 +1259,24 @@ export class PowerWebSocketClient {
     // "no time for even one retry" permitted exactly one. Starting it here means
     // a budget of 0 yields 0 attempts and 10s yields every retry inside 10s.
     if (!this._closedByUser) {
+      // RT-014. **First, and ahead of every other input to the decision.**
+      //
+      // It sits here rather than inside `_scheduleReconnect` because the check
+      // has to outrank *all* of them: `autoReconnect`, `maxReconnectAttempts` and
+      // `maxReconnectElapsedMs` today, and a `shouldReconnect` callback whenever
+      // one is added. A caller's own predicate must not be able to re-enable a
+      // reconnect on a code that same caller just declared non-retryable — the
+      // declaration is the stronger statement, and a callback that overrode it
+      // would be a foot-gun with no way to notice it was firing.
+      //
+      // It also runs before `_reconnectStartedAt` is stamped, so a run that was
+      // never started is not reported as one that began and stopped: the
+      // elapsed budget stays `null` and the next `connect()` gets the full
+      // window.
+      if (matchesCloseCode(this._nonRetryableCloseCodes, event?.code)) {
+        this._reconnectExhaustedBy = 'close-code';
+        return;
+      }
       if (this._reconnectStartedAt === null) this._reconnectStartedAt = nowMs();
       this._scheduleReconnect();
     }

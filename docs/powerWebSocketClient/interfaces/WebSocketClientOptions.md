@@ -150,6 +150,54 @@ Wall-clock ceiling on
 
 ***
 
+### nonRetryableCloseCodes?
+
+> `optional` **nonRetryableCloseCodes?**: `number`[]
+
+Close codes that **end**
+  the client rather than being retried. RT-014.
+
+  **Opt-in, and `[]` by default, so nothing changes until it is configured.**
+  A `close` event whose `code` is in this list skips the whole reconnect
+  decision: no attempt is counted, no backoff delay is armed, and
+  `stats().reconnectExhaustedBy` becomes `'close-code'`. The client is left
+  exactly where a caller-initiated `close()` leaves it — `readyState` `3`
+  (`CLOSED`), the `close` event already emitted, no timer pending.
+
+  The reason it exists is the stampede the backoff cannot prevent. A `1008`
+  (policy violation), `1001` (going away) or `1002` (protocol error) close is
+  the *same* answer for every client of a service, delivered immediately, so
+  decorrelated jitter has nothing to decorrelate — it spreads the retries
+  after the decision, not the decision itself. Declaring the code makes "this
+  is not retryable" a property of the application rather than a property of
+  the outage.
+
+  **The check runs before every other input to the reconnect decision** —
+  `autoReconnect`, `maxReconnectAttempts`, `maxReconnectElapsedMs` — and so
+  before any future `shouldReconnect` callback, because a caller's own
+  predicate must not be able to re-enable a reconnect on a code the caller
+  just declared non-retryable. No `shouldReconnect` option exists on this
+  class today, so the inputs being short-circuited are the built-in ones.
+
+  **A numeric string in the list matches the numeric `event.code`**, so
+  `'1008'` and `1008` behave identically. A list that silently matched
+  nothing is the one failure direction this option must not have: a code
+  read out of JSON, an environment variable or a query string arrives as a
+  string, and an ineffective list is indistinguishable from no list at all —
+  the client reconnects for ever, which is the defect being fixed. For the
+  same reason RT-013 validates `maxReconnectAttempts` rather than coercing
+  it, an entry that is not a code (`NaN`, `null`, `''`, `'close'`, an object)
+  **throws** at construction instead of being dropped: a dropped entry is a
+  list the caller believes in and the client ignores. Duplicates and `[]`
+  are legal.
+
+  A pending `connect()` promise is unaffected. A close arriving before `open`
+  settles it with the close event — the pre-existing RT-001 path, unchanged —
+  and a close after `open` has nothing left to settle. Call `connect()` again
+  to retry deliberately; the client is not latched.
+
+***
+
 ### observability?
 
 > `optional` **observability?**: `boolean` \| [`MetricsCollector`](../../helpers/metrics/classes/MetricsCollector.md)
