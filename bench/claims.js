@@ -1858,7 +1858,137 @@ function runSketchWorkload() {
           '       frequency than collapsed ones, or the sketch is effectively one row deep.'
   );
 
-  return { incrementNs: inc, estimateNs: est, distributionSum: good.total };
+  // ── GAP-014: keys the cache compares by reference ─────────────────────────
+  //
+  // Everything above measures *string* keys, which is why this mode was blind to
+  // the defect ADR 0007 records: `hashKey` did `String(key)`, and `String({})` is
+  // `"[object Object]"` for **every** object, so a cache keyed by object
+  // references — which `PowerCache` is, its entries live in a `Map` — handed the
+  // filter one counter for the whole key space. This mode is the one ADR 0007
+  // names as its own reversal condition ("`sketch` shows the `WeakMap` read
+  // costing more than the discrimination is worth"), and it could not see it.
+  //
+  // Read the **discrimination** block before the timings. The timing is the cost
+  // of a feature; the discrimination is whether the feature is worth anything, and
+  // a cost measurement alone would let a useless-but-fast path pass as a win.
+  //
+  // The "before" figures are computed here rather than quoted, for the same
+  // reason the collapsed distribution is: the string form of an object is one
+  // value, so a quoted number would be a claim about this machine's `String()`.
+  //
+  // **The claim is distinctness, not a zero.** An earlier draft of this block
+  // gated on "a never-seen object key must estimate 0" and reported the shipped
+  // code as broken. It was the assertion: Count-Min may *overcount*, which is its
+  // documented safe direction, so at `width: 64` a fresh id can legitimately land
+  // on a neighbour's counter. What the pre-fix shape could not do is give two
+  // object keys *different* answers at all — every one of them read the same
+  // number, and so did the key that had never been seen. That is the invariant,
+  // and unlike a zero it cannot be broken by a collision.
+  const objectKeys = Array.from({ length: 200 }, (_, i) => ({ i }));
+  const objectSketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
+  for (const k of objectKeys) objectSketch.increment(k);
+  const neverSeen = { i: 'never-seen' };
+  const objectEstimates = objectKeys.map((k) => objectSketch.estimate(k));
+  const objectTotal = objectEstimates.reduce((a, b) => a + b, 0);
+  const objectDistinct = new Set(objectEstimates).size;
+  const neverSeenEstimate = objectSketch.estimate(neverSeen);
+
+  // The counterfactual is the pre-GAP-014 `_hash`: `String(key)` plus one FNV
+  // pass. Pinned on the instance rather than re-implemented in a second sketch,
+  // so it cannot drift from the code it claims to describe — the same discipline
+  // as the collapsed-rows block above.
+  const legacySketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
+  legacySketch._hash = (key) => {
+    const text = String(key);
+    let h = 0x811c9dc5 | 0;
+    for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+    return h;
+  };
+  for (const k of objectKeys) legacySketch.increment(k);
+  const legacyEstimates = objectKeys.map((k) => legacySketch.estimate(k));
+  const legacyTotal = legacyEstimates.reduce((a, b) => a + b, 0);
+  const legacyDistinct = new Set(legacyEstimates).size;
+  const legacyNeverSeen = legacySketch.estimate(neverSeen);
+
+  console.log('\n  object keys — the discrimination the string path could not do');
+  console.log('  200 distinct objects, one increment each:');
+  console.log(
+    `    ${'shape'.padStart(18)}${'sum'.padStart(8)}${'distinct estimates'.padStart(20)}${'never-seen object'.padStart(19)}`
+  );
+  const shapeRow = (label, total, distinct, unseen) =>
+    `    ${label.padStart(18)}${String(total).padStart(8)}${`${distinct} of 200`.padStart(20)}${String(unseen).padStart(19)}`;
+  console.log(shapeRow('object (shipped)', objectTotal, objectDistinct, neverSeenEstimate));
+  console.log(shapeRow('object (was)', legacyTotal, legacyDistinct, legacyNeverSeen));
+  console.log(
+    legacyDistinct === 1 && objectDistinct > 1
+      ? '    => before, every object key shared ONE counter: same estimate for all 200, and the\n' +
+          '       never-seen key reported the same again, so the filter had no signal at all.\n' +
+          '       Now they are distinguishable, which is what admission needs.'
+      : '    => **the identity path is not discriminating**: the pre-fix shape must report\n' +
+          '       exactly one distinct estimate across 200 object keys (they share a counter),\n' +
+          '       and the shipped shape must report more than one.'
+  );
+
+  console.log('\n  and what the identity path costs, against the string path it replaced');
+  // The cost question ADR 0007 sets as its own reversal condition: "shows the
+  // `WeakMap` read costing more than the discrimination is worth".
+  //
+  // **The key that makes the comparison honest is one with a `toString`.** A plain
+  // object's string form is the constant `"[object Object]"` — it does not include
+  // own properties — so making the object "bigger" changes nothing for the string
+  // path, and an earlier draft of this block claimed a size scaling that does not
+  // exist. A caller whose key object defines `toString` *is* paying for its size,
+  // and that is the case the identity path removes.
+  const smallObject = neverSeen;
+  const wideObject = {
+    i: 'never-seen',
+    toString() {
+      return `never-seen:${'y'.repeat(256)}`;
+    },
+  };
+  const costRow = (sketch, label, key) => {
+    const i = timePerCall(() => sketch.increment(key), iterations);
+    const e = timePerCall(() => sketch.estimate(key), iterations);
+    return { label, i, e, both: i + e };
+  };
+  const shape = (label, sketch) => [
+    costRow(sketch, `${label}, plain`, smallObject),
+    costRow(sketch, `${label}, 256B toString`, wideObject),
+  ];
+  const identityCost = shape('identity', objectSketch);
+  const legacyCost = shape('string form', legacySketch);
+  console.log(
+    `    ${'key'.padStart(28)}${'increment'.padStart(12)}${'estimate'.padStart(11)}${'both'.padStart(10)}`
+  );
+  console.log(
+    `    ${'string, len 6'.padStart(28)}${inc.toFixed(1).padStart(10)} ns${est.toFixed(1).padStart(9)} ns${(inc + est).toFixed(1).padStart(8)} ns`
+  );
+  const printRow = ({ label, i, e, both }) =>
+    `    ${label.padStart(28)}${i.toFixed(1).padStart(10)} ns${e.toFixed(1).padStart(9)} ns${both.toFixed(1).padStart(8)} ns`;
+  for (const r of identityCost) console.log(printRow(r));
+  for (const r of legacyCost) console.log(printRow(r));
+  // Deliberately no verdict line with a percentage in it. Two runs of the same
+  // code on this machine have put the string-key path between 32 ns and 62 ns,
+  // which is the harness's own spread, so a single-run difference between two
+  // object paths is not a claim about either of them. What the pair of rows does
+  // show, and what does not depend on the noise, is the *shape*: the string form
+  // grows with the key's text and the identity path does not.
+  console.log(
+    `    => the string form follows the key's text: ${legacyCost[1].both.toFixed(1)} ns against ` +
+      `${legacyCost[0].both.toFixed(1)} ns for a plain\n` +
+      `       object. The identity path does not (${identityCost[1].both.toFixed(1)} ns against ` +
+      `${identityCost[0].both.toFixed(1)} ns) — it hashes an integer\n` +
+      '       the sketch handed out. Treat the absolute gap between the two object\n' +
+      '       paths as noise on this harness; treat the size insensitivity as the claim.'
+  );
+
+  return {
+    incrementNs: inc,
+    estimateNs: est,
+    distributionSum: good.total,
+    objectDistinctEstimates: objectDistinct,
+    legacyDistinctEstimates: legacyDistinct,
+  };
 }
 
 // ─── Workload 10: what the admission window costs on the read path ───────────

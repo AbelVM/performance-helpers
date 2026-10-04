@@ -107,6 +107,7 @@ function sketchWidthFor(maxEntries) {
  */
 import { nowMs } from '../utils/now.js';
 import { attach, detach } from './metrics.js';
+import { isError } from '../utils/errors.js';
 import {
   assertFunction,
   assertLimitRequired,
@@ -559,10 +560,12 @@ export class PowerCache {
     // memory probe per access, which is what not building it saves.
     //
     // The broader W-TinyLFU admission window that this option was heading
-    // towards is **not** in this release - the mechanism is correct but still
-    // measures worse than plain LRU on this workload, so it did not meet its own
-    // acceptance criteria. `adr/0003-tinylfu-admission-window.md` has the
-    // full story, including why.
+    // towards **is** in this release, reachable behind an opt-in `windowSize`
+    // and left at 0. It is correct, it passes three of ADR 0003's four
+    // acceptance criteria, and it misses the fourth by 79 points: on a cold
+    // start the best window size scores 1.0 % against plain LRU's 80.0 %.
+    // That is the case it was built to fix, so it is not the default.
+    // `adr/0003-tinylfu-admission-window.md` has the full sweep and why.
     this._sketch =
       admission === 'tinylfu' && this._policy === 'lru'
         ? new SmallLfuSketch({
@@ -1641,14 +1644,18 @@ export class PowerCache {
       // **This is a known defect, and the refusal rule above is why
       // `admission: 'tinylfu'` currently underperforms plain LRU.** Measured on
       // the paired Zipf + scan workload in `bench/claims.js` (`node bench/claims.js
-      // zipf`): on a cold 40-entry cache preceded by a 460-key scan burst the
-      // working-set hit rate is 2.5% against plain LRU's 66.4%, because the scan
-      // keys fill the cache while it is still below capacity and the working set
-      // is then refused every time. On a sustained Zipf mix, working-set
-      // retention is 15.4/40 against LRU's 17.2/40, with the worst hot keys
-      // sitting at estimate 0 - and a key at 0 can never re-enter. The release note
-      // for this option has been withdrawn; the measurements live in `review.md`
-      // under BENCH-002.
+      // coldstart`): on a cold 40-entry cache preceded by a 460-key scan burst the
+      // working-set hit rate is **0.0 %** against plain LRU's **80.0 %**, retaining
+      // **0 of 40** working-set keys against LRU's 40/40, because the scan keys
+      // fill the cache while it is still below capacity and the working set is
+      // then refused every time. On a sustained Zipf mix (`node bench/claims.js
+      // zipf`), working-set retention is 15.0/40 against LRU's 17.2/40, and the
+      // worst hot keys sit at estimate 0 - and a key at 0 can never re-enter.
+      //
+      // These two figures are restated from a re-run on the current build, not
+      // copied forward: the sketch is now sized from the cache's capacity and the
+      // key is hashed once per call, and the numbers moved with it. They moved by
+      // about a point, and the ranking did not move at all.
       //
       // **The fix is not a comparison operator.** Changing `>=` to `>` admits the
       // challenger on every tie, which lets a scan walk the working set - the
@@ -1656,9 +1663,14 @@ export class PowerCache {
       // W-TinyLFU's admission *window*: a small region at the MRU end that
       // accepts new keys unconditionally, so scan traffic is absorbed there and
       // the frequency filter arbitrates only that window's victim against a
-      // main-space victim. That needs a size choice, its own interaction rules
-      // with `policy: 'slru'` (which currently makes `tinylfu` *worse*), and its
-      // own tests.
+      // main-space victim. That is built and reachable behind `windowSize`, and it
+      // is off by default: it fixes the sustained mix and not the cold one, so it
+      // did not meet its own acceptance criteria.
+      //
+      // `adr/0003-tinylfu-admission-window.md` has the full sweep, the four
+      // criteria, and the two boundary bugs the experiment found. The decision is
+      // recorded there; this comment is the pointer, because it is the only place
+      // a reader of this block will look.
       //
       // The sketch itself is sound: `test/smallLfu.test.js` asserts at a
       // production-shaped half-life that a recurring key outranks a one-shot one
@@ -2219,6 +2231,118 @@ export class PowerCache {
     }
     this._freeNode(node);
     return true;
+  }
+
+  /**
+   * Remove every entry the predicate selects, and return how many went.
+   *
+   * The row that asked for this (`GAP-017`) also asked for
+   * `entriesAscending()` / `entriesDescending()`. **Those are not added**, and
+   * the reason is worth more than the two methods would be: `entries(order)`
+   * already takes `'LRU'` and `'MRU'`, so an alias pair for the same two orders
+   * is a second spelling of one decision, and a second spelling is a second
+   * thing to document, to type, to test and to keep in sync. Every reference
+   * implementation checked has them because it does **not** have an order
+   * parameter — this one does, and the parameter is the whole capability.
+   *
+   * The predicate is evaluated over a **snapshot** of the entries before any of
+   * them is removed. Two reasons, and the second is the important one:
+   *
+   * 1. `entries()` documents that removing two *adjacent* entries in one
+   *    iteration step can end its walk early, so driving removal off the public
+   *    generator would silently drop matches. This walks the list directly
+   *    instead, and the list is not being mutated while the predicate runs.
+   * 2. A predicate that throws leaves the cache **untouched**. Collecting first
+   *    means a failure cannot leave half the entries gone, which is the one
+   *    outcome a bulk-removal API must never produce — there is no way to undo
+   *    it and no counter that would tell a caller which half survived.
+   *
+   * @param {(key: *, value: *) => boolean} predicate - Return truthy to remove.
+   * @returns {number} Entries removed.
+   */
+  invalidate(predicate) {
+    if (typeof predicate !== 'function') {
+      throw new TypeError(
+        `PowerCache invalidate(predicate): predicate must be a function, got ${typeof predicate}`
+      );
+    }
+    /** @type {Array<CacheNode>} */
+    const doomed = [];
+    for (let node = this._head; node; node = node.next) {
+      if (predicate(node.key, node.value)) doomed.push(node);
+    }
+    let removed = 0;
+    for (const node of doomed) {
+      // A node collected above may have been removed by an earlier predicate call
+      // — the predicate is caller code and may delete as a side effect. Skipping
+      // the absent one is not defensive padding: unlinking a freed node would
+      // corrupt the pool, and counting it would report a removal that did not
+      // happen.
+      if (this._map.get(node.key) !== node) continue;
+      this._abortInflight(node.key, 'invalidated');
+      this._unlinkNode(node);
+      this._evictions += 1;
+      removed += 1;
+      try {
+        if (this.onEvict) this.onEvict(node.key, node.value, 'invalidated');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw (invalidated)');
+      }
+      this._freeNode(node);
+    }
+    if (!this._evictionCandidate || !isLinked(this._evictionCandidate, this._head, this._tail)) {
+      this._evictionCandidate = this._head;
+    }
+    return removed;
+  }
+
+  /**
+   * Evict up to `count` entries, least-recently-used first, and return how many
+   * went.
+   *
+   * Distinct from the sweep `maxEntries` drives, which evicts until the cache is
+   * *within* its limit and reports no number. This is the explicit version: a
+   * caller shedding memory before a spike, or after a deploy, wants a count and a
+   * return value, not a cache that happens to be smaller.
+   *
+   * `count` above the current size removes everything and reports the real
+   * number removed rather than the number asked for — reporting the request
+   * would make `evict(1e9)` on an empty cache report 1000000000.
+   *
+   * `count` must be a `number`, and `Number()` is deliberately **not** used to
+   * coerce: it would turn `null` into 0, `true` into 1 and `'3'` into 3, so
+   * `evict(null)` would silently do nothing and `evict(true)` would silently evict
+   * one. This is the same rule the TTL normaliser in this class already applies,
+   * for the same reason — a typo in a count must not read as a deliberate value.
+   *
+   * @param {number} [count=1]
+   * @returns {number} Entries removed.
+   */
+  evict(count = 1) {
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+      throw new TypeError(
+        `PowerCache evict(count): count must be a non-negative integer number, got ${
+          typeof count === 'string' ? `'${count}'` : String(count)
+        }`
+      );
+    }
+    let removed = 0;
+    while (removed < count) {
+      const node = this._evictionCandidate || this._head;
+      if (!node) break;
+      this._abortInflight(node.key, 'evicted');
+      this._unlinkNode(node, { advanceEvictionCandidate: true });
+      this._evictions += 1;
+      removed += 1;
+      try {
+        if (this.onEvict) this.onEvict(node.key, node.value, 'evicted');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw');
+      }
+      this._freeNode(node);
+    }
+    if (!this._evictionCandidate) this._evictionCandidate = this._head;
+    return removed;
   }
 
   /**
@@ -3866,7 +3990,7 @@ function encodeArg(v, seen) {
     }
     if (v instanceof Date) return 'D:' + v.getTime();
     if (v instanceof RegExp) return 'R:' + v.source + '/' + v.flags;
-    if (v instanceof Error) return 'E:' + v.name + ':' + v.message;
+    if (isError(v)) return 'E:' + v.name + ':' + v.message;
     if (v instanceof Map) {
       // Order is significant for a Map, so it is preserved rather than sorted.
       let out = 'Mp:[';

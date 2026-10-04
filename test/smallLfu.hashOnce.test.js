@@ -28,11 +28,81 @@ import { SmallLfuSketch } from '../src/utils/smallLfu.js';
 // harness has a ~29 % median min/max spread, so a wall-clock assertion would be
 // decoration. What is actually being pinned is that the key is *converted and
 // walked once per call*, which is a structural fact and is exact.
+//
+// **GAP-014 changed how that fact is observable on the object path, and the
+// change is not a loosening.** These tests used to count `String(key)` calls
+// through an object key with a counting `toString`. An object key no longer
+// reaches `String()` at all — it is hashed by a `WeakMap` identity instead — so
+// the counter now reads **0** rather than `1`. That still kills the mutant these
+// tests were written for (per-row hashing read `depth`), and it kills it more
+// sharply: 0 against `depth`, at every depth. The primitive path keeps its own
+// exact observable, a spy on `_hash`, because a primitive cannot be made to
+// count its own coercion — there is no user code in `String(1)`.
+
+/**
+ * Count how many times a sketch derived a hash.
+ *
+ * One per `increment`/`estimate` call is the property. At `depth: 4` the old
+ * shape was four, because `_index(key, row)` rehashed per row.
+ *
+ * @param {SmallLfuSketch} sketch
+ * @returns {() => number} The count so far.
+ */
+function countHashes(sketch) {
+  let calls = 0;
+  const real = sketch._hash.bind(sketch);
+  sketch._hash = (key) => {
+    calls += 1;
+    return real(key);
+  };
+  return () => calls;
+}
 
 describe('the key is hashed once per call, not once per row', () => {
-  it('increment coerces the key once regardless of depth', () => {
-    // The assertion that pins the change. Before it, this was `depth` — four
-    // `String(key)` calls per `increment`, and one per row.
+  it('increment derives one hash per call regardless of depth', () => {
+    // The assertion that pins the change, on the path where the count is
+    // observable. Before it, this was `depth` — four hash derivations per
+    // `increment`, one per row.
+    for (const depth of [1, 2, 4, 8]) {
+      const sketch = new SmallLfuSketch({ width: 64, depth, sampleSize: 1_000_000 });
+      const hashes = countHashes(sketch);
+      sketch.increment('a-key');
+      expect(hashes()).toBe(1);
+    }
+  });
+
+  it('estimate derives one hash per call regardless of depth', () => {
+    for (const depth of [1, 2, 4, 8]) {
+      const sketch = new SmallLfuSketch({ width: 64, depth, sampleSize: 1_000_000 });
+      const hashes = countHashes(sketch);
+      sketch.estimate('a-key');
+      expect(hashes()).toBe(1);
+    }
+  });
+
+  it('increment and estimate agree on the hash they derive', () => {
+    // Two calls, two derivations — and the same result. If `increment` and
+    // `estimate` hashed differently the sketch would report a frequency the
+    // caller never earned, which is the whole contract of an admission filter.
+    const sketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
+    const hashes = countHashes(sketch);
+    for (let i = 0; i < 5; i++) sketch.increment('shared');
+    expect(sketch.estimate('shared')).toBe(5);
+    expect(hashes()).toBe(6); // 5 increments + 1 estimate, one each
+  });
+});
+
+describe('an object key is never stringified', () => {
+  // The three tests above used an object with a counting `toString` to observe
+  // the conversion count. GAP-014 (ADR 0007) routed object keys around
+  // `String(key)` entirely — `String({})` is `"[object Object]"` for *every*
+  // object, so a cache keyed by object references handed the filter one counter
+  // for the whole key space — and the observable became stricter.
+  it('increment stringifies an object key zero times, at any depth', () => {
+    // 0, not 1. A key the caller gave a `toString` is never asked for its text,
+    // because its identity is the reference and its text is not it. The mutant
+    // this kills is the one that matters: `needsIdentity` returning false puts
+    // the count back at `depth`.
     for (const depth of [1, 2, 4, 8]) {
       let coercions = 0;
       const key = {
@@ -43,11 +113,11 @@ describe('the key is hashed once per call, not once per row', () => {
       };
       const sketch = new SmallLfuSketch({ width: 64, depth, sampleSize: 1_000_000 });
       sketch.increment(key);
-      expect(coercions).toBe(1);
+      expect(coercions).toBe(0);
     }
   });
 
-  it('estimate coerces the key once regardless of depth', () => {
+  it('estimate stringifies an object key zero times', () => {
     for (const depth of [1, 2, 4, 8]) {
       let coercions = 0;
       const key = {
@@ -58,25 +128,35 @@ describe('the key is hashed once per call, not once per row', () => {
       };
       const sketch = new SmallLfuSketch({ width: 64, depth, sampleSize: 1_000_000 });
       sketch.estimate(key);
-      expect(coercions).toBe(1);
+      expect(coercions).toBe(0);
     }
   });
 
-  it('increment and estimate agree on the hash they derive', () => {
-    // Two calls, two coercions — and the same result. If `increment` and
-    // `estimate` hashed differently the sketch would report a frequency the
-    // caller never earned, which is the whole contract of an admission filter.
-    let coercions = 0;
+  it('a repeated object is given one identity, not one per call or per row', () => {
+    // `_nextId` is the allocation counter, so it is the exact observable for
+    // "the id is derived once per *key*". A sketch that minted an id per call
+    // would report every object as never-seen — which fails the reference test
+    // in `smallLfu.test.js` in the opposite direction, with every key cold.
+    const sketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
+    const key = { id: 'stable' };
+    for (let i = 0; i < 5; i++) sketch.increment(key);
+    sketch.estimate(key);
+    expect(sketch._nextId).toBe(1);
+    expect(sketch.estimate(key)).toBe(5);
+  });
+
+  it('a throwing toString never runs, so a hostile key cannot break admission', () => {
+    // The identity path does not call user code at all. A key whose `toString`
+    // throws was previously a way to make `set()` throw from inside the filter;
+    // now it is just a key.
+    const sketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
     const key = {
       toString() {
-        coercions += 1;
-        return 'shared';
+        throw new Error('should never be called');
       },
     };
-    const sketch = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 1_000_000 });
-    for (let i = 0; i < 5; i++) sketch.increment(key);
-    expect(sketch.estimate(key)).toBe(5);
-    expect(coercions).toBe(6); // 5 increments + 1 estimate, one each
+    expect(() => sketch.increment(key)).not.toThrow();
+    expect(sketch.estimate(key)).toBe(1);
   });
 });
 

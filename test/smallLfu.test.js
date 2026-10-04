@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { SmallLfuSketch } from '../src/utils/smallLfu.js';
+import { PowerCache } from '../src/helpers/powerCache.js';
 
 /**
  * A sketch with the half-life reset effectively disabled, for tests that assert
@@ -215,5 +216,183 @@ describe('SmallLfuSketch', () => {
     const key = { id: 1 };
     expect(() => s.increment(key)).not.toThrow();
     expect(s.estimate(key)).toBe(1);
+  });
+});
+
+/**
+ * GAP-014 / ADR 0007. The sketch used to bucket an object key by
+ * `String(key)`, which is `"[object Object]"` for *every* object — so a cache
+ * keyed by object references (which `PowerCache` is: its entries live in a
+ * `Map`) handed the filter one counter for the whole key space.
+ *
+ * These tests are the discriminating ones ADR 0007 names: every other option it
+ * weighed — reject object keys, document the limit, add an `admissionKey`
+ * function — **fails the first test**, because the failure is not "object keys
+ * are handled badly", it is "a never-seen object reports a hot object's
+ * frequency".
+ */
+describe('SmallLfuSketch — keys compared by reference', () => {
+  it('a never-seen object key does not report a hot object key’s frequency', () => {
+    // The assertion that decides ADR 0007. Before the identity path: three
+    // distinct objects all estimated 3, and `{id:'delta'}`, never inserted,
+    // also estimated 3 — the sketch could not tell a new object from a hot one,
+    // so it had no admission signal to offer at all. Not a noisy one: none.
+    const s = wide();
+    const alpha = { id: 'alpha' };
+    const beta = { id: 'beta' };
+    const gamma = { id: 'gamma' };
+    const delta = { id: 'delta' }; // never inserted
+
+    for (let i = 0; i < 3; i += 1) s.increment(alpha);
+    s.increment(beta);
+    s.increment(gamma);
+
+    expect(s.estimate(alpha)).toBe(3);
+    expect(s.estimate(beta)).toBe(1);
+    expect(s.estimate(gamma)).toBe(1);
+    // The line the whole row is about.
+    expect(s.estimate(delta)).toBe(0);
+  });
+
+  it('two structurally identical objects are two keys, as the cache sees them', () => {
+    // PowerCache stores entries in a Map, so `{id:'a'}` and another `{id:'a'}`
+    // are two entries. The filter that is supposed to rank them must agree, or
+    // the cache admits on a frequency that belongs to a different entry.
+    const s = wide();
+    const first = { id: 'a' };
+    const second = { id: 'a' };
+    expect(first).not.toBe(second);
+
+    for (let i = 0; i < 5; i += 1) s.increment(first);
+    expect(s.estimate(first)).toBe(5);
+    expect(s.estimate(second)).toBe(0);
+  });
+
+  it('the same object keeps its counter across calls', () => {
+    // The identity has to be *stable*, not merely distinct: a sketch that
+    // handed out a fresh id per call would report every object as never-seen,
+    // which fails the first test in the opposite direction — every key cold.
+    const s = wide();
+    const key = { id: 'stable' };
+    s.increment(key);
+    s.increment(key);
+    expect(s.estimate(key)).toBe(2);
+    expect(s.estimate(key)).toBe(2); // a third read must not re-derive an id
+  });
+
+  it('an object key does not share a counter with the string that spells its id', () => {
+    // The id is handed out in order, so the third object in a cache hashes to
+    // `2` — the same *integer* a caller's string key `'2'` would suggest. They
+    // still land apart, because the string path arrives as FNV-1a of `"2"` and
+    // `_indexFor` runs `mix32` per row over a different hash.
+    //
+    // This is also the test that would fail if someone added a salt without
+    // thinking: the ids need no salt, and one would be a cost with no claim
+    // behind it.
+    const s = wide();
+    const objects = [{ n: 0 }, { n: 1 }, { n: 2 }];
+    s.increment(objects[0]);
+    s.increment(objects[1]);
+    s.increment(objects[2]);
+
+    expect(s.estimate('0')).toBe(0);
+    expect(s.estimate('1')).toBe(0);
+    expect(s.estimate('2')).toBe(0);
+    // And the objects are distinct from each other, which is the half that
+    // actually matters.
+    expect(s.estimate(objects[0])).toBe(1);
+    expect(s.estimate(objects[1])).toBe(1);
+    expect(s.estimate(objects[2])).toBe(1);
+  });
+
+  it('function keys are identity-tracked too', () => {
+    // `String(fn)` is the function's *source text*, so two different functions
+    // written identically collided — and a function is compared by reference in
+    // a Map exactly like an object.
+    const s = wide();
+    const make = () => (n) => n;
+    const a = make();
+    const b = make();
+    expect(String(a)).toBe(String(b)); // the collision the string path would cause
+
+    for (let i = 0; i < 4; i += 1) s.increment(a);
+    expect(s.estimate(a)).toBe(4);
+    expect(s.estimate(b)).toBe(0);
+  });
+
+  it('primitives keep their shared-counter behaviour', () => {
+    // `1`, '1' and `new String('1')` are three keys to the cache and *one*
+    // identity to the filter, deliberately: splitting one hot key's history
+    // across two counters under-reports the key the filter most needs to
+    // recognise. The identity path must not change that.
+    const s = wide();
+    s.increment(1);
+    s.increment('1');
+    expect(s.estimate(1)).toBe(2);
+    expect(s.estimate('1')).toBe(2);
+  });
+
+  it('null, symbols and bigints still hash by value, and say so', () => {
+    // All three stringify to something unique, so none of them may be routed
+    // through the WeakMap — and the observable is their *shared counter* with
+    // the string that spells them, not merely that they count. Routing `null`
+    // through the identity path (it is `typeof 'object'`) drops `estimate('null')`
+    // to 0, and routing symbols through it drops `estimate('Symbol(x)')`.
+    const s = wide();
+    s.increment(null);
+    s.increment(Symbol.for('x'));
+    s.increment(10n);
+
+    expect(s.estimate(null)).toBe(1);
+    expect(s.estimate('null')).toBe(1);
+    expect(s.estimate(Symbol.for('x'))).toBe(1);
+    expect(s.estimate('Symbol(x)')).toBe(1);
+    expect(s.estimate(10n)).toBe(1);
+    expect(s.estimate('10')).toBe(1);
+  });
+
+  it('a PowerCache keyed by objects admits on per-object history, not one shared counter', () => {
+    // The end-to-end shape of the row: the sketch is internal, so a test that
+    // only poked `SmallLfuSketch` could pass while the cache kept collapsing.
+    //
+    // The discriminating assertion is the **estimate**, not the refusal. Before
+    // the identity path, `fresh` shared `hot`'s counter, so it arrived at the
+    // admission comparison with the incumbent's own frequency — and was still
+    // refused, for entirely the wrong reason. A test that only checked
+    // "was it refused?" would have passed on the broken code.
+    const cache = new PowerCache({ maxEntries: 64, admission: 'tinylfu', seed: 7 });
+    const hot = { id: 'hot' };
+    const resident = { id: 'resident' };
+    const fresh = { id: 'fresh' };
+
+    // Fill to capacity so the filter is consulted at all: admission only runs at
+    // capacity, so a cache that never filled has measured nothing. 62 fillers and
+    // two named keys reach 64 — filling to 64 *first* has the two named keys
+    // refused on arrival, which is the filter working and would leave them with
+    // no history to assert on.
+    for (let i = 0; i < 62; i += 1) cache.set({ fill: i }, i);
+    cache.set(hot, 1);
+    cache.set(resident, 2);
+    for (let i = 0; i < 8; i += 1) {
+      cache.get(hot);
+      cache.get(resident);
+    }
+
+    const sketch = cache._sketch;
+    expect(sketch).not.toBeNull();
+    // Before the fix all three of these read the same number, because they shared
+    // the key `"[object Object]"`. `hot` and `resident` are given *equal* history
+    // on purpose — comparing them to each other would assert nothing, and what
+    // matters is that both outrank a key the cache has never seen.
+    expect(sketch.estimate(fresh)).toBe(0);
+    expect(sketch.estimate(hot)).toBeGreaterThan(sketch.estimate(fresh));
+    expect(sketch.estimate(resident)).toBeGreaterThan(sketch.estimate(fresh));
+
+    cache.set(fresh, 3);
+    // `false` is the *oversize* refusal; an admission refusal returns `this` for
+    // chaining, so the counter is the signal. Reading it as a return value is
+    // the kind of guess that compiles into a test that cannot fail.
+    expect(cache.stats().rejectedAdmission).toBeGreaterThan(0);
+    expect(cache.has(fresh)).toBe(false);
   });
 });

@@ -36,6 +36,10 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 
 - `delete(key)` — Remove an entry. Returns `true` when a key was removed.
 
+- `invalidate(predicate)` — **New in 2.0.** Remove every entry where `predicate(key, value)` returns truthy; returns how many were removed. Fires `onEvict(key, value, 'invalidated')` per removal and counts each in `stats().evictions`. See [Bulk removal](#bulk-removal-invalidate-and-evict).
+
+- `evict(count = 1)` — **New in 2.0.** Evict up to `count` entries, least-recently-used first; returns how many were actually removed. Fires `onEvict(key, value, 'evicted')` per removal and counts each in `stats().evictions`. See [Bulk removal](#bulk-removal-invalidate-and-evict).
+
 - `clear()` — Remove all entries and return nodes to the internal pool (no return value).
 
 - `cleanupExpiredUpTo(maxScan = Infinity)` — Scan up to `maxScan` nodes for expired entries and remove them; returns the number of nodes scanned in this pass.
@@ -406,9 +410,11 @@ on every CI run rather than being a one-off measurement.
   public ordering.
 - **There is deliberately no `protectedRatio` knob.** The split here is decided
   by access history, not by a fixed ratio, so exposing a ratio would be an
-  option that does nothing. A ratio only becomes meaningful with an admission
-  filter in front of it (a W-TinyLFU style policy), which would be the next
-  step up from this one.
+  option that does nothing. A ratio becomes meaningful only with an admission
+  filter in front of it — which exists, as `{ admission: 'tinylfu' }` — and that
+  combination is measured: composing the two is a no-op under `slru` by design,
+  because the probation segment and the sketch are the same mechanism.
+  [Below](#tinylfu-admission-resisting-a-scan) has the numbers.
 
 ## PowerMemoizer
 
@@ -485,13 +491,13 @@ recently used_ by definition. A frequency filter asks a different question: is
 the thing I would evict still wanted?
 
 > **Experimental, and currently a net loss. Measured, not assumed.**
-> `node bench/claims.js zipf` does not reproduce an earlier claim about this
-> option, and inverts it. On a cold 40-entry cache preceded by a 460-key scan
-> burst, `admission: 'tynilfu'` measured a **2.5 % hit rate against plain LRU's
-> 66.4 %**, retaining **1.7 of 40** working-set keys against LRU's 40/40. On the
-> sustained Zipf + scan mix below it is a mild loss. **Do not enable it on the
-> strength of the theory — measure your workload first**, and prefer
-> `policy: 'slru'`, which resists the same scan and is not experimental.
+> On a cold 40-entry cache preceded by a 460-key scan burst,
+> `admission: 'tynilfu'` measured a **0.0 % hit rate against plain LRU's
+> 80.0 %**, retaining **0 of 40** working-set keys against LRU's 40/40
+> (`node bench/claims.js coldstart`). On the sustained Zipf + scan mix below it
+> is a mild loss. **Do not enable it on the strength of the theory — measure your
+> workload first**, and prefer `policy: 'slru'`, which resists the same scan and
+> is not experimental.
 
 Sustained Zipf + scan workload — 40-key working set, a 25-key one-shot scan
 every 40 hot accesses, 5 paired repeats so every variant sees a byte-identical
@@ -545,7 +551,7 @@ The admission check refuses when the incumbent's estimate is `>=` the
 challenger's. A brand-new key's estimate is 0, so in a cold sketch — where every
 estimate is 0 — **every admission is refused**. A cache that filled with one-shot
 scan keys while below capacity therefore cannot recover: the working set is
-refused every time, which is the 2.5 % above.
+refused every time, which is the 0.0 % above.
 
 The fix is **not** a comparison operator. Changing `>=` to `>` was implemented
 and measured: it improved the sustained mix (70.9 % → 77.0 %, finally beating
@@ -563,8 +569,8 @@ not recommended, because it fixes the sustained case and not the cold one:
 | ---------------------- | --------------------: | ------------------: |
 | `lru`                  |                75.0 % |          **80.0 %** |
 | `admission: 'tinylfu'` |                70.8 % |               0.0 % |
-| + `windowSize: 1`      |            **77.3 %** |               1.5 % |
-| + `windowSize: 16`     |                70.7 % |               1.5 % |
+| + `windowSize: 1`      |            **77.7 %** |               1.0 % |
+| + `windowSize: 16`     |                70.6 % |               1.5 % |
 | `policy: 'slru'`       |            **89.4 %** |                   — |
 
 Both columns are `node bench/claims.js zipf` and `node bench/claims.js coldstart`.
@@ -574,6 +580,15 @@ keys already resident — and a key that is never admitted never accumulates the
 frequency that would let it win. `policy: 'slru'` remains the answer to scan
 resistance. `adr/0003-tinylfu-admission-window.md` has the full sweep, the
 four acceptance criteria, and the two boundary bugs the experiment found.
+
+Two numbers here moved when the sketch was resized from its fixed 256 counters
+to Caffeine's 16-per-entry and the key was hashed once instead of four times
+(`CACHE-005`, `CACHE-007`, `ALGO-011`). Restated from a re-run rather than
+edited: `windowSize: 1` went **77.3 % → 77.7 %**, which is the one acceptance
+criterion the window ever passed in the sustained mix, and `windowSize: 16` went
+70.7 % → 70.6 %. **The ranking did not move**, and the cold-start column is
+unchanged — which is the answer: three defects in the filter were worth fixing on
+their own terms, and fixing them did not make the feature earn its keep.
 
 #### What the sketch itself gets right
 
@@ -606,6 +621,43 @@ Independent of the admission defect, these hold and are worth keeping:
 - **Reads count towards frequency**, not just writes, so a read-mostly cache is
   not judged on a history it never had. `clear()` drops the history with the
   entries.
+- **Object keys are tracked by identity, not by their text. Changed in 2.0.**
+  The sketch used to bucket a key by `String(key)`, which is `"[object Object]"`
+  for _every_ object — so a cache keyed by object references, which this one is
+  (entries live in a `Map`), handed the filter one counter for the whole key
+  space. Measured on 200 distinct objects, each incremented once:
+
+  | shape            |  sum | distinct estimates | a never-seen object |
+  | ---------------- | ---: | -----------------: | ------------------: |
+  | objects (2.0)    |  509 |       **5 of 200** |               **2** |
+  | objects (before) | 3000 |       **1 of 200** |              **15** |
+
+  Before, all 200 read the same number _and so did a key that had never been
+  inserted_: the filter could not tell a new object from a hot one, so it had no
+  admission signal at all. Now they are distinguishable. The estimate is a
+  minimum across four Count-Min rows, so a fresh key can read 1 or 2 through a
+  collision — overcounting is the sketch's safe direction — but distinct object
+  keys get distinct answers, which is the property that matters.
+
+  It is also **faster than what it replaced**, because `String(obj)` allocates and
+  walks a string. `node bench/claims.js sketch`, increment plus estimate:
+
+  | key                                    |       was |          2.0 |
+  | -------------------------------------- | --------: | -----------: |
+  | plain object                           |  152.6 ns |  **82.5 ns** |
+  | object with a 256-character `toString` | 1353.0 ns | **101.4 ns** |
+
+  Primitives are unaffected: `1`, `'1'` and `new String('1')` deliberately share
+  one counter, so the added cost on that path is one `typeof` check.
+  `null`, symbols and BigInts also hash by value — they stringify uniquely, and
+  routing a symbol through the identity path would break it.
+
+  **What this takes away:** if you were relying on `{id:'a'}` and a second
+  `{id:'a'}` sharing a frequency history, they no longer do — which matches what
+  the cache itself already did with them, since it stores them as two entries.
+  A string key is the way to get value semantics.
+  [ADR 0007](../adr/0007-object-keys-in-the-admission-filter.md) has the
+  measurement and the options that were weighed.
 
 #### Making admission reproducible: `seed`
 
@@ -661,28 +713,84 @@ failed came from synthetic probes that did not resemble the real workload. The
 sketch test suite also could not see any of it, because every test built its
 sketch with `sampleSize: 1e9`, which disables the half-life reset — so 156 lines
 of tests exercised a configuration that never occurs in production. That is
-fixed, and the reasoning is kept in `review.md` under BENCH-002 rather than
-deleted: a review that silently drops its own wrong conclusions is not a review.
+fixed, and the reasoning is kept in
+[ADR 0003](../adr/0003-tinylfu-admission-window.md) rather than deleted: a
+review that silently drops its own wrong conclusions is not a review.
 
-#### The fix, and why it is not written yet
+#### The decision, and why the option stays off by default
 
-The mechanism is known: W-TinyLFU's admission **window** — a small
-unconditional LRU in front of the filtered space, so scan traffic dies in the
-window and the filter only ever arbitrates that window's victim against a
-main-space victim. The cold-start collapse is impossible by construction,
-because a new key is never refused outright.
+Both questions this section used to call undecided **are decided**, and the
+decision is written down in [ADR 0003](../adr/0003-tinylfu-admission-window.md)
+with the measurements:
 
-Two things are genuinely undecided, and both are decisions rather than
-mechanics: the **window size** (a 1 %-of-`maxEntries` window is 0.4 entries on
-a 40-entry cache, which rounds to the current broken behaviour), and whether
-`admission: 'tinylfu'` should be a **no-op under `policy: 'slru'`** — SLRU
-already has a probation region doing the same job, and stacking them currently
-produces the worst variant measured.
+- **The window size** is `min(max(4, ceil(maxEntries * 0.01)), floor(maxEntries / 4))`.
+  The floor of 4 is the part that matters: a pure 1 %-of-`maxEntries` ratio is
+  0.4 entries on a 40-entry cache, and that was implemented, measured and
+  reverted — it made scan resistance measurably _worse_.
+- **`admission: 'tinylfu'` is a no-op under `policy: 'slru'`**, which is the
+  section above.
 
-The full argument, including the two measured attempts and the measurements
-that killed three other hypotheses, is in
-[the design note (ADR 0003)](../adr/0003-tinylfu-admission-window.md). Until it is
-resolved, the numbers above stand and the option stays off by default.
+ADR 0003 set **four acceptance criteria, all or nothing**, and the mechanism
+meets **three** of them. The one it misses is the case the window was built for:
+cold start, where the best size scores 1.0 % against plain LRU's 80.0 %. So the
+window stays **off by default** (`windowSize: 0`), documented as not
+recommended, and `policy: 'slru'` remains the answer to scan resistance.
+
+**What is kept is the evidence.** The mechanism stays reachable behind the
+opt-in flag, the sweep stays in `bench/claims.js zipf`, the cold-start case
+stays a workload of its own, and the tests keep both honest. A mechanism whose
+only record is a paragraph in a design note is one refactor away from being
+rediscovered as promising — which is how the first three attempts at this
+happened.
+
+### Bulk removal: `invalidate` and `evict`
+
+**New in 2.0.** Until then the only ways out were `delete(key)` one at a time
+and `clear()` for everything, so a caller shedding a subset — every entry for one
+tenant, every entry older than a deploy marker — had to walk `entries()` itself
+and delete as it went.
+
+```js
+const cache = new PowerCache({ maxEntries: 10_000 });
+
+// Drop one tenant's entries. Returns how many went.
+const dropped = cache.invalidate((key, value) => value.tenantId === 'gone');
+
+// Shed memory before a spike: the 500 least-recently-used entries.
+const shed = cache.evict(500);
+```
+
+| Method                  | Selects                                 | Returns             | `onEvict` reason |
+| ----------------------- | --------------------------------------- | ------------------- | ---------------- |
+| `invalidate(predicate)` | every entry the predicate accepts       | entries removed     | `'invalidated'`  |
+| `evict(count)`          | the `count` least-recently-used entries | entries removed     | `'evicted'`      |
+| `delete(key)`           | one entry by key                        | `true` when removed | `'deleted'`      |
+
+Four things worth knowing, three of which are decisions rather than
+accidents.
+
+- **`invalidate` is atomic with respect to a throwing predicate.** The predicate
+  runs over the whole cache _before_ anything is removed, so a predicate that
+  throws leaves the cache exactly as it was. A bulk removal that applied as it
+  went could leave half the entries gone, with no counter that tells you which
+  half and no way to undo it.
+- **It does not use the public `entries()` walk to do it**, for the same reason
+  from the other direction: `entries()` documents that removing two _adjacent_
+  entries in one iteration step can end its walk early, so removal driven off it
+  would silently stop at the first pair.
+- **`evict` reports what it removed, not what you asked for.** `evict(99)` on a
+  3-entry cache returns **3**. And `count` must be a `number`: `null`, `true` and
+  `'3'` throw rather than being coerced, because `Number()` would make
+  `evict(null)` silently do nothing and `evict(true)` silently evict one. Same
+  rule the TTL normaliser already applies to `{ ttl: true }`.
+- **Both count into `stats().evictions`**, the same counter as the capacity
+  sweep. A caller watching memory cannot otherwise tell a policy eviction from an
+  explicit one — and both _did_ free a node and notify you.
+
+The row that asked for this also asked for `entriesAscending()` and
+`entriesDescending()`, and those were **declined**: `entries(order)` already takes
+`'LRU'` and `'MRU'`, so an alias pair would be a second spelling of one decision
+and a second thing to document, type and keep in sync.
 
 ### `hasEqual` and deep comparison limits
 

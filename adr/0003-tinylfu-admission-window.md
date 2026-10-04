@@ -613,3 +613,87 @@ What is kept is the evidence: the implementation behind an opt-in flag, the
 sweep in the benchmark, the cold-start case as its own workload, and the tests
 that keep the two honest. A mechanism whose only record is a paragraph in a
 design note is one refactor away from being rediscovered as promising.
+
+---
+
+## Re-measured after the filter's own defects were fixed
+
+Everything above was measured **before** the sketch was sized or hashed
+sensibly. Three rows of the plan fixed those, each on its own merits and each
+mutation-checked: `CACHE-005` sized the table from `maxEntries`, `ALGO-011` moved
+it to Caffeine's 16-counters-per-entry and stopped the sample clock advancing on
+an increment that saturated, and `CACHE-007` hashed the key once per call
+instead of once per sketch row. `CACHE-006` fixed the window-pointer walk, which
+is a `get()` cost and not an admission decision.
+
+A rejection measured against a broken instrument is not a measurement, so the
+gate was re-run on the fixed build before this note's conclusion was allowed to
+stand. `node bench/claims.js zipf` and `node bench/claims.js coldstart`, same
+workload and same paired streams:
+
+| variant                     | ws hit rate |    was | survivors |
+| --------------------------- | ----------: | -----: | --------: |
+| `lru`                       |      75.0 % |      — | 17.2 / 40 |
+| `lru` + `tinylfu` (shipped) |      70.8 % |      — | 15.0 / 40 |
+| window = 1                  |  **77.7 %** | 76.5 % | 15.8 / 40 |
+| window = 2                  |      77.4 % | 75.7 % | 15.8 / 40 |
+| window = 4                  |      76.8 % | 76.2 % | 17.0 / 40 |
+| window = 8                  |      73.0 % | 72.6 % | 17.8 / 40 |
+| window = 16                 |      70.6 % | 70.3 % | 19.4 / 40 |
+| window = 25                 |      69.3 % | 69.0 % | 19.0 / 40 |
+| window = 32                 |      70.4 % | 69.8 % | 17.6 / 40 |
+| `slru`                      |  **89.4 %** |      — | 33.0 / 40 |
+| `slru` + `tinylfu`          |  **89.4 %** |      — | 33.0 / 40 |
+
+Cold start is unchanged at every window size: `lru` **80.0 %**, shipped
+`tinylfu` **0.0 %**, the best window **1.0 %** at size 1.
+
+**Three real defects were worth fixing and fixing them did not change the
+answer.** Every window row moved up by roughly a point, one of them crossed the
+sustained criterion, and the cold-start collapse is exactly where it was. The
+ranking is untouched: `slru` wins, plain `lru` is second, and the filter on its
+own is third. Against the four criteria:
+
+| criterion                                      | before          | after                               |
+| ---------------------------------------------- | --------------- | ----------------------------------- |
+| 1. Cold start beats plain LRU                  | 2.0 % vs 80.0 % | **1.0 % vs 80.0 %** — still not met |
+| 2. Sustained at or above the 77.0 % doorkeeper | 76.5 %          | **77.7 %** at window = 1 — met      |
+| 3. `slru` stays at 89.4 %                      | met             | met                                 |
+| 4. No counter regression                       | met             | met                                 |
+
+Three of four, with the one that flips being the one ADR 0003 called
+secondary. Criterion 1 is the reason the mechanism exists and it misses by 79
+points.
+
+### The decision, and what was declined
+
+**Keep it, opt-in, off by default, documented as not recommended.** That is this
+note's original decision and the re-run confirms it rather than reopening it.
+
+The alternative on the table was **deletion** — roughly 250 lines of window and
+arbitration machinery plus the sketch wiring, which would make five earlier
+findings (`CACHE-001`, `F-18`, `F-21`, `F-22`, `CACHE-020`) structurally
+impossible rather than fixed. It is declined, for two reasons that the re-run is
+what makes checkable:
+
+1. **It would not have changed the answer.** The filter is not losing because of
+   the parts deletion would remove. The best window size beats plain LRU on the
+   sustained mix and loses to it by 79 points on cold start, and the mechanism
+   that survives is the one with the correct boundary bugs. Deleting the correct
+   mechanics because the policy loses is deleting the part that works.
+2. **The evidence is worth more than the code.** `windowSize` behind a flag, a
+   sweep inside `bench/claims.js zipf`, `coldstart` as a workload of its own and
+   `test/powerCache.window.test.js` are what make the conclusion re-checkable by
+   the next person. Without them this note is a claim; with them it is a
+   measurement. This project has twice rediscovered a promising window as a bug
+   in a design note, and both times the record is what ended the argument.
+
+The **guide** states the same three things — the measurements, the decision, and
+that `policy: 'slru'` is the answer — so the user-facing surface does not have to
+be reconciled against this note to find out which option to reach for.
+
+**What this decision does not claim.** It does not claim a frequency filter
+cannot work here, only that this one, on this workload, does not earn its keep
+over a segmented LRU that already ships. A workload with a long-lived hot set
+and a bounded scan would be a different measurement, and `zipf`'s 40-key working
+set equal to `maxEntries` is a deliberately brutal one.

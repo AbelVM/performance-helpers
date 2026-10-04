@@ -29,6 +29,53 @@ export class SmallLfuSketch {
     resets: number;
     seed: number;
     /**
+     * Stable integer id per object key, so the sketch's notion of a key matches
+     * the `Map`'s. Absent until an object key arrives — a cache that only ever
+     * sees primitives never allocates it.
+     *
+     * **Weak, so it cannot keep a key alive.** That is the whole reason this is
+     * a `WeakMap` and not a `Map`: the sketch's memory is otherwise a fixed
+     * `width * depth / 2` bytes that a caller can reason about from `size()`,
+     * and a strong map would make that number a lie the moment a caller cached
+     * a short-lived request object. An entry disappears when the key does, which
+     * means a *new* object may be handed an id whose counter still holds a dead
+     * key's frequency — bounded, and the direction an admission filter should
+     * err in (it can over-count, never under-count).
+     *
+     * Per sketch, not module-global: two sketches must not share an id space,
+     * and a module-level map would outlive every cache in the process.
+     *
+     * @type {WeakMap<object, number>|null}
+     * @private
+     */
+    private _ids;
+    /** Next id to hand out. Monotonic, so ids are never reused. @private */
+    private _nextId;
+    /**
+     * Hash a key by the identity the cache gives it.
+     *
+     * Primitives take the string path, which is unchanged: one `typeof` check is
+     * the entire added cost on the common path, and the FNV loop below it is
+     * byte-for-byte what it was.
+     *
+     * Object keys get a `WeakMap` id, and the **id** is hashed rather than the
+     * object, so the cost does not scale with anything the caller put in the key —
+     * the `String(obj)` path it replaces was `O(size of the object)`.
+     *
+     * **No salt, and that is deliberate.** The obvious worry is that id `3` and the
+     * string key `'3'` land on one counter. They cannot: `_indexFor` runs `mix32`
+     * per row, and the two arrive as different hashes — `3` and FNV-1a of `"3"`,
+     * which is not a small integer. And where two hashes *do* share a column that
+     * is the Count-Min collision the sketch already exists to absorb, in the safe
+     * direction. An earlier draft of this carried a salt and a comment justifying
+     * it; the justification did not survive checking, so the salt went too.
+     *
+     * @param {*} key
+     * @returns {number} The 32-bit hash, unmixed and unmasked.
+     * @private
+     */
+    private _hash;
+    /**
      * The sketch's footprint in bytes. Exposed so a caller can reason about the
      * memory an admission filter costs.
      * @returns {number}

@@ -60,6 +60,11 @@ function mix32(h, k) {
  * hot key's history across two counters would under-report exactly the key it
  * most needs to recognise.
  *
+ * **For keys whose identity is reference, not text** — objects and functions —
+ * this is the wrong function and {@link SmallLfuSketch#_hash} routes around it,
+ * because `String({})` is `"[object Object]"` for every object. See
+ * {@link needsIdentity} for what that cost.
+ *
  * The key has to be *hashed*, not passed straight to the mixer - an earlier
  * version wrote `mix32(String(key), seed)`, where the string met the number
  * with `+` and produced `"hot12345"`, which `| 0` turned into 0. Every key then
@@ -96,6 +101,32 @@ function hashKey(key) {
     h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
   }
   return h;
+}
+
+/**
+ * Whether `key` is one the cache would compare **by reference**.
+ *
+ * `String()` is the right identity for a primitive and the wrong one for
+ * everything else: `String({})` is `"[object Object]"` for *every* object, and
+ * `String(fn)` is the function's source text. So a cache keyed by object
+ * references — which `PowerCache` is, its entries live in a `Map` — handed the
+ * sketch one counter for the whole key space, and the filter could not tell a
+ * never-seen object from a hot one. Measured, before this check existed:
+ * three distinct object keys all estimated 3, and a key that had never been
+ * inserted also estimated 3. That is not a noisy filter, it is no filter.
+ *
+ * `null` is excluded deliberately: it is `typeof 'object'` but its string form
+ * is `"null"`, which is as good an identity as any primitive's. Symbols are
+ * excluded for the same reason — `String(sym)` is unique per symbol — and
+ * BigInt stringifies to its digits.
+ *
+ * @param {*} key
+ * @returns {boolean}
+ * @private
+ */
+function needsIdentity(key) {
+  const t = typeof key;
+  return t === 'function' || (t === 'object' && key !== null);
 }
 
 /**
@@ -136,6 +167,65 @@ export class SmallLfuSketch {
     this.sample = 0;
     this.resets = 0;
     this.seed = (Number.isFinite(seed) ? Number(seed) : Math.floor(Math.random() * 0xffffffff)) | 0;
+
+    /**
+     * Stable integer id per object key, so the sketch's notion of a key matches
+     * the `Map`'s. Absent until an object key arrives — a cache that only ever
+     * sees primitives never allocates it.
+     *
+     * **Weak, so it cannot keep a key alive.** That is the whole reason this is
+     * a `WeakMap` and not a `Map`: the sketch's memory is otherwise a fixed
+     * `width * depth / 2` bytes that a caller can reason about from `size()`,
+     * and a strong map would make that number a lie the moment a caller cached
+     * a short-lived request object. An entry disappears when the key does, which
+     * means a *new* object may be handed an id whose counter still holds a dead
+     * key's frequency — bounded, and the direction an admission filter should
+     * err in (it can over-count, never under-count).
+     *
+     * Per sketch, not module-global: two sketches must not share an id space,
+     * and a module-level map would outlive every cache in the process.
+     *
+     * @type {WeakMap<object, number>|null}
+     * @private
+     */
+    this._ids = null;
+    /** Next id to hand out. Monotonic, so ids are never reused. @private */
+    this._nextId = 0;
+  }
+
+  /**
+   * Hash a key by the identity the cache gives it.
+   *
+   * Primitives take the string path, which is unchanged: one `typeof` check is
+   * the entire added cost on the common path, and the FNV loop below it is
+   * byte-for-byte what it was.
+   *
+   * Object keys get a `WeakMap` id, and the **id** is hashed rather than the
+   * object, so the cost does not scale with anything the caller put in the key —
+   * the `String(obj)` path it replaces was `O(size of the object)`.
+   *
+   * **No salt, and that is deliberate.** The obvious worry is that id `3` and the
+   * string key `'3'` land on one counter. They cannot: `_indexFor` runs `mix32`
+   * per row, and the two arrive as different hashes — `3` and FNV-1a of `"3"`,
+   * which is not a small integer. And where two hashes *do* share a column that
+   * is the Count-Min collision the sketch already exists to absorb, in the safe
+   * direction. An earlier draft of this carried a salt and a comment justifying
+   * it; the justification did not survive checking, so the salt went too.
+   *
+   * @param {*} key
+   * @returns {number} The 32-bit hash, unmixed and unmasked.
+   * @private
+   */
+  _hash(key) {
+    if (!needsIdentity(key)) return hashKey(key);
+    const ids = this._ids || (this._ids = new WeakMap());
+    let id = ids.get(key);
+    if (id === undefined) {
+      id = this._nextId;
+      this._nextId += 1;
+      ids.set(key, id);
+    }
+    return id | 0;
   }
 
   /**
@@ -204,7 +294,7 @@ export class SmallLfuSketch {
    * @returns {void}
    */
   increment(key) {
-    const hash = hashKey(key);
+    const hash = this._hash(key);
     let advanced = false;
     for (let row = 0; row < this.depth; row += 1) {
       const i = this._indexFor(hash, row);
@@ -231,7 +321,7 @@ export class SmallLfuSketch {
    * @returns {number} 0..15.
    */
   estimate(key) {
-    const hash = hashKey(key);
+    const hash = this._hash(key);
     let min = 15;
     for (let row = 0; row < this.depth; row += 1) {
       const v = this._get(this._indexFor(hash, row));
@@ -302,6 +392,11 @@ export class SmallLfuSketch {
     this.counters.fill(0);
     this.sample = 0;
     this.resets = 0;
+    // `_ids` is deliberately kept. It holds the same weak references it held
+    // before, so keeping it retains nothing a reset would have released — and
+    // dropping it would hand a live key a *new* id whose counter is stale in the
+    // other direction. The counters are all zero either way, so every estimate
+    // is 0 immediately.
   }
 }
 

@@ -805,6 +805,57 @@ export class PowerCache {
      */
     delete(key: any): boolean;
     /**
+     * Remove every entry the predicate selects, and return how many went.
+     *
+     * The row that asked for this (`GAP-017`) also asked for
+     * `entriesAscending()` / `entriesDescending()`. **Those are not added**, and
+     * the reason is worth more than the two methods would be: `entries(order)`
+     * already takes `'LRU'` and `'MRU'`, so an alias pair for the same two orders
+     * is a second spelling of one decision, and a second spelling is a second
+     * thing to document, to type, to test and to keep in sync. Every reference
+     * implementation checked has them because it does **not** have an order
+     * parameter — this one does, and the parameter is the whole capability.
+     *
+     * The predicate is evaluated over a **snapshot** of the entries before any of
+     * them is removed. Two reasons, and the second is the important one:
+     *
+     * 1. `entries()` documents that removing two *adjacent* entries in one
+     *    iteration step can end its walk early, so driving removal off the public
+     *    generator would silently drop matches. This walks the list directly
+     *    instead, and the list is not being mutated while the predicate runs.
+     * 2. A predicate that throws leaves the cache **untouched**. Collecting first
+     *    means a failure cannot leave half the entries gone, which is the one
+     *    outcome a bulk-removal API must never produce — there is no way to undo
+     *    it and no counter that would tell a caller which half survived.
+     *
+     * @param {(key: *, value: *) => boolean} predicate - Return truthy to remove.
+     * @returns {number} Entries removed.
+     */
+    invalidate(predicate: (key: any, value: any) => boolean): number;
+    /**
+     * Evict up to `count` entries, least-recently-used first, and return how many
+     * went.
+     *
+     * Distinct from the sweep `maxEntries` drives, which evicts until the cache is
+     * *within* its limit and reports no number. This is the explicit version: a
+     * caller shedding memory before a spike, or after a deploy, wants a count and a
+     * return value, not a cache that happens to be smaller.
+     *
+     * `count` above the current size removes everything and reports the real
+     * number removed rather than the number asked for — reporting the request
+     * would make `evict(1e9)` on an empty cache report 1000000000.
+     *
+     * `count` must be a `number`, and `Number()` is deliberately **not** used to
+     * coerce: it would turn `null` into 0, `true` into 1 and `'3'` into 3, so
+     * `evict(null)` would silently do nothing and `evict(true)` would silently evict
+     * one. This is the same rule the TTL normaliser in this class already applies,
+     * for the same reason — a typo in a count must not read as a deliberate value.
+     *
+     * @param {number} [count=1]
+     * @returns {number} Entries removed.
+     */
+    evict(count?: number): number;
+    /**
      * Clear the cache and return nodes to the pool.
      * @returns {void}
      */
