@@ -9291,3 +9291,147 @@ the options bag and there is no third position to forward to.
 6 tests, 4 of 4 mutants killed. One assertion checks **identity** rather than equality,
 because a copy rebuilt per socket satisfies every equality assertion in the file and would
 still give a reconnect different settings from the first connection.
+
+## The event-loop monitor can now say when it was not looking
+
+`PowerEventLoopMonitor.stats()` described only probes that **fired**. `max`, `p99` and
+`blockedOver10ms` are all derived from recorded samples, so a period during which the
+monitor was not sampling — stopped, never started, or suspended past the timer — left
+no trace in any of them. A 30 s stall and one late tick were the same observation,
+because the only record of a stall is the tick that eventually landed late.
+
+Three additive counters. **No existing field changed**, and a monitor fed a known
+sequence produces byte-identical old-shape output — which is the row's constraint, so
+it is the assertion.
+
+```js
+const s = monitor.stats();
+s.blockedMs; // ms blocked, beside blockedOver10ms's count of blocked ticks
+s.droppedSamples; // readings refused because the clock moved backwards
+s.coverage; // share of wall-clock time the sampling schedule accounts for
+```
+
+**`blockedMs` is the pair's point.** A 12 ms hiccup and a 30 s stall are both
+`blockedOver10ms: 1`; only one of them is `blockedMs: 30000`. Counting is right for an
+alert _rate_ and the wrong shape for _severity_, which is the question being asked when
+a loop is in trouble. Both fields come off one `drift > 10` comparison, so they cannot
+drift apart onto different thresholds — and the test that pins the number needs values
+**at** the boundary, which is the finding below.
+
+**`droppedSamples` makes an existing refusal visible.** A backwards clock step was
+already refused rather than recorded, because a negative sample poisons the histogram's
+invariants. It was not _counted_, and an event with no counter is indistinguishable from
+an event that did not happen. A refused reading is also not passed to `onDrift`: a
+negative drift delivered to an alerting hook would read as "the loop is 1 ms _ahead_",
+which is not a thing a loop does.
+
+**`coverage` is a resolution statement, not a health statement** — and that is the
+distinction that stops it being turned into an alert. It is a lifetime figure and it
+trends down, so a monitor at `intervalMs: 10` running for an hour covers about 0.03 of
+it: a low number means "my sampling resolution is coarse for how long I have been
+running", not "my loop is sick". A stall is _accounted for_, because the drift that
+produced it is in the numerator, so a loop that was perfectly responsive throughout
+scores the same as one that stalled for two minutes and recovered.
+
+What it is for is the blind spot, and it is the only number that moves when time passed
+unobserved:
+
+```js
+if (s.coverage !== null && s.coverage < 0.5) metrics.gauge('eventloop.coverage', s.coverage);
+```
+
+**`coverage` is `null`, and the in-tree expression I inherited was wrong about it.** It
+read `hasSamples ? (elapsed > 0 ? clamp : 1) : null`, so a window that was not a window
+reported **1** — "fully covered", which is the single reading that _silences_ the alert
+above. It is now `null` for all three cases where there is no fraction to report: no
+samples yet, a window of no length, and a clock that stepped backwards. The middle case
+is not hypothetical in this repository — the suite's fake timers freeze `nowMs()`, so
+every test using them sits in exactly that state, and the unguarded ratio is `0 / 0`.
+**`NaN` compares false against every threshold**, so it would disable a coverage alert
+while still looking like a number.
+
+The two clock directions are deliberately **not** symmetric, and a test pins that they
+differ: a forward step genuinely grows the denominator and reports a small number, while
+a backward step makes a negative window, which has no fraction in it at all.
+
+16 tests across two files. **9 mutants, 9 killed**, each by the test written for it: the
+refused sample not counted, the milliseconds not accumulated, the threshold loosened, the
+`elapsed > 0` guard removed, the pre-fix `1` restored, the upper clamp removed, the
+`reset()` re-base removed, `onDrift` notified for a refused reading, and `accounted`
+using `samples` instead of `samples - 1`.
+
+**Three of my own mistakes, and the first one is the one worth keeping.**
+
+The threshold mutant **survived**, and it survived for a real reason: every drift either
+test file uses is comfortably above 5 ms, so a value above 5 is also above 10 and a
+loosened `drift > 10` is invisible. Pinning the number needs `10` and `9` — the
+boundary, where `> 10` and `>= 10` and `> 5` stop agreeing. Found by running the
+mutants, not by reading the assertions.
+
+The **first mutation run reported a false survivor and every other result in it was
+worthless.** It mutated the real source file and restored it afterwards, and a concurrent
+session restored it _mid-run_ — so `this._dropped += 1` was deleted, a test asserting
+`droppedSamples` toBe 2 passed, and the mutant was reported as surviving. The
+restoration was verified by hand: a direct `node` import of the mutated file reported
+`1`, which the file could not possibly do. The fix is the technique
+`scripts/mutant-check.mjs` already documents and this run then adopted: write the
+mutant into a throwaway copy of `src/` in a temp directory and run vitest against that
+copy, so nothing under the repository is read-modified and there is nothing to restore
+if the process is killed. **`AGENTS.md` prescribes `cp` for A/B work; that is right
+against a quiet tree and wrong against a shared one, and the difference is invisible in
+the result.**
+
+That harness also keeps its **INERT** check, and it earned its place: a mutant whose
+behaviour is unchanged reports as a survivor and reads exactly like a coverage gap, so
+the observable output is digested before and after each mutation. Two of the nine would
+otherwise have been indistinguishable from coverage failures. The digest needs
+`vi.setSystemTime`'s property — a jump past one second makes `nowMs()` read the faked
+`Date.now()`, since it prefers the performance clock only while the two agree — which is
+also what makes the coverage assertions exact instead of wall-clock approximations.
+
+Finally, a test of mine compared two **live** `stats()` calls across a clock step, so
+the second read described the backwards window and the assertion compared `null` with
+`null`. The fix is to read the first value into a variable, which is a rule worth more
+than this test: a snapshot read after the thing you are measuring has changed is a
+measurement of the change.
+
+## Three new fields on the event-loop monitor, for what a count cannot say
+
+`PowerEventLoopMonitor.stats()` described only ticks that **fired**. `max` and
+`blockedOver10ms` are both derived from recorded samples, so a period during which
+the monitor was not sampling — stopped, never started, or suspended past the timer
+entirely — left no trace in any field. A 30 s stall and one late tick were the same
+observation, because the only record of a stall is the tick that eventually landed late.
+
+- **`blockedMs`** — the `blockedOver10ms` population in milliseconds. A 30 s stall and
+  a 12 ms hiccup are **both** `blockedOver10ms: 1`; only one of them is
+  `blockedMs: 30000`. Counting is right for alert _rate_ and the wrong shape for
+  _severity_, which is the question being asked when a loop is already in trouble.
+- **`droppedSamples`** — readings refused because the clock moved backwards. They were
+  already dropped, since a negative sample poisons the histogram's invariants, but a
+  dropped sample is still an event and an event with no counter is indistinguishable
+  from an event that did not happen.
+- **`coverage`** — the fraction of wall-clock time the sampling schedule accounts for,
+  and the only field that moves when time passed **unobserved**. Read it as a
+  resolution statement rather than a health statement: it is a lifetime figure and it
+  trends down, so a healthy 10 ms monitor covers 0.03 of an hour and alerting on it
+  directly would be alerting on its own runtime. It answers the narrower question —
+  _is my sampling resolution fine enough to see what is happening to this process?_
+
+`coverage` is `null` rather than a number when there is no window to take a fraction
+of: no samples yet, `elapsed === 0`, or the clock stepping backwards. The `NaN` case
+matters most — `NaN` compares false against **every** threshold, so a ratio evaluating
+to `NaN` would silence a coverage alert while still looking like a number. `reset()`
+re-bases the window along with the samples, or a fresh count would be divided by the
+monitor's whole life.
+
+**Additive only.** No existing field changed shape or meaning, and a test asserts that
+against a known input sequence, because "additive only" was the row's constraint and
+therefore the assertion.
+
+Five of five mutants killed — and **one survived its first check**, which is the part
+worth keeping. "reset() does not re-base the coverage window" passed, because the reset
+assertion only read `coverage === null`, which is null _whether or not_ the baseline is
+re-based since the samples are gone either way. **That test was decoration on the exact
+point it claimed to cover.** It now spends 40 ms before the reset, records two fresh
+samples, and asserts coverage exceeds 0.5 — the only state that separates the two.
