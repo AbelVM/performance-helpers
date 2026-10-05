@@ -318,6 +318,29 @@ Histogram for heartbeat RTT. One is
 
 ***
 
+### socketOptions?
+
+> `optional` **socketOptions?**: `Object`
+
+Third argument to the **socket**
+  constructor, for a `WebSocketImpl` that takes one. RT-037.
+
+  Node's `ws` accepts `(url, protocols, options)` and its options are how a
+  Node caller sets `headers` (auth, cookies), `perMessageDeflate` and
+  `maxPayload` — none of which this library can reach any other way.
+
+  **A browser ignores this.** The DOM `WebSocket` constructor takes two
+  arguments and the third is discarded, so forwarding it unconditionally is
+  safe; the alternative is branching on the implementation, which would mean
+  deciding at runtime which of two socket contracts a caller's class follows.
+
+  **Forwarded verbatim and not validated**, because this library cannot know
+  what is behind `WebSocketImpl`. A typo reaches the transport as a typo and
+  fails there. Copied at construction, so mutating your object afterwards
+  changes nothing.
+
+***
+
 ### url
 
 > **url**: `string`

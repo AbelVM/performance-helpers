@@ -346,6 +346,102 @@ decorrelated-jitter backoff cursor, in ms
 
 ***
 
+### socketOptions
+
+> **socketOptions**: `object`
+
+#### constructor
+
+> **constructor**: `Function`
+
+The initial value of Object.prototype.constructor is the standard built-in Object constructor.
+
+#### hasOwnProperty()
+
+> **hasOwnProperty**(`v`): `boolean`
+
+Determines whether an object has a property with the specified name.
+
+##### Parameters
+
+###### v
+
+`PropertyKey`
+
+A property name.
+
+##### Returns
+
+`boolean`
+
+#### isPrototypeOf()
+
+> **isPrototypeOf**(`v`): `boolean`
+
+Determines whether an object exists in another object's prototype chain.
+
+##### Parameters
+
+###### v
+
+`Object`
+
+Another object whose prototype chain is to be checked.
+
+##### Returns
+
+`boolean`
+
+#### propertyIsEnumerable()
+
+> **propertyIsEnumerable**(`v`): `boolean`
+
+Determines whether a specified property is enumerable.
+
+##### Parameters
+
+###### v
+
+`PropertyKey`
+
+A property name.
+
+##### Returns
+
+`boolean`
+
+#### toLocaleString()
+
+> **toLocaleString**(): `string`
+
+Returns a date converted to a string using the current locale.
+
+##### Returns
+
+`string`
+
+#### toString()
+
+> **toString**(): `string`
+
+Returns a string representation of an object.
+
+##### Returns
+
+`string`
+
+#### valueOf()
+
+> **valueOf**(): `Object`
+
+Returns the primitive value of the specified object.
+
+##### Returns
+
+`Object`
+
+***
+
 ### url
 
 > **url**: `string`

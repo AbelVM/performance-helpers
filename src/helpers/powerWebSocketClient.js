@@ -105,6 +105,22 @@ export { READY_STATE };
  *   socket does not spin the event loop.
  * @property {string|string[]} [protocols] - Sub-protocols forwarded to the
  *   `WebSocket` / `WebSocketStream` constructor.
+ * @property {Object} [socketOptions={}] - Third argument to the **socket**
+ *   constructor, for a `WebSocketImpl` that takes one. RT-037.
+ *
+ *   Node's `ws` accepts `(url, protocols, options)` and its options are how a
+ *   Node caller sets `headers` (auth, cookies), `perMessageDeflate` and
+ *   `maxPayload` — none of which this library can reach any other way.
+ *
+ *   **A browser ignores this.** The DOM `WebSocket` constructor takes two
+ *   arguments and the third is discarded, so forwarding it unconditionally is
+ *   safe; the alternative is branching on the implementation, which would mean
+ *   deciding at runtime which of two socket contracts a caller's class follows.
+ *
+ *   **Forwarded verbatim and not validated**, because this library cannot know
+ *   what is behind `WebSocketImpl`. A typo reaches the transport as a typo and
+ *   fails there. Copied at construction, so mutating your object afterwards
+ *   changes nothing.
  * @property {number} [maxPollIntervalMs=250] - Ceiling for the backed-off poll.
  * @property {number} [heartbeatIntervalMs=30000] - Send a ping at this interval.
  *   `0` disables heartbeats.
@@ -323,6 +339,7 @@ export class PowerWebSocketClient {
         'reconnectMaxMs',
         'autoReconnect',
         'nonRetryableCloseCodes',
+        'socketOptions',
         'reconnectOnHeartbeatTimeout',
         'dropOnBackpressure',
         'onMessage',
@@ -355,6 +372,7 @@ export class PowerWebSocketClient {
       reconnectMaxMs = 30_000,
       autoReconnect = true,
       nonRetryableCloseCodes = [],
+      socketOptions = {},
       reconnectOnHeartbeatTimeout = true,
       onMessage,
       onOpen,
@@ -390,8 +408,24 @@ export class PowerWebSocketClient {
       );
     }
 
+    if (
+      socketOptions == null ||
+      typeof socketOptions !== 'object' ||
+      Array.isArray(socketOptions)
+    ) {
+      throw new TypeError(
+        'PowerWebSocketClient: `socketOptions` must be an object forwarded to the socket ' +
+          `constructor (received ${String(socketOptions)}). An array is not one, and a ` +
+          'non-object would be stringified into it.'
+      );
+    }
+
     this.url = url;
     this.protocols = protocols;
+    // Copied, for the same reason `nonRetryableCloseCodes` is: the caller's object
+    // is reachable after construction, and a reconnect constructs a *new* socket, so
+    // a later mutation would otherwise change the options a reconnect gets.
+    this.socketOptions = { ...socketOptions };
     this._WS = WebSocketImpl || (typeof WebSocket !== 'undefined' ? WebSocket : null);
     if (!this._WS) {
       throw new TypeError(
@@ -1054,7 +1088,11 @@ export class PowerWebSocketClient {
               done(e);
             });
         } else {
-          this._socket = new this._WS(this.url, this.protocols);
+          // RT-037. **The third argument is the whole row.** The DOM constructor
+          // takes two and discards the rest, so passing it is safe everywhere, and
+          // Node's `ws` reads it — which is how `headers`, `perMessageDeflate` and
+          // `maxPayload` become reachable without injecting a socket class.
+          this._socket = new this._WS(this.url, this.protocols, this.socketOptions);
           // **A browser delivers every inbound frame as a `Blob` unless this is
           // set**, and this library only ever sends binary — so without it every
           // binary frame the client receives fails to decode, while the

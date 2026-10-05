@@ -282,6 +282,30 @@ A measured cost was never the objection — `arrayBuffer()` is ~0.045 ms for a 6
 - `bufferedAmount` is reported as `0` unless the socket is open, so it can never leak a stale value after a close.
 - All internal timers go through `unref()` in Node, so a forgotten client does not keep a process alive.
 - Pass `WebSocketImpl` for a non-global implementation, or to inject a test double.
+- **Node transport options go in `socketOptions`, not in a socket class.** It is forwarded as the third argument to the socket constructor, which is where Node's `ws` reads `headers` (auth, cookies), `perMessageDeflate` and `maxPayload`:
+
+  ```javascript
+  import WebSocket from 'ws';
+
+  new PowerWebSocketClient({
+    url: 'wss://api.example/stream',
+    WebSocketImpl: WebSocket,
+    socketOptions: {
+      headers: { Authorization: `Bearer ${token}` },
+      perMessageDeflate: false,
+      maxPayload: 8 * 1024 * 1024,
+    },
+  });
+  ```
+
+  A **browser ignores it** — the DOM `WebSocket` constructor takes two arguments and discards the rest — so it is forwarded unconditionally rather than branched on, which is what keeps it working on both without the library deciding at runtime which of two socket contracts your class follows.
+
+  **Nothing inside is validated**, because nothing can be: this library does not know what is behind `WebSocketImpl`. A misspelled key reaches the transport as a misspelled key and fails there. Only the shape is checked — a non-object throws, since it would otherwise be stringified into the options position.
+
+  It is **copied at construction**, so mutating your object afterwards changes nothing, and every reconnect gets the settings as configured rather than whatever the object says by then.
+
+  `WebSocketStream` is untouched: it takes `(url, options)`, so its second argument is already the options bag and there is no third position to forward to.
+
 - `lowWaterMarkBytes > highWaterMarkBytes` is a construction error, not a runtime surprise.
 
 ## Validation
