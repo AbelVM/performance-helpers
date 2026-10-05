@@ -9193,3 +9193,62 @@ session's uncommitted edit, not this defect. Re-run once that session committed:
 
 Before the fix that class was present in **every** run, at between one and twelve failures.
 It is gone, and `VERIFY_TEST=test:coverage` is no longer a gate that means "try again".
+
+## A `Blob` frame is converted and decoded, and delivery stays ordered
+
+`PowerWebSocketClient` sets `binaryType = 'arraybuffer'` at connect. When a platform
+refuses that — a getter-only accessor throws on assignment — a binary frame arrives as a
+`Blob`, and the library had **no `Blob`-to-bytes conversion anywhere**: `frameSize` only
+_measures_ one and `decodeMessage` accepts views and `ArrayBuffer`. Every such frame
+failed in the codec with `expected a Uint8Array`, naming the codec rather than the reason,
+once per frame. Part 1 of RT-036 reported the refusal once instead; **part 2 closes the
+gap.**
+
+```js
+const client = new PowerWebSocketClient({ url });
+// on a platform that refuses binaryType:
+client.on('error', (e) => log(e)); // one message: the frames are converted here
+client.on('message', (m) => use(m)); // …and they arrive
+```
+
+**The conversion is `await blob.arrayBuffer()`, and the design problem was ordering.**
+`_handleMessage` runs inside a `message` listener, and **nobody awaits what that returns** —
+so converting inline would let a later text frame overtake an earlier binary one, and
+delivery order would become a function of how fast each conversion happened. Every frame
+that needs converting, **and every frame behind it**, therefore joins a serial chain.
+
+Two consequences, both contract rather than detail:
+
+- **Delivery becomes asynchronous once the first `Blob` arrives**, and stays that way for
+  the connection — nothing in the platform reveals whether more are coming. A platform
+  that honours `binaryType` (every browser that supports it, and Node's `ws`) never joins
+  the chain, keeps synchronous delivery for the whole connection, and pays one property
+  read per frame.
+- **`close` is ordered behind the chain.** `readyState` and the timers still change
+  synchronously — `CLOSED` is the peer's news, not an ordering decision — but the `close`
+  event waits for a pending conversion, so a caller treating `close` as "nothing more will
+  arrive" is not wrong once per connection.
+
+`stats().decodeErrors` now means what its name says. A `Blob` is no longer unreadable; a
+frame that survives conversion and then fails in the codec still counts; and a `Blob` whose
+`arrayBuffer()` rejects is counted and reported **every time**, because unlike the refusal,
+two conversion failures are not necessarily the same failure twice.
+
+**Three of my own mistakes, all caught by running.** The test fake resolved with the `Blob`
+rather than its bytes, and `new Uint8Array(blob)` does not throw — a Blob is neither
+array-like nor iterable, so it silently produced a **zero-length** array that then failed in
+the codec, and the test blamed the delivery chain. RT-036's note **predicted** that
+`maxPayload.test.js` would "still pass unchanged" after part 2, and that prediction was
+wrong: part 2 does not condition on a recorded refusal, it converts whatever arrives as a
+`Blob`. And the first `decodeErrors` assertion written for that test was also wrong —
+`frameOf(500)` is `encodeMessage` of a 500-byte pad, so it is a _valid_ message that merely
+happens to be large, and it converts and decodes; the codec error is gone rather than
+replaced.
+
+One guard is **unreachable and says so**: the chain's rejection-swallowing wrapper kills no
+mutant, because `_convertAndDeliver` catches its own failures and `_emit` catches everything
+a caller's handler can throw. It stays, documented as untested, because the only things
+enforcing the invariant are two unrelated try/catch blocks.
+
+11 tests, 4 mutants: chain removed **5 failed**, the conversion removed **6**, the one-shot
+report ungated from the recorded refusal **1**.
