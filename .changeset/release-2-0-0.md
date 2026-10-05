@@ -9252,3 +9252,42 @@ enforcing the invariant are two unrelated try/catch blocks.
 
 11 tests, 4 mutants: chain removed **5 failed**, the conversion removed **6**, the one-shot
 report ungated from the recorded refusal **1**.
+
+## Node transport options reach the socket constructor
+
+`new PowerWebSocketClient({ url, WebSocketImpl: ws })` could not set `headers`,
+`perMessageDeflate` or `maxPayload`. The client called
+`new this._WS(this.url, this.protocols)` — **correct for a browser**, since the DOM
+`WebSocket` constructor takes two arguments — but it left the Node `ws` options a
+caller usually needs unreachable. The only route was injecting a whole socket class
+through `WebSocketImpl`, which is configuring a transport by replacing it.
+
+```js
+new PowerWebSocketClient({
+  url: 'wss://api.example/stream',
+  WebSocketImpl: ws,
+  socketOptions: {
+    headers: { Authorization: `Bearer ${token}` },
+    perMessageDeflate: false,
+    maxPayload: 8 * 1024 * 1024,
+  },
+});
+```
+
+**A browser ignores it**, because the DOM constructor discards extra arguments by
+specification — so it is forwarded unconditionally rather than branched on. Branching
+would mean deciding at runtime which of two socket contracts a caller's class follows, and
+getting that wrong either loses the options on Node or passes a stray object to a browser.
+
+**Nothing inside is validated, because nothing can be.** This library does not know what is
+behind `WebSocketImpl`, so validating keys would invent a contract for a class it has never
+seen; a typo reaches the transport as a typo. Only the _shape_ is checked, since a
+non-object would otherwise be stringified into the options position. The object is copied at
+construction, so a later mutation cannot change what a reconnect gets.
+
+`WebSocketStream` is untouched — it takes `(url, options)`, so its second argument is already
+the options bag and there is no third position to forward to.
+
+6 tests, 4 of 4 mutants killed. One assertion checks **identity** rather than equality,
+because a copy rebuilt per socket satisfies every equality assertion in the file and would
+still give a reconnect different settings from the first connection.
