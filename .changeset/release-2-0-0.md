@@ -9435,3 +9435,42 @@ assertion only read `coverage === null`, which is null _whether or not_ the base
 re-based since the samples are gone either way. **That test was decoration on the exact
 point it claimed to cover.** It now spends 40 ms before the reset, records two fresh
 samples, and asserts coverage exceeds 0.5 — the only state that separates the two.
+
+## Transferring a cached encode buffer now fails loudly instead of corrupting silently
+
+`PowerPool`'s encode cache hands the **same** `Uint8Array` to every caller encoding the
+same payload. Transferring it detaches that buffer, and the next cache hit returns a
+zero-length husk — so the payload arrives at the worker **empty, with nothing thrown
+anywhere**. POOL-009 recorded the caveat; this is the better answer.
+
+The previous guard was a detached-buffer pre-check, and it had a gap: it catches the
+**second** transfer, not the first, and the first is the one that does the damage.
+
+Those buffers are now marked with `markAsUntransferable()`, and **the platform enforces
+it**. Where Node has it — this library's floor is `>=22.12.0`; browsers do not, and there
+the pre-check still stands:
+
+```js
+structuredClone({ frame }, { transfer: [frame.buffer] });
+// → DOMException: Cannot transfer object of unsupported type
+```
+
+**This is a behaviour change you may notice, and it is the point of the change:**
+
+|                              | before                                                 | after                                                      |
+| ---------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
+| transferring a cached buffer | no error, and every later hit of that key is **empty** | `DOMException` at the `postMessage`, cache entry untouched |
+| the bytes                    | **gone** — the buffer is detached                      | **intact** — the transfer is refused, not performed        |
+
+**Do not catch and ignore that error**, or you are back to the silent case with more steps
+between you and it. The fix is to send a copy — `.slice()` — which is what
+`prepareBuffers`' `clone: true` mode exists for.
+
+The error _type_ is a platform implementation detail (`DOMException` on Node 24.18, **not**
+the `DataCloneError` a first draft of this note claimed, which measurement corrected), so
+match on the fact that it threw rather than on its class.
+
+Buffers on the **cache-bypass paths** — a payload too large to cache, for instance — are
+_not_ marked: nothing is shared there to protect, and refusing a transfer the caller owns
+would be a regression in the other direction. A test pins that, because it is the mistake
+this change could have made in the other direction.
