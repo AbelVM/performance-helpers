@@ -507,6 +507,44 @@ worth keeping: a transfer list on a shared buffer would detach the cached encode
 entry. A deferred item carries no buffer at all, so there is nothing that _can_ be
 detached.
 
+#### A shared encode buffer is now marked, so the platform refuses to transfer it
+
+**Changed in 2.0, and this is a behaviour change you may notice.** The encode cache
+hands the **same** `Uint8Array` to every caller encoding the same payload. Transferring it
+detaches the shared buffer, and the next cache hit returns a zero-length husk — the payload
+arrives at the worker **empty, with nothing thrown anywhere**.
+
+That was previously guarded by a doc note (the sentence above) plus a detached-buffer
+pre-check, and the pre-check has a gap: it catches the **second** transfer, not the first,
+and the first is the one that does the damage.
+
+The buffers are now marked with `markAsUntransferable()`, and **the platform enforces it**.
+Where Node has it (this library's floor is `>=22.12.0`; browsers do not, and there the
+pre-check still stands):
+
+```js
+const frame = pool._encodeForTransfer({ hello: 'world' }); // the shared cached buffer
+structuredClone({ frame }, { transfer: [frame.buffer] });
+// → DOMException: Cannot transfer object of unsupported type
+```
+
+So the failure moves **to the call site that made the mistake**, and the bytes stay intact —
+which is the difference between a _refused_ transfer and a _performed_ one. Concretely:
+
+- **Before:** transfer it, get no error, and every later hit of that key is empty.
+- **After:** transfer it, get a `DOMException` at the `postMessage`, and the cache entry is
+  untouched.
+
+**Do not catch and ignore that error**, or you are back to the silent case with more steps.
+The fix is to send a copy — `.slice()` — which is what `prepareBuffers`' `clone: true` mode
+exists for.
+
+The error _type_ is a platform implementation detail (`DOMException` on Node 24.18, not the
+`DataCloneError` a first draft of this note claimed), so match on the fact that it threw, not
+on its class. Buffers on the **cache-bypass paths** — a payload too large to cache, for
+instance — are _not_ marked, because there is nothing shared to protect and refusing a
+transfer the caller owns would be a regression in the other direction.
+
 ### Zero-copy: forwarding raw ArrayBuffers / TypedArrays
 
 When your producer already has an `ArrayBuffer` or a `TypedArray` (for example a decoded image or a pre-serialized payload) you can avoid re-encoding and enable zero-copy transfers by passing the raw buffer directly. The pool will auto-add the underlying `ArrayBuffer` to the transfer list when no `transfer` is provided.

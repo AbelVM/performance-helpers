@@ -4102,7 +4102,7 @@
 					]
 				},
 				{
-					"id": 4066,
+					"id": 4072,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -4120,7 +4120,7 @@
 				{
 					"title": "References",
 					"children": [
-						4066
+						4072
 					]
 				}
 			]
@@ -4991,7 +4991,7 @@
 					]
 				},
 				{
-					"id": 4067,
+					"id": 4073,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -5009,7 +5009,7 @@
 				{
 					"title": "References",
 					"children": [
-						4067
+						4073
 					]
 				}
 			]
@@ -7478,7 +7478,7 @@
 					]
 				},
 				{
-					"id": 4068,
+					"id": 4074,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -7496,7 +7496,7 @@
 				{
 					"title": "References",
 					"children": [
-						4068
+						4074
 					]
 				}
 			]
@@ -18127,7 +18127,7 @@
 					]
 				},
 				{
-					"id": 4069,
+					"id": 4075,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -18145,7 +18145,7 @@
 				{
 					"title": "References",
 					"children": [
-						4069
+						4075
 					]
 				}
 			]
@@ -19378,7 +19378,7 @@
 					}
 				},
 				{
-					"id": 4070,
+					"id": 4076,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -19408,7 +19408,7 @@
 				{
 					"title": "References",
 					"children": [
-						4070
+						4076
 					]
 				}
 			]
@@ -19750,7 +19750,7 @@
 					]
 				},
 				{
-					"id": 4071,
+					"id": 4077,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -19768,7 +19768,7 @@
 				{
 					"title": "References",
 					"children": [
-						4071
+						4077
 					]
 				}
 			]
@@ -20203,7 +20203,7 @@
 					]
 				},
 				{
-					"id": 4072,
+					"id": 4078,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -20221,7 +20221,7 @@
 				{
 					"title": "References",
 					"children": [
-						4072
+						4078
 					]
 				}
 			]
@@ -22025,7 +22025,7 @@
 					}
 				},
 				{
-					"id": 4073,
+					"id": 4079,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -22049,7 +22049,7 @@
 				{
 					"title": "References",
 					"children": [
-						4073
+						4079
 					]
 				}
 			]
@@ -24178,7 +24178,7 @@
 					]
 				},
 				{
-					"id": 4074,
+					"id": 4080,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -24196,7 +24196,7 @@
 				{
 					"title": "References",
 					"children": [
-						4074
+						4080
 					]
 				}
 			]
@@ -25476,7 +25476,7 @@
 					]
 				},
 				{
-					"id": 4076,
+					"id": 4082,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -25494,7 +25494,7 @@
 				{
 					"title": "References",
 					"children": [
-						4076
+						4082
 					]
 				}
 			]
@@ -26788,7 +26788,7 @@
 					]
 				},
 				{
-					"id": 4077,
+					"id": 4083,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -26806,7 +26806,7 @@
 				{
 					"title": "References",
 					"children": [
-						4077
+						4083
 					]
 				}
 			]
@@ -29266,7 +29266,7 @@
 					]
 				},
 				{
-					"id": 4079,
+					"id": 4085,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -29284,7 +29284,7 @@
 				{
 					"title": "References",
 					"children": [
-						4079
+						4085
 					]
 				}
 			]
@@ -39995,7 +39995,7 @@
 					]
 				},
 				{
-					"id": 4081,
+					"id": 4087,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -40013,7 +40013,7 @@
 				{
 					"title": "References",
 					"children": [
-						4081
+						4087
 					]
 				}
 			]
@@ -41895,7 +41895,7 @@
 					"defaultValue": "..."
 				},
 				{
-					"id": 4080,
+					"id": 4086,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -41919,7 +41919,7 @@
 				{
 					"title": "References",
 					"children": [
-						4080
+						4086
 					]
 				}
 			]
@@ -43638,7 +43638,7 @@
 					]
 				},
 				{
-					"id": 4084,
+					"id": 4090,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -43656,7 +43656,7 @@
 				{
 					"title": "References",
 					"children": [
-						4084
+						4090
 					]
 				}
 			]
@@ -48394,7 +48394,7 @@
 					}
 				},
 				{
-					"id": 4085,
+					"id": 4091,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48402,7 +48402,7 @@
 					"target": 3076
 				},
 				{
-					"id": 4086,
+					"id": 4092,
 					"name": "READY_STATE",
 					"variant": "reference",
 					"kind": 4194304,
@@ -48460,8 +48460,8 @@
 				{
 					"title": "References",
 					"children": [
-						4085,
-						4086
+						4091,
+						4092
 					]
 				}
 			]
@@ -53148,7 +53148,7 @@
 					]
 				},
 				{
-					"id": 4087,
+					"id": 4093,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -53166,7 +53166,7 @@
 				{
 					"title": "References",
 					"children": [
-						4087
+						4093
 					]
 				}
 			]
@@ -53190,14 +53190,14 @@
 					}
 				},
 				{
-					"id": 3912,
+					"id": 3918,
 					"name": "detectEnv",
 					"variant": "declaration",
 					"kind": 64,
 					"flags": {},
 					"signatures": [
 						{
-							"id": 3913,
+							"id": 3919,
 							"name": "detectEnv",
 							"variant": "signature",
 							"kind": 4096,
@@ -53313,12 +53313,12 @@
 					]
 				},
 				{
-					"id": 4065,
+					"id": 4071,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
 					"flags": {},
-					"target": 3923
+					"target": 3929
 				}
 			],
 			"groups": [
@@ -53331,14 +53331,14 @@
 				{
 					"title": "Functions",
 					"children": [
-						3912,
+						3918,
 						3
 					]
 				},
 				{
 					"title": "References",
 					"children": [
-						4065
+						4071
 					]
 				}
 			]
@@ -53351,21 +53351,21 @@
 			"flags": {},
 			"children": [
 				{
-					"id": 3923,
+					"id": 3929,
 					"name": "WorkerAgnostic",
 					"variant": "declaration",
 					"kind": 128,
 					"flags": {},
 					"children": [
 						{
-							"id": 3928,
+							"id": 3934,
 							"name": "constructor",
 							"variant": "declaration",
 							"kind": 512,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3929,
+									"id": 3935,
 									"name": "WorkerAgnostic",
 									"variant": "signature",
 									"kind": 16384,
@@ -53388,7 +53388,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3930,
+											"id": 3936,
 											"name": "workerSource",
 											"variant": "param",
 											"kind": 32768,
@@ -53430,7 +53430,7 @@
 											}
 										},
 										{
-											"id": 3931,
+											"id": 3937,
 											"name": "options",
 											"variant": "param",
 											"kind": 32768,
@@ -53456,7 +53456,7 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3932,
+													"id": 3938,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
@@ -53468,7 +53468,7 @@
 									],
 									"type": {
 										"type": "reference",
-										"target": 3923,
+										"target": 3929,
 										"name": "WorkerAgnostic",
 										"package": "performance-helpers"
 									}
@@ -53476,7 +53476,7 @@
 							]
 						},
 						{
-							"id": 3942,
+							"id": 3948,
 							"name": "_disposed",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53487,7 +53487,7 @@
 							}
 						},
 						{
-							"id": 3943,
+							"id": 3949,
 							"name": "_listeners",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53514,7 +53514,7 @@
 							}
 						},
 						{
-							"id": 3947,
+							"id": 3953,
 							"name": "_nativeModel",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53534,7 +53534,7 @@
 							}
 						},
 						{
-							"id": 3936,
+							"id": 3942,
 							"name": "_onError",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53561,7 +53561,7 @@
 							}
 						},
 						{
-							"id": 3937,
+							"id": 3943,
 							"name": "_wired",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53578,21 +53578,21 @@
 										{
 											"type": "reflection",
 											"declaration": {
-												"id": 3938,
+												"id": 3944,
 												"name": "__type",
 												"variant": "declaration",
 												"kind": 65536,
 												"flags": {},
 												"signatures": [
 													{
-														"id": 3939,
+														"id": 3945,
 														"name": "__type",
 														"variant": "signature",
 														"kind": 4096,
 														"flags": {},
 														"parameters": [
 															{
-																"id": 3940,
+																"id": 3946,
 																"name": "args",
 																"variant": "param",
 																"kind": 32768,
@@ -53621,7 +53621,7 @@
 							}
 						},
 						{
-							"id": 3941,
+							"id": 3947,
 							"name": "_wiredProperties",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53644,7 +53644,7 @@
 							}
 						},
 						{
-							"id": 3933,
+							"id": 3939,
 							"name": "env",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53655,7 +53655,7 @@
 							}
 						},
 						{
-							"id": 3934,
+							"id": 3940,
 							"name": "options",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53663,7 +53663,7 @@
 							"type": {
 								"type": "reflection",
 								"declaration": {
-									"id": 3935,
+									"id": 3941,
 									"name": "__type",
 									"variant": "declaration",
 									"kind": 65536,
@@ -53672,7 +53672,7 @@
 							}
 						},
 						{
-							"id": 3944,
+							"id": 3950,
 							"name": "worker",
 							"variant": "declaration",
 							"kind": 1024,
@@ -53689,14 +53689,14 @@
 							}
 						},
 						{
-							"id": 3995,
+							"id": 4001,
 							"name": "[dispose]",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3996,
+									"id": 4002,
 									"name": "[dispose]",
 									"variant": "signature",
 									"kind": 4096,
@@ -53718,14 +53718,14 @@
 							]
 						},
 						{
-							"id": 3961,
+							"id": 3967,
 							"name": "addEventListener",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3962,
+									"id": 3968,
 									"name": "addEventListener",
 									"variant": "signature",
 									"kind": 4096,
@@ -53741,7 +53741,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3963,
+											"id": 3969,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -53752,7 +53752,7 @@
 											}
 										},
 										{
-											"id": 3964,
+											"id": 3970,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -53760,21 +53760,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3965,
+													"id": 3971,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3966,
+															"id": 3972,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3967,
+																	"id": 3973,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -53800,7 +53800,7 @@
 									],
 									"type": {
 										"type": "reference",
-										"target": 3923,
+										"target": 3929,
 										"name": "WorkerAgnostic",
 										"package": "performance-helpers"
 									}
@@ -53808,14 +53808,14 @@
 							]
 						},
 						{
-							"id": 3948,
+							"id": 3954,
 							"name": "dispose",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3949,
+									"id": 3955,
 									"name": "dispose",
 									"variant": "signature",
 									"kind": 4096,
@@ -53874,14 +53874,14 @@
 							]
 						},
 						{
-							"id": 3982,
+							"id": 3988,
 							"name": "off",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3983,
+									"id": 3989,
 									"name": "off",
 									"variant": "signature",
 									"kind": 4096,
@@ -53896,7 +53896,7 @@
 												"kind": "inline-tag",
 												"tag": "@link",
 												"text": "removeEventListener",
-												"target": 3968
+												"target": 3974
 											},
 											{
 												"kind": "text",
@@ -53912,7 +53912,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3984,
+											"id": 3990,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -53923,7 +53923,7 @@
 											}
 										},
 										{
-											"id": 3985,
+											"id": 3991,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -53931,21 +53931,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3986,
+													"id": 3992,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3987,
+															"id": 3993,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3988,
+																	"id": 3994,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -53971,7 +53971,7 @@
 									],
 									"type": {
 										"type": "reference",
-										"target": 3923,
+										"target": 3929,
 										"name": "WorkerAgnostic",
 										"package": "performance-helpers"
 									}
@@ -53979,14 +53979,14 @@
 							]
 						},
 						{
-							"id": 3975,
+							"id": 3981,
 							"name": "on",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3976,
+									"id": 3982,
 									"name": "on",
 									"variant": "signature",
 									"kind": 4096,
@@ -54001,7 +54001,7 @@
 												"kind": "inline-tag",
 												"tag": "@link",
 												"text": "addEventListener",
-												"target": 3961
+												"target": 3967
 											},
 											{
 												"kind": "text",
@@ -54017,7 +54017,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3977,
+											"id": 3983,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -54028,7 +54028,7 @@
 											}
 										},
 										{
-											"id": 3978,
+											"id": 3984,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -54036,21 +54036,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3979,
+													"id": 3985,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3980,
+															"id": 3986,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3981,
+																	"id": 3987,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -54076,7 +54076,7 @@
 									],
 									"type": {
 										"type": "reference",
-										"target": 3923,
+										"target": 3929,
 										"name": "WorkerAgnostic",
 										"package": "performance-helpers"
 									}
@@ -54084,14 +54084,14 @@
 							]
 						},
 						{
-							"id": 3989,
+							"id": 3995,
 							"name": "postMessage",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3990,
+									"id": 3996,
 									"name": "postMessage",
 									"variant": "signature",
 									"kind": 4096,
@@ -54107,7 +54107,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3991,
+											"id": 3997,
 											"name": "message",
 											"variant": "param",
 											"kind": 32768,
@@ -54118,7 +54118,7 @@
 											}
 										},
 										{
-											"id": 3992,
+											"id": 3998,
 											"name": "transfer",
 											"variant": "param",
 											"kind": 32768,
@@ -54188,14 +54188,14 @@
 							]
 						},
 						{
-							"id": 3968,
+							"id": 3974,
 							"name": "removeEventListener",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3969,
+									"id": 3975,
 									"name": "removeEventListener",
 									"variant": "signature",
 									"kind": 4096,
@@ -54211,7 +54211,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3970,
+											"id": 3976,
 											"name": "type",
 											"variant": "param",
 											"kind": 32768,
@@ -54222,7 +54222,7 @@
 											}
 										},
 										{
-											"id": 3971,
+											"id": 3977,
 											"name": "handler",
 											"variant": "param",
 											"kind": 32768,
@@ -54230,21 +54230,21 @@
 											"type": {
 												"type": "reflection",
 												"declaration": {
-													"id": 3972,
+													"id": 3978,
 													"name": "__type",
 													"variant": "declaration",
 													"kind": 65536,
 													"flags": {},
 													"signatures": [
 														{
-															"id": 3973,
+															"id": 3979,
 															"name": "__type",
 															"variant": "signature",
 															"kind": 4096,
 															"flags": {},
 															"parameters": [
 																{
-																	"id": 3974,
+																	"id": 3980,
 																	"name": "arg0",
 																	"variant": "param",
 																	"kind": 32768,
@@ -54270,7 +54270,7 @@
 									],
 									"type": {
 										"type": "reference",
-										"target": 3923,
+										"target": 3929,
 										"name": "WorkerAgnostic",
 										"package": "performance-helpers"
 									}
@@ -54278,14 +54278,14 @@
 							]
 						},
 						{
-							"id": 3993,
+							"id": 3999,
 							"name": "terminate",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 3994,
+									"id": 4000,
 									"name": "terminate",
 									"variant": "signature",
 									"kind": 4096,
@@ -54328,7 +54328,7 @@
 							]
 						},
 						{
-							"id": 3924,
+							"id": 3930,
 							"name": "create",
 							"variant": "declaration",
 							"kind": 2048,
@@ -54337,7 +54337,7 @@
 							},
 							"signatures": [
 								{
-									"id": 3925,
+									"id": 3931,
 									"name": "create",
 									"variant": "signature",
 									"kind": 4096,
@@ -54371,7 +54371,7 @@
 									},
 									"parameters": [
 										{
-											"id": 3926,
+											"id": 3932,
 											"name": "workerSource",
 											"variant": "param",
 											"kind": 32768,
@@ -54397,7 +54397,7 @@
 											}
 										},
 										{
-											"id": 3927,
+											"id": 3933,
 											"name": "options",
 											"variant": "param",
 											"kind": 32768,
@@ -54428,41 +54428,41 @@
 						{
 							"title": "Constructors",
 							"children": [
-								3928
+								3934
 							]
 						},
 						{
 							"title": "Properties",
 							"children": [
+								3948,
+								3949,
+								3953,
 								3942,
 								3943,
 								3947,
-								3936,
-								3937,
-								3941,
-								3933,
-								3934,
-								3944
+								3939,
+								3940,
+								3950
 							]
 						},
 						{
 							"title": "Methods",
 							"children": [
+								4001,
+								3967,
+								3954,
+								3988,
+								3981,
 								3995,
-								3961,
-								3948,
-								3982,
-								3975,
-								3989,
-								3968,
-								3993,
-								3924
+								3974,
+								3999,
+								3930
 							]
 						}
 					]
 				},
 				{
-					"id": 4062,
+					"id": 4068,
 					"name": "announceCapabilities",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54470,7 +54470,7 @@
 					"target": 1662
 				},
 				{
-					"id": 3917,
+					"id": 3923,
 					"name": "b2o",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54478,7 +54478,7 @@
 					"target": 234
 				},
 				{
-					"id": 4053,
+					"id": 4059,
 					"name": "canUseNativeClone",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54486,7 +54486,7 @@
 					"target": 1574
 				},
 				{
-					"id": 4046,
+					"id": 4052,
 					"name": "CODECS",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54494,7 +54494,7 @@
 					"target": 1684
 				},
 				{
-					"id": 4063,
+					"id": 4069,
 					"name": "collectTransferables",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54502,7 +54502,7 @@
 					"target": 1672
 				},
 				{
-					"id": 4050,
+					"id": 4056,
 					"name": "createFrameDecoder",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54510,7 +54510,7 @@
 					"target": 1603
 				},
 				{
-					"id": 4064,
+					"id": 4070,
 					"name": "decodeInbound",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54518,7 +54518,7 @@
 					"target": 1676
 				},
 				{
-					"id": 4049,
+					"id": 4055,
 					"name": "decodeMessage",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54526,7 +54526,7 @@
 					"target": 1591
 				},
 				{
-					"id": 4012,
+					"id": 4018,
 					"name": "defaultMetrics",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54534,23 +54534,23 @@
 					"target": 109
 				},
 				{
-					"id": 3997,
+					"id": 4003,
 					"name": "detectEnv",
 					"variant": "reference",
 					"kind": 4194304,
 					"flags": {},
-					"target": 3912
+					"target": 3918
 				},
 				{
-					"id": 4021,
+					"id": 4027,
 					"name": "detectWebTransportSupport",
 					"variant": "reference",
 					"kind": 4194304,
 					"flags": {},
-					"target": 3888
+					"target": 3894
 				},
 				{
-					"id": 4048,
+					"id": 4054,
 					"name": "encodeMessage",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54558,7 +54558,7 @@
 					"target": 1582
 				},
 				{
-					"id": 4052,
+					"id": 4058,
 					"name": "encodeNative",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54566,7 +54566,7 @@
 					"target": 1636
 				},
 				{
-					"id": 4061,
+					"id": 4067,
 					"name": "encodeNativeEnvelope",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54574,7 +54574,7 @@
 					"target": 1651
 				},
 				{
-					"id": 4016,
+					"id": 4022,
 					"name": "formatErrorObj",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54582,7 +54582,7 @@
 					"target": 3723
 				},
 				{
-					"id": 4051,
+					"id": 4057,
 					"name": "frameEncodedJson",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54590,7 +54590,7 @@
 					"target": 1588
 				},
 				{
-					"id": 4056,
+					"id": 4062,
 					"name": "frameTransferList",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54598,7 +54598,7 @@
 					"target": 1642
 				},
 				{
-					"id": 4047,
+					"id": 4053,
 					"name": "HEADER_BYTES",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54606,7 +54606,7 @@
 					"target": 1687
 				},
 				{
-					"id": 4060,
+					"id": 4066,
 					"name": "isCapabilityAnnouncement",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54614,7 +54614,7 @@
 					"target": 1648
 				},
 				{
-					"id": 4059,
+					"id": 4065,
 					"name": "isNativeEnvelope",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54622,7 +54622,7 @@
 					"target": 1645
 				},
 				{
-					"id": 4055,
+					"id": 4061,
 					"name": "isRawPayload",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54630,7 +54630,7 @@
 					"target": 1576
 				},
 				{
-					"id": 4020,
+					"id": 4026,
 					"name": "measureAsync",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54638,7 +54638,7 @@
 					"target": 3831
 				},
 				{
-					"id": 4019,
+					"id": 4025,
 					"name": "measureSync",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54646,7 +54646,7 @@
 					"target": 3823
 				},
 				{
-					"id": 4045,
+					"id": 4051,
 					"name": "MESSAGE_CODECS",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54654,7 +54654,7 @@
 					"target": 1688
 				},
 				{
-					"id": 4044,
+					"id": 4050,
 					"name": "MESSAGE_PROTOCOL_VERSION",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54662,7 +54662,7 @@
 					"target": 1683
 				},
 				{
-					"id": 4014,
+					"id": 4020,
 					"name": "METRICS_VERSION",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54670,7 +54670,7 @@
 					"target": 79
 				},
 				{
-					"id": 4011,
+					"id": 4017,
 					"name": "MetricsCollector",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54678,7 +54678,7 @@
 					"target": 80
 				},
 				{
-					"id": 4018,
+					"id": 4024,
 					"name": "monoMs",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54686,7 +54686,7 @@
 					"target": 3841
 				},
 				{
-					"id": 4057,
+					"id": 4063,
 					"name": "NATIVE_ENVELOPE_KEY",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54694,7 +54694,7 @@
 					"target": 1689
 				},
 				{
-					"id": 4058,
+					"id": 4064,
 					"name": "NATIVE_PROTOCOL_VERSION",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54702,7 +54702,7 @@
 					"target": 1690
 				},
 				{
-					"id": 4015,
+					"id": 4021,
 					"name": "normalizeError",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54710,7 +54710,7 @@
 					"target": 3714
 				},
 				{
-					"id": 4017,
+					"id": 4023,
 					"name": "nowMs",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54718,7 +54718,7 @@
 					"target": 3839
 				},
 				{
-					"id": 3914,
+					"id": 3920,
 					"name": "o2b",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54726,7 +54726,7 @@
 					"target": 231
 				},
 				{
-					"id": 3915,
+					"id": 3921,
 					"name": "o2u8",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54734,7 +54734,7 @@
 					"target": 224
 				},
 				{
-					"id": 4028,
+					"id": 4034,
 					"name": "PowerBackpressure",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54742,7 +54742,7 @@
 					"target": 111
 				},
 				{
-					"id": 4030,
+					"id": 4036,
 					"name": "PowerBatch",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54750,7 +54750,7 @@
 					"target": 182
 				},
 				{
-					"id": 4029,
+					"id": 4035,
 					"name": "PowerBulkhead",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54758,7 +54758,7 @@
 					"target": 238
 				},
 				{
-					"id": 3918,
+					"id": 3924,
 					"name": "PowerCache",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54766,7 +54766,7 @@
 					"target": 333
 				},
 				{
-					"id": 4004,
+					"id": 4010,
 					"name": "PowerChunker",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54774,7 +54774,7 @@
 					"target": 900
 				},
 				{
-					"id": 4022,
+					"id": 4028,
 					"name": "PowerCircuit",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54782,7 +54782,7 @@
 					"target": 907
 				},
 				{
-					"id": 4023,
+					"id": 4029,
 					"name": "PowerCron",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54790,7 +54790,7 @@
 					"target": 954
 				},
 				{
-					"id": 4026,
+					"id": 4032,
 					"name": "PowerDeadline",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54798,7 +54798,7 @@
 					"target": 1030
 				},
 				{
-					"id": 4009,
+					"id": 4015,
 					"name": "PowerDefer",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54806,7 +54806,7 @@
 					"target": 1044
 				},
 				{
-					"id": 4034,
+					"id": 4040,
 					"name": "PowerEventBus",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54814,7 +54814,7 @@
 					"target": 1065
 				},
 				{
-					"id": 4036,
+					"id": 4042,
 					"name": "PowerEventLoopMonitor",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54822,7 +54822,7 @@
 					"target": 1147
 				},
 				{
-					"id": 4035,
+					"id": 4041,
 					"name": "PowerGCRA",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54830,7 +54830,7 @@
 					"target": 1253
 				},
 				{
-					"id": 4027,
+					"id": 4033,
 					"name": "PowerHistogram",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54838,7 +54838,7 @@
 					"target": 1364
 				},
 				{
-					"id": 4032,
+					"id": 4038,
 					"name": "PowerLatch",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54846,7 +54846,7 @@
 					"target": 1440
 				},
 				{
-					"id": 3999,
+					"id": 4005,
 					"name": "PowerLogger",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54854,7 +54854,7 @@
 					"target": 1504
 				},
 				{
-					"id": 3919,
+					"id": 3925,
 					"name": "PowerMemoizer",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54862,7 +54862,7 @@
 					"target": 673
 				},
 				{
-					"id": 4043,
+					"id": 4049,
 					"name": "PowerMessageCodec",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54870,7 +54870,7 @@
 					"target": 1691
 				},
 				{
-					"id": 4033,
+					"id": 4039,
 					"name": "PowerObserver",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54878,7 +54878,7 @@
 					"target": 1827
 				},
 				{
-					"id": 4005,
+					"id": 4011,
 					"name": "PowerPermitGate",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54886,7 +54886,7 @@
 					"target": 1892
 				},
 				{
-					"id": 3922,
+					"id": 3928,
 					"name": "PowerPool",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54894,7 +54894,7 @@
 					"target": 1968
 				},
 				{
-					"id": 4003,
+					"id": 4009,
 					"name": "PowerQueue",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54902,7 +54902,7 @@
 					"target": 2401
 				},
 				{
-					"id": 4002,
+					"id": 4008,
 					"name": "PowerRateLimit",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54910,7 +54910,7 @@
 					"target": 2557
 				},
 				{
-					"id": 4037,
+					"id": 4043,
 					"name": "PowerRealtimeHub",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54918,7 +54918,7 @@
 					"target": 2644
 				},
 				{
-					"id": 4024,
+					"id": 4030,
 					"name": "PowerRetry",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54926,7 +54926,7 @@
 					"target": 2862
 				},
 				{
-					"id": 4025,
+					"id": 4031,
 					"name": "PowerRetryBudget",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54934,7 +54934,7 @@
 					"target": 2826
 				},
 				{
-					"id": 4042,
+					"id": 4048,
 					"name": "PowerRTCChannel",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54942,7 +54942,7 @@
 					"target": 2460
 				},
 				{
-					"id": 4006,
+					"id": 4012,
 					"name": "PowerScheduler",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54950,7 +54950,7 @@
 					"target": 2878
 				},
 				{
-					"id": 4008,
+					"id": 4014,
 					"name": "PowerSemaphore",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54958,7 +54958,7 @@
 					"target": 2924
 				},
 				{
-					"id": 4031,
+					"id": 4037,
 					"name": "PowerServo",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54966,7 +54966,7 @@
 					"target": 2969
 				},
 				{
-					"id": 4001,
+					"id": 4007,
 					"name": "PowerSlidingWindow",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54974,7 +54974,7 @@
 					"target": 3023
 				},
 				{
-					"id": 4040,
+					"id": 4046,
 					"name": "PowerSocketAdapter",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54982,7 +54982,7 @@
 					"target": 3076
 				},
 				{
-					"id": 4007,
+					"id": 4013,
 					"name": "PowerSubscriberSet",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54990,7 +54990,7 @@
 					"target": 3239
 				},
 				{
-					"id": 4000,
+					"id": 4006,
 					"name": "PowerThrottle",
 					"variant": "reference",
 					"kind": 4194304,
@@ -54998,7 +54998,7 @@
 					"target": 3390
 				},
 				{
-					"id": 3920,
+					"id": 3926,
 					"name": "PowerTimedCache",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55006,7 +55006,7 @@
 					"target": 758
 				},
 				{
-					"id": 4010,
+					"id": 4016,
 					"name": "PowerTTLMap",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55014,7 +55014,7 @@
 					"target": 3296
 				},
 				{
-					"id": 4038,
+					"id": 4044,
 					"name": "PowerWebSocketClient",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55022,7 +55022,7 @@
 					"target": 3452
 				},
 				{
-					"id": 3998,
+					"id": 4004,
 					"name": "preloadNode",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55030,7 +55030,7 @@
 					"target": 3
 				},
 				{
-					"id": 4039,
+					"id": 4045,
 					"name": "READY_STATE",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55038,7 +55038,7 @@
 					"target": 19
 				},
 				{
-					"id": 4054,
+					"id": 4060,
 					"name": "selectCodec",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55046,7 +55046,7 @@
 					"target": 1579
 				},
 				{
-					"id": 3921,
+					"id": 3927,
 					"name": "simpleArgsKey",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55054,7 +55054,7 @@
 					"target": 330
 				},
 				{
-					"id": 4013,
+					"id": 4019,
 					"name": "toSeries",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55062,7 +55062,7 @@
 					"target": 55
 				},
 				{
-					"id": 3916,
+					"id": 3922,
 					"name": "u82o",
 					"variant": "reference",
 					"kind": 4194304,
@@ -55074,88 +55074,88 @@
 				{
 					"title": "Classes",
 					"children": [
-						3923
+						3929
 					]
 				},
 				{
 					"title": "References",
 					"children": [
-						4062,
-						3917,
-						4053,
-						4046,
-						4063,
-						4050,
-						4064,
-						4049,
-						4012,
-						3997,
-						4021,
-						4048,
-						4052,
-						4061,
-						4016,
-						4051,
-						4056,
-						4047,
-						4060,
+						4068,
+						3923,
 						4059,
+						4052,
+						4069,
+						4056,
+						4070,
 						4055,
-						4020,
-						4019,
-						4045,
-						4044,
-						4014,
-						4011,
 						4018,
-						4057,
+						4003,
+						4027,
+						4054,
 						4058,
-						4015,
-						4017,
-						3914,
-						3915,
-						4028,
-						4030,
-						4029,
-						3918,
-						4004,
+						4067,
 						4022,
-						4023,
+						4057,
+						4062,
+						4053,
+						4066,
+						4065,
+						4061,
 						4026,
-						4009,
+						4025,
+						4051,
+						4050,
+						4020,
+						4017,
+						4024,
+						4063,
+						4064,
+						4021,
+						4023,
+						3920,
+						3921,
 						4034,
 						4036,
 						4035,
-						4027,
-						4032,
-						3999,
-						3919,
-						4043,
-						4033,
-						4005,
-						3922,
-						4003,
-						4002,
-						4037,
-						4024,
-						4025,
-						4042,
-						4006,
-						4008,
-						4031,
-						4001,
-						4040,
-						4007,
-						4000,
-						3920,
+						3924,
 						4010,
+						4028,
+						4029,
+						4032,
+						4015,
+						4040,
+						4042,
+						4041,
+						4033,
 						4038,
-						3998,
+						4005,
+						3925,
+						4049,
 						4039,
-						4054,
-						3921,
+						4011,
+						3928,
+						4009,
+						4008,
+						4043,
+						4030,
+						4031,
+						4048,
+						4012,
+						4014,
+						4037,
+						4007,
+						4046,
 						4013,
-						3916
+						4006,
+						3926,
+						4016,
+						4044,
+						4004,
+						4045,
+						4060,
+						3927,
+						4019,
+						3922
 					]
 				}
 			]
@@ -57406,7 +57406,7 @@
 					]
 				},
 				{
-					"id": 4075,
+					"id": 4081,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -57430,7 +57430,7 @@
 				{
 					"title": "References",
 					"children": [
-						4075
+						4081
 					]
 				}
 			]
@@ -63781,7 +63781,7 @@
 					]
 				},
 				{
-					"id": 4078,
+					"id": 4084,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -63830,7 +63830,7 @@
 				{
 					"title": "References",
 					"children": [
-						4078
+						4084
 					]
 				}
 			]
@@ -67106,7 +67106,7 @@
 					}
 				},
 				{
-					"id": 4082,
+					"id": 4088,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -67140,7 +67140,7 @@
 				{
 					"title": "References",
 					"children": [
-						4082
+						4088
 					]
 				}
 			]
@@ -68576,7 +68576,7 @@
 					]
 				},
 				{
-					"id": 4083,
+					"id": 4089,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -68595,7 +68595,7 @@
 				{
 					"title": "References",
 					"children": [
-						4083
+						4089
 					]
 				}
 			]
@@ -72980,7 +72980,7 @@
 					}
 				},
 				{
-					"id": 4088,
+					"id": 4094,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -72988,7 +72988,7 @@
 					"target": 3452
 				},
 				{
-					"id": 4089,
+					"id": 4095,
 					"name": "READY_STATE",
 					"variant": "reference",
 					"kind": 4194304,
@@ -73059,8 +73059,8 @@
 				{
 					"title": "References",
 					"children": [
-						4088,
-						4089
+						4094,
+						4095
 					]
 				}
 			]
@@ -76566,7 +76566,7 @@
 					]
 				},
 				{
-					"id": 4090,
+					"id": 4096,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -76587,7 +76587,7 @@
 				{
 					"title": "References",
 					"children": [
-						4090
+						4096
 					]
 				}
 			]
@@ -77199,7 +77199,7 @@
 					]
 				},
 				{
-					"id": 4091,
+					"id": 4097,
 					"name": "default",
 					"variant": "reference",
 					"kind": 4194304,
@@ -77217,27 +77217,244 @@
 				{
 					"title": "References",
 					"children": [
-						4091
+						4097
 					]
 				}
 			]
 		},
 		{
 			"id": 3887,
+			"name": "utils/transferable",
+			"variant": "declaration",
+			"kind": 2,
+			"flags": {},
+			"children": [
+				{
+					"id": 3891,
+					"name": "canMarkUntransferable",
+					"variant": "declaration",
+					"kind": 64,
+					"flags": {},
+					"signatures": [
+						{
+							"id": 3892,
+							"name": "canMarkUntransferable",
+							"variant": "signature",
+							"kind": 4096,
+							"flags": {},
+							"comment": {
+								"summary": [
+									{
+										"kind": "text",
+										"text": "Whether "
+									},
+									{
+										"kind": "inline-tag",
+										"tag": "@link",
+										"text": "markUntransferable",
+										"target": 3888
+									},
+									{
+										"kind": "text",
+										"text": " can do anything on this platform.\n\nExposed for the guide and for a test that asserts the *documented* difference between a\nmarked and an unmarked platform, rather than leaving that difference to be discovered on\na browser."
+									}
+								],
+								"blockTags": [
+									{
+										"tag": "@returns",
+										"content": []
+									}
+								]
+							},
+							"type": {
+								"type": "intrinsic",
+								"name": "boolean"
+							}
+						}
+					]
+				},
+				{
+					"id": 3888,
+					"name": "markUntransferable",
+					"variant": "declaration",
+					"kind": 64,
+					"flags": {},
+					"signatures": [
+						{
+							"id": 3889,
+							"name": "markUntransferable",
+							"variant": "signature",
+							"kind": 4096,
+							"flags": {},
+							"comment": {
+								"summary": [
+									{
+										"kind": "text",
+										"text": "Mark an "
+									},
+									{
+										"kind": "code",
+										"text": "`ArrayBuffer`"
+									},
+									{
+										"kind": "text",
+										"text": " so the platform refuses to transfer it.\n\n**Every failure mode here is silent by design, and that is the whole contract.** A browser\nhas no such API; a "
+									},
+									{
+										"kind": "code",
+										"text": "`SharedArrayBuffer`"
+									},
+									{
+										"kind": "text",
+										"text": " is not markable; a buffer that is already marked is\na no-op. None of those is a reason to fail a "
+									},
+									{
+										"kind": "code",
+										"text": "`postMessage`"
+									},
+									{
+										"kind": "text",
+										"text": ", so none of them throws.\n\nThe one case worth noticing is a **non-"
+									},
+									{
+										"kind": "code",
+										"text": "`ArrayBuffer`"
+									},
+									{
+										"kind": "text",
+										"text": " view target**: "
+									},
+									{
+										"kind": "code",
+										"text": "`view.buffer`"
+									},
+									{
+										"kind": "text",
+										"text": " is\nalways an "
+									},
+									{
+										"kind": "code",
+										"text": "`ArrayBuffer`"
+									},
+									{
+										"kind": "text",
+										"text": " for a typed array over one, so that cannot happen here, but a\ncaller passing a "
+									},
+									{
+										"kind": "code",
+										"text": "`DataView`"
+									},
+									{
+										"kind": "text",
+										"text": " over a "
+									},
+									{
+										"kind": "code",
+										"text": "`SharedArrayBuffer`"
+									},
+									{
+										"kind": "text",
+										"text": " could and the guard absorbs it."
+									}
+								],
+								"blockTags": [
+									{
+										"tag": "@returns",
+										"content": [
+											{
+												"kind": "code",
+												"text": "`true`"
+											},
+											{
+												"kind": "text",
+												"text": " if the buffer is marked or the platform has no marker to apply."
+											}
+										]
+									}
+								]
+							},
+							"parameters": [
+								{
+									"id": 3890,
+									"name": "buffer",
+									"variant": "param",
+									"kind": 32768,
+									"flags": {},
+									"comment": {
+										"summary": [
+											{
+												"kind": "text",
+												"text": "Usually "
+											},
+											{
+												"kind": "code",
+												"text": "`view.buffer`"
+											},
+											{
+												"kind": "text",
+												"text": "."
+											}
+										]
+									},
+									"type": {
+										"type": "union",
+										"types": [
+											{
+												"type": "reference",
+												"target": {
+													"packageName": "typescript",
+													"packagePath": "lib/lib.es5.d.ts",
+													"qualifiedName": "ArrayBufferLike"
+												},
+												"name": "ArrayBufferLike",
+												"package": "typescript"
+											},
+											{
+												"type": "literal",
+												"value": null
+											},
+											{
+												"type": "intrinsic",
+												"name": "undefined"
+											}
+										]
+									}
+								}
+							],
+							"type": {
+								"type": "intrinsic",
+								"name": "boolean"
+							}
+						}
+					]
+				}
+			],
+			"groups": [
+				{
+					"title": "Functions",
+					"children": [
+						3891,
+						3888
+					]
+				}
+			]
+		},
+		{
+			"id": 3893,
 			"name": "utils/webtransport",
 			"variant": "declaration",
 			"kind": 2,
 			"flags": {},
 			"children": [
 				{
-					"id": 3904,
+					"id": 3910,
 					"name": "WebTransportSupport",
 					"variant": "declaration",
 					"kind": 256,
 					"flags": {},
 					"children": [
 						{
-							"id": 3905,
+							"id": 3911,
 							"name": "available",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77272,7 +77489,7 @@
 							}
 						},
 						{
-							"id": 3911,
+							"id": 3917,
 							"name": "byob",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77291,7 +77508,7 @@
 							}
 						},
 						{
-							"id": 3908,
+							"id": 3914,
 							"name": "createWritable",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77318,7 +77535,7 @@
 							}
 						},
 						{
-							"id": 3907,
+							"id": 3913,
 							"name": "datagrams",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77345,7 +77562,7 @@
 							}
 						},
 						{
-							"id": 3906,
+							"id": 3912,
 							"name": "reliableOnly",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77396,7 +77613,7 @@
 							}
 						},
 						{
-							"id": 3909,
+							"id": 3915,
 							"name": "sendGroups",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77443,7 +77660,7 @@
 							}
 						},
 						{
-							"id": 3910,
+							"id": 3916,
 							"name": "stats",
 							"variant": "declaration",
 							"kind": 1024,
@@ -77494,26 +77711,26 @@
 						{
 							"title": "Properties",
 							"children": [
-								3905,
 								3911,
-								3908,
-								3907,
-								3906,
-								3909,
-								3910
+								3917,
+								3914,
+								3913,
+								3912,
+								3915,
+								3916
 							]
 						}
 					]
 				},
 				{
-					"id": 3888,
+					"id": 3894,
 					"name": "detectWebTransportSupport",
 					"variant": "declaration",
 					"kind": 64,
 					"flags": {},
 					"signatures": [
 						{
-							"id": 3889,
+							"id": 3895,
 							"name": "detectWebTransportSupport",
 							"variant": "signature",
 							"kind": 4096,
@@ -77603,7 +77820,7 @@
 							},
 							"parameters": [
 								{
-									"id": 3890,
+									"id": 3896,
 									"name": "probe",
 									"variant": "param",
 									"kind": 32768,
@@ -77629,14 +77846,14 @@
 									"type": {
 										"type": "reflection",
 										"declaration": {
-											"id": 3891,
+											"id": 3897,
 											"name": "__type",
 											"variant": "declaration",
 											"kind": 65536,
 											"flags": {},
 											"children": [
 												{
-													"id": 3894,
+													"id": 3900,
 													"name": "transport",
 													"variant": "declaration",
 													"kind": 1024,
@@ -77678,14 +77895,14 @@
 													"type": {
 														"type": "reflection",
 														"declaration": {
-															"id": 3895,
+															"id": 3901,
 															"name": "__type",
 															"variant": "declaration",
 															"kind": 65536,
 															"flags": {},
 															"children": [
 																{
-																	"id": 3896,
+																	"id": 3902,
 																	"name": "datagrams",
 																	"variant": "declaration",
 																	"kind": 1024,
@@ -77695,14 +77912,14 @@
 																	"type": {
 																		"type": "reflection",
 																		"declaration": {
-																			"id": 3897,
+																			"id": 3903,
 																			"name": "__type",
 																			"variant": "declaration",
 																			"kind": 65536,
 																			"flags": {},
 																			"children": [
 																				{
-																					"id": 3899,
+																					"id": 3905,
 																					"name": "readable",
 																					"variant": "declaration",
 																					"kind": 1024,
@@ -77715,7 +77932,7 @@
 																					}
 																				},
 																				{
-																					"id": 3898,
+																					"id": 3904,
 																					"name": "writable",
 																					"variant": "declaration",
 																					"kind": 1024,
@@ -77740,8 +77957,8 @@
 																				{
 																					"title": "Properties",
 																					"children": [
-																						3899,
-																						3898
+																						3905,
+																						3904
 																					]
 																				}
 																			]
@@ -77749,7 +77966,7 @@
 																	}
 																},
 																{
-																	"id": 3901,
+																	"id": 3907,
 																	"name": "getStats",
 																	"variant": "declaration",
 																	"kind": 1024,
@@ -77759,14 +77976,14 @@
 																	"type": {
 																		"type": "reflection",
 																		"declaration": {
-																			"id": 3902,
+																			"id": 3908,
 																			"name": "__type",
 																			"variant": "declaration",
 																			"kind": 65536,
 																			"flags": {},
 																			"signatures": [
 																				{
-																					"id": 3903,
+																					"id": 3909,
 																					"name": "__type",
 																					"variant": "signature",
 																					"kind": 4096,
@@ -77781,7 +77998,7 @@
 																	}
 																},
 																{
-																	"id": 3900,
+																	"id": 3906,
 																	"name": "incomingHighWaterMark",
 																	"variant": "declaration",
 																	"kind": 1024,
@@ -77798,9 +78015,9 @@
 																{
 																	"title": "Properties",
 																	"children": [
-																		3896,
-																		3901,
-																		3900
+																		3902,
+																		3907,
+																		3906
 																	]
 																}
 															]
@@ -77808,7 +78025,7 @@
 													}
 												},
 												{
-													"id": 3892,
+													"id": 3898,
 													"name": "WebTransport",
 													"variant": "declaration",
 													"kind": 1024,
@@ -77835,7 +78052,7 @@
 													}
 												},
 												{
-													"id": 3893,
+													"id": 3899,
 													"name": "WebTransportSendGroup",
 													"variant": "declaration",
 													"kind": 1024,
@@ -77866,9 +78083,9 @@
 												{
 													"title": "Properties",
 													"children": [
-														3894,
-														3892,
-														3893
+														3900,
+														3898,
+														3899
 													]
 												}
 											]
@@ -77879,7 +78096,7 @@
 							],
 							"type": {
 								"type": "reference",
-								"target": 3904,
+								"target": 3910,
 								"name": "WebTransportSupport",
 								"package": "performance-helpers"
 							}
@@ -77891,13 +78108,13 @@
 				{
 					"title": "Interfaces",
 					"children": [
-						3904
+						3910
 					]
 				},
 				{
 					"title": "Functions",
 					"children": [
-						3888
+						3894
 					]
 				}
 			]
@@ -77953,7 +78170,8 @@
 				3817,
 				3822,
 				3843,
-				3887
+				3887,
+				3893
 			]
 		}
 	],
@@ -94046,53 +94264,53 @@
 		},
 		"3887": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/utils/webtransport.js",
+			"packagePath": "src/utils/transferable.js",
 			"qualifiedName": ""
 		},
 		"3888": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "detectWebTransportSupport"
+			"packagePath": "src/utils/transferable.js",
+			"qualifiedName": "markUntransferable"
 		},
 		"3889": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "detectWebTransportSupport"
+			"packagePath": "src/utils/transferable.js",
+			"qualifiedName": "markUntransferable"
 		},
 		"3890": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "probe"
+			"packagePath": "src/utils/transferable.js",
+			"qualifiedName": "buffer"
 		},
 		"3891": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type"
+			"packagePath": "src/utils/transferable.js",
+			"qualifiedName": "canMarkUntransferable"
 		},
 		"3892": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.WebTransport"
+			"packagePath": "src/utils/transferable.js",
+			"qualifiedName": "canMarkUntransferable"
 		},
 		"3893": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.WebTransportSendGroup"
+			"qualifiedName": ""
 		},
 		"3894": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.transport"
+			"qualifiedName": "detectWebTransportSupport"
 		},
 		"3895": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "detectWebTransportSupport"
 		},
 		"3896": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.datagrams"
+			"qualifiedName": "probe"
 		},
 		"3897": {
 			"packageName": "performance-helpers",
@@ -94102,27 +94320,27 @@
 		"3898": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.writable"
+			"qualifiedName": "__type.WebTransport"
 		},
 		"3899": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.readable"
+			"qualifiedName": "__type.WebTransportSendGroup"
 		},
 		"3900": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.incomingHighWaterMark"
+			"qualifiedName": "__type.transport"
 		},
 		"3901": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.getStats"
+			"qualifiedName": "__type"
 		},
 		"3902": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "__type.datagrams"
 		},
 		"3903": {
 			"packageName": "performance-helpers",
@@ -94132,127 +94350,127 @@
 		"3904": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "WebTransportSupport"
+			"qualifiedName": "__type.writable"
 		},
 		"3905": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.available"
+			"qualifiedName": "__type.readable"
 		},
 		"3906": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.reliableOnly"
+			"qualifiedName": "__type.incomingHighWaterMark"
 		},
 		"3907": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.datagrams"
+			"qualifiedName": "__type.getStats"
 		},
 		"3908": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.createWritable"
+			"qualifiedName": "__type"
 		},
 		"3909": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.sendGroups"
+			"qualifiedName": "__type"
 		},
 		"3910": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.stats"
+			"qualifiedName": "WebTransportSupport"
 		},
 		"3911": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/webtransport.js",
-			"qualifiedName": "__type.byob"
+			"qualifiedName": "__type.available"
 		},
 		"3912": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "detectEnv"
+			"packagePath": "src/utils/webtransport.js",
+			"qualifiedName": "__type.reliableOnly"
 		},
 		"3913": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "detectEnv"
+			"packagePath": "src/utils/webtransport.js",
+			"qualifiedName": "__type.datagrams"
 		},
 		"3914": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "o2b"
+			"packagePath": "src/utils/webtransport.js",
+			"qualifiedName": "__type.createWritable"
 		},
 		"3915": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "o2u8"
+			"packagePath": "src/utils/webtransport.js",
+			"qualifiedName": "__type.sendGroups"
 		},
 		"3916": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "u82o"
+			"packagePath": "src/utils/webtransport.js",
+			"qualifiedName": "__type.stats"
 		},
 		"3917": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "b2o"
+			"packagePath": "src/utils/webtransport.js",
+			"qualifiedName": "__type.byob"
 		},
 		"3918": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerCache"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "detectEnv"
 		},
 		"3919": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerMemoizer"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "detectEnv"
 		},
 		"3920": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerTimedCache"
+			"qualifiedName": "o2b"
 		},
 		"3921": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "simpleArgsKey"
+			"qualifiedName": "o2u8"
 		},
 		"3922": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerPool"
+			"qualifiedName": "u82o"
 		},
 		"3923": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic"
+			"packagePath": "src/index.js",
+			"qualifiedName": "b2o"
 		},
 		"3924": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.create"
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerCache"
 		},
 		"3925": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.create"
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerMemoizer"
 		},
 		"3926": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "workerSource"
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerTimedCache"
 		},
 		"3927": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "options"
+			"packagePath": "src/index.js",
+			"qualifiedName": "simpleArgsKey"
 		},
 		"3928": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.__constructor"
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerPool"
 		},
 		"3929": {
 			"packageName": "performance-helpers",
@@ -94262,137 +94480,137 @@
 		"3930": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "workerSource"
+			"qualifiedName": "WorkerAgnostic.create"
 		},
 		"3931": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "options"
+			"qualifiedName": "WorkerAgnostic.create"
+		},
+		"3932": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "workerSource"
 		},
 		"3933": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.env"
+			"qualifiedName": "options"
 		},
 		"3934": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.options"
+			"qualifiedName": "WorkerAgnostic.__constructor"
+		},
+		"3935": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic"
 		},
 		"3936": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._onError"
+			"qualifiedName": "workerSource"
 		},
 		"3937": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._wired"
-		},
-		"3938": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "options"
 		},
 		"3939": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "WorkerAgnostic.env"
 		},
 		"3940": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "args"
-		},
-		"3941": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._wiredProperties"
+			"qualifiedName": "WorkerAgnostic.options"
 		},
 		"3942": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._disposed"
+			"qualifiedName": "WorkerAgnostic._onError"
 		},
 		"3943": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._listeners"
+			"qualifiedName": "WorkerAgnostic._wired"
 		},
 		"3944": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.worker"
+			"qualifiedName": "__type"
+		},
+		"3945": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "__type"
+		},
+		"3946": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "args"
 		},
 		"3947": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic._nativeModel"
+			"qualifiedName": "WorkerAgnostic._wiredProperties"
 		},
 		"3948": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.dispose"
+			"qualifiedName": "WorkerAgnostic._disposed"
 		},
 		"3949": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic._listeners"
+		},
+		"3950": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.worker"
+		},
+		"3953": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic._nativeModel"
+		},
+		"3954": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/helpers/WorkerAgnostic.js",
 			"qualifiedName": "WorkerAgnostic.dispose"
 		},
-		"3961": {
+		"3955": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.addEventListener"
-		},
-		"3962": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.addEventListener"
-		},
-		"3963": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
-		},
-		"3964": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
-		},
-		"3965": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
-		},
-		"3966": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "WorkerAgnostic.dispose"
 		},
 		"3967": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "WorkerAgnostic.addEventListener"
 		},
 		"3968": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.removeEventListener"
+			"qualifiedName": "WorkerAgnostic.addEventListener"
 		},
 		"3969": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.removeEventListener"
+			"qualifiedName": "type"
 		},
 		"3970": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
+			"qualifiedName": "handler"
 		},
 		"3971": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
+			"qualifiedName": "__type"
 		},
 		"3972": {
 			"packageName": "performance-helpers",
@@ -94402,32 +94620,32 @@
 		"3973": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "arg0"
 		},
 		"3974": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "WorkerAgnostic.removeEventListener"
 		},
 		"3975": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.on"
+			"qualifiedName": "WorkerAgnostic.removeEventListener"
 		},
 		"3976": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.on"
+			"qualifiedName": "type"
 		},
 		"3977": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
+			"qualifiedName": "handler"
 		},
 		"3978": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
+			"qualifiedName": "__type"
 		},
 		"3979": {
 			"packageName": "performance-helpers",
@@ -94437,32 +94655,32 @@
 		"3980": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "arg0"
 		},
 		"3981": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "WorkerAgnostic.on"
 		},
 		"3982": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.off"
+			"qualifiedName": "WorkerAgnostic.on"
 		},
 		"3983": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.off"
+			"qualifiedName": "type"
 		},
 		"3984": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "type"
+			"qualifiedName": "handler"
 		},
 		"3985": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "handler"
+			"qualifiedName": "__type"
 		},
 		"3986": {
 			"packageName": "performance-helpers",
@@ -94472,519 +94690,549 @@
 		"3987": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "arg0"
 		},
 		"3988": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "arg0"
+			"qualifiedName": "WorkerAgnostic.off"
 		},
 		"3989": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.postMessage"
+			"qualifiedName": "WorkerAgnostic.off"
 		},
 		"3990": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.postMessage"
+			"qualifiedName": "type"
 		},
 		"3991": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "message"
+			"qualifiedName": "handler"
 		},
 		"3992": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "transfer"
+			"qualifiedName": "__type"
 		},
 		"3993": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.terminate"
+			"qualifiedName": "__type"
 		},
 		"3994": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.terminate"
+			"qualifiedName": "arg0"
 		},
 		"3995": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.[dispose]"
+			"qualifiedName": "WorkerAgnostic.postMessage"
 		},
 		"3996": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
-			"qualifiedName": "WorkerAgnostic.[dispose]"
+			"qualifiedName": "WorkerAgnostic.postMessage"
 		},
 		"3997": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "detectEnv"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "message"
 		},
 		"3998": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "preloadNode"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "transfer"
 		},
 		"3999": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerLogger"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.terminate"
 		},
 		"4000": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerThrottle"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.terminate"
 		},
 		"4001": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSlidingWindow"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.[dispose]"
 		},
 		"4002": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRateLimit"
+			"packagePath": "src/helpers/WorkerAgnostic.js",
+			"qualifiedName": "WorkerAgnostic.[dispose]"
 		},
 		"4003": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerQueue"
+			"qualifiedName": "detectEnv"
 		},
 		"4004": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerChunker"
+			"qualifiedName": "preloadNode"
 		},
 		"4005": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerPermitGate"
+			"qualifiedName": "PowerLogger"
 		},
 		"4006": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerScheduler"
+			"qualifiedName": "PowerThrottle"
 		},
 		"4007": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSubscriberSet"
+			"qualifiedName": "PowerSlidingWindow"
 		},
 		"4008": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSemaphore"
+			"qualifiedName": "PowerRateLimit"
 		},
 		"4009": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerDefer"
+			"qualifiedName": "PowerQueue"
 		},
 		"4010": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerTTLMap"
+			"qualifiedName": "PowerChunker"
 		},
 		"4011": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "MetricsCollector"
+			"qualifiedName": "PowerPermitGate"
 		},
 		"4012": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "defaultMetrics"
+			"qualifiedName": "PowerScheduler"
 		},
 		"4013": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "toSeries"
+			"qualifiedName": "PowerSubscriberSet"
 		},
 		"4014": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "METRICS_VERSION"
+			"qualifiedName": "PowerSemaphore"
 		},
 		"4015": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "normalizeError"
+			"qualifiedName": "PowerDefer"
 		},
 		"4016": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "formatErrorObj"
+			"qualifiedName": "PowerTTLMap"
 		},
 		"4017": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "nowMs"
+			"qualifiedName": "MetricsCollector"
 		},
 		"4018": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "monoMs"
+			"qualifiedName": "defaultMetrics"
 		},
 		"4019": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "measureSync"
+			"qualifiedName": "toSeries"
 		},
 		"4020": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "measureAsync"
+			"qualifiedName": "METRICS_VERSION"
 		},
 		"4021": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "detectWebTransportSupport"
+			"qualifiedName": "normalizeError"
 		},
 		"4022": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerCircuit"
+			"qualifiedName": "formatErrorObj"
 		},
 		"4023": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerCron"
+			"qualifiedName": "nowMs"
 		},
 		"4024": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRetry"
+			"qualifiedName": "monoMs"
 		},
 		"4025": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRetryBudget"
+			"qualifiedName": "measureSync"
 		},
 		"4026": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerDeadline"
+			"qualifiedName": "measureAsync"
 		},
 		"4027": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerHistogram"
+			"qualifiedName": "detectWebTransportSupport"
 		},
 		"4028": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBackpressure"
+			"qualifiedName": "PowerCircuit"
 		},
 		"4029": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBulkhead"
+			"qualifiedName": "PowerCron"
 		},
 		"4030": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerBatch"
+			"qualifiedName": "PowerRetry"
 		},
 		"4031": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerServo"
+			"qualifiedName": "PowerRetryBudget"
 		},
 		"4032": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerLatch"
+			"qualifiedName": "PowerDeadline"
 		},
 		"4033": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerObserver"
+			"qualifiedName": "PowerHistogram"
 		},
 		"4034": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerEventBus"
+			"qualifiedName": "PowerBackpressure"
 		},
 		"4035": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerGCRA"
+			"qualifiedName": "PowerBulkhead"
 		},
 		"4036": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerEventLoopMonitor"
+			"qualifiedName": "PowerBatch"
 		},
 		"4037": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRealtimeHub"
+			"qualifiedName": "PowerServo"
 		},
 		"4038": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerWebSocketClient"
+			"qualifiedName": "PowerLatch"
 		},
 		"4039": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "READY_STATE"
+			"qualifiedName": "PowerObserver"
 		},
 		"4040": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerSocketAdapter"
+			"qualifiedName": "PowerEventBus"
+		},
+		"4041": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "PowerGCRA"
 		},
 		"4042": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerRTCChannel"
+			"qualifiedName": "PowerEventLoopMonitor"
 		},
 		"4043": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "PowerMessageCodec"
+			"qualifiedName": "PowerRealtimeHub"
 		},
 		"4044": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "MESSAGE_PROTOCOL_VERSION"
+			"qualifiedName": "PowerWebSocketClient"
 		},
 		"4045": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "MESSAGE_CODECS"
+			"qualifiedName": "READY_STATE"
 		},
 		"4046": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "CODECS"
-		},
-		"4047": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/index.js",
-			"qualifiedName": "HEADER_BYTES"
+			"qualifiedName": "PowerSocketAdapter"
 		},
 		"4048": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "encodeMessage"
+			"qualifiedName": "PowerRTCChannel"
 		},
 		"4049": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "decodeMessage"
+			"qualifiedName": "PowerMessageCodec"
 		},
 		"4050": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "createFrameDecoder"
+			"qualifiedName": "MESSAGE_PROTOCOL_VERSION"
 		},
 		"4051": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "frameEncodedJson"
+			"qualifiedName": "MESSAGE_CODECS"
 		},
 		"4052": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "encodeNative"
+			"qualifiedName": "CODECS"
 		},
 		"4053": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "canUseNativeClone"
+			"qualifiedName": "HEADER_BYTES"
 		},
 		"4054": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "selectCodec"
+			"qualifiedName": "encodeMessage"
 		},
 		"4055": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "isRawPayload"
+			"qualifiedName": "decodeMessage"
 		},
 		"4056": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "frameTransferList"
+			"qualifiedName": "createFrameDecoder"
 		},
 		"4057": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "NATIVE_ENVELOPE_KEY"
+			"qualifiedName": "frameEncodedJson"
 		},
 		"4058": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "NATIVE_PROTOCOL_VERSION"
+			"qualifiedName": "encodeNative"
 		},
 		"4059": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "isNativeEnvelope"
+			"qualifiedName": "canUseNativeClone"
 		},
 		"4060": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "isCapabilityAnnouncement"
+			"qualifiedName": "selectCodec"
 		},
 		"4061": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "encodeNativeEnvelope"
+			"qualifiedName": "isRawPayload"
 		},
 		"4062": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "announceCapabilities"
+			"qualifiedName": "frameTransferList"
 		},
 		"4063": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "collectTransferables"
+			"qualifiedName": "NATIVE_ENVELOPE_KEY"
 		},
 		"4064": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/index.js",
-			"qualifiedName": "decodeInbound"
+			"qualifiedName": "NATIVE_PROTOCOL_VERSION"
 		},
 		"4065": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "isNativeEnvelope"
+		},
+		"4066": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "isCapabilityAnnouncement"
+		},
+		"4067": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "encodeNativeEnvelope"
+		},
+		"4068": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "announceCapabilities"
+		},
+		"4069": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "collectTransferables"
+		},
+		"4070": {
+			"packageName": "performance-helpers",
+			"packagePath": "src/index.js",
+			"qualifiedName": "decodeInbound"
+		},
+		"4071": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/WorkerAgnostic.js",
 			"qualifiedName": "default"
 		},
-		"4066": {
+		"4072": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBackpressure.js",
 			"qualifiedName": "default"
 		},
-		"4067": {
+		"4073": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBatch.js",
 			"qualifiedName": "default"
 		},
-		"4068": {
+		"4074": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerBulkhead.js",
 			"qualifiedName": "default"
 		},
-		"4069": {
+		"4075": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerCircuit.js",
 			"qualifiedName": "default"
 		},
-		"4070": {
+		"4076": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerCron.js",
 			"qualifiedName": "default"
 		},
-		"4071": {
+		"4077": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerDeadline.js",
 			"qualifiedName": "default"
 		},
-		"4072": {
+		"4078": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerDefer.js",
 			"qualifiedName": "default"
 		},
-		"4073": {
+		"4079": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerEventBus.js",
 			"qualifiedName": "default"
 		},
-		"4074": {
+		"4080": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerEventLoopMonitor.js",
 			"qualifiedName": "default"
 		},
-		"4075": {
+		"4081": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerGCRA.js",
 			"qualifiedName": "default"
 		},
-		"4076": {
+		"4082": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerHistogram.js",
 			"qualifiedName": "default"
 		},
-		"4077": {
+		"4083": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerLatch.js",
 			"qualifiedName": "default"
 		},
-		"4078": {
+		"4084": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerMessageCodec.js",
 			"qualifiedName": "default"
 		},
-		"4079": {
+		"4085": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerObserver.js",
 			"qualifiedName": "default"
 		},
-		"4080": {
+		"4086": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRTCChannel.js",
 			"qualifiedName": "default"
 		},
-		"4081": {
+		"4087": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRateLimit.js",
 			"qualifiedName": "default"
 		},
-		"4082": {
+		"4088": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRealtimeHub.js",
 			"qualifiedName": "default"
 		},
-		"4083": {
+		"4089": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerRetry.js",
 			"qualifiedName": "default"
 		},
-		"4084": {
+		"4090": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSemaphore.js",
 			"qualifiedName": "default"
 		},
-		"4085": {
+		"4091": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSocketAdapter.js",
 			"qualifiedName": "default"
 		},
-		"4086": {
+		"4092": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerSocketAdapter.js",
 			"qualifiedName": "READY_STATE"
 		},
-		"4087": {
+		"4093": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerTTLMap.js",
 			"qualifiedName": "default"
 		},
-		"4088": {
+		"4094": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerWebSocketClient.js",
 			"qualifiedName": "default"
 		},
-		"4089": {
+		"4095": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerWebSocketClient.js",
 			"qualifiedName": "READY_STATE"
 		},
-		"4090": {
+		"4096": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/now.js",
 			"qualifiedName": "default"
 		},
-		"4091": {
+		"4097": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/utils/smallLfu.js",
 			"qualifiedName": "default"
@@ -95038,7 +95286,8 @@
 			"44": "src/utils/neutralise.js",
 			"45": "src/utils/now.js",
 			"46": "src/utils/smallLfu.js",
-			"47": "src/utils/webtransport.js"
+			"47": "src/utils/transferable.js",
+			"48": "src/utils/webtransport.js"
 		},
 		"reflections": {
 			"1": 1,
@@ -95087,7 +95336,8 @@
 			"44": 3817,
 			"45": 3822,
 			"46": 3843,
-			"47": 3887
+			"47": 3887,
+			"48": 3893
 		}
 	}
 }

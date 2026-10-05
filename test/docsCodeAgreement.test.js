@@ -65,6 +65,13 @@ const BUILTIN_GLOBALS = new Set([
   'parseFloat',
   'isNaN',
   'BigInt',
+  // A `node:worker_threads` export, named in `powerPool.md` because the encode cache
+  // now marks its shared buffers with it. **Added to this group rather than reworded
+  // away, and the distinction matters**: `markAsUntransferable` is a platform builtin that
+  // genuinely exists, so allowlisting it is the sanctioned response to this check. The
+  // same trap with `entriesAscending` had to be reworded instead, because that method
+  // deliberately does NOT exist and allowlisting it would mask the day someone adds it.
+  'markAsUntransferable',
 ]);
 
 /** Imported from `src/utils/`, so named in a guide but not defined in a helper. */

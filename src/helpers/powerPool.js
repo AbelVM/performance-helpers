@@ -54,6 +54,7 @@ import {
   DEFAULT_AUTOSCALE_AIMD_BETA,
 } from './constants.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+import { markUntransferable } from '../utils/transferable.js';
 
 /** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
 
@@ -1838,6 +1839,18 @@ export class PowerPool {
       }
       this._encodeCache.set(s, u8);
       if (u8?.byteLength) this._encodeCacheBytes += u8.byteLength;
+      // GAP-011 / POOL-009. **The buffer about to be handed to a caller must not be
+      // transferred, and until now that was a doc note plus a detached-buffer pre-check.**
+      // The pre-check catches the *second* transfer and not the first, which is the one
+      // that matters: after the first, this entry is a zero-length husk that the next hit
+      // returns, and the payload arrives at the worker empty with nothing thrown anywhere.
+      //
+      // `markAsUntransferable` moves the failure to the call site that made the mistake,
+      // because the platform enforces it: a marked buffer listed for transfer is refused
+      // rather than detached. **That is a behaviour change and it is the
+      // point of the row** - silent corruption becomes a loud error - so it is recorded in
+      // the changeset rather than absorbed here.
+      markUntransferable(u8?.buffer);
       return u8;
     } catch (err) {
       // Fall back to direct encoding attempt
