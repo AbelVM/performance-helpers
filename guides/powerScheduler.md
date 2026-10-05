@@ -6,9 +6,11 @@ Use `PowerScheduler` when you need a shared `schedule()`, `flush()`, and `cancel
 
 ## Constructor
 
-| option       |                                    type | default       | description                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------ | --------------------------------------: | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scheduling` | `'microtask' \| 'macrotask' \| 'yield'` | `'microtask'` | Scheduling mode used to defer the flush callback. `microtask` uses `queueMicrotask`; `macrotask` posts to a `MessageChannel`; `yield` uses `scheduler.yield()` where it exists and falls back to a macrotask where it does not. An unrecognised value **throws** — it used to be `=== 'macrotask' ? 'macrotask' : 'microtask'`, so a typo silently selected the _fastest_ strategy. |
+| option         |                                                  type | default          | description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------- | ----------------------------------------------------: | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scheduling`   | `'microtask' \| 'macrotask' \| 'yield' \| 'postTask'` | `'microtask'`    | Scheduling mode used to defer the flush callback. `microtask` uses `queueMicrotask`; `macrotask` posts to a `MessageChannel`; `yield` uses `scheduler.yield()` where it exists; `postTask` uses `scheduler.postTask()` with a `TaskController`. `yield` and `postTask` fall back to a macrotask where they do not exist, and `strategy.supported` reports the substitution. An unrecognised value **throws** — it used to be `=== 'macrotask' ? 'macrotask' : 'microtask'`, so a typo silently selected the _fastest_ strategy. |
+| `taskPriority` |   `'user-blocking' \| 'user-visible' \| 'background'` | `'user-visible'` | Priority handed to `scheduler.postTask`. Only used when `scheduling` is `'postTask'`. The value is validated on every strategy — following `PowerCache`'s `filter`, an unrecognised one throws there too rather than sitting there doing nothing — while a valid one on a strategy with no use for it is accepted and inert, so a caller forwarding a shared options object is not broken.                                                                                                                                      |
+| `onError`      |                  `((error: unknown) => void) \| null` | `null`           | Called when a flush throws, synchronously or as an async rejection. A throwing `onError` is swallowed.                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## API
 
@@ -16,6 +18,9 @@ Use `PowerScheduler` when you need a shared `schedule()`, `flush()`, and `cancel
 - `flush()` — Immediately invoke the pending flush if one is scheduled.
 - `cancel()` — Cancel a pending flush without invoking the callback.
 - `scheduled` — `true` when a flush is pending.
+- `strategy` — `{ scheduling, supported }`: what was **requested**, and whether this
+  runtime can honour it. `supported` is `false` wherever the requested strategy
+  needed a platform primitive that is missing and a macrotask was substituted.
 
 ## Example
 
@@ -81,19 +86,121 @@ If you want idle work, drive it from something that does not promise latency —
 a chunked cleanup loop that yields between batches, rather than a scheduler
 flush.
 
-### Cancellation is logical, not structural
+### Cancellation needs a generation counter here, and that claim was retracted once
 
 A `scheduler.yield()` continuation is already queued the moment it is requested
 and returns only a promise: **there is no handle to detach**. So `flush()` and
-`cancel()` cannot un-schedule it. They do not need to — `_run()` opens with
-`if (!this._scheduled) return`, and both clear `_scheduled` first, so an
-abandoned continuation arrives, finds the schedule closed, and does nothing.
+`cancel()` cannot un-schedule it. Logical cancellation is the first line of
+defence — `_run()` opens with `if (!this._scheduled) return`, so an abandoned
+continuation that arrives after a `cancel()` finds the schedule closed and does
+nothing.
 
-That is worth stating because the obvious implementation is a generation
-counter, and one was written. Removing it entirely left all seven yield-path
-tests green: an **equivalent mutant**, caught by mutation testing rather than by
-reading. It was deleted rather than kept as belt-and-braces, because machinery
-that no test can distinguish from its absence is machinery nobody will maintain.
+**That is not sufficient, and this subsection previously said it was.** The
+first implementation concluded that no generation counter was needed because
+removing one left all seven yield-path tests green — an _equivalent mutant_ by
+mutation testing, which is normally a good reason to delete machinery nobody can
+distinguish from its absence. It was deleted.
+
+It was wrong, and it was wrong in one clause. `cancel()` does clear `_scheduled`
+first; **`flush()` does not** — `_run()` clears it, as a side effect of _running_
+the flush. So after `schedule(); flush(); schedule()` the flag is true again, the
+abandoned first continuation finds a **live** schedule, and runs it. Measured
+with a controllable `scheduler.yield`: that sequence left one flush and two
+queued continuations, and resuming the abandoned one produced a **second flush
+and a nulled `_timer`** — the newer schedule ran early and its handle was
+clobbered on the way past. The seven tests stayed green throughout because none
+of them resumed an abandoned continuation.
+
+So the counter is here: `const generation = ++this._generation` at the arm,
+compared on resumption. The check has to be on the generation rather than the
+flag, precisely because the later `schedule()` re-sets the flag. This is
+`RES-006`, and the comment in `powerScheduler.js` records the same history — the
+retracted claim is kept in both places rather than deleted, so the next reader
+who re-derives it finds it already answered.
+
+## `postTask` scheduling, and why it is a fourth strategy rather than a better `yield`
+
+`scheduling: 'postTask'` uses **`scheduler.postTask(fn, { priority, signal })`**
+with a **`TaskController`**. It is available in Chromium-family browsers and, as
+of 2026, in Firefox; Node does not have it.
+
+Two things it offers that the other strategies do not:
+
+- **A priority.** `'user-blocking'`, `'user-visible'` (the default) or
+  `'background'`, set with `taskPriority`.
+- **A handle.** `new TaskController()`, passed through `signal`. `abort()` stops
+  the task **before it runs** — the platform checks it, so the callback is never
+  called at all.
+
+```javascript
+const s = new PowerScheduler(flush, {
+  scheduling: 'postTask',
+  taskPriority: 'background',
+});
+s.strategy; // { scheduling: 'postTask', supported: true }
+```
+
+The handle is the substantive one. It is what lets `cancel()` and `flush()` mean
+the same thing on every strategy: **the pending work is actually stopped**, rather
+than being made harmless after it arrives. `flush()` therefore aborts the queued
+task before running the flush itself, or the same flush would run twice; and
+`dispose()` aborts it too, or a task queued against a torn-down scheduler would
+run a callback after teardown.
+
+### It needs `TaskController`, not just `postTask`
+
+Both halves are required, and `postTask` alone is the worse of the two worlds:
+`postTask` returns a handle with **no `cancel` method**, so a strategy built on it
+alone would be _less_ cancellable than the `MessageChannel` macrotask it replaces —
+and a feature test that only checked `typeof scheduler.postTask === 'function'`
+would pass an implementation that quietly lost cancellation. So
+`strategy.supported` is `false` unless `scheduler.postTask` **and**
+`TaskController` are both functions, and the strategy falls back to a macrotask
+rather than running uncancellably.
+
+Both are detected **once at module load**, alongside `HAS_SCHEDULER_YIELD`, for
+the same reason: a stable runtime feature does not need re-probing per flush.
+
+### Where it is missing
+
+Node, and any browser without it. The fallback is a macrotask — the same
+degradation `yield` makes, and for the same reason: the flush still happens
+promptly, the **ordering** differs, and `strategy.supported` says so:
+
+```javascript
+const s = new PowerScheduler(flush, { scheduling: 'postTask' });
+s.strategy; // { scheduling: 'postTask', supported: false }
+```
+
+It falls back to a macrotask rather than to `queueMicrotask` deliberately. A
+microtask fallback would also "still flush", and it is a different ordering —
+which is the entire distinction between these two fallbacks and the reason the
+unsupported branch is tested for it.
+
+### Why not fold this into `yield`
+
+`scheduler.yield()` is prioritised ahead of the rendering and task queues and is
+the right primitive for a scheduler whose job is to run promptly. The temptation
+is that `postTask` is the same promise with a priority attached and a real handle,
+so routing `yield` through it where it exists would be a strict improvement.
+
+**It was not done that way.** A substitution changes the behaviour of every
+caller already on `scheduling: 'yield'` — in an upgrade, with no change to their
+code — for a scheduling difference they did not ask for. It would also remove the
+generation counter's reason to exist on a path that still needs it where
+`postTask` is absent, and it would make the two strategies' cancellation
+guarantees differ silently by runtime. A new name is visible in a stack trace, in
+`strategy.supported`, and in the options; a substitution is none of those.
+
+What `postTask` genuinely makes unnecessary is the counter **where it is
+available**: the platform drops the task, so there is no stale continuation to
+recognise. That is why this path reads no generation counter at all — asserted in
+`test/powerScheduler.postTask.test.js`, because a counter left in place would be
+harmless and would be the thing a future reader believes is load-bearing.
+
+`PowerScheduler` therefore needs no generation counter on this path, and needs one
+on `yield`. See [ADR 0010](../adr/0010-a-new-strategy-rather-than-a-better-yield.md)
+for the decision, and the `yield` section above for the counter's own history.
 
 ## Macrotask scheduling is not `setTimeout(0)`
 

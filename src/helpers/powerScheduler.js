@@ -160,6 +160,25 @@ const HAS_SCHEDULER_YIELD =
   typeof globalThis.scheduler.yield === 'function';
 
 /**
+ * GAP-013. `scheduler.postTask(fn, {priority, signal})` plus `TaskController`.
+ *
+ * **A separate opt-in strategy rather than a change to `yield`.** Routing `yield`
+ * through `postTask` where it happens to exist would silently alter the behaviour of
+ * every caller already on that strategy, in an upgrade, for a scheduling difference
+ * they did not ask for. A new name is visible; a substitution is not.
+ *
+ * Both halves are feature-detected together, because `postTask` without
+ * `TaskController` is the *worse* of the two worlds: `postTask` returns a handle with
+ * no `cancel` method, so a strategy built on it would be less cancellable than the
+ * `MessageChannel` macrotask it replaces.
+ */
+const HAS_POST_TASK =
+  typeof globalThis.scheduler === 'object' &&
+  globalThis.scheduler !== null &&
+  typeof globalThis.scheduler.postTask === 'function' &&
+  typeof globalThis.TaskController === 'function';
+
+/**
  * @typedef {{cancel: () => void}} MacrotaskHandle
  */
 
@@ -217,7 +236,7 @@ export class PowerScheduler {
    * @param {PowerSchedulerOptions} [options] Scheduling and error handling options.
    */
   constructor(flushFn, options = {}) {
-    assertKnownOptions(options, ['scheduling', 'onError'], 'PowerScheduler');
+    assertKnownOptions(options, ['scheduling', 'onError', 'taskPriority'], 'PowerScheduler');
     if (typeof flushFn !== 'function') {
       throw new TypeError('PowerScheduler requires a flush function');
     }
@@ -226,13 +245,14 @@ export class PowerScheduler {
       scheduling !== undefined &&
       scheduling !== 'microtask' &&
       scheduling !== 'macrotask' &&
-      scheduling !== 'yield'
+      scheduling !== 'yield' &&
+      scheduling !== 'postTask'
     ) {
       // A closed set rather than `=== 'macrotask' ? ... : 'microtask'`: a typo
       // would otherwise silently pick the *fastest* strategy for a scheduler
       // that was asked for something else.
       throw new TypeError(
-        'PowerScheduler: `scheduling` must be one of microtask, macrotask, yield ' +
+        'PowerScheduler: `scheduling` must be one of microtask, macrotask, yield, postTask ' +
           `(received ${String(scheduling)}).`
       );
     }
@@ -241,11 +261,31 @@ export class PowerScheduler {
     // `'microtask' | 'macrotask'` and every later `=== 'yield'` check is a
     // compile error, which is how a strategy you just validated can end up
     // unreachable to the type checker.
-    /** @type {'microtask'|'macrotask'|'yield'} */
+    /** @type {'microtask'|'macrotask'|'yield'|'postTask'} */
     this._scheduling = scheduling === undefined ? 'microtask' : scheduling;
+    const taskPriority = options.taskPriority;
+    if (
+      taskPriority !== undefined &&
+      taskPriority !== 'user-blocking' &&
+      taskPriority !== 'user-visible' &&
+      taskPriority !== 'background'
+    ) {
+      throw new TypeError(
+        'PowerScheduler: `taskPriority` must be one of user-blocking, user-visible, ' +
+          `background (received ${String(taskPriority)}).`
+      );
+    }
+    this._taskPriority = taskPriority === undefined ? 'user-visible' : taskPriority;
     this._onError = typeof options.onError === 'function' ? options.onError : null;
     this._scheduled = false;
+    // Annotated rather than inferred: three sites assign here, and two of them are
+    // `{ cancel: () => {} }` placeholders with no other member, so inference emitted the
+    // published `_timer` type as `MacrotaskHandle | {cancel} | {cancel} | null` — the same
+    // shape written twice. Structurally identical, so one annotation says it once.
+    /** @type {?MacrotaskHandle} */
     this._timer = null;
+    /** @type {?TaskController} The live `postTask` controller, if any. GAP-013. */
+    this._taskController = null;
     // Bumped by every `schedule()` that actually starts one, so a continuation
     // left over from a previous schedule can tell that it has been superseded.
     // Only the yield path needs it — the other strategies hold a cancellable
@@ -269,12 +309,17 @@ export class PowerScheduler {
    * degradation in *ordering*, not correctness — the flush still happens
    * promptly — which is exactly why it should be visible rather than silent.
    *
-   * @returns {{scheduling: 'microtask'|'macrotask'|'yield', supported: boolean}}
+   * @returns {{scheduling: 'microtask'|'macrotask'|'yield'|'postTask', supported: boolean}}
    */
   get strategy() {
     return {
-      scheduling: /** @type {'microtask'|'macrotask'|'yield'} */ (this._scheduling),
-      supported: this._scheduling !== 'yield' || HAS_SCHEDULER_YIELD,
+      scheduling: /** @type {'microtask'|'macrotask'|'yield'|'postTask'} */ (this._scheduling),
+      // `postTask` reports `false` wherever it is unsupported, and it **falls back to
+      // a macrotask** rather than refusing to schedule — the same degradation the
+      // `yield` path already makes, and reported here rather than hidden.
+      supported:
+        (this._scheduling !== 'yield' || HAS_SCHEDULER_YIELD) &&
+        (this._scheduling !== 'postTask' || HAS_POST_TASK),
     };
   }
 
@@ -288,6 +333,39 @@ export class PowerScheduler {
 
     if (this._scheduling === 'macrotask') {
       this._timer = scheduleMacrotask(() => this._run());
+      return;
+    }
+    if (this._scheduling === 'postTask' && HAS_POST_TASK) {
+      // GAP-013. **This is the whole row: cancellation the platform performs, so this
+      // strategy needs none of the bookkeeping `yield` does.**
+      //
+      // The generation counter exists on the `yield` path only because
+      // `scheduler.yield()` hands back a promise with no handle to detach. A
+      // `TaskController` is a handle: `abort()` stops the task before it runs, and it
+      // arrives through the `signal` option the platform itself checks. So there is no
+      // stale continuation to guard against, and no `_generation` compare here.
+      //
+      // The controller is kept rather than discarded so `flush()` and `cancel()` can
+      // abort, and so `dispose()` cannot leave a task queued against a torn-down
+      // scheduler.
+      this._taskController = new globalThis.TaskController();
+      const handle = globalThis.scheduler.postTask(
+        () => {
+          this._taskController = null;
+          this._timer = null;
+          this._run();
+        },
+        { priority: this._taskPriority, signal: this._taskController.signal }
+      );
+      // A `postTask` handle has **no `cancel` method**, and the three teardown sites
+      // reach the platform through `_abortTask()` explicitly — so this placeholder is
+      // an honest no-op, exactly as the `yield` path's is. It was briefly a wrapper
+      // (`{ cancel: () => this._abortTask() }`), which made `_abortTask()` reachable by
+      // two routes at once: delete the explicit call and the suite stayed green, because
+      // `cancelMacrotask(this._timer)` reached the controller through the closure. Two
+      // mechanisms for one job, neither of which a test could see the loss of.
+      void handle;
+      this._timer = { cancel: () => {} };
       return;
     }
     if (this._scheduling === 'yield' && HAS_SCHEDULER_YIELD) {
@@ -323,6 +401,13 @@ export class PowerScheduler {
       });
       return;
     }
+    if (this._scheduling === 'postTask') {
+      // Requested but unsupported here, for the same reason and with the same
+      // consequence as `yield`: a macrotask still flushes promptly, the ordering
+      // differs, and `strategy.supported` says so rather than hiding it.
+      this._timer = scheduleMacrotask(() => this._run());
+      return;
+    }
     if (this._scheduling === 'yield') {
       // Requested but unsupported here. Falling back to a macrotask is a
       // degradation in *ordering* only: the flush still happens promptly, and
@@ -340,6 +425,11 @@ export class PowerScheduler {
    */
   flush() {
     if (!this._scheduled) return;
+    // GAP-013: `flush()` runs the work *now*, so a queued `postTask` must be stopped or
+    // it would run the same flush a second time. This call is the *only* thing that
+    // stops it: `_timer` is a placeholder on this strategy (a `postTask` handle has no
+    // `cancel`), so `cancelMacrotask` below cancels nothing here.
+    this._abortTask();
     if (this._timer) {
       cancelMacrotask(this._timer);
       this._timer = null;
@@ -354,9 +444,50 @@ export class PowerScheduler {
   cancel() {
     if (!this._scheduled) return;
     this._scheduled = false;
+    // GAP-013. The abort has to happen here rather than being left to the
+    // `cancelMacrotask` call below, because on this strategy `_timer` is a placeholder
+    // with a no-op `cancel` — a `postTask` handle has none. The controller is the only
+    // thing that can stop the task, and `_abortTask()` nulls the field as it aborts, so
+    // the later `_timer = null` cannot strand it.
+    this._abortTask();
     if (this._timer) {
       cancelMacrotask(this._timer);
       this._timer = null;
+    }
+  }
+
+  /**
+   * Abort a pending `scheduler.postTask`, if one is outstanding.
+   *
+   * **Separate from `cancel()` because the two are not the same operation.** `cancel()`
+   * is *this scheduler's* business — drop my pending flush — and it runs on every
+   * strategy. This is the platform's: stop a task that may already be queued with the
+   * browser's scheduler, which is a queue this library does not own and cannot drain.
+   *
+   * Reached from `flush()` and `cancel()`, and from `dispose()` *through* `cancel()` —
+   * there is no third call site, which is the part worth knowing: a reader auditing this
+   * will find two calls in the file and may reasonably conclude teardown misses it.
+   * Verified that it does not. A `postTask` flush left un-aborted by `dispose()` lands
+   * after teardown and runs a callback against a disposed scheduler.
+   *
+   * Idempotent by field rather than by the platform's tolerance: `_taskController` is
+   * nulled *before* `abort()` and again by the task callback when it runs, so a repeat
+   * call returns on the guard and the platform never sees a second `abort()`.
+   *
+   * @private
+   * @returns {void}
+   */
+  _abortTask() {
+    const controller = this._taskController;
+    if (!controller) return;
+    this._taskController = null;
+    try {
+      controller.abort();
+    } catch (e) {
+      // Aborting must not throw out of `cancel()`. A scheduler being torn down is not
+      // a place to raise a new error, and there is nothing a caller could do about it
+      // beyond the `onError` they already own.
+      this._notifyError(e);
     }
   }
 

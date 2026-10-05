@@ -58,13 +58,25 @@ Scheduling and error handling options.
 
 ### \_scheduling
 
-> **\_scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"`
+> **\_scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"` \| `"postTask"`
+
+***
+
+### \_taskController
+
+> **\_taskController**: `TaskController` \| `null`
+
+***
+
+### \_taskPriority
+
+> **\_taskPriority**: `"user-blocking"` \| `"user-visible"` \| `"background"`
 
 ***
 
 ### \_timer
 
-> **\_timer**: [`MacrotaskHandle`](../type-aliases/MacrotaskHandle.md) \| \{ `cancel`: () => `void`; \} \| `null`
+> **\_timer**: [`MacrotaskHandle`](../type-aliases/MacrotaskHandle.md) \| `null`
 
 ## Accessors
 
@@ -103,7 +115,7 @@ promptly — which is exactly why it should be visible rather than silent.
 
 ###### scheduling
 
-> **scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"`
+> **scheduling**: `"microtask"` \| `"macrotask"` \| `"yield"` \| `"postTask"`
 
 ###### supported
 

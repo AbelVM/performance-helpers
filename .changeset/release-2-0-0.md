@@ -3793,6 +3793,81 @@ no-early-flush and the no-clobber tests and break the scheduler.
 
 Closes RES-006.
 
+#### `scheduler.postTask`, a fourth strategy — and why it is not a better `yield`
+
+`PowerScheduler` gains `scheduling: 'postTask'`, built on
+`scheduler.postTask(fn, { priority, signal })` and a `TaskController`, plus a
+`taskPriority` option.
+
+```js
+const s = new PowerScheduler(flush, {
+  scheduling: 'postTask',
+  taskPriority: 'background', // 'user-visible' by default
+});
+s.strategy; // { scheduling: 'postTask', supported: true }
+```
+
+`scheduler.yield()` returns a promise and **no handle**, so the yield strategy
+resolves its un-detachable continuation with a generation counter — the fix above,
+where RES-006 proved the counter load-bearing. A `TaskController` _is_ a handle:
+`abort()` stops the task before it runs, and it arrives through the `signal` the
+platform itself checks. So on this path the cancellation is the platform's, and
+the scheduler needs none of that bookkeeping.
+
+Both halves are required. `postTask` returns a handle with **no `cancel` method**,
+so a strategy built on it alone would be _less_ cancellable than the
+`MessageChannel` macrotask it replaces — and a feature test that only checked
+`typeof scheduler.postTask === 'function'` would pass an implementation that had
+quietly lost cancellation. `TaskController` alone gives nothing either, since
+without `postTask` there is no task to attach a signal to. Each is tested alone.
+
+**It falls back to a macrotask** where either is missing (Node, and any browser
+without them), and `strategy.supported` reports `false` rather than hiding the
+substitution — the same degradation and the same reporting `yield` already makes.
+The fallback is a macrotask and not `queueMicrotask`: it would also satisfy "the
+flush still happens", and it is a different **ordering**, which is the whole
+distinction. The first version of that test asserted only that the flush ran, and
+a microtask fallback passed it.
+
+`flush()`, `cancel()` and `dispose()` all abort the queued task. `flush()` has to:
+it runs the work _now_, so an un-aborted task would run the same flush a second
+time. `dispose()` has to, or a task queued against a torn-down scheduler runs a
+callback after teardown.
+
+**It is a new name rather than a substitution for `yield`.** Routing `yield`
+through `postTask` where it happens to exist would change the behaviour of every
+caller already on that strategy, in an upgrade, with no change to their code — and
+would leave the yield path needing a counter in exactly the runtimes where
+`postTask` is absent, so one strategy would carry two different cancellation
+mechanisms chosen by feature detection with nothing reporting which was live. A
+new name is visible in a stack trace, in `strategy.supported` and in the options;
+a substitution is none of those. See [ADR 0010](../adr/0010-a-new-strategy-rather-than-a-better-yield.md).
+
+`test/powerScheduler.postTask.test.js`, 15 tests, 12 injected mutants and every one
+killed by a named test.
+
+**The mutants are why this entry mentions a redundant abort.** The first version
+made `_timer` a wrapper whose `cancel` called `_abortTask()`, _and_ called
+`_abortTask()` explicitly from `flush()` and `cancel()`. Two independent routes to
+one abort, so deleting either left the other and every test stayed green — four of
+the first ten mutants survived, all in the abort path. The wrapper was deleted
+rather than a test added; `_timer` is now an honest `{ cancel: () => {} }`
+placeholder on this strategy, exactly as the `yield` path's already was. That is
+the same shape as the `getStats()` alias lesson: a mechanism written twice, where
+neither copy can be observed missing.
+
+**A guide section claimed the opposite of the code above, and has since been
+corrected.** `guides/powerScheduler.md` said the yield path's generation counter
+was an equivalent mutant that had been deleted — the exact reasoning RES-006
+refuted, presented as current design. It came from the original yield commit
+(`92f59d9`) and was never updated when the counter was reinstated (`986a77f`).
+Nothing could catch it: no lint, `docs:claims`, type ratchet or test can see a
+guide sentence describing an earlier state of its own file. The retracted claim is
+now retained as history rather than deleted, in both the guide and the source
+comment.
+
+Closes GAP-013.
+
 #### A batch the limiter could admit, and one it could never admit
 
 `PowerGCRA` admitted a batch whose own span did not fit inside the delay

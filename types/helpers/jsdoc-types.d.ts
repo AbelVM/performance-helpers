@@ -1600,10 +1600,18 @@ export type PowerHistogramOptions = {
 export type PowerSchedulerOptions = {
     /**
      * How the flush is
-     * scheduled. `'yield'` is the cooperative primitive added in 2.0. An
+     * scheduled. `'yield'` is the cooperative primitive added in 2.0, and `'postTask'` the
+     * `scheduler.postTask` strategy added alongside it. Both fall back to a macrotask
+     * where the runtime lacks them, and `strategy.supported` reports the substitution. An
      * unrecognised value throws rather than falling back to the fastest strategy.
      */
-    scheduling?: "microtask" | "macrotask" | "yield" | undefined;
+    scheduling?: "microtask" | "macrotask" | "yield" | "postTask" | undefined;
+    /**
+     * Priority handed to `scheduler.postTask`. Only used when `scheduling` is
+     * `'postTask'`; the value is validated on every strategy, so an unrecognised one
+     * throws there too rather than sitting there doing nothing.
+     */
+    taskPriority?: "user-blocking" | "user-visible" | "background" | undefined;
     /**
      * Called when a flush throws. A
      * throwing `onError` is swallowed.

@@ -1155,9 +1155,15 @@ export {};
  * Options for `PowerScheduler`.
  *
  * @typedef {Object} PowerSchedulerOptions
- * @property {'microtask'|'macrotask'|'yield'} [scheduling] How the flush is
- *   scheduled. `'yield'` is the cooperative primitive added in 2.0. An
+ * @property {'microtask'|'macrotask'|'yield'|'postTask'} [scheduling] How the flush is
+ *   scheduled. `'yield'` is the cooperative primitive added in 2.0, and `'postTask'` the
+ *   `scheduler.postTask` strategy added alongside it. Both fall back to a macrotask
+ *   where the runtime lacks them, and `strategy.supported` reports the substitution. An
  *   unrecognised value throws rather than falling back to the fastest strategy.
+ * @property {'user-blocking'|'user-visible'|'background'} [taskPriority='user-visible']
+ *   Priority handed to `scheduler.postTask`. Only used when `scheduling` is
+ *   `'postTask'`; the value is validated on every strategy, so an unrecognised one
+ *   throws there too rather than sitting there doing nothing.
  * @property {?((error:unknown)=>void)} [onError] Called when a flush throws. A
  *   throwing `onError` is swallowed.
  */

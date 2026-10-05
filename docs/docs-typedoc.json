@@ -42033,7 +42033,7 @@
 							}
 						},
 						{
-							"id": 2895,
+							"id": 2893,
 							"name": "_generation",
 							"variant": "declaration",
 							"kind": 1024,
@@ -42044,7 +42044,7 @@
 							}
 						},
 						{
-							"id": 2885,
+							"id": 2886,
 							"name": "_onError",
 							"variant": "declaration",
 							"kind": 1024,
@@ -42055,21 +42055,21 @@
 									{
 										"type": "reflection",
 										"declaration": {
-											"id": 2886,
+											"id": 2887,
 											"name": "__type",
 											"variant": "declaration",
 											"kind": 65536,
 											"flags": {},
 											"signatures": [
 												{
-													"id": 2887,
+													"id": 2888,
 													"name": "__type",
 													"variant": "signature",
 													"kind": 4096,
 													"flags": {},
 													"parameters": [
 														{
-															"id": 2888,
+															"id": 2889,
 															"name": "error",
 															"variant": "param",
 															"kind": 32768,
@@ -42096,7 +42096,7 @@
 							}
 						},
 						{
-							"id": 2889,
+							"id": 2890,
 							"name": "_scheduled",
 							"variant": "declaration",
 							"kind": 1024,
@@ -42126,12 +42126,66 @@
 									{
 										"type": "literal",
 										"value": "yield"
+									},
+									{
+										"type": "literal",
+										"value": "postTask"
 									}
 								]
 							}
 						},
 						{
-							"id": 2890,
+							"id": 2892,
+							"name": "_taskController",
+							"variant": "declaration",
+							"kind": 1024,
+							"flags": {},
+							"type": {
+								"type": "union",
+								"types": [
+									{
+										"type": "reference",
+										"target": {
+											"packageName": "typescript",
+											"packagePath": "lib/lib.dom.d.ts",
+											"qualifiedName": "TaskController"
+										},
+										"name": "TaskController",
+										"package": "typescript"
+									},
+									{
+										"type": "literal",
+										"value": null
+									}
+								]
+							}
+						},
+						{
+							"id": 2885,
+							"name": "_taskPriority",
+							"variant": "declaration",
+							"kind": 1024,
+							"flags": {},
+							"type": {
+								"type": "union",
+								"types": [
+									{
+										"type": "literal",
+										"value": "user-blocking"
+									},
+									{
+										"type": "literal",
+										"value": "user-visible"
+									},
+									{
+										"type": "literal",
+										"value": "background"
+									}
+								]
+							}
+						},
+						{
+							"id": 2891,
 							"name": "_timer",
 							"variant": "declaration",
 							"kind": 1024,
@@ -42146,57 +42200,6 @@
 										"package": "performance-helpers"
 									},
 									{
-										"type": "reflection",
-										"declaration": {
-											"id": 2891,
-											"name": "__type",
-											"variant": "declaration",
-											"kind": 65536,
-											"flags": {},
-											"children": [
-												{
-													"id": 2892,
-													"name": "cancel",
-													"variant": "declaration",
-													"kind": 1024,
-													"flags": {},
-													"type": {
-														"type": "reflection",
-														"declaration": {
-															"id": 2893,
-															"name": "__type",
-															"variant": "declaration",
-															"kind": 65536,
-															"flags": {},
-															"signatures": [
-																{
-																	"id": 2894,
-																	"name": "__type",
-																	"variant": "signature",
-																	"kind": 4096,
-																	"flags": {},
-																	"type": {
-																		"type": "intrinsic",
-																		"name": "void"
-																	}
-																}
-															]
-														}
-													},
-													"defaultValue": "..."
-												}
-											],
-											"groups": [
-												{
-													"title": "Properties",
-													"children": [
-														2892
-													]
-												}
-											]
-										}
-									},
-									{
 										"type": "literal",
 										"value": null
 									}
@@ -42204,13 +42207,13 @@
 							}
 						},
 						{
-							"id": 2896,
+							"id": 2894,
 							"name": "scheduled",
 							"variant": "declaration",
 							"kind": 262144,
 							"flags": {},
 							"getSignature": {
-								"id": 2897,
+								"id": 2895,
 								"name": "scheduled",
 								"variant": "signature",
 								"kind": 524288,
@@ -42230,13 +42233,13 @@
 							}
 						},
 						{
-							"id": 2898,
+							"id": 2896,
 							"name": "strategy",
 							"variant": "declaration",
 							"kind": 262144,
 							"flags": {},
 							"getSignature": {
-								"id": 2899,
+								"id": 2897,
 								"name": "strategy",
 								"variant": "signature",
 								"kind": 524288,
@@ -42274,14 +42277,14 @@
 								"type": {
 									"type": "reflection",
 									"declaration": {
-										"id": 2900,
+										"id": 2898,
 										"name": "__type",
 										"variant": "declaration",
 										"kind": 65536,
 										"flags": {},
 										"children": [
 											{
-												"id": 2901,
+												"id": 2899,
 												"name": "scheduling",
 												"variant": "declaration",
 												"kind": 1024,
@@ -42300,12 +42303,16 @@
 														{
 															"type": "literal",
 															"value": "yield"
+														},
+														{
+															"type": "literal",
+															"value": "postTask"
 														}
 													]
 												}
 											},
 											{
-												"id": 2902,
+												"id": 2900,
 												"name": "supported",
 												"variant": "declaration",
 												"kind": 1024,
@@ -42320,8 +42327,8 @@
 											{
 												"title": "Properties",
 												"children": [
-													2901,
-													2902
+													2899,
+													2900
 												]
 											}
 										]
@@ -42402,14 +42409,14 @@
 							]
 						},
 						{
-							"id": 2907,
+							"id": 2905,
 							"name": "cancel",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 2908,
+									"id": 2906,
 									"name": "cancel",
 									"variant": "signature",
 									"kind": 4096,
@@ -42486,14 +42493,14 @@
 							]
 						},
 						{
-							"id": 2905,
+							"id": 2903,
 							"name": "flush",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 2906,
+									"id": 2904,
 									"name": "flush",
 									"variant": "signature",
 									"kind": 4096,
@@ -42520,14 +42527,14 @@
 							]
 						},
 						{
-							"id": 2903,
+							"id": 2901,
 							"name": "schedule",
 							"variant": "declaration",
 							"kind": 2048,
 							"flags": {},
 							"signatures": [
 								{
-									"id": 2904,
+									"id": 2902,
 									"name": "schedule",
 									"variant": "signature",
 									"kind": 4096,
@@ -42565,18 +42572,20 @@
 							"title": "Properties",
 							"children": [
 								2883,
-								2895,
-								2885,
-								2889,
+								2893,
+								2886,
+								2890,
 								2884,
-								2890
+								2892,
+								2885,
+								2891
 							]
 						},
 						{
 							"title": "Accessors",
 							"children": [
-								2896,
-								2898
+								2894,
+								2896
 							]
 						},
 						{
@@ -42584,10 +42593,10 @@
 							"children": [
 								2909,
 								2916,
-								2907,
-								2914,
 								2905,
-								2903
+								2914,
+								2903,
+								2901
 							]
 						}
 					]
@@ -90175,12 +90184,12 @@
 		"2885": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler._onError"
+			"qualifiedName": "PowerScheduler._taskPriority"
 		},
 		"2886": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/jsdoc-types.js",
-			"qualifiedName": "__type"
+			"packagePath": "src/helpers/powerScheduler.js",
+			"qualifiedName": "PowerScheduler._onError"
 		},
 		"2887": {
 			"packageName": "performance-helpers",
@@ -90190,104 +90199,94 @@
 		"2888": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/jsdoc-types.js",
-			"qualifiedName": "error"
+			"qualifiedName": "__type"
 		},
 		"2889": {
 			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler._scheduled"
+			"packagePath": "src/helpers/jsdoc-types.js",
+			"qualifiedName": "error"
 		},
 		"2890": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler._timer"
+			"qualifiedName": "PowerScheduler._scheduled"
 		},
 		"2891": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__object"
+			"qualifiedName": "PowerScheduler._timer"
 		},
 		"2892": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__object.cancel"
+			"qualifiedName": "PowerScheduler._taskController"
 		},
 		"2893": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__function"
+			"qualifiedName": "PowerScheduler._generation"
 		},
 		"2894": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__function"
+			"qualifiedName": "PowerScheduler.scheduled"
 		},
 		"2895": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler._generation"
+			"qualifiedName": "PowerScheduler.scheduled"
 		},
 		"2896": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.scheduled"
+			"qualifiedName": "PowerScheduler.strategy"
 		},
 		"2897": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.scheduled"
+			"qualifiedName": "PowerScheduler.strategy"
 		},
 		"2898": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.strategy"
+			"qualifiedName": "__type"
 		},
 		"2899": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.strategy"
+			"qualifiedName": "__type.scheduling"
 		},
 		"2900": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__type"
+			"qualifiedName": "__type.supported"
 		},
 		"2901": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__type.scheduling"
+			"qualifiedName": "PowerScheduler.schedule"
 		},
 		"2902": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "__type.supported"
+			"qualifiedName": "PowerScheduler.schedule"
 		},
 		"2903": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.schedule"
+			"qualifiedName": "PowerScheduler.flush"
 		},
 		"2904": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.schedule"
+			"qualifiedName": "PowerScheduler.flush"
 		},
 		"2905": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.flush"
-		},
-		"2906": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/powerScheduler.js",
-			"qualifiedName": "PowerScheduler.flush"
-		},
-		"2907": {
-			"packageName": "performance-helpers",
-			"packagePath": "src/helpers/powerScheduler.js",
 			"qualifiedName": "PowerScheduler.cancel"
 		},
-		"2908": {
+		"2906": {
 			"packageName": "performance-helpers",
 			"packagePath": "src/helpers/powerScheduler.js",
 			"qualifiedName": "PowerScheduler.cancel"
