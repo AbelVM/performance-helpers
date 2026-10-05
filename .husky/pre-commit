@@ -70,10 +70,30 @@ npx --no-install lint-staged
 # edit to `src/helpers/powerDefer.js` still captured the source, its `.d.ts`,
 # its doc page, and the whole-file index - so the drift check is intact.
 #
-# Two paths stay genuinely shared, because typedoc's index is whole-file:
-# `docs/index/` and `docs/docs-typedoc.json`. Those are staged whenever
-# `src/index.js` changed, and are documented here as the one place two concurrent
-# commits can still reach each other, rather than left to be discovered.
+# **`docs/docs-typedoc.json` is staged for EVERY staged `src/` change, not only
+# `src/index.js`.** This comment used to say the opposite - that the index was
+# "staged whenever `src/index.js` changed" and that a JSDoc-only edit to a helper
+# "still captured the source, its `.d.ts`, its doc page, and the whole-file
+# index". **That claim was false**, and it was false in the one direction that
+# matters: typedoc's aggregated index records a *source line reference for every
+# documented comment*, so editing any documented helper shifts references
+# throughout it. GATE-021: a `Blob`-conversion change to
+# `powerWebSocketClient.js` regenerated 1238 insertions and 1219 deletions in
+# that one file, and the hook staged the helper's page and its `.d.ts` and left
+# the index behind - so `npm run verify` passed ten steps and failed the
+# eleventh. Three abandoned gates, all with the other ten steps green.
+#
+# The verification below is the evidence, because the claim above was asserted:
+# a JSDoc-only edit to a documented helper now stages the index, and one to an
+# undocumented one still does not stage a page that does not exist.
+#
+# So `docs/index/` stays tied to `src/index.js` - it is the module list, and it
+# changes when the set of modules changes rather than when a comment moves - and
+# `docs/docs-typedoc.json` is hoisted out to every branch. That widens the
+# genuinely-shared surface: two concurrent commits touching different helpers can
+# now both reach this file. It is documented here as the one place two commits
+# can still collide, rather than left to be discovered, and the alternative -
+# leaving it unstaged - is a gate that is red for a reason no one can find.
 npm run --silent types:generate
 npm run --silent docs
 
@@ -104,10 +124,11 @@ add_generated() {
 }
 
 staged_generated=0
+touched_src=0
 for src in $(git diff --cached --name-only -- 'src/**'); do
   case "$src" in
     src/index.js)
-      add_generated docs/index docs/docs-typedoc.json types/index.d.ts
+      add_generated docs/index types/index.d.ts
       staged_generated=$((staged_generated + 1))
       ;;
     src/helpers/*)
@@ -121,7 +142,15 @@ for src in $(git diff --cached --name-only -- 'src/**'); do
       staged_generated=$((staged_generated + 1))
       ;;
   esac
+  touched_src=1
 done
+
+# Hoisted out of the `case` on purpose - see the note above. Any staged `src/`
+# file can move a line reference in the aggregated index, including a file with
+# no page of its own (a typedef-only module like `src/helpers/jsdoc-types.js`).
+if [ "$touched_src" -gt 0 ]; then
+  add_generated docs/docs-typedoc.json
+fi
 
 if [ "$staged_generated" -gt 0 ]; then
   echo "staged the regenerated declarations and reference for $staged_generated source file(s)."
