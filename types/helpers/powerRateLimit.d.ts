@@ -1,18 +1,3 @@
-/** @typedef {import('../utils/limiterClock.js').LimiterNowOptions} LimiterNowOptions */
-/**
- * Declared at module level, not inside the class, for two reasons.
- *
- * A `@typedef` block sitting between the class opening and the constructor's
- * `@param` block is not attached to anything, and TypeScript then inlines the
- * type structurally into the declaration - which for {@link RateLimiterLike} is
- * a dozen members with comment bodies, emitted twice. And a typedef that is
- * *local* is inlined even when it is attached, because the emitter cannot name
- * a type it does not export.
- *
- * @typedef {import('./jsdoc-types.js').PowerRateLimitOptions} PowerRateLimitOptions
- * @typedef {import('./jsdoc-types.js').PowerRateLimitCallOptions} PowerRateLimitCallOptions
- * @typedef {import('./jsdoc-types.js').RateLimiterLike} RateLimiterLike
- */
 /**
  * PowerRateLimit
  *
@@ -37,6 +22,7 @@ export class PowerRateLimit {
     /** @type {RateLimiterLike[]} */
     limiters: RateLimiterLike[];
     atomicDefault: boolean;
+    /** @type {'shared'|'shared-denied'|'local'|'fail-closed'|null} */
     keyFn: ((arg0: any) => string) | null;
     buckets: number;
     /** @type {Array<RateLimiterLike[]|null>} */
@@ -80,13 +66,21 @@ export class PowerRateLimit {
      * if other limiters subsequently fail. Prefer limiters that implement
      * `available()` for atomic semantics.
      *
+     * When `sharedState` is configured, the distributed store is consulted
+     * first. On a backend error the limiter degrades according to `degrade`:
+     * `'local'` falls back to the local legs (approximate but available),
+     * `'fail-closed'` refuses the request. The path taken is exposed through
+     * `stats().path` and `lastPath`.
+     *
      * @param {number} [n=1] - Tokens to consume.
      * @param {PowerRateLimitCallOptions} [options] - Per-call overrides; `atomic`
      *   defaults to the instance setting, `now` supplies the single clock reading
      *   threaded into every leg, and `context` is what `keyFn` is called with.
-     * @returns {boolean} `true` only when every composed limiter allowed it.
+     * @returns {boolean|Promise<boolean>} `true` only when every composed limiter
+     *   allowed it. Returns a promise when `sharedState` is configured and its
+     *   adapter is async.
      */
-    tryConsume(n?: number, options?: PowerRateLimitCallOptions): boolean;
+    tryConsume(n?: number, options?: PowerRateLimitCallOptions): boolean | Promise<boolean>;
     /**
      * The consume path, parameterised on the leg set.
      *
@@ -213,13 +207,21 @@ export class PowerRateLimit {
      */
     reset(): void;
     /**
+     * The path taken by the most recent `tryConsume` call, when `sharedState` is
+     * configured. `null` before any call, and `null` for an unkeyed composer
+     * without `sharedState`.
+     *
+     * @returns {'shared'|'shared-denied'|'local'|'fail-closed'|null}
+     */
+    get lastPath(): "shared" | "shared-denied" | "local" | "fail-closed" | null;
+    /**
      * Serializable snapshot of the composition's shape and, where there is one
      * answer, its headroom.
      *
      * **`available` is `null` for a keyed composer, and that is the interesting
      * field.** Each key has its own budget and a snapshot has no key to measure, so
-     * there is no single number. The obvious alternative — measure the shared
-     * default slot, as `tryConsume` does when no key is given — would report one
+     * there is no single number. The obvious alternative -- measure the shared
+     * default slot, as `tryConsume` does when no key is given -- would report one
      * arbitrary tenant's allowance as *the composition's*, and that is the number
      * least likely to be believed and most likely to be believed wrongly. `null`
      * is the honest reading, and `toSeries` already preserves it as an explicit
@@ -232,7 +234,10 @@ export class PowerRateLimit {
      * holding budgets for. `builtSlots / buckets` is the occupancy; at 1.0 every
      * slot has been touched and further tenants share budgets with existing ones.
      *
-     * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null}}
+     * `path` is the most recent `tryConsume` path when `sharedState` is configured,
+     * or `null` otherwise.
+     *
+     * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null, path:string|null}}
      */
     stats(): {
         legs: number;
@@ -241,6 +246,7 @@ export class PowerRateLimit {
         buckets: number;
         builtSlots: number;
         available: number | null;
+        path: string | null;
     };
     /**
      * Alias for {@link stats}, so a caller who learned `getStats()` from
@@ -256,6 +262,7 @@ export class PowerRateLimit {
         buckets: number;
         builtSlots: number;
         available: number | null;
+        path: string | null;
     };
     /**
      * Release every resource this instance holds, so it can take part in `using` /
@@ -341,3 +348,8 @@ export type PowerRateLimitCallOptions = import("./jsdoc-types.js").PowerRateLimi
  * a type it does not export.
  */
 export type RateLimiterLike = import("./jsdoc-types.js").RateLimiterLike;
+export type SharedStateOutcome = {
+    ok: boolean;
+    retryAfterMs?: number;
+};
+export type SharedStatePromise = Promise<SharedStateOutcome>;

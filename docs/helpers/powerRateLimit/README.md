@@ -10,6 +10,11 @@
 
 - [PowerRateLimit](classes/PowerRateLimit.md)
 
+## Type Aliases
+
+- [SharedStateOutcome](type-aliases/SharedStateOutcome.md)
+- [SharedStatePromise](type-aliases/SharedStatePromise.md)
+
 ## References
 
 ### default

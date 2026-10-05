@@ -13,6 +13,8 @@ Options:
 | Option           |      Type |    Default | Description                                                                                                                            |
 | ---------------- | --------: | ---------: | -------------------------------------------------------------------------------------------------------------------------------------- |
 | `atomic`         | `boolean` |    `false` | When `true` attempts to provide atomic consumes across composed limiters. See **Atomic semantics** below for details and requirements. |
+| `sharedState`    |  `object` |     `null` | A user-supplied adapter for distributed rate limiting. See **Distributed rate limiting** below.                                        |
+| `degrade`        |  `string` |  `'local'` | Policy when `sharedState` throws: `'local'` falls back to local legs, `'fail-closed'` refuses. See **Distributed rate limiting**.      |
 | `now` (per call) |  `number` | `monoMs()` | `tryConsume(n, { now })` and `available({ now })` take **one** reading in ms and thread it into every leg. See [Clocks](#clocks).      |
 
 ### Atomic semantics
@@ -86,6 +88,79 @@ budget**, so:
 `reset()` clears the budgets of every built slot but **keeps the slots** —
 discarding them would hand every key a fresh allowance, which is the same bypass
 reached deliberately.
+
+## Distributed rate limiting (GAP-015)
+
+`PowerRateLimit` can consult an external shared store before the local legs,
+which is what makes it useful behind a load balancer where every process has
+its own heap. The store is user-supplied and must expose one method:
+
+```typescript
+interface PowerSharedStateAdapter {
+  checkAndIncrement(
+    key: string,
+    n: number
+  ):
+    | { ok: true }
+    | { ok: false; retryAfterMs?: number }
+    | Promise<{ ok: true } | { ok: false; retryAfterMs?: number }>;
+}
+```
+
+```javascript
+const limiter = new PowerRateLimit([new PowerThrottle({ capacity: 100, refillRate: 10 })], {
+  sharedState: {
+    async checkAndIncrement(key, n) {
+      const result = await redis.incrBy(key, n);
+      if (result <= 100) return { ok: true };
+      return { ok: false, retryAfterMs: 1000 };
+    },
+  },
+  degrade: 'local', // or 'fail-closed'
+});
+```
+
+The key is derived the same way `keyFn` derives one: from `options.context` when
+present, or from the string `'default'` when it is not. That means a keyed
+composer can use both `keyFn` and `sharedState` together, and the same key
+reaches both the shared store and the per-slot limiter set.
+
+### Degrade policy
+
+A backend error — a timeout, a connection drop, a Redis `MOVED` — is not the
+same as a rate-limit refusal. The store said "I cannot answer", not "no". The
+`degrade` option chooses what the limiter does next:
+
+| Value           | Behaviour                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| `'local'`       | Fall back to the local legs only. The service stays available, but the limit is now per-process. |
+| `'fail-closed'` | Refuse the request until the shared store recovers. Safer, but a backend blip becomes an outage. |
+
+`'local'` is the default deliberately: _"failing every request is usually worse
+than limiting slightly imperfectly, so the service degrades to a per-process
+token bucket: available, but approximate."_ The caller can see which path served
+through `stats().path` and the `lastPath` getter.
+
+### Why this respects REJ-008
+
+The library does not ship a Redis client, a Memcached client, or any other
+runtime dependency. The user brings the client, and the adapter is a thin
+wrapper around it. The N-is-unknown case that sharding cannot cover is handled
+by the external store, which knows the actual process count because it sees
+every request.
+
+### Async adapters
+
+`checkAndIncrement` may return a promise. When it does, `tryConsume` returns a
+promise of the same boolean shape, so the caller's control flow is unchanged:
+
+```javascript
+const ok = await limiter.tryConsume(1, { context: { tenant: 'acme' } });
+```
+
+The local legs are only consulted after the shared store admits, so an async
+adapter does not change the admission order — it only makes the round-trip
+visible to the caller.
 
 ## Request counts
 

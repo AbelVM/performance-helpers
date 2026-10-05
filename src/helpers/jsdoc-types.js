@@ -1326,6 +1326,13 @@ export {};
  *   is set**: each key has its own budget and a snapshot has no key to measure, so there is
  *   no single number. `builtSlots` over `buckets` gives occupancy instead, and
  *   `available({ context })` measures one key.
+ * @property {PowerSharedStateAdapter} [sharedState] Enables distributed rate
+ *   limiting. The adapter is called with the derived key and the requested count
+ *   before the local legs run. On a backend error the limiter degrades according
+ *   to `degrade`. Respects REJ-008: the user brings the client.
+ * @property {'local'|'fail-closed'} [degrade='local'] Policy when `sharedState`
+ *   throws. `'local'` falls back to the local legs (approximate but available);
+ *   `'fail-closed'` refuses the request until the shared store recovers.
  *
  * Per-call `tryConsume(n, options)` also accepts a `{ context }` value, which is
  * what `keyFn` is called with, and a `{ now }` number - read
@@ -1334,6 +1341,21 @@ export {};
  * and having one name mean a function in one place and a number in another on
  * the same class is a trap. The composer needs no injected clock of its own,
  * because the per-call value covers every use the limiters' injection does.
+ */
+
+/**
+ * A user-supplied adapter for distributed rate limiting (GAP-015).
+ *
+ * The adapter is called synchronously on every `tryConsume` when `sharedState`
+ * is configured. It may also return a promise, in which case `tryConsume`
+ * returns a promise of the same boolean shape.
+ *
+ * @typedef {Object} PowerSharedStateAdapter
+ * @property {function(string, number): {ok: boolean, retryAfterMs?: number} | Promise<{ok: boolean, retryAfterMs?: number}>} checkAndIncrement -
+ *   Atomically check and increment the shared counter for `key` by `n`. Returns
+ *   `{ ok: true }` when the request is admitted, `{ ok: false, retryAfterMs }`
+ *   when it is refused, or a promise of same. Throwing signals a backend error
+ *   and triggers the `degrade` policy.
  */
 
 /**

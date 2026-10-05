@@ -45,9 +45,33 @@ Limiter instances to compose. Each
 
 ## Properties
 
+### \_degrade
+
+> **\_degrade**: `"local"` \| `"fail-closed"`
+
+***
+
+### \_lastPath
+
+> **\_lastPath**: `"local"` \| `"fail-closed"` \| `"shared"` \| `"shared-denied"` \| `null`
+
+***
+
+### \_localOnly
+
+> **\_localOnly**: `boolean`
+
+***
+
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
+
+***
+
+### \_sharedState
+
+> **\_sharedState**: `PowerSharedStateAdapter` \| `null`
 
 ***
 
@@ -78,6 +102,22 @@ Limiter instances to compose. Each
 ### limiters
 
 > **limiters**: `RateLimiterLike`[]
+
+## Accessors
+
+### lastPath
+
+#### Get Signature
+
+> **get** **lastPath**(): `"local"` \| `"fail-closed"` \| `"shared"` \| `"shared-denied"` \| `null`
+
+The path taken by the most recent `tryConsume` call, when `sharedState` is
+configured. `null` before any call, and `null` for an unkeyed composer
+without `sharedState`.
+
+##### Returns
+
+`"local"` \| `"fail-closed"` \| `"shared"` \| `"shared-denied"` \| `null`
 
 ## Methods
 
@@ -229,6 +269,10 @@ shape is inferred rather than copied.
 ##### legs
 
 > **legs**: `number`
+
+##### path
+
+> **path**: `string` \| `null`
 
 ***
 
@@ -396,8 +440,8 @@ answer, its headroom.
 
 **`available` is `null` for a keyed composer, and that is the interesting
 field.** Each key has its own budget and a snapshot has no key to measure, so
-there is no single number. The obvious alternative — measure the shared
-default slot, as `tryConsume` does when no key is given — would report one
+there is no single number. The obvious alternative -- measure the shared
+default slot, as `tryConsume` does when no key is given -- would report one
 arbitrary tenant's allowance as *the composition's*, and that is the number
 least likely to be believed and most likely to be believed wrongly. `null`
 is the honest reading, and `toSeries` already preserves it as an explicit
@@ -409,6 +453,9 @@ specific key.
 for a keyed composer is the number of tenants the instance is currently
 holding budgets for. `builtSlots / buckets` is the occupancy; at 1.0 every
 slot has been touched and further tenants share budgets with existing ones.
+
+`path` is the most recent `tryConsume` path when `sharedState` is configured,
+or `null` otherwise.
 
 #### Returns
 
@@ -438,11 +485,15 @@ slot has been touched and further tenants share budgets with existing ones.
 
 > **legs**: `number`
 
+##### path
+
+> **path**: `string` \| `null`
+
 ***
 
 ### tryConsume()
 
-> **tryConsume**(`n?`, `options?`): `boolean`
+> **tryConsume**(`n?`, `options?`): `boolean` \| `Promise`\<`boolean`\>
 
 Try to consume `n` tokens across all limiters. Returns true only when
 every underlying limiter allows consumption. This method first performs a
@@ -458,6 +509,12 @@ Note: when a limiter does not implement `available()` this method falls
 back to calling `tryConsume` directly which may partially mutate state
 if other limiters subsequently fail. Prefer limiters that implement
 `available()` for atomic semantics.
+
+When `sharedState` is configured, the distributed store is consulted
+first. On a backend error the limiter degrades according to `degrade`:
+`'local'` falls back to the local legs (approximate but available),
+`'fail-closed'` refuses the request. The path taken is exposed through
+`stats().path` and `lastPath`.
 
 #### Parameters
 
@@ -477,6 +534,8 @@ Per-call overrides; `atomic`
 
 #### Returns
 
-`boolean`
+`boolean` \| `Promise`\<`boolean`\>
 
-`true` only when every composed limiter allowed it.
+`true` only when every composed limiter
+  allowed it. Returns a promise when `sharedState` is configured and its
+  adapter is async.

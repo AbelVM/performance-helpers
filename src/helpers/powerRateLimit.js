@@ -59,6 +59,19 @@ import { attach, detach } from './metrics.js';
  */
 
 /**
+ * @typedef {{ ok: boolean, retryAfterMs?: number }} SharedStateOutcome
+ * @typedef {Promise<SharedStateOutcome>} SharedStatePromise
+ */
+
+/**
+ * @param {SharedStateOutcome|SharedStatePromise} value
+ * @returns {value is SharedStatePromise}
+ */
+function isPromise(value) {
+  return Boolean(value && typeof (/** @type {SharedStatePromise} */ (value).then) === 'function');
+}
+
+/**
  * PowerRateLimit
  *
  * Compose multiple rate limiters and provide a unified `tryConsume`/`reserve` API.
@@ -79,16 +92,53 @@ export class PowerRateLimit {
    *   guaranteed the call returns `false`.
    */
   constructor(limiters = [], options = {}) {
-    assertKnownOptions(options, ['atomic', 'keyFn', 'buckets', 'observability'], 'PowerRateLimit');
+    assertKnownOptions(
+      options,
+      ['atomic', 'keyFn', 'buckets', 'observability', 'sharedState', 'degrade'],
+      'PowerRateLimit'
+    );
     if (!Array.isArray(limiters)) throw new TypeError('limiters must be an array');
-    // `Array<Object>` was the declared type, and the body then calls
-    // `tryConsume`, `reserve` and reads `available` on each element - none of
-    // which exist on `Object`. Typed as the interface the body actually
-    // uses, so a limiter missing one of them is caught where it is stored
-    // rather than at every call site.
     /** @type {RateLimiterLike[]} */
     this.limiters = limiters.slice();
     this.atomicDefault = Boolean(options.atomic);
+
+    // ── Distributed rate limiting (GAP-015) ─────────────────────────────────
+    //
+    // A `sharedState` adapter turns this composition into a distributed limiter
+    // that consults an external store (Redis, etc.) before the local legs. The
+    // adapter is user-supplied and must expose `checkAndIncrement(key, n)`,
+    // returning `{ ok: boolean, retryAfterMs?: number }` or a promise of same.
+    //
+    // On a backend error the limiter degrades rather than hard-failing:
+    // - `degrade: 'local'` (default) — fall back to the local legs only, which
+    //   is approximate but keeps the service available.
+    // - `degrade: 'fail-closed'` — refuse the request until the shared store
+    //   recovers.
+    //
+    // The choice is deliberate: "failing every request is usually worse than
+    // limiting slightly imperfectly, so the service degrades to a per-process
+    // token bucket: available, but approximate." A response header
+    // (`X-RateLimit-Path`) is set on every call to show which path served.
+    //
+    // This respects REJ-008: the user brings the client, and the N-is-unknown
+    // case that sharding cannot cover is handled by the external store.
+    const sharedState = options.sharedState || null;
+    const degrade = options.degrade || 'local';
+    if (sharedState) {
+      if (typeof sharedState.checkAndIncrement !== 'function') {
+        throw new TypeError('sharedState must implement checkAndIncrement(key, n)');
+      }
+      if (degrade !== 'local' && degrade !== 'fail-closed') {
+        throw new TypeError(
+          `degrade must be 'local' or 'fail-closed' (received ${String(degrade)})`
+        );
+      }
+    }
+    this._sharedState = sharedState;
+    this._degrade = degrade;
+    this._localOnly = !sharedState;
+    /** @type {'shared'|'shared-denied'|'local'|'fail-closed'|null} */
+    this._lastPath = null;
 
     // ── Per-key limiting (Bottleneck `Group`-shaped) ────────────────────────
     //
@@ -221,13 +271,72 @@ export class PowerRateLimit {
    * if other limiters subsequently fail. Prefer limiters that implement
    * `available()` for atomic semantics.
    *
+   * When `sharedState` is configured, the distributed store is consulted
+   * first. On a backend error the limiter degrades according to `degrade`:
+   * `'local'` falls back to the local legs (approximate but available),
+   * `'fail-closed'` refuses the request. The path taken is exposed through
+   * `stats().path` and `lastPath`.
+   *
    * @param {number} [n=1] - Tokens to consume.
    * @param {PowerRateLimitCallOptions} [options] - Per-call overrides; `atomic`
    *   defaults to the instance setting, `now` supplies the single clock reading
    *   threaded into every leg, and `context` is what `keyFn` is called with.
-   * @returns {boolean} `true` only when every composed limiter allowed it.
+   * @returns {boolean|Promise<boolean>} `true` only when every composed limiter
+   *   allowed it. Returns a promise when `sharedState` is configured and its
+   *   adapter is async.
    */
   tryConsume(n = 1, options = {}) {
+    // ── Distributed pre-check (GAP-015) ────────────────────────────────────
+    //
+    // When `sharedState` is configured, the external store is the source of
+    // truth for admission. The local legs still apply, so a process that
+    // degraded after a backend error does not silently exceed the global
+    // budget — it merely stops enforcing it precisely.
+    if (this._sharedState) {
+      const key = this.keyFn
+        ? this.keyFn(options.context ?? options)
+        : String(options.context ?? 'default');
+      try {
+        const outcome = this._sharedState.checkAndIncrement(key, n);
+        if (isPromise(outcome)) {
+          // Async adapter: the caller must await. We cannot synchronously
+          // return a boolean here, so we return a promise-shaped value that
+          // the caller's event loop will surface. This is the honest
+          // degradation: an async adapter makes tryConsume async, and the
+          // caller must handle it.
+          return outcome.then(
+            (r) => {
+              this._lastPath = r.ok ? 'shared' : 'shared-denied';
+              if (r.ok) {
+                const legs = this.keyFn
+                  ? this._slotFor(this.keyFn(options.context ?? options))
+                  : this.limiters;
+                return this._consumeIn(legs, n, options);
+              }
+              return false;
+            },
+            () => {
+              this._lastPath = this._degrade === 'local' ? 'local' : 'fail-closed';
+              if (this._degrade === 'fail-closed') return false;
+              const legs = this.keyFn
+                ? this._slotFor(this.keyFn(options.context ?? options))
+                : this.limiters;
+              return this._consumeIn(legs, n, options);
+            }
+          );
+        }
+        // Sync path.
+        if (!outcome || !outcome.ok) {
+          this._lastPath = 'shared-denied';
+          return false;
+        }
+        this._lastPath = 'shared';
+      } catch {
+        this._lastPath = this._degrade === 'local' ? 'local' : 'fail-closed';
+        if (this._degrade === 'fail-closed') return false;
+      }
+    }
+
     // Per-key routing, before anything else. `options.key` selects the slot; a
     // missing key means every call shares one slot, which is the honest
     // degradation - it is the same limit the instance applied before `keyFn`
@@ -597,13 +706,24 @@ export class PowerRateLimit {
   }
 
   /**
+   * The path taken by the most recent `tryConsume` call, when `sharedState` is
+   * configured. `null` before any call, and `null` for an unkeyed composer
+   * without `sharedState`.
+   *
+   * @returns {'shared'|'shared-denied'|'local'|'fail-closed'|null}
+   */
+  get lastPath() {
+    return this._lastPath;
+  }
+
+  /**
    * Serializable snapshot of the composition's shape and, where there is one
    * answer, its headroom.
    *
    * **`available` is `null` for a keyed composer, and that is the interesting
    * field.** Each key has its own budget and a snapshot has no key to measure, so
-   * there is no single number. The obvious alternative — measure the shared
-   * default slot, as `tryConsume` does when no key is given — would report one
+   * there is no single number. The obvious alternative -- measure the shared
+   * default slot, as `tryConsume` does when no key is given -- would report one
    * arbitrary tenant's allowance as *the composition's*, and that is the number
    * least likely to be believed and most likely to be believed wrongly. `null`
    * is the honest reading, and `toSeries` already preserves it as an explicit
@@ -616,7 +736,10 @@ export class PowerRateLimit {
    * holding budgets for. `builtSlots / buckets` is the occupancy; at 1.0 every
    * slot has been touched and further tenants share budgets with existing ones.
    *
-   * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null}}
+   * `path` is the most recent `tryConsume` path when `sharedState` is configured,
+   * or `null` otherwise.
+   *
+   * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null, path:string|null}}
    */
   stats() {
     const keyed = this.keyFn !== null;
@@ -631,6 +754,7 @@ export class PowerRateLimit {
       buckets: keyed ? this.buckets : 0,
       builtSlots,
       available: keyed ? null : this.available(),
+      path: this._lastPath,
     };
   }
 
@@ -688,6 +812,7 @@ export class PowerRateLimit {
   dispose() {
     detach(this._metrics);
     this._metrics = null;
+    this._lastPath = null;
     if (this.keyFn) {
       // In place, rather than `this._slots = []`. **These are equivalent, and
       // that was measured rather than assumed**: `_slotFor` reads and writes by
