@@ -103,7 +103,7 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 ## Observability
 
-- [PowerEventLoopMonitor: Event-loop delay and utilization](guides/powerEventLoopMonitor.md). Timer-drift histogram plus Node's `eventLoopUtilization()`, so a latency regression can be attributed to the host instead of guessed at. Zero dependencies, both runtimes; `utilization()` returns `null` where the runtime cannot measure it.
+- [PowerEventLoopMonitor: Event-loop delay and utilization](guides/powerEventLoopMonitor.md). Timer-drift histogram plus Node's `eventLoopUtilization()`, so a latency regression can be attributed to the host instead of guessed at. Zero dependencies, both runtimes; `utilization()` returns `null` where the runtime cannot measure it. `stats()` also reports the milliseconds blocked alongside the count of blocked ticks, the readings it refused, and the share of wall-clock time it actually sampled.
 
 ## Utils
 
