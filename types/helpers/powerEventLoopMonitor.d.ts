@@ -52,6 +52,9 @@ export class PowerEventLoopMonitor {
     _max: number;
     _lastDelay: number;
     _blocked: number;
+    _blockedMs: number;
+    _dropped: number;
+    _startedAt: number;
     _running: boolean;
     _handle: any;
     /**
@@ -196,7 +199,10 @@ export class PowerEventLoopMonitor {
      *   p50: number|null,
      *   p99: number|null,
      *   p99_9: number|null,
-     *   blockedOver10ms: number
+     *   blockedOver10ms: number,
+     *   blockedMs: number,
+     *   droppedSamples: number,
+     *   coverage: number|null
      * }}
      */
     stats(): {
@@ -210,6 +216,9 @@ export class PowerEventLoopMonitor {
         p99: number | null;
         p99_9: number | null;
         blockedOver10ms: number;
+        blockedMs: number;
+        droppedSamples: number;
+        coverage: number | null;
     };
     /**
      * Alias for {@link stats}, so a caller who learned `getStats()` from
@@ -248,6 +257,9 @@ export class PowerEventLoopMonitor {
         p99: number | null;
         p99_9: number | null;
         blockedOver10ms: number;
+        blockedMs: number;
+        droppedSamples: number;
+        coverage: number | null;
     };
     /**
      * Stop sampling and release the timer. Safe to call more than once.

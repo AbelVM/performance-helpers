@@ -88,6 +88,25 @@ export class PowerEventLoopMonitor {
     this._max = 0;
     this._lastDelay = 0;
     this._blocked = 0;
+    // OBS-007. The three things that made a stall invisible.
+    //
+    // `_blockedMs` is the same population as `_blocked` measured in milliseconds
+    // rather than in ticks, so a 30 s stall and a 12 ms hiccup stop reading the
+    // same: both are `blockedOver10ms: 1`, and only one of them is `blockedMs:
+    // 30000`. Counting was the right call for alert rate; it is the wrong shape
+    // for severity, and severity is the question being asked when a loop is in
+    // trouble.
+    this._blockedMs = 0;
+    // Readings refused because the clock moved backwards (NTP correction, a
+    // suspended laptop). They were dropped rather than recorded, because a
+    // negative sample poisons the histogram - but a **dropped sample is still an
+    // event**, and an event with no counter is indistinguishable from an event
+    // that did not happen.
+    this._dropped = 0;
+    // Wall-clock baseline for `coverage`. Re-based by `reset()`, because a
+    // coverage figure whose window the caller has just cleared is a lie about the
+    // cleared interval.
+    this._startedAt = nowMs();
     this._running = false;
     this._handle = null;
 
@@ -168,6 +187,11 @@ export class PowerEventLoopMonitor {
     this._max = 0;
     this._lastDelay = 0;
     this._blocked = 0;
+    this._blockedMs = 0;
+    this._dropped = 0;
+    // The coverage window restarts with the samples, or coverage would keep
+    // dividing a fresh sample count by the whole life of the monitor.
+    this._startedAt = nowMs();
   }
 
   /**
@@ -292,11 +316,53 @@ export class PowerEventLoopMonitor {
    *   p50: number|null,
    *   p99: number|null,
    *   p99_9: number|null,
-   *   blockedOver10ms: number
+   *   blockedOver10ms: number,
+   *   blockedMs: number,
+   *   droppedSamples: number,
+   *   coverage: number|null
    * }}
    */
   stats() {
     const hasSamples = this._samples > 0;
+    // OBS-007. **Coverage is a lifetime figure, and it trends down — read it as a
+    // resolution statement, not a health statement.** It answers "what fraction of
+    // the wall-clock time since this monitor started does its own sampling schedule
+    // account for?", which is `(samples - 1) * intervalMs + totalDrift` over the
+    // elapsed time. That is why it is not an alertable ratio on its own: a monitor
+    // at `intervalMs: 10` that has been running for an hour covers 0.03 of it, and
+    // a loop that has been perfectly responsive the whole time scores the same as
+    // one that stalled for 2 minutes and then recovered.
+    //
+    // What it is for is the case every other field here gets wrong. `max` and
+    // `blockedOver10ms` can only describe ticks that **fired**. If the monitor was
+    // not sampling — stopped, or never started, or the process was suspended past
+    // the timer entirely — no tick fires, no drift is recorded, and the gap is
+    // invisible in every other field. Coverage is the only number here that moves
+    // when time passed unobserved.
+    //
+    const elapsed = nowMs() - this._startedAt;
+    const accounted = hasSamples ? (this._samples - 1) * this.intervalMs + this._sum : 0;
+    // `null` in three cases, and all three are one fact: there is no window to take
+    // a fraction of.
+    //
+    // - no samples yet, for the same reason `mean` is `null` and not `0`. "Not
+    //   measured yet" and "measured, accounted for nothing" are different facts.
+    // - `elapsed === 0`, a window of no length. Not hypothetical in this repo: the
+    //   suite's fake timers freeze `nowMs()`, so every test using them sits in
+    //   exactly this state, and `0 / 0` is `NaN` - which compares false against
+    //   *every* threshold, so it would silence a caller's coverage alert while
+    //   still looking like a number.
+    // - `elapsed < 0`, the wall clock stepping backwards (NTP correction, a
+    //   suspended laptop) so the window runs the wrong way. `1` was the answer
+    //   written here first, and it is the worst one available: "fully covered" is
+    //   the single reading that silences an alert. `droppedSamples` is the tell
+    //   that this clock is not to be trusted.
+    //
+    // Clamped at both ends. The upper bound is a clock stepping *backwards* under an
+    // already-recorded window: the denominator shrinks, the numerator does not, and
+    // the ratio reports more than everything.
+    const coverage =
+      hasSamples && elapsed > 0 ? Math.min(1, Math.max(0, accounted / elapsed)) : null;
     return {
       active: this._running,
       intervalMs: this.intervalMs,
@@ -312,6 +378,14 @@ export class PowerEventLoopMonitor {
       // count rather than a verdict because the right number is workload
       // specific.
       blockedOver10ms: this._blocked,
+      // The same population as `blockedOver10ms`, in milliseconds. The pair is the
+      // point: one is how *often*, the other is how *badly*.
+      blockedMs: this._blockedMs,
+      // Ticks refused because the clock moved backwards. Non-zero means the drift
+      // figures on this monitor are from a clock that was adjusted under them,
+      // which is worth knowing before you trust a percentile.
+      droppedSamples: this._dropped,
+      coverage,
     };
   }
 
@@ -397,12 +471,18 @@ export class PowerEventLoopMonitor {
     // A negative reading means the clock moved backwards (NTP correction, a
     // suspended laptop). Recording it would poison the histogram's invariants,
     // so it is dropped and the gap goes unreported rather than reported wrong.
-    if (!(drift >= 0)) return;
+    if (!(drift >= 0)) {
+      this._dropped += 1;
+      return;
+    }
     this._lastDelay = drift;
     this._samples += 1;
     this._sum += drift;
     if (drift > this._max) this._max = drift;
-    if (drift > 10) this._blocked += 1;
+    if (drift > 10) {
+      this._blocked += 1;
+      this._blockedMs += drift;
+    }
     this._delay.record(drift);
 
     if (this._onDrift) {

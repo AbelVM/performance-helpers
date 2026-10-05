@@ -59,10 +59,31 @@ Two consequences worth internalising:
   p99: 41.2,             // ms, estimated
   p99_9: 61.0,           // ms, estimated
   blockedOver10ms: 3,    // count, not a rate
+  blockedMs: 3120,       // ms, for those same 3 ticks
+  droppedSamples: 0,      // readings refused: clock moved backwards
+  coverage: 0.98,         // fraction of wall-clock time the schedule explains
 }
 ```
 
 `mean`, `p50`, `p99` and `p99_9` are **`null` before the first sample**, not `0`, so a consumer cannot mistake "not measured yet" for "no delay". `blockedOver10ms` is a count rather than a verdict because the threshold that matters is workload-specific.
+
+### `blockedMs` — the same ticks, weighed
+
+A 30 s stall and a 12 ms hiccup are **both** `blockedOver10ms: 1`. The count is right for alert _rate_ and the wrong shape for _severity_, which is the question being asked when a loop is already in trouble. `blockedMs` is the same population in milliseconds — `3120` above is those three ticks totalling 3.12 s. Read the pair together: one is how _often_, the other is how _badly_.
+
+### `droppedSamples` — readings the clock refused
+
+A drift reading of `-1` or `NaN` — NTP correction, a suspended laptop — is **dropped rather than recorded**, because a negative sample would poison the histogram's invariants. But a dropped sample is still an event, and an event with no counter is indistinguishable from an event that did not happen. Non-zero means the drift figures on this monitor came from a clock that was adjusted underneath them, which is worth knowing before you trust a percentile.
+
+### `coverage` — the only field that notices an unobserved gap
+
+`max`, `blockedOver10ms` and `samples` can only describe ticks that **fired**. If the monitor was not sampling — stopped, never started, or the process was suspended past the timer entirely — no tick fires, no drift is recorded, and the gap is invisible in every other field. `coverage` is the fraction of wall-clock time since construction that the sampling schedule accounts for, and it is the one number here that moves when time passed unobserved.
+
+**Read it as a resolution statement, not a health statement.** It is a lifetime figure and it trends _down_: a monitor at `intervalMs: 10` that has run for an hour covers 0.03 of it, and a loop that was perfectly responsive the whole time scores the same as one that stalled for two minutes and recovered. So do not alert on it directly. It answers a narrower and more useful question — _is my sampling resolution fine enough to see what is happening to this process?_ — and a low figure is the honest answer to that.
+
+It is `null` rather than a number in three degenerate cases, and all three are one fact: there is no window to take a fraction of. No samples yet; `elapsed === 0`; or `elapsed < 0`, the clock stepping backwards. The `NaN` case matters most — `NaN` compares false against _every_ threshold, so a ratio that evaluated to `NaN` would silence a coverage alert while still looking like a number.
+
+`reset()` re-bases the window along with the samples. Without that, a fresh sample count would be divided by the monitor's whole life and report near-zero coverage for an interval that is fully covered.
 
 ## `utilization()`
 

@@ -66,9 +66,21 @@ setInterval(() => {
 
 ***
 
+### \_blockedMs
+
+> **\_blockedMs**: `number`
+
+***
+
 ### \_delay
 
 > **\_delay**: [`PowerHistogram`](../../powerHistogram/classes/PowerHistogram.md)
+
+***
+
+### \_dropped
+
+> **\_dropped**: `number`
 
 ***
 
@@ -117,6 +129,12 @@ setInterval(() => {
 ### \_samples
 
 > **\_samples**: `number`
+
+***
+
+### \_startedAt
+
+> **\_startedAt**: `number`
 
 ***
 
@@ -227,9 +245,21 @@ which is the property a consumer relies on.
 
 > **active**: `boolean`
 
+##### blockedMs
+
+> **blockedMs**: `number`
+
 ##### blockedOver10ms
 
 > **blockedOver10ms**: `number`
+
+##### coverage
+
+> **coverage**: `number` \| `null`
+
+##### droppedSamples
+
+> **droppedSamples**: `number`
 
 ##### intervalMs
 
@@ -334,9 +364,21 @@ They are *estimates* - `PowerHistogram` is a DDSketch with a
 
 > **active**: `boolean`
 
+##### blockedMs
+
+> **blockedMs**: `number`
+
 ##### blockedOver10ms
 
 > **blockedOver10ms**: `number`
+
+##### coverage
+
+> **coverage**: `number` \| `null`
+
+##### droppedSamples
+
+> **droppedSamples**: `number`
 
 ##### intervalMs
 
