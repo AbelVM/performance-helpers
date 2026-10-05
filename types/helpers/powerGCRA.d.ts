@@ -35,21 +35,14 @@ export class PowerGCRA {
     rate: number;
     per: number;
     burst: number;
-    _onError: ((arg0: number) => void) | null;
-    _emission: number;
-    _delayTolerance: number;
-    _tat: number;
     /**
      * Clock for this limiter, and whether it was explicitly injected. See
      * `resolveLimiterNow` for why the flag is load-bearing: an injected clock
      * must outrank a value threaded in by a composition.
      * @type {(() => number)}
      */
-    _now: (() => number);
     /** @type {boolean} */
-    _nowExplicit: boolean;
     /** @type {?number} */
-    _lastNow: number | null;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -72,7 +65,6 @@ export class PowerGCRA {
      * @returns {void}
      * @private
      */
-    private _notifyClock;
     /**
      * @param {number} [n=1]
      * @param {import('../utils/limiterClock.js').LimiterNowOptions} [options]
@@ -147,7 +139,6 @@ export class PowerGCRA {
      * @returns {number} A whole number of operations, at least 1.
      * @private
      */
-    private _ceiling;
     /**
      * Consume, or return the exact wait needed.
      * @param {number} [n=1]
@@ -197,7 +188,6 @@ export class PowerGCRA {
      * @returns {number} A non-negative whole number of operations.
      * @private
      */
-    private _covers;
     /**
      * Milliseconds of tolerance still unspent at `now`, given the pre-update TAT.
      *
@@ -211,7 +201,6 @@ export class PowerGCRA {
      * @returns {number} Milliseconds remaining; negative when the TAT is ahead.
      * @private
      */
-    private _remainingAt;
     /**
      * The pre-update TAT at `now`, clamped so it never sits in the past.
      *
@@ -225,7 +214,6 @@ export class PowerGCRA {
      * @returns {number} The TAT to decide against.
      * @private
      */
-    private _tatAt;
     /**
      * Whether the limiter would accept a single operation right now, without
      * consuming it. Same shape as `PowerThrottle.available()` for composition.

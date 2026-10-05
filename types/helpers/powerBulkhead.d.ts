@@ -17,18 +17,6 @@ export class PowerBulkhead {
      * @param {PowerBulkheadOptions} [options]
      */
     constructor(options?: PowerBulkheadOptions);
-    _onError: ((err: any) => void) | null;
-    _partitions: number;
-    _maxConcurrency: number;
-    _queueCapacity: number;
-    _partitioner: ((key: any) => number) | null;
-    _nextPartition: number;
-    _activeCount: number;
-    _outstanding: number;
-    _buckets: {
-        gate: PowerPermitGate;
-    }[];
-    _drainWaiters: PowerQueue;
     _metrics: {
         unregister: () => boolean;
         name: string;

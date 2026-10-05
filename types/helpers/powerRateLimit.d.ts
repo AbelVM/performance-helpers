@@ -40,7 +40,6 @@ export class PowerRateLimit {
     keyFn: ((arg0: any) => string) | null;
     buckets: number;
     /** @type {Array<RateLimiterLike[]|null>} */
-    _slots: Array<RateLimiterLike[] | null>;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -57,7 +56,6 @@ export class PowerRateLimit {
      * @returns {RateLimiterLike[]} The slot's limiters, empty if the key is unusable.
      * @private
      */
-    private _slotFor;
     /**
      * The per-key limiter set for `key`, for a caller that wants to inspect or
      * drive one key directly (a `retryAfter` in a `Retry-After` header, say).
@@ -105,7 +103,6 @@ export class PowerRateLimit {
      * @returns {boolean}
      * @private
      */
-    private _consumeIn;
     /**
      * Return the minimum available tokens across all limiters.
      * If any limiter does not expose `available()`, this returns `0`.
@@ -196,7 +193,6 @@ export class PowerRateLimit {
      * @returns {RateLimiterLike[]}
      * @private
      */
-    private _liveLimiters;
     /**
      * @param {{l: RateLimiterLike, method: string, token?: *}} entry
      * @param {number} want

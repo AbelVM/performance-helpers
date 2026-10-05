@@ -20,18 +20,7 @@ export class PowerObserver {
      * @param {PowerObserverOptions} options
      */
     constructor(initial: any, options?: PowerObserverOptions);
-    _value: any;
-    _subs: PowerSubscriberSet;
-    _map: Function | null;
-    _distinct: boolean;
     /** @type {*} */
-    _mapped: any;
-    _mappedValid: boolean;
-    _scheduleMode: string;
-    _pending: boolean;
-    _pendingPrev: any;
-    _pendingNext: any;
-    _scheduler: PowerScheduler;
     /** Set value and schedule notification according to `async` option */
     set value(v: any);
     /** Current value */

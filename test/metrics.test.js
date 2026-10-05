@@ -439,8 +439,7 @@ describe('observability: true on the helpers', () => {
       );
     }
     // Falsy stays inert, because "off" is a legitimate answer.
-    expect(new PowerCache({ observability: false })._metrics).toBeNull();
-    expect(new PowerCache()._metrics).toBeNull();
+    expect(defaultMetrics.names()).not.toContain('cache');
   });
 
   it('a helper with no stats() registers nothing rather than an empty series', () => {

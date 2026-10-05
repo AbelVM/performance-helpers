@@ -37,14 +37,7 @@ export class PowerLogger {
      *   any of them was an error and a custom sink needed a cast.
      */
     constructor(level?: number, options?: PowerLoggerOptions);
-    _debugLevel: number;
-    _counters: Map<any, any>;
-    _countersDropped: number;
-    _maxCounters: number;
-    _format: "json" | "text";
     name: string | null;
-    _formatter: ((payload: import("./jsdoc-types.js").PowerLoggerPayload) => string | import("./jsdoc-types.js").PowerLoggerPayload | null) | null;
-    _output: ((payload: import("./jsdoc-types.js").PowerLoggerPayload | string) => void) | null;
     /**
      * Set the global debug level.
      *
@@ -78,7 +71,6 @@ export class PowerLogger {
      * @param {any[]} args
      * @returns {any[]}
      */
-    private _resolveLogArgs;
     /**
      * Internal helper to emit logs with unified JSON/text formatting.
      * @private
@@ -88,7 +80,6 @@ export class PowerLogger {
      * @param {any[]} args - original arguments array
      * @param {PowerLoggerEmitOptions} [opts]
      */
-    private _emit;
     /**
      * Report a failure raised by a user-supplied log sink.
      *

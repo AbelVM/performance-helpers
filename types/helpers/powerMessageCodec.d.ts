@@ -274,7 +274,6 @@ export function isCapabilityAnnouncement(value: any): boolean;
 export function encodeNativeEnvelope(value: any, options?: {
     correlationId?: string | undefined;
 }): {
-    __pp: 1;
     kind: "envelope";
     value: any;
     correlationId?: string;
@@ -296,7 +295,6 @@ export function encodeNativeEnvelope(value: any, options?: {
 export function announceCapabilities(options?: {
     codecs?: string[] | undefined;
 }): {
-    __pp: 1;
     kind: "capabilities";
     codecs: string[];
     protocol: number;

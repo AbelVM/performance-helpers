@@ -57,70 +57,20 @@ export class PowerSocketAdapter {
     kind: SocketKind;
     /** @type {any} The underlying socket, for escape hatches the adapter omits. */
     socket: any;
-    _onMessage: ((arg0: import("./jsdoc-types.js").PowerSocketAdapterMessage) => (void | Promise<void>)) | null;
-    _onOpen: ((arg0: import("./powerSocketAdapter.js").PowerSocketAdapter) => void) | null;
-    _onClose: ((arg0: {
-        code: number;
-        reason: string;
-        adapter: import("./powerSocketAdapter.js").PowerSocketAdapter;
-    }) => void) | null;
-    _onError: ((arg0: any, arg1: import("./powerSocketAdapter.js").PowerSocketAdapter) => void) | null;
-    _onRateLimited: import("./jsdoc-types.js").PowerSocketAdapterRateLimited | null;
-    _rateLimitAction: string;
-    _heartbeatIntervalMs: number;
-    _heartbeatTimeoutMs: number;
-    _idleTimeoutMs: number;
-    _drainTimeoutMs: number;
-    _maxPayloadSizeBytes: number;
     /** @type {PowerSlidingWindow|null} */
-    _limiter: PowerSlidingWindow | null;
-    _state: any;
-    _draining: boolean;
-    _disposed: boolean;
-    _closedByUser: boolean;
-    _detached: (() => void) | (() => void) | null;
     /** @type {?ReturnType<typeof setTimeout>} */
-    _heartbeatTimer: ReturnType<typeof setTimeout> | null;
     /** @type {?ReturnType<typeof setTimeout>} */
-    _heartbeatDeadline: ReturnType<typeof setTimeout> | null;
     /** @type {?ReturnType<typeof setTimeout>} */
-    _idleTimer: ReturnType<typeof setTimeout> | null;
     /** @type {?ReturnType<typeof setTimeout>} */
-    _drainTimer: ReturnType<typeof setTimeout> | null;
-    _lastActivityAt: number;
-    _pingSentAt: number;
-    _rtt: PowerHistogram;
-    _pending: number;
     /** @type {Array<(ok: boolean) => void>} */
-    _drainWaiters: Array<(ok: boolean) => void>;
     /** @type {?Promise<boolean>} */
-    _drainPromise: Promise<boolean> | null;
     /**
      * The single `WebSocketStream` writer, acquired on first send and held
      * until dispose. See `_writeStream` for why it cannot be per-call.
      * @type {any}
      */
-    _streamWriter: any;
-    _streamWritePending: number;
     /** @type {any} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
-    _streamRetryTimer: any;
     /** @type {number} Current retry delay, so the backoff actually grows. */
-    _streamRetryDelay: number;
-    _counters: {
-        messages: number;
-        handled: number;
-        rateLimited: number;
-        sent: number;
-        sendFailures: number;
-        backpressureEvents: number;
-        heartbeatTimeouts: number;
-        heartbeats: number;
-        idleTimeouts: number;
-        drained: number;
-        drainTimeouts: number;
-        drainedFromDrain: number;
-        oversizeFrames: number;
-    };
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -199,7 +149,6 @@ export class PowerSocketAdapter {
      * @param {any} data
      * @returns {boolean}
      */
-    private _writeStream;
     /**
      * Close the socket.
      *
@@ -280,16 +229,11 @@ export class PowerSocketAdapter {
     /**
      * @private
      */
-    private _attach;
     /**
      * `WebSocketStream` emits on a `ReadableStream` rather than on an emitter,
      * so it is read with a reader and the loop is restarted on each value.
      * @private
      */
-    private _attachStream;
-    _streamReader: any;
-    _pumpStream: (() => Promise<void>) | undefined;
-    _streamPromise: Promise<void> | undefined;
     /**
      * Re-check `socket.readable` after a growing delay.
      *
@@ -298,15 +242,12 @@ export class PowerSocketAdapter {
      *
      * @private
      */
-    private _armStreamRetry;
     /**
      * @private
      */
-    private _handleMessage;
     /**
      * @private
      */
-    private _handleClose;
     /**
      * Hand back the writer lock taken in `_writeStream`, if one is held.
      *
@@ -315,47 +256,36 @@ export class PowerSocketAdapter {
      *
      * @private
      */
-    private _releaseStreamWriter;
     /**
      * @private
      */
-    private _handlePong;
     /**
      * @private
      */
-    private _scheduleHeartbeat;
     /**
      * @private
      */
-    private _tickHeartbeat;
     /**
      * @private
      */
-    private _resetIdleTimer;
     /**
      * @private
      */
-    private _flushDrainWaiters;
     /**
      * @private
      */
-    private _finishDrain;
     /**
      * @private
      */
-    private _clearTimers;
     /**
      * @private
      */
-    private _detach;
     /**
      * @private
      */
-    private _emitError;
     /**
      * @private
      */
-    private _invoke;
     /**
      * Alias for {@link PowerSocketAdapter#dispose}, so `using` works.
      */

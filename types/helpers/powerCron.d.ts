@@ -78,21 +78,8 @@ export class PowerCron {
      * @param {PowerCronOptions} [options]
      */
     constructor(task: () => any, options?: PowerCronOptions);
-    _task: () => any;
-    _intervalMs: number;
-    _maxCatchUp: number;
-    _overlap: boolean;
-    _catchUp: "skip" | "catch-up" | "run-once";
-    _jitter: number;
-    _runOnStart: boolean;
-    _onError: ((err: Error) => void) | null;
-    _onFire: ((info: Object) => void) | null;
-    _unref: boolean;
     /** @type {any} */
-    _timer: any;
-    _running: boolean;
     /** Absolute timestamp the next fire is aimed at. */
-    _nextAt: number;
     /**
      * Times the task was invoked. Exposed as `fireCount` so a caller can count
      * runs rather than assume one per interval.
@@ -116,14 +103,12 @@ export class PowerCron {
      * @type {number}
      * @private
      */
-    private _fireCount;
     /**
      * Accumulated scheduling error, in ms, between when a fire was due and when
      * it actually ran. Exposed so drift is measurable rather than folklore.
      * @type {number}
      * @private
      */
-    private _totalDriftMs;
     /**
      * Whether a task is currently in flight. `overlap` gates the schedule on
      * it: with it off, a tick whose target arrives while a task is running is
@@ -132,7 +117,6 @@ export class PowerCron {
      * @type {boolean}
      * @private
      */
-    private _runningTask;
     /** @returns {number} The configured interval, in ms. */
     get intervalMs(): number;
     /** @returns {boolean} Whether the schedule is armed. */
@@ -187,20 +171,17 @@ export class PowerCron {
      * @private
      * @returns {void}
      */
-    private _arm;
     /**
      * The random component for this fire, in ms.
      * @private
      * @returns {number}
      */
-    private _jitterDelay;
     /**
      * Handle a timer expiry: work out which periods were missed, apply the
      * catch-up policy, then re-arm from the absolute target.
      * @private
      * @returns {void}
      */
-    private _onTimer;
     /**
      * Invoke the task, swallowing and reporting failures so a bad run cannot stop
      * the schedule.
@@ -219,7 +200,6 @@ export class PowerCron {
      *   place that matters: `_onTimer` had already computed it.
      * @returns {void}
      */
-    private _run;
     /**
      * Route an error to `onError`, never letting it escape.
      * @private
@@ -227,7 +207,6 @@ export class PowerCron {
      * @param {string} where - Which callback threw, for the fallback log.
      * @returns {void}
      */
-    private _report;
     /**
      * Stop the schedule for good.
      * @returns {void}

@@ -4,7 +4,6 @@ export class PowerSemaphore {
      * @param {number} [limit=1] Maximum number of concurrent permits.
      */
     constructor(limit?: number, queueCapacity?: undefined);
-    _gate: PowerPermitGate;
     /** Maximum concurrent holders. */
     get limit(): number;
     /** Currently acquired permits. */

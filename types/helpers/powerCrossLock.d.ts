@@ -13,13 +13,9 @@ export class PowerCrossLock {
      * @param {PowerCrossLockOptions} [options] Configuration.
      */
     constructor(options?: PowerCrossLockOptions);
-    _name: string;
     /** @type {number} Completed acquisitions on this instance. A counter, not a duration. */
-    _acquisitions: number;
     /** @type {number} Acquisitions that passed `steal`. */
-    _steals: number;
     /** @type {number} Acquisitions rejected by an `AbortSignal`. */
-    _aborted: number;
     /** Whether this platform can honour a cross-worker lock. */
     get supported(): boolean;
     /**
@@ -110,7 +106,6 @@ export class PowerCrossLock {
      * @private
      * @returns {void}
      */
-    private _assertName;
     /**
      * Release this instance. There is nothing to release — no timer, no listener, no queue
      * of this library's own — so this is a **state reset**, not a teardown, and the lock

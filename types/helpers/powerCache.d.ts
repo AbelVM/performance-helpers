@@ -46,7 +46,6 @@ export class PowerCache {
     staleTtl: number;
     /** @type {Function|null} */
     fetchMethod: Function | null;
-    _now: () => number;
     rejectOversized: boolean;
     onEvict: ((arg0: any, arg1: any, arg2: string) => void) | null;
     onError: ((arg0: any, arg1: string) => void) | null;
@@ -55,14 +54,10 @@ export class PowerCache {
      *  and could not be, because nothing in `stats()` carried it (CACHE-011);
      *  `stats().weightErrors` is where a caller reads it now, and `attach()`
      *  flattens that into a metric series. */
-    _weightErrors: number;
     onExpire: ((arg0: any, arg1: any) => void) | null;
     maxCleanupPerTick: number;
-    _map: Map<any, any>;
     /** @type {CacheNode|null} */
-    _head: CacheNode | null;
     /** @type {CacheNode|null} */
-    _tail: CacheNode | null;
     /**
      * Recycled nodes, kept to avoid allocating one per insert.
      *
@@ -74,9 +69,6 @@ export class PowerCache {
      *
      * @type {CacheNode[]}
      */
-    _pool: CacheNode[];
-    _currentWeight: number;
-    _hits: number;
     /**
      * Serves of an **expired** value, from the stale-while-revalidate path.
      *
@@ -89,37 +81,19 @@ export class PowerCache {
      * A subset of `_hits` — a stale serve still counts as a hit, because from the
      * caller's side it was served.
      */
-    _staleServes: number;
-    _misses: number;
-    _evictions: number;
-    _refreshesSkipped: number;
-    _rejected: number;
-    _rejectedAdmission: number;
-    _expirations: number;
-    _cleanupTimer: any;
-    _cleanupRunning: boolean;
-    _cleanupParams: {
-        interval: number;
-        maxCleanupPerTick: number;
-    } | null;
     /** @type {CacheNode|null} */
-    _cleanupCursor: CacheNode | null;
-    _cleanupCursorValid: boolean;
-    _evictionCandidate: any;
     /**
      * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
      * behaviour. `'slru'` splits the list into a probation segment and a
      * protected segment and promotes on access, which makes the cache far more
      * resistant to a one-off sequential scan evicting the working set.
      */
-    _policy: string;
     /**
      * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
      * admission is off. See {@link SmallLfuSketch}.
      * @type {SmallLfuSketch|null}
      * @private
      */
-    private _sketch;
     /**
      * Size of the W-TinyLFU admission window, or `0` for no window.
      *
@@ -140,9 +114,6 @@ export class PowerCache {
      * @type {number}
      * @private
      */
-    private _windowSize;
-    _windowStartMemo: import("./jsdoc-types.js").CacheNode | null;
-    _windowTail: import("./jsdoc-types.js").CacheNode | null;
     /**
      * MRU end of the probation segment. With `policy: 'slru'` the list is
      * ordered:
@@ -154,10 +125,6 @@ export class PowerCache {
      * promotes a node to the tail. `null` when the list is empty.
      * @type {CacheNode|null}
      */
-    _probationEnd: CacheNode | null;
-    _inflightPromises: Map<any, any>;
-    _inflightControllers: Map<any, any>;
-    _defaultAsyncTimeout: number;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -176,7 +143,6 @@ export class PowerCache {
      * @param {number} expiresAt
      * @returns {CacheNode}
      */
-    private _allocNode;
     /**
      * Compute and validate a weight for a value.
      * If `explicitWeight` is provided it is normalized and returned.
@@ -187,7 +153,6 @@ export class PowerCache {
      * @param {number|null|undefined} explicitWeight
      * @returns {number}
      */
-    private _computeWeight;
     /**
      * Report an internal failure (a throwing user callback, a failing
      * `weightFn`, ...) exactly once, through the configured `onError` handler
@@ -202,7 +167,6 @@ export class PowerCache {
      * @returns {void}
      * @private
      */
-    private _notifyError;
     /**
      * Reset and return a node to the pool for reuse.
      *
@@ -214,7 +178,6 @@ export class PowerCache {
      * @param {CacheNode} node
      * @returns {void}
      */
-    private _freeNode;
     /**
      * Remove a node that has expired.
      *
@@ -230,7 +193,6 @@ export class PowerCache {
      * increment `this._misses` when the removal corresponds to a user-facing
      * lookup (for example, `get()`/`getMany()`/`getOrSet()`).
      */
-    private _removeExpiredNode;
     /**
      * Fetch a node and validate expiry.
      * @protected
@@ -273,7 +235,6 @@ export class PowerCache {
      * @param {number} now
      * @returns {boolean}
      */
-    private _staleServable;
     /**
      * Signal the factory in flight for `key`, if there is one.
      *
@@ -294,7 +255,6 @@ export class PowerCache {
      * @param {string} [reason] - Diagnostic surfaced through `onError`.
      * @returns {boolean} Whether a factory was signalled.
      */
-    private _abortInflight;
     /**
      * Start a background refresh for an expired entry.
      *
@@ -310,7 +270,6 @@ export class PowerCache {
      * @param {number} [options.weight]
      * @returns {void}
      */
-    private _refreshStaleEntry;
     /**
      * Append a node to the tail (mark it most-recently used).
      * This updates the linked-list pointers appropriately and is used when
@@ -320,7 +279,6 @@ export class PowerCache {
      * @param {CacheNode} node - Node to append at the tail.
      * @returns {void}
      */
-    private _append;
     /**
      * Splice `node` in as the new MRU of the probation segment (SLRU only).
      *
@@ -333,7 +291,6 @@ export class PowerCache {
      * @param {CacheNode} node
      * @returns {void}
      */
-    private _insertIntoProbation;
     /**
      * Unlink a node and update every piece of bookkeeping that depends on it.
      *
@@ -360,7 +317,6 @@ export class PowerCache {
      *   eviction cursor past the removed node.
      * @returns {CacheNode|null} The node that followed it, now at this position.
      */
-    private _unlinkNode;
     /**
      * Remove a node from the linked list without freeing it. The node's
      * `prev`/`next` references are updated on neighbors and the node's links
@@ -371,7 +327,6 @@ export class PowerCache {
      * @param {CacheNode} node - Node to unlink from the list.
      * @returns {void}
      */
-    private _remove;
     /**
      * Move an existing node to the tail (mark as most-recently used).
      * Implemented as an unlink followed by an append. No-op when node is
@@ -381,7 +336,6 @@ export class PowerCache {
      * @param {CacheNode} node - Node to promote to MRU position.
      * @returns {void}
      */
-    private _moveToTail;
     /**
      * The oldest node in the admission window, or `null` when the window is empty.
      *
@@ -456,7 +410,6 @@ export class PowerCache {
      * @private
      * @returns {CacheNode|null}
      */
-    private _windowOldest;
     /**
      * The eviction candidate in main space: the entry just below the window.
      *
@@ -468,7 +421,6 @@ export class PowerCache {
      * @private
      * @returns {CacheNode|null}
      */
-    private _windowVictim;
     /**
      * Splice an unlinked node in at the MRU end of main space — immediately
      * before the window's oldest entry.
@@ -487,7 +439,6 @@ export class PowerCache {
      * @param {CacheNode} node - An unlinked node. Its links are overwritten.
      * @returns {void}
      */
-    private _insertAtMainSpaceMrU;
     /**
      * Move a node out of the window and into main space, in front of the window.
      *
@@ -495,7 +446,6 @@ export class PowerCache {
      * @param {CacheNode} node - A linked window node.
      * @returns {void}
      */
-    private _promoteFromWindow;
     /**
      * Evict one node, reporting it and returning it to the node pool.
      *
@@ -509,7 +459,6 @@ export class PowerCache {
      * @param {CacheNode} node
      * @returns {void}
      */
-    private _evictNode;
     /**
      * Admit a new key into the window, then arbitrate the window's oldest entry.
      *
@@ -541,7 +490,6 @@ export class PowerCache {
      * @param {number} previousSize - `this._map.size` before this arrival.
      * @returns {void}
      */
-    private _arbitrateWindow;
     /**
      * Evict nodes from the head (least-recently used) until the cache
      * satisfies both `maxEntries` and `maxWeight` constraints. For each
@@ -551,7 +499,6 @@ export class PowerCache {
      * @private
      * @returns {void}
      */
-    private _evictIfNeeded;
     /**
      * Normalise a caller-supplied TTL into the `expiresAt` this entry stores.
      *
@@ -577,7 +524,6 @@ export class PowerCache {
      * @throws {TypeError} If `ttl` is neither nullish, `Infinity`, nor a finite
      *   number.
      */
-    private _expiresAt;
     /**
      * The oversize rejection, shared by `set` and `setMany`.
      *
@@ -595,7 +541,6 @@ export class PowerCache {
      * @param {number} w - Already-computed weight.
      * @returns {boolean} `true` when the insert was rejected and must be skipped.
      */
-    private _rejectIfOversized;
     /**
      * Insert a key that is not already present, applying the admission policy.
      *
@@ -614,7 +559,6 @@ export class PowerCache {
      *   window arbitration needs to tell "grew by one" from "replaced one".
      * @returns {boolean} `false` when the admission filter refused the key.
      */
-    private _insertNew;
     /**
      * Set a value in the cache (add or update).
      * Marks the entry as most-recently used.
@@ -648,7 +592,6 @@ export class PowerCache {
      * @param {number} expiresAt - Already-computed absolute expiry.
      * @returns {void}
      */
-    private _updateExisting;
     /**
      * Retrieve a value and mark it as recently used.
      * @param {*} key
@@ -917,7 +860,6 @@ export class PowerCache {
      * allocating a per-call closure inside `startCleanup()`.
      * @private
      */
-    private _cleanupTick;
     /**
      * Current number of entries in cache.
      * @returns {number}
@@ -1101,17 +1043,8 @@ export class PowerMemoizer {
     constructor(fn?: Function, options?: PowerMemoizerOptions);
     keyResolver: (...arg0: any[]) => string;
     cache: PowerCache;
-    _inflight: Map<any, any>;
     /** @type {{ttl?: number, weight?: number}} */
-    _defaultMemoizeOptions: {
-        ttl?: number;
-        weight?: number;
-    };
     run: (...args: any[]) => any;
-    _originalFn: Function | null;
-    _receiverIds: WeakMap<WeakKey, any>;
-    _nextReceiverId: number;
-    _fnWrapper: import("./jsdoc-types.js").MemoizedFunction<Function> | undefined;
     /**
      * Wrap a function with memoization.
      * @private
@@ -1136,7 +1069,6 @@ export class PowerMemoizer {
      * @returns {string} Cache key scoped to `receiver`.
      * @private
      */
-    private _receiverKey;
     /**
      * Wrap `fn` so every call goes through this memoizer's cache.
      *
@@ -1155,7 +1087,6 @@ export class PowerMemoizer {
      * @template {Function} F
      * @private
      */
-    private _memoize;
     /**
      * Public API to memoize an arbitrary function using this PowerMemoizer instance's cache.
      * Mirrors the behavior used by the constructor when a function is supplied —
@@ -1212,19 +1143,16 @@ export class PowerMemoizer {
      * @returns {string}
      * @private
      */
-    private _scopedKey;
     /**
      * @param {string} key
      * @returns {*|undefined}
      * @private
      */
-    private _lookup;
     /**
      * @param {string} key
      * @returns {boolean}
      * @private
      */
-    private _evict;
     /**
      * @param {Function} memoizedFn
      * @param {any} receiver
@@ -1232,7 +1160,6 @@ export class PowerMemoizer {
      * @returns {*|undefined}
      * @private
      */
-    private _getFor;
     /**
      * @param {Function} memoizedFn
      * @param {any} receiver
@@ -1240,7 +1167,6 @@ export class PowerMemoizer {
      * @returns {boolean}
      * @private
      */
-    private _hasFor;
     /**
      * @param {Function} memoizedFn
      * @param {any} receiver
@@ -1248,7 +1174,6 @@ export class PowerMemoizer {
      * @returns {boolean}
      * @private
      */
-    private _deleteFor;
     /**
      * Clear all cached entries and any inflight markers.
      * @returns {void}

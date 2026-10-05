@@ -43,20 +43,7 @@ export class PowerEventLoopMonitor {
     /** @type {number} */
     intervalMs: number;
     /** @type {?function(number):void} */
-    _onDrift: ((arg0: number) => void) | null;
     /** @type {boolean} */
-    _keepProcessAlive: boolean;
-    _delay: PowerHistogram;
-    _samples: number;
-    _sum: number;
-    _max: number;
-    _lastDelay: number;
-    _blocked: number;
-    _blockedMs: number;
-    _dropped: number;
-    _startedAt: number;
-    _running: boolean;
-    _handle: any;
     /**
      * Resolves once the Node `perf_hooks` lookup has settled, if it was
      * attempted. Never rejects: a runtime without it simply leaves
@@ -64,7 +51,6 @@ export class PowerEventLoopMonitor {
      * @type {Promise<void>}
      */
     ready: Promise<void>;
-    _utilizationSource: (() => any) | null;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -275,20 +261,17 @@ export class PowerEventLoopMonitor {
      * @returns {void}
      * @private
      */
-    private _schedule;
     /**
      * @param {number} drift - Milliseconds the timer was late by.
      * @returns {void}
      * @private
      */
-    private _record;
     /**
      * Resolve Node's `eventLoopUtilization` without a static import, so bundlers
      * never try to resolve `node:perf_hooks` for a browser build.
      * @returns {Promise<void>}
      * @private
      */
-    private _resolveNodeUtilization;
     [Symbol.dispose](): void;
 }
 export default PowerEventLoopMonitor;

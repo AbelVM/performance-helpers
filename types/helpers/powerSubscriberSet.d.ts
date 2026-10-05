@@ -20,16 +20,9 @@ export class PowerSubscriberSet {
      *   behind `WeakRef`; `maxListeners` caps the set (`0` = unlimited).
      */
     constructor(options?: PowerSubscriberSetOptions);
-    _weak: boolean;
-    _maxListeners: number;
     /** @type {Set<SubscriberEntry>} */
-    _listeners: Set<SubscriberEntry>;
     /** @type {WeakMap<SubscriberListener, SubscriberListener>} original -> once-wrapper */
-    _onceMap: WeakMap<SubscriberListener, SubscriberListener>;
     /** @type {?(FinalizationRegistry<{ref: WeakRef<SubscriberListener>}>)} */
-    _finalization: (FinalizationRegistry<{
-        ref: WeakRef<SubscriberListener>;
-    }>) | null;
     /** Number of currently live listeners. */
     get size(): number;
     /**

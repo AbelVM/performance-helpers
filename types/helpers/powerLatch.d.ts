@@ -15,16 +15,9 @@ export class PowerLatch {
      *   rejection reason by {@link PowerLatch#abort}.
      */
     constructor(count?: number, options?: import("./jsdoc-types.js").PowerLatchOptions);
-    _count: number;
     /** @type {Map<number, PowerLatchWaiter>} */
-    _waiters: Map<number, import("./jsdoc-types.js").PowerLatchWaiter>;
-    _nextWaiterToken: number;
-    _aborted: boolean;
     /** @type {any} */
-    _abortReason: any;
-    _disposed: boolean;
     /** @type {?((reason:any)=>void)} */
-    _onAbort: ((reason: any) => void) | null;
     set onAbort(fn: ((reason: any) => void) | null);
     /**
      * Optional callback invoked when `abort()` is called: `(reason) => void`.

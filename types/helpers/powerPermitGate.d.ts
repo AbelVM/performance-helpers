@@ -5,11 +5,6 @@ export class PowerPermitGate {
      *   {@link PowerPermitGateOptions}.
      */
     constructor(options?: PowerPermitGateOptions);
-    _className: string;
-    _capacity: number;
-    _queueCapacity: number;
-    _available: number;
-    _waiters: PowerQueue;
     /**
      * Capacity units that have been granted and not yet returned.
      *
@@ -49,7 +44,6 @@ export class PowerPermitGate {
      * @type {number}
      * @private
      */
-    private _cancelledWaiters;
     /** Maximum number of permits. */
     get capacity(): number;
     /** Currently available permits. */
@@ -159,7 +153,6 @@ export class PowerPermitGate {
      * @returns {PowerReleaseFn}
      * @private
      */
-    private _grant;
     /**
      * The queued-waiter grant: the single point at which a permit reaches a
      * caller that was waiting for one.
@@ -178,7 +171,6 @@ export class PowerPermitGate {
      * @returns {void}
      * @private
      */
-    private _grantTo;
     /**
      * Hand permits to queued waiters, skipping any that have been aborted.
      *

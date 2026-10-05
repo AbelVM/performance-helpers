@@ -12,10 +12,7 @@ export class PowerSlidingWindow {
      * must outrank a value threaded in by a composition.
      * @type {(() => number)}
      */
-    _now: (() => number);
     /** @type {boolean} */
-    _nowExplicit: boolean;
-    _timestamps: PowerQueue;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -32,7 +29,6 @@ export class PowerSlidingWindow {
      * @param {number} now - current timestamp in milliseconds
      * @returns {void}
      */
-    private _prune;
     /**
      * Try to consume `n` slots (default 1).
      * @param {number} [n=1]

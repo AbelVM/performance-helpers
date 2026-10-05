@@ -90,16 +90,10 @@ export class PowerPool {
      * @param {number} [options.maxDrainWaiters=100] - Cap on concurrent `drain()` waits, so a caller that drains in a loop cannot accumulate unbounded `idle` listeners. (Internally `DEFAULT_MAX_DRAIN_WAITERS`; not exported.)
      */
     constructor(workerSource: Function | string, options?: PowerPoolOptions | undefined, ...args: any[]);
-    _workerSource: string | Function;
-    _workerOptions: Object;
-    _maxTasksPerWorker: number;
     minSize: number;
     maxSize: number;
     idleTimeout: number;
     taskQueueEnabled: boolean;
-    _queuePolicy: "enqueue" | "drop-oldest" | "drop-newest" | "reject";
-    _maxQueueLength: number;
-    _maxDrainWaiters: number;
     /**
      * Number of `drain()` calls currently *waiting* for idle. Each one holds an
      * `idle` listener, so this is the bound that keeps a caller draining in a
@@ -107,59 +101,12 @@ export class PowerPool {
      * `DEFAULT_MAX_DRAIN_WAITERS`.
      * @type {number}
      */
-    _drainWaiters: number;
-    _createdAt: number;
-    _totalWorkersCreated: number;
-    _totalTasksCompleted: number;
-    _postFailures: number;
-    _taskDurationsWelfordCount: number;
-    _taskDurationsWelfordMean: number;
-    _taskDurationsWelfordM2: number;
-    _taskDurationsMin: number;
-    _taskDurationsMax: number;
-    _slowTaskThreshold: number;
-    _slowTaskCount: number;
-    _ewmaLatency: any;
-    _autoScale: {
-        enabled: boolean;
-        intervalMs: number;
-        targetMs: number;
-        alpha: number;
-        cooldownMs: number;
-        hysteresis: number;
-        stepUp: number;
-        stepDown: number;
-        backoffFactor: number;
-        backoffMaxMultiplier: number;
-        backoffResetMs: number;
-        policy: "ewma" | "aimd" | "vegas" | "gradient2" | undefined;
-        limitMin: number;
-        limitMax: number;
-        longWindowAlpha: number;
-        aimdBeta: number;
-    } | null;
-    _autoScaleInterval: any;
-    _lastAutoScaleAt: number;
-    _terminatedWorkerTaskCountsTotal: number;
-    _terminatedWorkerTaskCountsCount: number;
     /** @type {WorkerObj[]} */
     workers: WorkerObj[];
     queue: PowerQueue;
-    _bus: PowerEventBus;
-    _queueHighThreshold: number;
-    _queueHighCrossed: boolean;
-    _onmessage: Function | null;
-    _onerror: Function | null;
-    _onidle: Function | null;
-    _onresize: Function | null;
-    _nextIndex: number;
-    _nextWorkerId: number;
     /** number of currently active (dispatched) tasks across all workers */
-    _activeTasks: number;
     /** whether the pool is considered idle (no active tasks and empty queue) */
-    _isIdle: boolean;
     /** whether queued dispatch is paused */
-    _queuePaused: boolean;
     /**
      * Wire protocol for object messages.
      *
@@ -180,13 +127,11 @@ export class PowerPool {
      *
      * @type {'framed'|'legacy'|'negotiated'}
      */
-    _messageCodec: "framed" | "legacy" | "negotiated";
     /**
      * Whether this runtime can structured-clone at all. Checked once here so
      * `'negotiated'` on a runtime without `structuredClone` degrades to the
      * framed path rather than throwing per message.
      */
-    _nativeCloneAvailable: boolean;
     /**
      * Terminal flag. Set by `shutdown()` / `terminate()`; once true the pool
      * refuses to dispatch, enqueue or grow, so a late `postMessage()` cannot
@@ -194,29 +139,6 @@ export class PowerPool {
      * interval, pinning the Node.js process).
      * @type {boolean}
      */
-    _terminated: boolean;
-    _logger: PowerLogger;
-    _pendingResponses: Map<any, any>;
-    _underlyingToWorkerObj: Map<any, any>;
-    _defaultAwaitResponseTimeout: number;
-    _reaperInterval: any;
-    _encodeCache: Map<any, any>;
-    _encodeCacheLimit: number;
-    _encodeCacheByteLimit: number;
-    _encodeCacheBytes: number;
-    _idempotencyTtlMs: number;
-    _idempotency: Map<any, any> | null;
-    _idempotencyLookups: number;
-    _idempotencyDuplicatesInFlight: number;
-    _idempotencyDuplicatesSettled: number;
-    _idempotencyExpired: number;
-    _idempotencySize: number;
-    _autoScaleBackoffMultiplier: number | undefined;
-    _adaptiveLimit: number | undefined;
-    _longEwmaLatency: any;
-    _minLatencyWindow: number | undefined;
-    _lastAdaptiveLimit: number | undefined;
-    _congestion: boolean | undefined;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -228,9 +150,7 @@ export class PowerPool {
      * @returns {void}
      * @private
      */
-    private _debugLog;
     /** Ensure the reaper interval exists; recreate it if missing. @private */
-    private _ensureReaper;
     _createPendingResponsePromise(correlationId: any, options: any): {
         pendingPromise: Promise<any>;
         correlationKey: any;
@@ -253,7 +173,6 @@ export class PowerPool {
      * @param {{message: *, transfer: (TransferList|undefined), deferred?: boolean}} prepared
      * @returns {{message: *, transfer: (TransferList|undefined)}}
      */
-    private _encodeForWorker;
     /**
      * Wrap a deferred message in the native envelope, or return `null` when this
      * runtime cannot do it.
@@ -271,7 +190,6 @@ export class PowerPool {
      * @param {PreparedItem} prepared - Already framed or marked `deferred`.
      * @returns {{message: object, transfer: (TransferList|undefined)}|null}
      */
-    private _encodeNativeForWorker;
     /**
      * Record what a worker says it can decode, and announce the change.
      *
@@ -290,7 +208,6 @@ export class PowerPool {
      * @param {import('./jsdoc-types.js').WorkerObj} obj
      * @param {{codecs: string[]}} announcement
      */
-    private _applyCapabilities;
     /**
      * Post a prepared message to a specific worker object and update bookkeeping.
      * Returns the `pendingPromise` when `wantResponse` is true, otherwise `true` on success.
@@ -305,7 +222,6 @@ export class PowerPool {
      * @returns {Promise<any>|boolean}
      * @private
      */
-    private _postToWorkerObj;
     /**
      * Report a failed `postMessage` and clean up the pending response for it.
      *
@@ -359,7 +275,6 @@ export class PowerPool {
      *   and wants every record in a batch or a broadcast to share it.
      * @returns {number} The `startTime` used, for a caller that has not taken one.
      */
-    private _dispatchToWorker;
     /**
      * Report a batched post that could not be dispatched.
      *
@@ -380,7 +295,6 @@ export class PowerPool {
      * @returns {false} So a call site can assign it straight to its result slot.
      * @private
      */
-    private _reportPostFailure;
     /**
      * Report a failed `postMessage` and clean up the pending response for it.
      * @param {any} err - The error thrown by `postMessage`.
@@ -392,7 +306,6 @@ export class PowerPool {
      *   `false` otherwise - matching `postMessage`'s contract.
      * @private
      */
-    private _failPost;
     /**
      * Attempt to grow the pool by adding a worker and dispatching the message.
      * Preserves the same pending-response cleanup semantics as inline logic.
@@ -406,7 +319,6 @@ export class PowerPool {
      * @returns {Promise<any>|boolean}
      * @private
      */
-    private _tryGrowPool;
     /**
      * Resolve and validate the per-item correlation ids for a batch that expects
      * responses.
@@ -428,7 +340,6 @@ export class PowerPool {
      * @throws {Error} `ERR_POOL_DUPLICATE_CORRELATION_ID` on the first collision.
      * @private
      */
-    private _resolveBatchCorrelationIds;
     /**
      * Reserve room for `count` more tasks in the task queue, honouring
      * `maxQueueLength` and the configured `queuePolicy`.
@@ -450,7 +361,6 @@ export class PowerPool {
      *   refused by the caller.
      * @private
      */
-    private _reserveQueueSlots;
     /**
      * Enqueue or reject a prepared message according to the configured queue policy.
      * Returns `pendingPromise`/`true`/`false` to match `postMessage` semantics.
@@ -461,7 +371,6 @@ export class PowerPool {
      *   which is the shape of the POOL-003 defect.
      * @private
      */
-    private _enqueueOrReject;
     /**
      * Single choke point for retiring a worker from the pool.
      *
@@ -483,7 +392,6 @@ export class PowerPool {
      *   retired.
      * @private
      */
-    private _terminateWorker;
     /**
      * Reject every pending response that was dispatched to a worker that is being
      * retired. The response for those tasks lives in that worker and is never
@@ -501,7 +409,6 @@ export class PowerPool {
      * @returns {number} How many pending responses were rejected.
      * @private
      */
-    private _rejectPendingForWorker;
     /**
      * Record which worker a pending response was dispatched to, so retirement
      * can find it. Stamped after the post succeeds: a response that never left
@@ -512,18 +419,15 @@ export class PowerPool {
      * @returns {void}
      * @private
      */
-    private _markPendingWorker;
     /**
      * Throws when the pool has been shut down. Called from every public entry
      * point that would otherwise dispatch, enqueue or grow workers.
      * @private
      */
-    private _assertNotTerminated;
     /**
      * Clear lifecycle timer intervals used by the pool.
      * @private
      */
-    private _clearLifecycleIntervals;
     /**
      * Shutdown the pool: clear timers, reject pending responses, terminate workers,
      * and clear internal queues. This is a full stop that prevents background
@@ -555,7 +459,6 @@ export class PowerPool {
      * @param {Uint8Array} body - Encoded JSON payload.
      * @returns {Uint8Array} The framed message.
      */
-    private _encodeForTransfer;
     /**
      * Prepare an array of transferable buffers for a batch of items.
      * Each item may be a plain object, a TypedArray/ArrayBuffer view, or
@@ -613,7 +516,6 @@ export class PowerPool {
      * @private
      * @returns {PreparedItem}
      */
-    private _prepareForTransfer;
     /**
      * Encode a plain-object message as a framed JSON body.
      *
@@ -626,7 +528,6 @@ export class PowerPool {
      * @param {TransferList|undefined} tr
      * @returns {PreparedItem}
      */
-    private _frameObjectForTransfer;
     /**
      * Decrement the global active task counter safely.
      * Ensures the counter never goes negative and centralizes error handling.
@@ -652,7 +553,6 @@ export class PowerPool {
      * @private
      * @param {number} [n=1]
      */
-    private _decrementActiveTasks;
     /**
      * Resize the pool's maximum size at runtime.
      * If `n` is smaller than the current number of workers, extra workers
@@ -690,7 +590,6 @@ export class PowerPool {
      * @returns {WorkerAgnostic} The wrapper; `.worker` is the raw native worker.
      * @throws {Error} When `workerSource` is invalid or worker construction fails.
      */
-    private _createWorkerInstance;
     /**
      * Report a worker event handler that threw.
      *
@@ -711,7 +610,6 @@ export class PowerPool {
      * @private
      * @returns {void}
      */
-    private _onWorkerListenerError;
     _deleteWorkerUnderlyingMapping(workerObj: any): void;
     /**
      * Add and wire a new worker instance into the pool.
@@ -726,7 +624,6 @@ export class PowerPool {
      * @param {number} [id] - Optional explicit id for the worker entry.
      * @returns {WorkerObj} The newly created worker entry.
      */
-    private _addWorkerInstance;
     /**
      * Return the least-loaded worker (smallest `tasks` count).
      *
@@ -737,7 +634,6 @@ export class PowerPool {
      * @private
      * @returns {WorkerObj|null}
      */
-    private _findLeastLoadedWorker;
     /**
      * Determine whether a single-worker pool should queue rather than flood the
      * underlying worker with additional in-flight messages.
@@ -772,7 +668,6 @@ export class PowerPool {
      * @param {number} now - From `nowMs()`, so one post reads one clock.
      * @returns {boolean} `true` to proceed, `false` if the key is already claimed.
      */
-    private _idempotencyBegin;
     /**
      * Move a claimed key from in-flight to settled.
      *
@@ -781,14 +676,12 @@ export class PowerPool {
      *   coerces every idempotency key.
      * @param {number} now
      */
-    private _idempotencySettle;
     /**
      * Drop a claim for a post that was never dispatched.
      *
      * @private
      * @param {string|number|undefined} key
      */
-    private _idempotencyRelease;
     /**
      * Expire settled keys older than the TTL, examining a bounded slice per call.
      *
@@ -804,7 +697,6 @@ export class PowerPool {
      * @private
      * @param {number} now
      */
-    private _idempotencySweep;
     /**
      * Post a message to a worker in the pool.
      * The pool will try to reuse an idle/least-loaded worker, grow the pool
@@ -833,7 +725,6 @@ export class PowerPool {
      * @param {PostMessageOptions=} options
      * @returns {boolean|Promise<any>}
      */
-    private _postMessageInner;
     /**
      * Generate a correlation id for a pending response.
      *
@@ -858,7 +749,6 @@ export class PowerPool {
      * @private
      * @returns {string}
      */
-    private _generateCorrelationId;
     /**
      * Centralized cleanup for a pending response entry.
      * Ensures the timer is cleared and the entry is resolved/rejected exactly once.
@@ -866,7 +756,6 @@ export class PowerPool {
      * @param {string|number} key
      * @param {{resolveWith?:any, rejectWith?:any}} opts
      */
-    private _cleanupPendingResponse;
     /**
      * Broadcasts a message to all workers in the pool.
      * @param {*} message
@@ -883,7 +772,6 @@ export class PowerPool {
      * @param {{recreateWorkers?: boolean}&PostMessageOptions=} options
      * @returns {{recreate: boolean, fwdOptions: Object|undefined}}
      */
-    private _normalizeStopThePressOptions;
     /**
      * Shared reset routine used by stop-the-press APIs.
      * Clears queue and pending responses, terminates workers, optionally recreates workers,
@@ -892,7 +780,6 @@ export class PowerPool {
      * @param {{recreate:boolean, scope:string}} config
      * @returns {{currentCount:number, terminatedIds:number[]}}
      */
-    private _resetPoolForStopThePress;
     /**
      * Stop all pending queued tasks and immediately post a message to the pool.
      * This clears the internal task queue first (cancelling pending tasks),
@@ -967,7 +854,6 @@ export class PowerPool {
      * @private
      * @returns {void}
      */
-    private _reapIdleWorkers;
     /**
      * Update the adaptive concurrency limit for this tick.
      *
@@ -1050,9 +936,7 @@ export class PowerPool {
      * - scale down: when EWMA < targetMs * 0.5 AND queue is empty
      * @private
      */
-    private _autoScaleTick;
     /** @type {PowerServo|null} */
-    _autoscaleServo: PowerServo | null | undefined;
     /**
      * Emit the pool-idle synthetic message to `onmessage` and listeners.
      *
@@ -1091,7 +975,6 @@ export class PowerPool {
      * @private
      * @returns {{data:{type:string,workers:{id:number,tasks:number,lastActive:number}[],stats:object}}}
      */
-    private _buildIdleEvent;
     _emitIdle(): void;
     /**
      * Check current state and emit idle event if transitioning to idle.
@@ -1103,7 +986,6 @@ export class PowerPool {
      * @private
      * @returns {void}
      */
-    private _updateIdleState;
     /**
      * Terminate the entire pool, clear queue and the reaper interval.
      */
@@ -1236,7 +1118,6 @@ export class PowerPool {
      * Dispatch queued tasks to available workers when the queue is not paused.
      * @private
      */
-    private _dispatchQueuedTasks;
     [Symbol.dispose](): void;
     /**
      * Asynchronous disposal hook. Drains outstanding work and then terminates.

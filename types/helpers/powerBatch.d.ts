@@ -20,12 +20,7 @@ export class PowerBatch {
      *   `scheduling` to `'microtask'`.
      */
     constructor(handler: (items: any[]) => Promise<void> | void, options?: import("./jsdoc-types.js").PowerBatchOptions);
-    _handler: (items: any[]) => Promise<void> | void;
-    _maxSize: number;
-    _queue: PowerQueue;
     /** @type {?BatchPending} */
-    _pending: import("./jsdoc-types.js").BatchPending | null;
-    _scheduler: PowerScheduler;
     /**
      * Add an item to the current batch. Returns a Promise that resolves
      * when the batch containing this item has been processed. For non-flushed
@@ -63,7 +58,6 @@ export class PowerBatch {
      * Internal: run the queued batch and call the handler.
      * @private
      */
-    private _runBatch;
     /**
      * Number of items currently queued (not yet flushed).
      * @returns {number}

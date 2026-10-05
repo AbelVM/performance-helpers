@@ -19,16 +19,8 @@ export class PowerTTLMap {
      * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
      */
     constructor(defaultTTL?: number | PowerTTLMapOptions, options?: PowerTTLMapOptions);
-    _defaultTTL: number;
-    _onExpire: ((key: any, value: any) => void) | null;
-    _now: () => number;
     /** @type {Map<any, TTLMapEntry>} */
-    _map: Map<any, TTLMapEntry>;
     /** @type {Map<any, number>} */
-    _expirations: Map<any, number>;
-    _nextExpiryAt: number;
-    _nextExpiryDirty: boolean;
-    _disposed: boolean;
     /**
      * Resolve a TTL argument that may be either a positional number or an
      * options object `{ ttl }` (matching the `PowerCache.set` convention).
@@ -37,7 +29,6 @@ export class PowerTTLMap {
      * @param {number} fallback Default TTL when `ttl` is nullish.
      * @returns {number} Resolved TTL in ms (0 = no expiry).
      */
-    private _resolveTtl;
     /**
      * Set a key with optional TTL (ms).
      * @param {any} key
@@ -67,7 +58,6 @@ export class PowerTTLMap {
      *   absent.
      * @returns {void}
      */
-    private _expireKey;
     /**
      * Whether a key needs removing: absent, or present and past its expiry.
      * @param {any} key

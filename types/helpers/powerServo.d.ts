@@ -7,7 +7,6 @@ export class PowerServo {
      */
     constructor(options?: import("./jsdoc-types.js").PowerServoOptions);
     /** @type {number} */
-    _setpoint: number;
     set setpoint(value: number);
     /**
      * The reference `r`. Writable at any time.
@@ -25,40 +24,25 @@ export class PowerServo {
      */
     get setpoint(): number;
     /** @type {number} - Proportional gain. */
-    _kp: number;
     /** @type {number} - Integral gain. Zero disables the integrator entirely. */
-    _ki: number;
     /** @type {number} - Derivative gain. Zero disables the derivative path. */
-    _kd: number;
     /**
      * First-order low-pass coefficient on the derivative term, in `[0, 1)`.
      * `0` filters nothing (raw differentiation); values near `1` make the
      * derivative very slow. Ignored when `kd` is `0`.
      */
-    _derivativeFilter: number;
-    _min: number;
-    _max: number;
     /** @type {Function|number|null} - Open-loop term, ahead of the error. */
-    _feedforward: Function | number | null;
     /**
      * Static-gain form of the feedforward path, applied to `disturbance` when
      * `feedforward` is not a function. Setting it implies
      * `feedforward: (d) => d * gain`.
      */
-    _feedforwardGain: number;
     /**
      * Default `dt` for {@link PowerServo#step}, in whatever time unit the gains
      * are expressed in. `1` makes a controller that ignores wall time behave
      * correctly for a fixed-rate tick, and callers on a real clock should pass
      * their own elapsed time instead.
      */
-    _defaultDt: number;
-    _integral: number;
-    _previousMeasured: number | null;
-    _derivative: number;
-    _output: number;
-    _error: number;
-    _saturated: boolean;
     set min(value: number);
     /**
      * Lower output bound. `-Infinity` for no lower bound.

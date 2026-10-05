@@ -93,8 +93,6 @@ export class MetricsCollector {
         prefix?: string | undefined;
     });
     /** @type {Map<string, () => *>} */
-    _sources: Map<string, () => any>;
-    _prefix: string;
     /**
      * Register a named source. The callback is called on each `snapshot()` and
      * should return that helper's `stats()`.

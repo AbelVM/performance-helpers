@@ -15,15 +15,11 @@ export class PowerCircuit {
      *   `maxTimeout` and jitter the result.
      */
     constructor(options?: PowerCircuitOptions);
-    _threshold: number;
-    _timeout: number;
-    _maxTimeout: number;
     /**
      * Consecutive entries into `open`, which drive the exponential growth.
      * Reset to 0 whenever the circuit proves the dependency is healthy again.
      * @type {number}
      */
-    _consecutiveOpens: number;
     /**
      * The jittered window for the *current* `open` period, drawn once when the
      * circuit opened. It must be stored rather than re-drawn: the open check
@@ -31,19 +27,12 @@ export class PowerCircuit {
      * make the window fluctuate, so the breaker would flap instead of holding.
      * @type {number}
      */
-    _openWindowMs: number;
     /** @type {CircuitState} */
-    _state: CircuitState;
-    _failures: number;
     /** @type {any} */
     lastError: any;
     /** @type {?number} */
-    _openedAt: number | null;
-    _trialInFlight: boolean;
-    _halfOpenAnnounced: boolean;
     /** @type {?((state: CircuitState, reason?: string) => void)} */
     onStateChange: ((state: CircuitState, reason?: string) => void) | null;
-    _bus: PowerEventBus | null;
     /**
      * Draw the open window for a trip: exponential backoff on the base timeout,
      * capped, then equal jitter.
@@ -91,7 +80,6 @@ export class PowerCircuit {
      * @returns {void}
      * @private
      */
-    private _notifyState;
     /** @returns {CircuitState} */
     get state(): CircuitState;
     get failures(): number;

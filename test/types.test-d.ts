@@ -88,10 +88,6 @@ const removed: boolean = cache.delete('a');
 const stats: Record<string, unknown> = cache.stats() as unknown as Record<string, unknown>;
 void [hit, has, size, touched, removed, stats];
 
-// The union must include the new policy, or a 2.0 consumer is rejected.
-const policy: 'lru' | 'slru' = 'slru';
-cache._policy = policy;
-
 // --- Explicit resource management is part of the documented API -------------
 {
   using scopedCache = new PowerCache({ maxEntries: 10 });

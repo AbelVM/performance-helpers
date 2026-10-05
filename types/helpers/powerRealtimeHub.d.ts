@@ -4,33 +4,9 @@ export class PowerRealtimeHub {
      *   without it, so the parameter is not defaulted.
      */
     constructor(options: HubOptions);
-    _send: (arg0: object, arg1: Uint8Array) => (void | Promise<void>);
-    _close: ((arg0: object, arg1: string) => (void | Promise<void>)) | null;
-    _batch: boolean;
-    _batchDelayMs: number;
-    _codec: "json" | "raw";
-    _onError: ((arg0: Error, arg1: object) => void) | null;
     /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
-    _topics: Map<string, Map<string, HubSubscriber>>;
     /** @type {Map<string, HubSubscriber>} subscriberId -> sub */
-    _subs: Map<string, HubSubscriber>;
     /** @type {Map<string, any[]>} topic -> retained messages (bounded) */
-    _retained: Map<string, any[]>;
-    _flushScheduled: boolean;
-    _flushTimer: any;
-    _closed: boolean;
-    _counters: {
-        published: number;
-        delivered: number;
-        dropped: number;
-        disconnected: number;
-        bytesOut: number;
-        encoded: number;
-    };
-    _frameMemo: Uint8Array<ArrayBufferLike> | null;
-    _frameMemoLength: number;
-    _frameMemoFirst: any;
-    _frameMemoLast: any;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -141,7 +117,6 @@ export class PowerRealtimeHub {
      * @param {any} message
      * @returns {void}
      */
-    private _enqueue;
     /**
      * Retain a message for future subscribers of a topic.
      * @private
@@ -149,22 +124,18 @@ export class PowerRealtimeHub {
      * @param {any} message
      * @returns {void}
      */
-    private _retain;
     /**
      * @private
      */
-    private _scheduleFlush;
     /**
      * Drain every subscriber with queued work, one batch per send.
      * @private
      * @returns {void}
      */
-    private _drain;
     /**
      * @private
      * @returns {Promise<void>}
      */
-    private _flushAll;
     /**
      * Deliver everything queued for one subscriber, waiting out any send already
      * in flight, so the frames reach the transport one at a time and in order.
@@ -176,20 +147,17 @@ export class PowerRealtimeHub {
      * @returns {Promise<void>}
      * @private
      */
-    private _drainSubscriberFully;
     /**
      * Build one frame from a subscriber's queue and hand it to the transport.
      * @private
      * @param {HubSubscriber} sub
      * @returns {Promise<void>}
      */
-    private _flushSubscriber;
     /**
      * @private
      * @param {any[]} batch
      * @returns {Uint8Array}
      */
-    private _encodeBatch;
     /**
      * Detach a subscriber from the hub, optionally closing its transport.
      * @private
@@ -197,7 +165,6 @@ export class PowerRealtimeHub {
      * @param {{close?: boolean, reason?: string}} [options]
      * @returns {void}
      */
-    private _detach;
     /**
      * Report an internal failure through the optional `onError` adapter. A
      * throwing `onError` must not break the hub, so it is swallowed.
@@ -206,7 +173,6 @@ export class PowerRealtimeHub {
      * @param {HubSubscriber} sub
      * @returns {void}
      */
-    private _notify;
     [Symbol.dispose](): void;
     /**
      * Asynchronous disposal hook: **flush what is pending, then close.**

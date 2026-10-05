@@ -21,13 +21,6 @@ export class PowerQueue {
      * @param {number} [initialCapacity=16] Initial capacity (rounded up to power-of-two).
      */
     constructor(initialCapacity?: number);
-    _capacity: number;
-    _mask: number;
-    _buffer: any[];
-    _head: number;
-    _tail: number;
-    _size: number;
-    _totalWeight: number;
     /**
      * Enqueue an item at the tail.
      * @param {any} item Item to enqueue.
@@ -150,7 +143,6 @@ export class PowerQueue {
      * @private
      * @returns {void}
      */
-    private _grow;
     /**
      * Enqueue multiple items in one call. Optimized to resize buffer once and
      * copy items in contiguous blocks when possible.

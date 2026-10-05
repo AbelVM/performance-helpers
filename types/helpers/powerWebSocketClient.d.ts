@@ -15,69 +15,12 @@ export class PowerWebSocketClient {
         isPrototypeOf(v: Object): boolean;
         propertyIsEnumerable(v: PropertyKey): boolean;
     };
-    _WS: Function;
-    _WSStream: any;
-    _codec: "json" | "raw";
-    _connectTimeoutMs: number;
-    _highWaterMark: number;
-    _maxPayloadSizeBytes: number;
-    _lowWaterMark: number;
-    _pollBase: number;
-    _pollMax: number;
-    _heartbeatIntervalMs: number;
-    _heartbeatTimeoutMs: number;
-    _maxReconnectAttempts: number;
-    _maxReconnectElapsedMs: number;
-    _reconnectStartedAt: number | null;
-    _reconnectBaseMs: number;
-    _reconnectMaxMs: number;
-    _autoReconnect: boolean;
-    _nonRetryableCloseCodes: number[];
-    _reconnectOnHeartbeatTimeout: boolean;
-    _on: {
-        message: Function | null;
-        open: Function | null;
-        close: Function | null;
-        error: Function | null;
-        pause: Function | null;
-        resume: Function | null;
-    };
-    _socket: any;
     /** @type {WritableStreamDefaultWriter|null} */
-    _writer: WritableStreamDefaultWriter | null;
     /** @type {ReadableStreamDefaultReader|null} */
-    _streamReader: ReadableStreamDefaultReader | null;
-    _binaryTypeUnsupported: boolean;
-    _reportedBinaryTypeUnsupported: boolean;
     /** @type {Promise<void>|null} */
-    _inboundChain: Promise<void> | null;
     /** @type {0|1|2|3} */
-    _state: 0 | 1 | 2 | 3;
-    _closedByUser: boolean;
-    _reconnectAttempts: number;
-    _reconnectExhaustedBy: string | null;
-    _connectTimer: any;
-    _pollTimer: any;
-    _heartbeatTimer: any;
-    _heartbeatDeadline: any;
-    _reconnectTimer: any;
-    _paused: boolean;
-    _lastPollInterval: number;
-    _lastPongAt: number;
-    _pingSentAt: number;
     /** decorrelated-jitter backoff cursor, in ms */
-    _reconnectDelay: any;
     rtt: PowerHistogram;
-    _counters: {
-        sent: number;
-        received: number;
-        drops: number;
-        decodeErrors: number;
-        oversizeFrames: number;
-        reconnects: number;
-        heartbeatTimeouts: number;
-        heartbeats: number;
-    };
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -163,7 +106,6 @@ export class PowerWebSocketClient {
      * @param {Object} options
      * @returns {Promise<boolean>}
      */
-    private _transmit;
     /**
      * Send an **already-framed** payload, applying the same back-pressure.
      *
@@ -234,12 +176,10 @@ export class PowerWebSocketClient {
      * @private
      * @returns {Promise<void>}
      */
-    private _open;
     /**
      * @param {(err?: any) => void} done Settles the pending connect exactly once.
      * @private
      */
-    private _handleOpen;
     /**
      * Read the streams tier's inbound frames until the stream ends.
      *
@@ -265,13 +205,11 @@ export class PowerWebSocketClient {
      * @private
      * @returns {void}
      */
-    private _startStreamPump;
     /**
      * @param {{data?: any}} event The DOM `MessageEvent`, or the bare payload when
      *   the caller delivers one directly - hence `event?.data ?? event`.
      * @private
      */
-    private _handleMessage;
     /**
      * Append one frame to the serial inbound chain.
      *
@@ -292,7 +230,6 @@ export class PowerWebSocketClient {
      * @private
      * @returns {void}
      */
-    private _enqueueInboundFrame;
     /**
      * Resolve once every frame queued so far has been converted, decoded and delivered.
      *
@@ -311,7 +248,6 @@ export class PowerWebSocketClient {
      * @private
      * @returns {Promise<void>}
      */
-    private _settleInbound;
     /**
      * Convert a frame if it needs it, then decode and deliver it.
      *
@@ -319,7 +255,6 @@ export class PowerWebSocketClient {
      * @private
      * @returns {Promise<void>}
      */
-    private _convertAndDeliver;
     /**
      * Decode one already-usable frame and emit it.
      *
@@ -327,13 +262,11 @@ export class PowerWebSocketClient {
      * @private
      * @returns {void}
      */
-    private _deliverFrame;
     /**
      * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
      *   absent on a synthetic close.
      * @private
      */
-    private _handleClose;
     /**
      * Emit `close`, then decide whether to reconnect — behind the inbound chain.
      *
@@ -346,7 +279,6 @@ export class PowerWebSocketClient {
      * @private
      * @returns {void}
      */
-    private _emitCloseAndReconnect;
     /**
      * The `close` notification and the reconnect decision, once the inbound chain is dry.
      *
@@ -354,13 +286,11 @@ export class PowerWebSocketClient {
      * @private
      * @returns {void}
      */
-    private _finishClose;
     /**
      * @param {any} err Whatever the platform or the caller reported. `any` because
      *   the WS `error` event carries no guaranteed shape.
      * @private
      */
-    private _handleError;
     /**
      * The reply to a heartbeat ping.
      *
@@ -378,38 +308,30 @@ export class PowerWebSocketClient {
      * @private
      * @returns {void}
      */
-    private _handlePong;
     /**
      * Poll `bufferedAmount`, pausing and resuming the producer across the marks.
      * The interval backs off while paused so a stuck socket does not spin.
      * @private
      */
-    private _schedulePoll;
     /**
      * @private
      */
-    private _stopPoll;
     /**
      * @private
      */
-    private _tickWatermark;
     /**
      * @param {boolean} paused
      * @private
      */
-    private _setPaused;
     /**
      * @private
      */
-    private _scheduleHeartbeat;
     /**
      * @private
      */
-    private _tickHeartbeat;
     /**
      * @private
      */
-    private _onHeartbeatTimeout;
     /**
      * Decorrelated-jitter backoff, per AWS "Exponential Backoff and Jitter"
      * (2015). It decorrelates far better than full jitter under load, which
@@ -418,29 +340,23 @@ export class PowerWebSocketClient {
      * @private
      * @returns {number} Delay in ms.
      */
-    private _nextReconnectDelay;
     /**
      * @private
      */
-    private _scheduleReconnect;
     /**
      * @private
      */
-    private _clearConnectTimer;
     /**
      * @private
      */
-    private _clearHeartbeat;
     /**
      * @private
      */
-    private _clearTimers;
     /**
      * @param {string} type One of the keys of `this._on`.
      * @param {...any} args
      * @private
      */
-    private _emit;
     [Symbol.dispose](): void;
     /**
      * Asynchronous disposal hook, so `await using client = new PowerWebSocketClient(…)`

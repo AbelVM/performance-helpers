@@ -47,18 +47,6 @@ export class PowerRTCChannel {
     constructor(channel: any, options?: PowerRTCChannelOptions);
     /** @type {any} The underlying channel, for escape hatches this class omits. */
     channel: any;
-    _onMessage: ((arg0: {
-        data: any;
-        channel: import("./powerRTCChannel.js").PowerRTCChannel;
-    }) => void) | null;
-    _onOpen: ((arg0: import("./powerRTCChannel.js").PowerRTCChannel) => void) | null;
-    _onClose: ((arg0: {
-        reason: "local" | "remote";
-        channel: import("./powerRTCChannel.js").PowerRTCChannel;
-    }) => void) | null;
-    _onError: ((arg0: any, arg1: import("./powerRTCChannel.js").PowerRTCChannel) => void) | null;
-    _disposed: boolean;
-    _closedByUs: boolean;
     /**
      * Everything this class attached to the caller's channel, so `dispose()` can
      * undo all of it. A listener nobody remembers to remove is the leak this
@@ -67,10 +55,6 @@ export class PowerRTCChannel {
      * in, which is what makes a seventh addition a deliberate edit.
      * @type {Array<[string, (any: any) => void]>}
      */
-    _listeners: Array<[string, (any: any) => void]>;
-    _state: number;
-    _maxMessageSizeBytes: number;
-    _highWaterMark: number;
     /**
      * Whether the outgoing buffer is above the high-water mark.
      *
@@ -81,21 +65,6 @@ export class PowerRTCChannel {
      * fall. Polling on a timer would answer the same question later and cost a
      * wakeup for it.
      */
-    _backpressured: boolean;
-    _counters: {
-        messages: number;
-        handled: number;
-        bytesIn: number;
-        sent: number;
-        bytesOut: number;
-        sendRefusals: number;
-        sendFailures: number;
-        oversizeFrames: number;
-        backpressureEvents: number;
-        lowBufferEvents: number;
-        opened: number;
-        closed: number;
-    };
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -279,7 +248,6 @@ export class PowerRTCChannel {
      *
      * @private
      */
-    private _attach;
     /**
      * Remove everything {@link PowerRTCChannel#_attach} added.
      *
@@ -290,16 +258,13 @@ export class PowerRTCChannel {
      *
      * @private
      */
-    private _detachListeners;
     /**
      * @private
      * @param {any} data
      */
-    private _handleMessage;
     /**
      * @private
      */
-    private _handleClose;
     /**
      * Re-evaluate the high-water mark after a send.
      *
@@ -309,18 +274,15 @@ export class PowerRTCChannel {
      *
      * @private
      */
-    private _refreshBackpressure;
     /**
      * @private
      * @param {any} err
      */
-    private _emitError;
     /**
      * @private
      * @param {any} fn
      * @param {any} arg
      */
-    private _invoke;
     /**
      * Alias for {@link PowerRTCChannel#dispose}, so `using` works.
      */

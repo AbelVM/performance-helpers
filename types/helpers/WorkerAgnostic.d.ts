@@ -51,24 +51,17 @@ declare class WorkerAgnostic {
      * Read before `_wireEvents`, because a listener that throws during the initial
      * capability announcement must already have somewhere to report to.
      */
-    _onError: any;
     /** @type {Array<[string, (...args: any[]) => void]>} Native listeners this instance attached,
      * as `[type, handler]`, so `dispose()` can detach exactly what it wired. */
-    _wired: Array<[string, (...args: any[]) => void]>;
     /** @type {Array<[string, any]>} For the property native model, the
      * `[propertyName, previousValue]` pairs to restore on disposal. */
-    _wiredProperties: Array<[string, any]>;
     /** @type {boolean} */
-    _disposed: boolean;
-    _listeners: Map<any, any>;
     /** @type {import('./jsdoc-types.js').WorkerLike} */
     worker: import("./jsdoc-types.js").WorkerLike;
     /**
      * Attach the underlying worker's native events to our unified dispatcher.
      * @private
      */
-    private _wireEvents;
-    _nativeModel: string | undefined;
     /**
      * Release every resource this instance holds.
      *
@@ -102,7 +95,6 @@ declare class WorkerAgnostic {
      * @param {...*} args
      * @private
      */
-    private _dispatch;
     /**
      * Route a listener error to the configured `onError` handler.
      *
@@ -119,7 +111,6 @@ declare class WorkerAgnostic {
      * @private
      * @returns {void}
      */
-    private _notifyError;
     /**
      * @param {string} type
      * @param {function(...*):void} handler

@@ -4,19 +4,6 @@ export class PowerBackpressure extends PowerPermitGate {
      *   are inherited from `PowerPermitGate`; the rest tune the refill schedule.
      */
     constructor(options?: PowerBackpressureOptions);
-    _lowWaterMark: number;
-    _refillAmount: number;
-    _refillInterval: number;
-    _refillTimer: any;
-    _baseRefillAmount: number;
-    _adaptive: {
-        enabled: boolean;
-        additiveIncrease: number;
-        beta: number;
-        min: number;
-        max: number;
-    };
-    _adaptiveHeartbeat: boolean;
     /**
      * The refill amount the controller is currently probing with.
      *
@@ -60,7 +47,6 @@ export class PowerBackpressure extends PowerPermitGate {
      * @returns {boolean}
      * @private
      */
-    private _hasWaiters;
     _scheduleRefill(): void;
     _performRefill(): void;
     /**
@@ -101,7 +87,6 @@ export class PowerBackpressure extends PowerPermitGate {
      * @returns {void}
      * @private
      */
-    private _aimdStep;
 }
 export default PowerBackpressure;
 export type BackpressureAdaptiveOptions = import("./jsdoc-types.js").BackpressureAdaptiveOptions;

@@ -7,9 +7,7 @@
  * @class PowerDefer
  */
 export class PowerDefer {
-    _settled: boolean;
     /** @type {'pending'|'fulfilled'|'rejected'} */
-    _status: "pending" | "fulfilled" | "rejected";
     /** @type {Promise<any>} */
     promise: Promise<any>;
     /**

@@ -17,23 +17,14 @@ export class PowerMessagePort {
      */
     constructor(port: MessagePort, options?: PowerMessagePortOptions);
     /** @type {MessagePort} */
-    _port: MessagePort;
     /** @type {?((arg0: any, arg1: string | undefined) => void)} */
-    _onMessage: ((arg0: any, arg1: string | undefined) => void) | null;
     /** @type {?(() => void)} */
-    _onClose: (() => void) | null;
     /** @type {?((arg0: Error) => void)} */
-    _onError: ((arg0: Error) => void) | null;
     /** @type {boolean} */
-    _disposed: boolean;
     /** @type {number} */
-    _sentCount: number;
     /** @type {number} */
-    _receivedCount: number;
     /** @type {number} */
-    _errorCount: number;
     /** @type {'open'|'closed'} */
-    _state: "open" | "closed";
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -87,19 +78,13 @@ export class PowerMessagePort {
     /**
      * @private
      */
-    private _attach;
-    _onMessageHandler: ((e: MessageEvent) => void) | undefined;
-    _onCloseHandler: (() => void) | undefined;
-    _onMessageErrorHandler: ((e: ErrorEvent) => void) | undefined;
     /**
      * @private
      */
-    private _detach;
     /**
      * @private
      * @param {unknown} err
      */
-    private _emitError;
     /**
      * Alias for {@link PowerMessagePort#dispose}, so `using` works.
      */

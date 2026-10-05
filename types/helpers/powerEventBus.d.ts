@@ -6,15 +6,9 @@ export class PowerEventBus {
      */
     constructor(options?: PowerEventBusOptions);
     /** @type {Map<string, EventBusBucket>} */
-    _listeners: Map<string, EventBusBucket>;
-    _maxListeners: number;
-    _weak: boolean;
     /** @type {?(FinalizationRegistry<EventBusWeakToken>)} */
-    _fr: (FinalizationRegistry<EventBusWeakToken>) | null;
     /** @type {WeakMap<SubscriberListener, Map<string, Set<WeakRef<SubscriberListener>>>>} */
-    _finalizationRefs: WeakMap<SubscriberListener, Map<string, Set<WeakRef<SubscriberListener>>>>;
     /** @type {Map<string, Set<WeakRef<SubscriberListener>>>} */
-    _eventFinalizationRefs: Map<string, Set<WeakRef<SubscriberListener>>>;
     /**
      * Lazily build the `FinalizationRegistry` that prunes collected weak
      * listeners. Returns `null` when weak mode is off or the runtime has no
@@ -110,7 +104,6 @@ export class PowerEventBus {
      * @param {EventBusBucket} bucket
      * @yields {SubscriberListener}
      */
-    private _iterBucketListeners;
     /**
      * Emit an event to all subscribers and await async listeners.
      * Supports bounded concurrency so long listener lists can be processed in

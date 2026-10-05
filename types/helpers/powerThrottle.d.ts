@@ -16,11 +16,7 @@ export class PowerThrottle {
      * must outrank a value threaded in by a composition.
      * @type {(() => number)}
      */
-    _now: (() => number);
     /** @type {boolean} */
-    _nowExplicit: boolean;
-    _lastRefill: number;
-    _tokenRemainder: number;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -35,7 +31,6 @@ export class PowerThrottle {
      * @param {number} now - current timestamp in milliseconds
      * @returns {void}
      */
-    private _refill;
     /**
      * Try to consume `n` tokens.
      * @param {number} [n=1]

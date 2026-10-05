@@ -6,23 +6,7 @@ export class PowerHistogram {
      * @param {PowerHistogramOptions} [options]
      */
     constructor(options?: PowerHistogramOptions);
-    _alpha: number;
-    _gamma: number;
-    _logGamma: number;
-    _minValue: number;
-    _maxValue: number;
-    _legacyBucketCount: number | null;
     /** @type {Map<number, number>} sparse bucket index -> count */
-    _buckets: Map<number, number>;
-    _zeroCount: number;
-    _infCount: number;
-    _count: number;
-    _sum: number;
-    _min: number;
-    _max: number;
-    _outOfRangeCount: number;
-    _belowRangeCount: number;
-    _sortedIndices: number[] | null;
     /** Number of records added. */
     get count(): number;
     /** Sum of all recorded values. */
@@ -105,7 +89,6 @@ export class PowerHistogram {
      * @returns {number}
      * @private
      */
-    private _clamp;
     /**
      * Merge another sketch into this one.
      *
@@ -152,7 +135,6 @@ export class PowerHistogram {
      * @returns {number}
      * @private
      */
-    private _index;
     /**
      * Representative value for a bucket index. This is the midpoint of the
      * bucket's multiplicative range, so the worst-case relative error against
@@ -161,14 +143,12 @@ export class PowerHistogram {
      * @returns {number}
      * @private
      */
-    private _value;
     /**
      * Ascending list of occupied bucket indices, cached until the bucket set
      * changes.
      * @returns {number[]}
      * @private
      */
-    private _sortedIndexList;
 }
 export default PowerHistogram;
 export type PowerHistogramOptions = import("./jsdoc-types.js").PowerHistogramOptions;

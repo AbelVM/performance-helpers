@@ -25,13 +25,7 @@ export class PowerRetryBudget {
      *   tokens. See {@link PowerRetryBudgetOptions}.
      */
     constructor(options?: PowerRetryBudgetOptions);
-    _ratio: number;
-    _capacity: number;
     /** Full on construction — see the class note for why an empty bucket is wrong. */
-    _tokens: number;
-    _retries: number;
-    _refused: number;
-    _funded: number;
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -158,7 +152,6 @@ export class PowerRetry {
      */
     constructor(options?: PowerRetryOptions);
     /** @type {PowerRetryOptions} */
-    _options: PowerRetryOptions;
     /**
      * A constructor-supplied `signal`, used only while it is not aborted. An
      * aborted signal stays aborted, so once the caller cancels, later runs on
@@ -167,14 +160,12 @@ export class PowerRetry {
      * opposite of what cancelling means.
      * @type {AbortSignal|null}
      */
-    _defaultSignal: AbortSignal | null;
     /**
      * `null`, a shared bucket, or a bucket created from a ratio here. A bucket
      * built at construction time is the only form that can ration retries
      * *across* calls, because that is the traffic a budget is about.
      * @type {PowerRetryBudget|null}
      */
-    _budget: PowerRetryBudget | null;
     /**
      * Run `fn` with the instance defaults, overridden per call.
      * @param {Function} fn - The operation to run.

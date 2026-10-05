@@ -4,17 +4,9 @@ export class PowerScheduler {
      * @param {PowerSchedulerOptions} [options] Scheduling and error handling options.
      */
     constructor(flushFn: Function, options?: PowerSchedulerOptions);
-    _flushFn: Function;
     /** @type {'microtask'|'macrotask'|'yield'|'postTask'} */
-    _scheduling: "microtask" | "macrotask" | "yield" | "postTask";
-    _taskPriority: "user-blocking" | "user-visible" | "background";
-    _onError: ((error: unknown) => void) | null;
-    _scheduled: boolean;
     /** @type {?MacrotaskHandle} */
-    _timer: MacrotaskHandle | null;
     /** @type {?TaskController} The live `postTask` controller, if any. GAP-013. */
-    _taskController: TaskController | null;
-    _generation: number;
     /** Whether a flush is currently scheduled. */
     get scheduled(): boolean;
     /**
@@ -69,7 +61,6 @@ export class PowerScheduler {
      * @private
      * @returns {void}
      */
-    private _abortTask;
     _run(): void;
     /**
      * Route an error to the configured `onError` handler without ever letting a
@@ -78,7 +69,6 @@ export class PowerScheduler {
      * @private
      * @returns {void}
      */
-    private _notifyError;
     /**
      * Release every resource this instance holds.
      *
