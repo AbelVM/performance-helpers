@@ -599,6 +599,15 @@ export class PowerWebSocketClient {
     // one property read per frame; the price is that delivery becomes
     // asynchronous from the first `Blob` onward. Both are documented on
     // `nonRetryableCloseCodes`' sibling option and in the guide.
+    //
+    // The `@type` is load-bearing, not decoration. Without it `tsc` reports four
+    // TS7022s — `_inboundChain` "implicitly has type any because it is referenced
+    // directly or indirectly in its own initializer", and the same for the locals in
+    // `_enqueueInboundFrame` and `_emitCloseAndReconnect`. The field is initialised
+    // with `null` and assigned a promise built by methods that read the field, so the
+    // inference has a cycle to walk. This is the same trap the `_state` declaration
+    // below documents, and the same fix.
+    /** @type {Promise<void>|null} */
     this._inboundChain = null;
     // Field declaration for the checker only: an `@type` on the initializer
     // narrows `_state` to the literal `3`, which made every

@@ -130,7 +130,7 @@
 
 ### \_inboundChain
 
-> **\_inboundChain**: `any`
+> **\_inboundChain**: `Promise`\<`void`\> \| `null`
 
 ***
 
