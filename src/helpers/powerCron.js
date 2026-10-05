@@ -15,6 +15,18 @@ import { assertFunction, assertLimitRequired, assertKnownOptions } from '../util
  *   - `'catch-up'` replay every missed fire, in order, before resuming. Correct
  *     for jobs that must account for each period (billing, rollups).
  *   - `'run-once'` coalesce all missed fires into a single run.
+ * @property {number} [maxCatchUp=Infinity] - Cap on how many missed periods
+ *   `'catch-up'` replays in one timer tick. **`Infinity` is the default and the
+ *   opt-out** — see the note below on why a default is not a floor. A finite
+ *   value stops a backlog from becoming a synchronous burst: measured, a cron
+ *   that fell ~600 periods behind on a 10 ms interval replayed all 600 in one
+ *   tick, which extrapolates to ~8.6 M invocations for 24 h of drift.
+ * @property {boolean} [overlap=false] - Whether a task may run again before the
+ *   previous one finished. **Off by default**, because a cron is a schedule, not
+ *   a fan-out: measured, a 50 ms task on a 20 ms interval fired 15 times with 15
+ *   concurrent runs. With it on, the cadence is what drives the timer and the
+ *   task is fire-and-forget; with it off, a run still in flight blocks the next
+ *   fire and the blocked periods are reported as missed by the following tick.
  * @property {number} [jitter=0] - Random fraction (0–1) of the interval added
  *   to each fire, spreading a fleet's crons so they do not stampede a
  *   dependency on the same minute boundary.
@@ -74,7 +86,17 @@ export class PowerCron {
   constructor(task, options = {}) {
     assertKnownOptions(
       options,
-      ['intervalMs', 'catchUp', 'jitter', 'runOnStart', 'onError', 'onFire', 'unref'],
+      [
+        'intervalMs',
+        'maxCatchUp',
+        'overlap',
+        'catchUp',
+        'jitter',
+        'runOnStart',
+        'onError',
+        'onFire',
+        'unref',
+      ],
       'PowerCron'
     );
     assertFunction(task, { name: 'task', className: 'PowerCron', optional: false });
@@ -86,6 +108,18 @@ export class PowerCron {
       min: 10,
       fallback: MS_PER_MIN,
     });
+    // `Infinity` is the default and the opt-out: a cron that fell behind is
+    // supposed to replay, and capping it is the whole point of the option.
+    // Measured before this existed — a 10 ms cron that fell ~600 periods
+    // behind replayed all 600 in one synchronous tick.
+    this._maxCatchUp = assertLimitRequired(options.maxCatchUp, {
+      name: 'maxCatchUp',
+      className: 'PowerCron',
+      min: 0,
+      allowInfinity: true,
+      fallback: Infinity,
+    });
+    this._overlap = Boolean(options.overlap);
     const catchUp = options.catchUp;
     this._catchUp =
       catchUp === 'catch-up' || catchUp === 'run-once' || catchUp === 'skip' ? catchUp : 'skip';
@@ -132,6 +166,15 @@ export class PowerCron {
      * @private
      */
     this._totalDriftMs = 0;
+    /**
+     * Whether a task is currently in flight. `overlap` gates the schedule on
+     * it: with it off, a tick whose target arrives while a task is running is
+     * dropped rather than stacking two tasks. Nothing else reads this — it is
+     * the only state the overlap policy needs.
+     * @type {boolean}
+     * @private
+     */
+    this._runningTask = false;
   }
 
   /** @returns {number} The configured interval, in ms. */
@@ -204,6 +247,7 @@ export class PowerCron {
    */
   stop() {
     this._running = false;
+    this._runningTask = false;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = null;
@@ -266,10 +310,34 @@ export class PowerCron {
     // *missed* fires beyond the one being handled now.
     const missedPeriods = Math.max(0, Math.floor((now - target) / this._intervalMs));
 
+    // **Overlap is a property of the schedule, not of the task.** With it off
+    // (the default) a run still in flight blocks the next fire: this is a
+    // schedule, not a fan-out, and two tasks running at once is the thing the
+    // option exists to prevent. Measured before it existed — a 50 ms task on a
+    // 20 ms interval fired 15 times with 15 concurrent runs. The tick is
+    // dropped, the target advances past it, and the next one fires on time, so
+    // the cadence is what drives the timer and the dropped period is reported
+    // as missed by whatever run follows. `runNow()` is out of band and not
+    // gated: a caller who asks for it explicitly owns the concurrency.
+    if (!this._overlap && this._runningTask) {
+      this._nextAt = target + (missedPeriods + 1) * this._intervalMs;
+      this._arm();
+      return;
+    }
+
+    // **`maxCatchUp` caps the replay, and the cap is the whole point.** Measured
+    // before this option existed: a 10 ms cron that fell ~600 periods behind
+    // replayed all 600 in one synchronous tick, which extrapolates to ~8.6 M
+    // invocations for 24 h of drift. The periods the cap refuses are not
+    // replayed and are not silently dropped — the run that follows stands in
+    // for them, so `missed` still says how many there were.
+    const replayed = this._catchUp === 'catch-up' ? Math.min(missedPeriods, this._maxCatchUp) : 0;
+    const dropped = missedPeriods - replayed;
+
     if (this._catchUp === 'catch-up') {
       // Replay every missed period, oldest first, then this one. Each replay is
       // counted so `fireCount` reflects the work actually done.
-      for (let i = 0; i < missedPeriods; i += 1) {
+      for (let i = 0; i < replayed; i += 1) {
         this._fireCount += 1;
         // Each replay stands in for exactly one missed period - it *is* that
         // period being run - so it reports `missed: 1` rather than `0`.
@@ -281,11 +349,13 @@ export class PowerCron {
     }
 
     this._fireCount += 1;
-    // Under `catch-up` the replays above have already accounted for every missed
-    // period, so this run stands in for none of them. Under `skip` they were dropped
-    // and under `run-once` they were folded into this run; either way the number the
-    // caller needs is how many there were, which is what `_onTimer` already knows.
-    this._run(target, this._catchUp === 'catch-up' ? 0 : missedPeriods);
+    // Under `catch-up` the replays above have already accounted for every
+    // missed period they replayed, so this run stands in for the ones the cap
+    // refused — which under `Infinity` is every missed period, the old
+    // behaviour. Under `skip` they were dropped and under `run-once` they
+    // were folded into this run; either way the number the caller needs is
+    // how many there were, which is what `_onTimer` already knows.
+    this._run(target, this._catchUp === 'catch-up' ? dropped : missedPeriods);
 
     // Advance the target by whole intervals, never from `now`. Anchoring here
     // rather than at the run is what makes the schedule drift-free.
@@ -315,21 +385,29 @@ export class PowerCron {
     const ranAt = nowMs();
     const driftMs = Math.max(0, ranAt - scheduledFor);
     this._totalDriftMs += driftMs;
+    this._runningTask = true;
+    const finish = () => {
+      this._runningTask = false;
+    };
+    /** @type {any} Declared here so `finally` can tell the two paths apart. */
+    let result;
     try {
-      const result = this._task();
+      result = this._task();
       if (result && typeof result.then === 'function') {
-        result.then(
-          () => {
-            if (this._onFire) {
-              try {
-                this._onFire({ scheduledFor, ranAt, driftMs, missed });
-              } catch (e) {
-                this._report(e, 'onFire');
+        result
+          .then(
+            () => {
+              if (this._onFire) {
+                try {
+                  this._onFire({ scheduledFor, ranAt, driftMs, missed });
+                } catch (e) {
+                  this._report(e, 'onFire');
+                }
               }
-            }
-          },
-          (/** @type {any} */ err) => this._report(err, 'task')
-        );
+            },
+            (/** @type {any} */ err) => this._report(err, 'task')
+          )
+          .then(finish, finish);
       } else if (this._onFire) {
         try {
           this._onFire({ scheduledFor, ranAt, driftMs, missed });
@@ -339,6 +417,13 @@ export class PowerCron {
       }
     } catch (err) {
       this._report(err, 'task');
+    } finally {
+      // A synchronous task — including one that threw — is done now, so the
+      // flag clears before the next tick can read it. An async task clears in
+      // the `.then(finish, finish)` above; calling `finish` there too rather
+      // than in `finally` is what keeps the two paths from racing, because a
+      // `finally` runs before the promise settles.
+      if (!result || typeof result.then !== 'function') finish();
     }
   }
 

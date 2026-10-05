@@ -81,6 +81,12 @@ The function to run on each fire. May be async;
 
 ***
 
+### \_maxCatchUp
+
+> **\_maxCatchUp**: `number`
+
+***
+
 ### \_nextAt
 
 > **\_nextAt**: `number`
@@ -98,6 +104,12 @@ Absolute timestamp the next fire is aimed at.
 ### \_onFire
 
 > **\_onFire**: ((`info`) => `void`) \| `null`
+
+***
+
+### \_overlap
+
+> **\_overlap**: `boolean`
 
 ***
 

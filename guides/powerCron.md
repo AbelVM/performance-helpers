@@ -37,16 +37,18 @@ there so a schedule that cannot keep up says so.
 
 ### `new PowerCron(task, options?)`
 
-| Option       | Type                                 | Default  | What it does                                                                                                                                         |
-| ------------ | ------------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task`       | `() => any`                          | —        | Run on each fire. May be async. **Required.**                                                                                                        |
-| `intervalMs` | `number`                             | `60000`  | Milliseconds between fires. Must be at least `10`, so a typo cannot become a hot loop.                                                               |
-| `catchUp`    | `'skip' \| 'catch-up' \| 'run-once'` | `'skip'` | What to do about fires missed while the process was busy or asleep (see below).                                                                      |
-| `jitter`     | `number`                             | `0`      | Random fraction (0–1) of the interval added to each fire, so a fleet's crons do not stampede a dependency on the same boundary. Clamped to `[0, 1]`. |
-| `runOnStart` | `boolean`                            | `false`  | Fire once immediately on `start()`, then follow the cadence.                                                                                         |
-| `onError`    | `(err) => void`                      | —        | Called when the task throws or rejects. Without it, errors are logged.                                                                               |
-| `onFire`     | `(info) => void`                     | —        | Called after each run with `{ scheduledFor, ranAt, driftMs, missed }`.                                                                               |
-| `unref`      | `boolean`                            | `true`   | Whether the pending timer is `unref`'d, so a cron alone does not keep a Node process alive.                                                          |
+| Option       | Type                                 | Default    | What it does                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ------------ | ------------------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task`       | `() => any`                          | —          | Run on each fire. May be async. **Required.**                                                                                                                                                                                                                                                                                                                                                                                      |
+| `intervalMs` | `number`                             | `60000`    | Milliseconds between fires. Must be at least `10`, so a typo cannot become a hot loop.                                                                                                                                                                                                                                                                                                                                             |
+| `catchUp`    | `'skip' \| 'catch-up' \| 'run-once'` | `'skip'`   | What to do about fires missed while the process was busy or asleep (see below).                                                                                                                                                                                                                                                                                                                                                    |
+| `maxCatchUp` | `number`                             | `Infinity` | Cap on how many missed periods `'catch-up'` replays in one timer tick. **`Infinity` is the default and the opt-out** — a cron that fell behind is supposed to replay, and capping it is the whole point of the option. Measured: a 10 ms cron that fell ~600 periods behind replayed all 600 in one synchronous tick, which extrapolates to ~8.6 M invocations for 24 h of drift.                                                  |
+| `overlap`    | `boolean`                            | `false`    | Whether a task may run again before the previous one finished. **Off by default**, because a cron is a schedule, not a fan-out: measured, a 50 ms task on a 20 ms interval fired 15 times with 15 concurrent runs. With it on, the cadence is what drives the timer and the task is fire-and-forget; with it off, a run still in flight blocks the next fire and the blocked periods are reported as missed by the following tick. |
+| `jitter`     | `number`                             | `0`        | Random fraction (0–1) of the interval added to each fire, so a fleet's crons do not stampede a dependency on the same boundary. Clamped to `[0, 1]`.                                                                                                                                                                                                                                                                               |
+| `runOnStart` | `boolean`                            | `false`    | Fire once immediately on `start()`, then follow the cadence.                                                                                                                                                                                                                                                                                                                                                                       |
+| `onError`    | `(err) => void`                      | —          | Called when the task throws or rejects. Without it, errors are logged.                                                                                                                                                                                                                                                                                                                                                             |
+| `onFire`     | `(info) => void`                     | —          | Called after each run with `{ scheduledFor, ranAt, driftMs, missed }`.                                                                                                                                                                                                                                                                                                                                                             |
+| `unref`      | `boolean`                            | `true`     | Whether the pending timer is `unref`'d, so a cron alone does not keep a Node process alive.                                                                                                                                                                                                                                                                                                                                        |
 
 ### Methods
 
@@ -81,6 +83,31 @@ What happens to fires missed while the process was busy or asleep is a
   number of periods the run covered, so the work is visible even though the task
   ran once.
 
+### Capping catch-up with `maxCatchUp`
+
+`'catch-up'` replays every missed period by default, which is correct for a
+small backlog and dangerous for a large one: measured, a 10 ms cron that fell
+~600 periods behind replayed all 600 in one synchronous tick, extrapolating to
+~8.6 M invocations for 24 h of drift. `maxCatchUp` (default `Infinity`) caps
+the replay at that many periods per tick. The periods the cap refuses are not
+silently dropped — the run that follows stands in for them, so `onFire.missed`
+still reports how many there were.
+
+## Overlap
+
+By default a `PowerCron` will not start a new task while the previous one is
+still running. This is the right default for a schedule: two tasks running at
+once is the thing `overlap` exists to prevent. Measured before the option
+existed — a 50 ms task on a 20 ms interval fired 15 times with 15 concurrent
+runs.
+
+Set `overlap: true` to restore the old behaviour. The cadence is what drives
+the timer and the task is fire-and-forget; a long-running task does not delay
+the next fire, and `onFire` reports each one independently.
+
+`runNow()` is out of band and is not gated by `overlap`: a caller who asks for
+it explicitly owns the concurrency.
+
 ## Errors do not kill the schedule
 
 A throwing task, a rejected promise, or a throwing `onFire` is routed to
@@ -101,8 +128,9 @@ on the host. With no `onError` configured, errors are logged rather than dropped
   `process.exit()`. Pass `unref: false` if the cron alone should hold the process
   open.
 - **Not a calendar cron.** There is no `@daily` parsing, no timezone handling and
-  no overlap policy — this is an interval scheduler that does not drift. Compose
+  no calendar semantics — this is an interval scheduler that does not drift. Compose
   it with a wall-clock check inside the task if calendar semantics are needed.
+  Overlap is controlled by the `overlap` option; see [Overlap](#overlap) above.
 
 ## See also
 

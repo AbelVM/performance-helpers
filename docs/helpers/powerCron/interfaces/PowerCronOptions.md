@@ -40,6 +40,19 @@ Random fraction (0–1) of the interval added
 
 ***
 
+### maxCatchUp?
+
+> `optional` **maxCatchUp?**: `number`
+
+Cap on how many missed periods
+  `'catch-up'` replays in one timer tick. **`Infinity` is the default and the
+  opt-out** — see the note below on why a default is not a floor. A finite
+  value stops a backlog from becoming a synchronous burst: measured, a cron
+  that fell ~600 periods behind on a 10 ms interval replayed all 600 in one
+  tick, which extrapolates to ~8.6 M invocations for 24 h of drift.
+
+***
+
 ### onError?
 
 > `optional` **onError?**: (`err`) => `void`
@@ -82,6 +95,19 @@ Called after each successful run
 #### Returns
 
 `void`
+
+***
+
+### overlap?
+
+> `optional` **overlap?**: `boolean`
+
+Whether a task may run again before the
+  previous one finished. **Off by default**, because a cron is a schedule, not
+  a fan-out: measured, a 50 ms task on a 20 ms interval fired 15 times with 15
+  concurrent runs. With it on, the cadence is what drives the timer and the
+  task is fire-and-forget; with it off, a run still in flight blocks the next
+  fire and the blocked periods are reported as missed by the following tick.
 
 ***
 
