@@ -40,6 +40,10 @@
  *   node bench/claims.js permit    # what a SharedArrayBuffer permit pool would cost
  *   node bench/claims.js stream    # chunking a payload against posting it whole
  *   node bench/claims.js bcfanout  # one BroadcastChannel against K explicit ports
+ *   node bench/claims.js defer     # PowerDefer WeakMap overhead vs closure form
+ *   node bench/claims.js codec     # JSON.stringify cost vs a minimal binary encoding
+ *   node bench/claims.js sabring   # SharedArrayBuffer ring vs structured clone
+ *   node bench/claims.js keyshape # cache key-shape performance (int/string/object)
  *
  * That list is a convenience, not the authority: `MODES` below is, and running
  * this file with an unrecognised mode prints every mode that exists.
@@ -3835,6 +3839,300 @@ async function runBroadcastFanoutWorkload() {
   return { rows };
 }
 
+// ─── Workload: PowerDefer WeakMap overhead ───────────────────────────────────
+//
+// RES-022 asks whether the WeakMap in PowerDefer is worth its ~6× construction
+// surcharge. The immutability motive is real but partial (promise, _settled,
+// _status stay public), so this mode measures the actual cost before any change
+// is adopted.
+
+async function runDeferWorkload() {
+  const N = Number(process.env.CLAIM_DEFER_OPS || 500000);
+  console.log('BENCH-002g — PowerDefer WeakMap overhead vs closure form\n');
+  console.log('  `PowerDefer` stores resolve/reject in a WeakMap so they are not');
+  console.log('  assignable from user code. This measures the construction and resolve');
+  console.log('  cost of that choice against a plain closure form.\n');
+  console.log(`  ops                    ${N.toLocaleString()}\n`);
+
+  const time = (fn) => {
+    for (let i = 0; i < 50_000; i += 1) fn();
+    const s = [];
+    for (let r = 0; r < 7; r += 1) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < N; i += 1) fn();
+      s.push(Number(process.hrtime.bigint() - t0) / N);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+
+  // Sink the result so nothing is optimised away.
+  const sink = 0;
+  const values = [];
+
+  // Closure form: resolve/reject are plain properties on the instance.
+  class ClosureDefer {
+    constructor() {
+      this._settled = false;
+      this._status = 'pending';
+      this.promise = new Promise((resolve, reject) => {
+        this.resolve = (v) => {
+          if (this._settled) return;
+          this._settled = true;
+          this._status = 'fulfilled';
+          resolve(v);
+        };
+        this.reject = (err) => {
+          if (this._settled) return;
+          this._settled = true;
+          this._status = 'rejected';
+          reject(err);
+        };
+      });
+    }
+  }
+
+  const deferNs = time(() => {
+    const d = new ClosureDefer();
+    d.resolve(1);
+    values.push(d._status);
+  });
+
+  // PowerDefer form: resolve/reject live in a WeakMap.
+  const { PowerDefer } = await import('../src/helpers/powerDefer.js');
+
+  const powerNs = time(() => {
+    const d = new PowerDefer();
+    d.resolve(1);
+    values.push(d.status);
+  });
+
+  console.log(
+    `  ClosureDefer          ${deferNs.toFixed(2).padStart(8)} ns/op   (plain properties)`
+  );
+  console.log(
+    `  PowerDefer            ${powerNs.toFixed(2).padStart(8)} ns/op   ${(powerNs / deferNs).toFixed(2)}x the closure form`
+  );
+
+  console.log('\n  The WeakMap.set is paid once per construction. If the ratio stays');
+  console.log('  above ~3× and the immutability benefit is only partial, the row');
+  console.log('  should be closed as "not adopted" rather than "needs more optimisation".');
+
+  void sink;
+  void values;
+
+  return { deferNs, powerNs };
+}
+
+// ─── Workload 9: JSON.stringify cost vs a minimal binary encoding ─────────────
+//
+// RT-027 asks whether a binary codec (MessagePack / CBOR) is worth building.
+// The premise is that JSON.stringify is the cost; this measures it for numeric
+// payloads against a hand-rolled 8-bytes-per-double binary layout. A real CBOR
+// implementation adds type tags and varint sizing, which narrows the gap but
+// does not reverse it for the numeric case.
+
+async function runCodecWorkload() {
+  const N = Number(process.env.CLAIM_CODEC_OPS || 200000);
+  console.log('BENCH-002h — JSON.stringify cost vs a minimal binary encoding\n');
+  console.log('  RT-027 asks whether a binary codec (MessagePack / CBOR) is worth');
+  console.log('  building. This measures the actual stringify cost for numeric');
+  console.log('  payloads against a hand-rolled 8-bytes-per-double binary layout.\n');
+
+  const time = (fn) => {
+    for (let i = 0; i < 50_000; i += 1) fn();
+    const s = [];
+    for (let r = 0; r < 7; r += 1) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < N; i += 1) fn();
+      s.push(Number(process.hrtime.bigint() - t0) / N);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+
+  const payloads = [
+    { label: '4 numbers', make: () => [1, 2, 3, 4] },
+    { label: '50 numbers', make: () => Array.from({ length: 50 }, (_, i) => i) },
+    { label: '1000 numbers', make: () => Array.from({ length: 1000 }, (_, i) => i) },
+  ];
+
+  // Minimal binary layout: one IEEE 754 double per number, no framing.
+  const encodeBinary = (arr) => {
+    const buf = new ArrayBuffer(arr.length * 8);
+    const view = new Float64Array(buf);
+    for (let i = 0; i < arr.length; i++) view[i] = arr[i];
+    return buf;
+  };
+
+  console.log(
+    `  ${'payload'.padEnd(16)}${'json us'.padStart(10)}${'bin us'.padStart(10)}${'json/bin'.padStart(12)}`
+  );
+  console.log(`  ${'-'.repeat(48)}`);
+
+  for (const { label, make } of payloads) {
+    const sample = make();
+    const jsonUs = time(() => JSON.stringify(sample));
+    const binUs = time(() => encodeBinary(sample));
+    const ratio = jsonUs / binUs;
+    console.log(
+      `  ${label.padEnd(16)}${jsonUs.toFixed(3).padStart(10)}${binUs.toFixed(3).padStart(10)}${ratio.toFixed(2).padStart(12)}`
+    );
+  }
+
+  console.log('\n  The binary path is a fixed 8 bytes per number with no parsing.');
+  console.log('  A real CBOR implementation adds type tags and varint sizing,');
+  console.log('  which narrows the gap but does not reverse it for numeric payloads.');
+  console.log('  The row should be closed as "adopted" only if a measured payload');
+  console.log('  shows JSON.stringify dominating the encode path.');
+
+  return { payloads: payloads.map((p) => p.label) };
+}
+
+// ─── Workload 10: SharedArrayBuffer ring vs structured clone ─────────────────
+//
+// RT-031 asks whether a SAB result ring avoids a clone for PowerChunker.
+// The win is bounded by "avoid one clone of a large payload". This measures
+// structuredClone against a SAB write/read round-trip for a string-heavy payload.
+
+async function runSabRingWorkload() {
+  const N = Number(process.env.CLAIM_SAB_OPS || 200000);
+  console.log('BENCH-002i — SharedArrayBuffer ring vs structured clone\n');
+  console.log('  RT-031 asks whether a SAB result ring avoids a clone for the');
+  console.log('  chunker. This measures structuredClone against a SAB write/read');
+  console.log('  round-trip for a string-heavy payload.\n');
+
+  const time = (fn) => {
+    for (let i = 0; i < 50_000; i += 1) fn();
+    const s = [];
+    for (let r = 0; r < 7; r += 1) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < N; i += 1) fn();
+      s.push(Number(process.hrtime.bigint() - t0) / N);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+
+  const payload = 'x'.repeat(1024); // 1 KB string
+  const encoder = new TextEncoder();
+  const sabSize = 4 + payload.length; // 4-byte length prefix + bytes
+  const sab = new SharedArrayBuffer(sabSize);
+  const uint8 = new Uint8Array(sab);
+  const view = new DataView(sab);
+
+  const cloneNs = time(() => {
+    const cloned = structuredClone(payload);
+    void cloned;
+  });
+
+  const sabNs = time(() => {
+    view.setUint32(0, payload.length, true);
+    encoder.encodeInto(payload, uint8.subarray(4));
+    const len = view.getUint32(0, true);
+    const read = new Uint8Array(len);
+    read.set(uint8.subarray(4, 4 + len));
+    void read;
+  });
+
+  console.log(`  payload size: ${payload.length} bytes (1 KB string)`);
+  console.log(`  ops per pass: ${N}`);
+  console.log('');
+  console.log(`  ${'method'.padEnd(24)}${'ns/op'.padStart(10)}${'ratio'.padStart(8)}`);
+  console.log(`  ${'-'.repeat(42)}`);
+  console.log(
+    `  ${'structuredClone'.padEnd(24)}${cloneNs.toFixed(2).padStart(10)}${'1.00x'.padStart(8)}`
+  );
+  console.log(
+    `  ${'SAB write+read'.padEnd(24)}${sabNs.toFixed(2).padStart(10)}${(sabNs / cloneNs).toFixed(2)}x`.padStart(
+      8
+    )
+  );
+
+  console.log('\n  A SAB ring avoids the clone only if the producer can write directly');
+  console.log('  into shared memory. The benchmark above measures the round-trip cost');
+  console.log('  of copying into SAB and reading back, which is the minimum a ring');
+  console.log('  must beat to be worth building.');
+
+  return { cloneNs, sabNs, ratio: sabNs / cloneNs };
+}
+
+// ─── Workload 11: cache key-shape performance ────────────────────────────────
+//
+// GAP-018 asks for a key-shape / storage-bounds guide backed by measurements.
+// This measures PowerCache get/set throughput for integer, string, and object
+// keys so the guide can state actual costs rather than advice.
+
+async function runKeyShapeWorkload() {
+  const N = Number(process.env.CLAIM_KEYSHAPE_OPS || 10000);
+  console.log('BENCH-002j — cache key-shape performance\n');
+  console.log('  GAP-018 asks for a key-shape / storage-bounds guide backed by');
+  console.log('  measurements. This measures PowerCache get/set throughput for');
+  console.log('  integer, string, and object keys.\n');
+
+  const time = (fn) => {
+    for (let i = 0; i < 50_000; i += 1) fn();
+    const s = [];
+    for (let r = 0; r < 7; r += 1) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < N; i += 1) fn();
+      s.push(Number(process.hrtime.bigint() - t0) / N);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+
+  const cache = new PowerCache({ maxEntries: 1000 });
+
+  // Integer keys
+  const intKeys = Array.from({ length: 500 }, (_, i) => i);
+  cache.clear();
+  for (const k of intKeys) cache.set(k, k);
+  const intGetUs = time(() => {
+    for (const k of intKeys) cache.get(k);
+  });
+
+  // String keys
+  const strKeys = intKeys.map(String);
+  cache.clear();
+  for (const k of strKeys) cache.set(k, k);
+  const strGetUs = time(() => {
+    for (const k of strKeys) cache.get(k);
+  });
+
+  // Object keys
+  const objKeys = intKeys.map((i) => ({ id: i }));
+  cache.clear();
+  for (const k of objKeys) cache.set(k, k);
+  const objGetUs = time(() => {
+    for (const k of objKeys) cache.get(k);
+  });
+
+  console.log(`  ${'key type'.padEnd(16)}${'get us/op'.padStart(12)}${'vs int'.padStart(10)}`);
+  console.log(`  ${'-'.repeat(38)}`);
+  console.log(
+    `  ${'integer'.padEnd(16)}${intGetUs.toFixed(3).padStart(12)}${'1.00x'.padStart(10)}`
+  );
+  console.log(
+    `  ${'string'.padEnd(16)}${strGetUs.toFixed(3).padStart(12)}${(strGetUs / intGetUs).toFixed(2)}x`.padStart(
+      10
+    )
+  );
+  console.log(
+    `  ${'object'.padEnd(16)}${objGetUs.toFixed(3).padStart(12)}${(objGetUs / intGetUs).toFixed(2)}x`.padStart(
+      10
+    )
+  );
+
+  console.log('\n  Object keys are hashed via String(key), so every object collapses');
+  console.log('  to "[object Object]" and the cache cannot distinguish them.');
+  console.log('  The guide should state this explicitly rather than leaving it to');
+  console.log('  be discovered from a silent collision.');
+
+  cache.clear();
+  return { intGetUs, strGetUs, objGetUs };
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -3853,6 +4151,10 @@ const MODES = {
   concurrency: runConcurrencyWorkload,
   stepsize: runStepSizingWorkload,
   bcfanout: runBroadcastFanoutWorkload,
+  defer: runDeferWorkload,
+  codec: runCodecWorkload,
+  sabring: runSabRingWorkload,
+  keyshape: runKeyShapeWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
