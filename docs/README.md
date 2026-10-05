@@ -42,6 +42,7 @@
 - [index](index/README.md)
 - [powerGCRA](powerGCRA/README.md)
 - [powerMessageCodec](powerMessageCodec/README.md)
+- [powerMessagePort](powerMessagePort/README.md)
 - [powerRealtimeHub](powerRealtimeHub/README.md)
 - [powerRetry](powerRetry/README.md)
 - [powerWebSocketClient](powerWebSocketClient/README.md)

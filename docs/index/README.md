@@ -324,6 +324,12 @@ Re-exports [PowerMessageCodec](../powerMessageCodec/variables/PowerMessageCodec.
 
 ***
 
+### PowerMessagePort
+
+Re-exports [PowerMessagePort](../powerMessagePort/classes/PowerMessagePort.md)
+
+***
+
 ### PowerObserver
 
 Re-exports [PowerObserver](../helpers/powerObserver/classes/PowerObserver.md)

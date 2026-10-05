@@ -1004,6 +1004,30 @@ export type PowerRTCChannelOptions = {
     expectUnreliable?: boolean | undefined;
 };
 /**
+ * Options for `PowerMessagePort`.
+ */
+export type PowerMessagePortOptions = {
+    /**
+     * - Called with
+     * the decoded `value` and optional `correlationId` for each inbound message.
+     */
+    onMessage?: ((arg0: any, arg1: (string | undefined)) => void) | undefined;
+    /**
+     * - Called when the port closes.
+     */
+    onClose?: (() => void) | undefined;
+    /**
+     * - Called when an inbound message
+     * cannot be decoded.
+     */
+    onError?: ((arg0: Error) => void) | undefined;
+    /**
+     * -
+     * Opt in to metrics. See `guides/metrics.md`.
+     */
+    observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
+};
+/**
  * Logger options for `PowerLogger`.
  */
 export type PowerLoggerOptions = {

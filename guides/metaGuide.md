@@ -36,6 +36,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Write code that runs on any runtime with a worker                      | `WorkerAgnostic`                                   | `PowerPool`                                                | runtime `if (typeof Worker)` branches                                   |
 | Move structured values across a byte-stream transport                  | `PowerMessageCodec`                                | `PowerBuffer`                                              | hand-rolled framing, which cannot carry binary                          |
 | Fan out to many subscribers without one slow client stalling the rest  | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                                      |
+| Deliver hub frames over a `MessagePort` with native structured clone   | `PowerMessagePort`                                 | `PowerRealtimeHub`, `PowerMessageCodec`                    | hand-rolled `postMessage` framing                                       |
 | Push to a socket without unbounded client-side buffering               | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                                 |
 | Handle an accepted socket without knowing which library produced it    | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
 | Push to a WebRTC peer without tripping over the channel's string state | `PowerRTCChannel`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | `dc.readyState === READY_STATE.OPEN`, which is always false             |
@@ -620,6 +621,11 @@ channel, and the other two sit between them.
 - `PowerRealtimeHub`: every subscription gets its own bounded queue and a declared slow-consumer
   policy, so a single client that stops reading becomes a bounded, observable problem instead of a
   process-wide memory leak. Batches over `PowerMessageCodec`.
+- `PowerMessagePort`: a `MessagePort` transport adapter for the hub. The platform's native
+  structured-clone codec carries `Map`, `Set`, `Date`, `BigInt` and cycles losslessly, so inbound
+  frames are decoded through `decodeInbound` and listeners are torn down on `dispose()`. Use it
+  when the transport is a `MessagePort` or `Worker` and you want the hub's slow-consumer control
+  without JSON round-tripping.
 - `PowerSocketAdapter`: the **server-side** counterpart to the client. A Node `ws` socket, a browser
   `WebSocket` and a `WebSocketStream` are genuinely incompatible — `ws` calls a `message` handler
   with `(data, isBinary)`, an `EventTarget` with one event object, and a `WebSocketStream` has

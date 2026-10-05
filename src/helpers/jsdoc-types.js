@@ -723,6 +723,19 @@ export {};
  */
 
 /**
+ * Options for `PowerMessagePort`.
+ *
+ * @typedef {Object} PowerMessagePortOptions
+ * @property {function(any, (string|undefined)):void} [onMessage] - Called with
+ *   the decoded `value` and optional `correlationId` for each inbound message.
+ * @property {function():void} [onClose] - Called when the port closes.
+ * @property {function(Error):void} [onError] - Called when an inbound message
+ *   cannot be decoded.
+ * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] -
+ *   Opt in to metrics. See `guides/metrics.md`.
+ */
+
+/**
  * Logger options for `PowerLogger`.
  * @typedef {Object} PowerLoggerOptions
  * @property {'text'|'json'} [format]

@@ -126,6 +126,11 @@
       "import": "./src/helpers/powerMessageCodec.js",
       "default": "./src/helpers/powerMessageCodec.js"
     },
+    "./powerMessagePort": {
+      "types": "./types/helpers/powerMessagePort.d.ts",
+      "import": "./src/helpers/powerMessagePort.js",
+      "default": "./src/helpers/powerMessagePort.js"
+    },
     "./powerRealtimeHub": {
       "types": "./types/helpers/powerRealtimeHub.d.ts",
       "import": "./src/helpers/powerRealtimeHub.js",

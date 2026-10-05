@@ -83,6 +83,35 @@ That is the whole native path. The envelope is lossless for `Map`, `Set`, `Date`
 **not** clone, because `postMessage` clones whatever it is handed. One deep copy,
 not two.
 
+### `PowerMessagePort` decodes the native path for you
+
+[`PowerMessagePort`](powerRealtimeHub.md#built-in-adapters) is the companion
+adapter for the hub. It listens on `port.onmessage` and calls `decodeInbound`
+for you, so a `MessagePort` subscriber receives the original `Map`, `Set`,
+`Date`, `BigInt` and binary values without any JSON round-trip:
+
+```javascript
+import { PowerMessagePort, encodeNativeEnvelope } from 'performance-helpers';
+
+const port = new MessageChannel().port2;
+const adapter = new PowerMessagePort(port, {
+  onMessage: (value, correlationId) => {
+    /* value is the original object */
+  },
+  onError: (err) => console.error('decode failed', err),
+});
+
+port.postMessage(encodeNativeEnvelope(new Map([['a', 1]]), { correlationId: 'abc' }));
+// adapter.onMessage receives the Map, correlationId === 'abc'
+```
+
+`decodeInbound` is the same function the pool uses in `messageCodec:
+'negotiated'` mode, so the fidelity table in [Negotiation: the carrier is a
+per-worker decision](#negotiation-the-carrier-is-a-per-worker-decision) applies
+here too: `Map`, `Set`, `Date`, `RegExp`, `BigInt`, `Infinity`, `NaN` and
+cycles survive the boundary unchanged. A frame of an unsupported version or a
+truncated body is reported as `RangeError` through `onError`, not swallowed.
+
 ### `encodeNative` is deprecated, and one case still needs it
 
 `encodeNative(value)` clones the value and returns `{ message, transfer }` for you

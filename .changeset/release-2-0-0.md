@@ -9623,3 +9623,23 @@ Buffers on the **cache-bypass paths** — a payload too large to cache, for inst
 _not_ marked: nothing is shared there to protect, and refusing a transfer the caller owns
 would be a regression in the other direction. A test pins that, because it is the mistake
 this change could have made in the other direction.
+
+## `PowerMessagePort`: `MessagePort` transport for `PowerRealtimeHub`
+
+Add `PowerMessagePort` — a `MessagePort` adapter that wraps the hub's `send(sub,
+frame)` / `close(sub, reason)` interface and uses `decodeInbound` for native-envelope
+fidelity on the inbound side.
+
+The native codec path was already lossless for `Map`, `Set`, `Date`, `BigInt` and
+binary, but the hub had no built-in adapter to consume it. `PowerMessagePort` fills
+that gap: it listens on `port.onmessage`, calls `decodeInbound` for every inbound
+message, and routes the decoded value and optional `correlationId` to the caller's
+`onMessage` callback. A truncated frame or unsupported protocol version is reported
+as `RangeError` through `onError`, not swallowed.
+
+`dispose()` / `[Symbol.dispose]()` detaches all listeners and closes the port.
+`close()` is idempotent. After `dispose()`, inbound messages and close events are
+ignored.
+
+14 tests, mutation-checked. No changes to existing helpers beyond the new export
+from `src/index.js`.

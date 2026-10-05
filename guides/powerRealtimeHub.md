@@ -234,6 +234,45 @@ hub.publish('prices', { btc: 42_000 });
 hub.close();
 ```
 
+## Built-in adapters
+
+### `PowerMessagePort`
+
+`PowerMessagePort` wraps a `MessagePort` (or any object with the same event
+shape) and presents the `send` / `close` interface the hub expects. It is the
+recommended adapter when the transport is a `MessageChannel`, a `Worker` port,
+or a `BroadcastChannel`-style boundary that exposes `postMessage` / `close`.
+
+```javascript
+import { PowerRealtimeHub, PowerMessagePort } from 'performance-helpers';
+
+const port1 = new MessageChannel().port1;
+const port2 = new MessageChannel().port2;
+
+const hub = new PowerRealtimeHub({
+  send: (sub, frame) => sub.adapter.send({}, frame),
+  close: (sub, reason) => sub.adapter.close({ reason }),
+});
+
+const sub = hub.subscribe('room', (msg) => render(msg), {
+  id: 'client',
+  transport: { adapter: new PowerMessagePort(port2, { onMessage: render }) },
+});
+
+port1.postMessage(encodeNativeEnvelope({ text: 'hello' }));
+```
+
+The adapter owns the listener lifecycle: it attaches `onmessage`,
+`onmessageerror` and `onclose` on construction and removes them on
+`dispose()` / `[Symbol.dispose]()`. `close()` is idempotent. After
+`dispose()`, inbound messages and close events are ignored.
+
+### `PowerWebSocketClient`
+
+[`PowerWebSocketClient`](powerWebSocketClient.md) is the WebSocket-specific
+adapter. It pairs with the hub the same way and adds `bufferedAmount`
+back-pressure on top.
+
 ## Notes
 
 - Subscriber `id`s must be unique; a duplicate throws. Generate them from your connection identity, not a counter, so a reconnect gets a fresh subscription.

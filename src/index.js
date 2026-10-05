@@ -41,6 +41,7 @@ export { PowerEventBus } from './helpers/powerEventBus.js';
 export { PowerGCRA } from './helpers/powerGCRA.js';
 export { PowerEventLoopMonitor } from './helpers/powerEventLoopMonitor.js';
 export { PowerRealtimeHub } from './helpers/powerRealtimeHub.js';
+export { PowerMessagePort } from './helpers/powerMessagePort.js';
 export { PowerWebSocketClient, READY_STATE } from './helpers/powerWebSocketClient.js';
 export { PowerSocketAdapter, detectSocketKind } from './helpers/powerSocketAdapter.js';
 export { PowerRTCChannel } from './helpers/powerRTCChannel.js';

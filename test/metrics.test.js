@@ -26,6 +26,7 @@ import { PowerRTCChannel } from '../src/helpers/powerRTCChannel.js';
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
 import { PowerRateLimit } from '../src/helpers/powerRateLimit.js';
+import { PowerMessagePort } from '../src/helpers/powerMessagePort.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -246,6 +247,21 @@ describe('observability: true on the helpers', () => {
       'retryBudget',
     ],
     ['PowerEventLoopMonitor', () => new PowerEventLoopMonitor({ observability: true }), 'loop'],
+    [
+      'PowerMessagePort',
+      () =>
+        new PowerMessagePort(
+          /** @type {any} */ ({
+            postMessage: () => {},
+            close: () => {},
+            addEventListener: () => {},
+            removeEventListener: () => {},
+            dispatchEvent: () => true,
+          }),
+          { observability: true }
+        ),
+      'messagePort',
+    ],
     // A socket the adapter can identify. `{}` throws by design — the adapter
     // refuses a socket it cannot classify rather than guessing.
     [
