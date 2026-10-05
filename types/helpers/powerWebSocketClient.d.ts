@@ -1,18 +1,4 @@
 export { READY_STATE };
-/**
- * Reconnecting WebSocket client with explicit back-pressure.
- *
- * @example
- * const client = new PowerWebSocketClient({
- *   url: 'wss://example.test/feed',
- *   highWaterMarkBytes: 1 << 20,
- *   onPause: () => feed.pause(),
- *   onResume: () => feed.resume(),
- *   onMessage: (msg) => render(msg),
- * });
- *
- * client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
- */
 export class PowerWebSocketClient {
     /**
      * @param {WebSocketClientOptions} options
@@ -54,6 +40,7 @@ export class PowerWebSocketClient {
     _streamReader: ReadableStreamDefaultReader | null;
     _binaryTypeUnsupported: boolean;
     _reportedBinaryTypeUnsupported: boolean;
+    _inboundChain: any;
     /** @type {0|1|2|3} */
     _state: 0 | 1 | 2 | 3;
     _closedByUser: boolean;
@@ -276,11 +263,88 @@ export class PowerWebSocketClient {
      */
     private _handleMessage;
     /**
+     * Append one frame to the serial inbound chain.
+     *
+     * The stored chain **never rejects**: a frame that fails to convert or decode is
+     * reported and dropped, and the frame behind it still has to be delivered. A
+     * rejected chain would strand every later frame, which turns one bad frame into
+     * a permanently deaf socket — the exact shape this path exists to remove.
+     *
+     * **This guard is currently unreachable, and a mutation check says so.** Removing it
+     * kills no test, because nothing can reject: `_convertAndDeliver` catches its own
+     * conversion and decode failures, and `_emit` catches everything a caller's handler
+     * can throw. It stays for the same reason the `_evictionCandidate` repair in
+     * `invalidate` stays — the invariant is real, the *only* thing enforcing it today is
+     * two unrelated try/catch blocks, and a future edit that let either one propagate would
+     * fail silently. Do not read this as tested.
+     *
+     * @param {*} data The raw frame: a `Blob`, or bytes/text needing no conversion.
+     * @private
+     * @returns {void}
+     */
+    private _enqueueInboundFrame;
+    /**
+     * Resolve once every frame queued so far has been converted, decoded and delivered.
+     *
+     * **A test seam, and deliberately not public API.** Once a `Blob` has been seen the
+     * inbound path is asynchronous, so a test asserting on `received` or on a `message`
+     * listener needs a way to wait for the queue — and `await null` is not a thing a
+     * caller can be handed. Exposing `drainInbound()` on the public surface would be
+     * worse than the gap: every caller who did not have this exact problem would have to
+     * read the documentation to learn it could be ignored.
+     *
+     * The loop, rather than a single `await`, because a frame can be enqueued *while*
+     * this is waiting — from a test, or from a socket that delivers in the same tick as
+     * a conversion settles. Comparing against the chain it captured is what stops it
+     * spinning on a chain nobody is extending.
+     *
+     * @private
+     * @returns {Promise<void>}
+     */
+    private _settleInbound;
+    /**
+     * Convert a frame if it needs it, then decode and deliver it.
+     *
+     * @param {*} data
+     * @private
+     * @returns {Promise<void>}
+     */
+    private _convertAndDeliver;
+    /**
+     * Decode one already-usable frame and emit it.
+     *
+     * @param {*} data Bytes, text, or anything `decodeMessage` accepts.
+     * @private
+     * @returns {void}
+     */
+    private _deliverFrame;
+    /**
      * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
      *   absent on a synthetic close.
      * @private
      */
     private _handleClose;
+    /**
+     * Emit `close`, then decide whether to reconnect — behind the inbound chain.
+     *
+     * RT-036. Split out of `_handleClose` so the notification can wait for a pending
+     * `Blob` conversion while the teardown stays synchronous. See that call site for why
+     * the split falls where it does.
+     *
+     * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
+     *   absent on a synthetic close.
+     * @private
+     * @returns {void}
+     */
+    private _emitCloseAndReconnect;
+    /**
+     * The `close` notification and the reconnect decision, once the inbound chain is dry.
+     *
+     * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`.
+     * @private
+     * @returns {void}
+     */
+    private _finishClose;
     /**
      * @param {any} err Whatever the platform or the caller reported. `any` because
      *   the WS `error` event carries no guaranteed shape.

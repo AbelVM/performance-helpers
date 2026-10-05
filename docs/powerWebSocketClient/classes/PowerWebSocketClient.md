@@ -6,22 +6,6 @@
 
 # Class: PowerWebSocketClient
 
-Reconnecting WebSocket client with explicit back-pressure.
-
-## Example
-
-```ts
-const client = new PowerWebSocketClient({
-  url: 'wss://example.test/feed',
-  highWaterMarkBytes: 1 << 20,
-  onPause: () => feed.pause(),
-  onResume: () => feed.resume(),
-  onMessage: (msg) => render(msg),
-});
-
-client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
-```
-
 ## Constructors
 
 ### Constructor
@@ -141,6 +125,12 @@ client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
 ### \_highWaterMark
 
 > **\_highWaterMark**: `number`
+
+***
+
+### \_inboundChain
+
+> **\_inboundChain**: `any`
 
 ***
 

@@ -232,13 +232,25 @@ const client = new PowerWebSocketClient({
 
 ### If the platform refuses `binaryType`
 
-The client sets `binaryType = 'arraybuffer'` at connect and **remembers if that is refused** — a getter-only accessor throws on assignment, and the platform default for a binary frame is then a `Blob`. This library has no `Blob`-to-bytes conversion anywhere (`frameSize` only _sizes_ one), so such a frame cannot be decoded.
+The client sets `binaryType = 'arraybuffer'` at connect and **remembers if that is refused** — a getter-only accessor throws on assignment, and the platform default for a binary frame is then a `Blob`. **The `Blob` is converted here**, so the frame decodes and is delivered; and you still get **one** `error` saying so, because a platform that ignores an option this client set is worth knowing about even though nothing is broken.
 
-When that happens you get **one** `error`, naming the cause and what to do about it, and `stats().decodeErrors` counts every frame it could not read. You do **not** get the codec's `expected a Uint8Array` once per frame, which named the codec rather than the reason. The report is one-shot across reconnects, because the platform will refuse again on every connection and a repeat per connection is the same noise one layer down.
+```
+one error: this platform refused binaryType="arraybuffer", so binary frames arrive as
+Blob and are converted here instead. Conversion is asynchronous, so inbound delivery
+becomes asynchronous once it first happens: frames are still delivered in order, but no
+longer inside the "message" listener. Pass a WebSocketImpl that honours binaryType to
+avoid both. Conversion costs about 0.045 ms per 64 KiB frame.
+```
 
-Converting the `Blob` instead is `await blob.arrayBuffer()`, and that is **deliberately not done**: the inbound path is synchronous, so an `await` there would make delivery order an implementation detail. The fix is to pass a `WebSocketImpl` that honours `binaryType`, or to send text frames. A measured cost is not the objection — `arrayBuffer()` is ~0.045 ms for a 64 KiB frame — the ordering contract is.
+Two things follow from that, and both are contract rather than implementation detail.
 
-That is why it is described this way in the option, in the error message, and here. A number that reads like a limit and is not one is worse than no number, because a deployment sets it, believes it is protected, and is not. **Prevention belongs at the peer that produces the frame.**
+**Delivery becomes asynchronous once the first `Blob` arrives, and stays that way for the connection.** A `Blob` can only be read with `await blob.arrayBuffer()`, and `_handleMessage` runs inside a `message` listener whose returned promise **nobody awaits** — so converting inline would let a later text frame overtake an earlier binary one, and delivery order would depend on how fast each conversion happened. Instead every frame that needs converting, **and every frame behind it**, joins a serial chain. If your platform honours `binaryType` — every browser that supports it, and Node's `ws` — nothing joins, delivery stays synchronous for the whole connection, and the cost is one property read per frame.
+
+**`close` is ordered behind the chain too.** `readyState` and the timers change synchronously, because `CLOSED` is the peer's news rather than an ordering decision, but the `close` event waits for a pending conversion. Otherwise a caller treating `close` as "nothing more will arrive" would be wrong once per connection.
+
+`stats().decodeErrors` now means what its name says: frames the library genuinely could not read. A `Blob` is no longer one of them. A frame that survives conversion and then fails in the codec still counts, and a `Blob` whose `arrayBuffer()` rejects is counted and reported **every time** — unlike the refusal above, two conversion failures are not necessarily the same failure twice.
+
+A measured cost was never the objection — `arrayBuffer()` is ~0.045 ms for a 64 KiB frame, 0.101 ms on the first call. The ordering contract was, and that is what the chain buys.
 
 `0` disables the report, the same convention `highWaterMarkBytes: 0` uses, and the limit is inclusive — a frame exactly at the limit is not over it. A **text** frame is measured in UTF-16 code units rather than UTF-8 bytes, because an exact figure would cost a `TextEncoder` per frame; binary frames, the ones this is for, are exact.
 

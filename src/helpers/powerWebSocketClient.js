@@ -267,6 +267,35 @@ function matchesCloseCode(codes, code) {
  *
  * client.on('open', () => hub.subscribe('feed', (m) => client.send(m)));
  */
+/**
+ * Whether `data` is a `Blob` the caller needs converted before it can be decoded.
+ *
+ * **`instanceof` is not usable here.** It compares against *this* realm's
+ * prototype, so it is `false` for a `Blob` from another `vm` context, an iframe or
+ * a worker — the same cross-realm trap `errors.js`, `powerMessageCodec` and
+ * `powerBuffer` each shipped a defect in. `Object.prototype.toString` is
+ * realm-independent but **spoofable**, and this repository has already paid for
+ * relying on it.
+ *
+ * So this is a duck test: an object with a callable `arrayBuffer()` and a numeric
+ * `size`. A spoof is possible and its consequence is stated rather than assumed —
+ * a fake would have its `arrayBuffer()` awaited and whatever it resolves to handed
+ * to `decodeMessage`, which either decodes it or **throws a real decode error that
+ * is reported**. That is the safe direction: the alternative, treating a real
+ * `Blob` as bytes, is the silent-corruption one.
+ *
+ * @param {*} data
+ * @returns {boolean}
+ */
+function isConvertibleBlob(data) {
+  return (
+    data != null &&
+    typeof data === 'object' &&
+    typeof data.arrayBuffer === 'function' &&
+    typeof data.size === 'number'
+  );
+}
+
 export class PowerWebSocketClient {
   /**
    * @param {WebSocketClientOptions} options
@@ -562,6 +591,15 @@ export class PowerWebSocketClient {
     // reconnect, and a per-connection repeat is the same wall of noise one
     // layer down.
     this._reportedBinaryTypeUnsupported = false;
+    // RT-036. The serial inbound chain, `null` until a frame needs converting.
+    // **Once a `Blob` has arrived this stays non-null for the connection**, which
+    // is deliberate: a later frame cannot be delivered synchronously without
+    // risking that it overtakes a conversion still in flight, and nothing in the
+    // platform lets this class know whether more `Blob`s are coming. The cost is
+    // one property read per frame; the price is that delivery becomes
+    // asynchronous from the first `Blob` onward. Both are documented on
+    // `nonRetryableCloseCodes`' sibling option and in the guide.
+    this._inboundChain = null;
     // Field declaration for the checker only: an `@type` on the initializer
     // narrows `_state` to the literal `3`, which made every
     // `_state === READY_STATE.X` comparison an "unintentional comparison"
@@ -1226,6 +1264,10 @@ export class PowerWebSocketClient {
     // in `stats()` and in your logs, and `_counters.oversizeFrames` makes it
     // alertable. The prevention belongs at the edge that owns the bytes — the
     // server, or a proxy in front of it.
+    //
+    // `frameByteLength` reads a `Blob`'s `.size`, so the report is correct for a
+    // frame that has not been converted yet — which is every one of them on this
+    // path.
     const size = frameByteLength(data);
     // `0` disables the check, the same convention `highWaterMarkBytes: 0` uses
     // in this class. The first draft took `min: 0` as "accepted" and documented
@@ -1240,31 +1282,147 @@ export class PowerWebSocketClient {
       );
     }
 
-    // RT-036. When `binaryType` was refused, a binary frame arrives as a `Blob`,
-    // `decodeMessage` cannot read one, and the error it raises names the codec
-    // rather than the cause. Reported once, in the terms of the actual problem,
-    // and the codec error is suppressed so the caller sees one diagnosis instead
-    // of that diagnosis buried under one copy per frame.
-    if (this._binaryTypeUnsupported) {
-      // Every frame is counted, and the codec is never reached: reaching it is
-      // what produces the misleading per-frame error this replaces. The report
-      // itself is one-shot.
-      this._counters.decodeErrors += 1;
-      if (this._reportedBinaryTypeUnsupported) return;
-      this._reportedBinaryTypeUnsupported = true;
-      this._emit(
-        'error',
-        new Error(
-          'PowerWebSocketClient: this platform refused binaryType="arraybuffer", so binary ' +
-            'frames arrive as Blob and cannot be decoded. Pass a WebSocketImpl that honours ' +
-            'binaryType, or send text frames. Not converting the Blob here is deliberate: ' +
-            'decoding is synchronous and the conversion is not, so it would make the inbound ' +
-            'order an implementation detail.'
-        )
-      );
+    // RT-036. A `Blob` cannot be decoded, and `await blob.arrayBuffer()` is the
+    // conversion — so this frame, and **every frame behind it**, join a serial
+    // chain. (`_binaryTypeUnsupported` is deliberately *not* consulted here: a
+    // `Blob` can arrive on a socket that never refused anything, and it has to be
+    // read either way.)
+    //
+    // The chain is the whole design, and the reason is ordering rather than
+    // convenience. `_handleMessage` is called from an `addEventListener`
+    // handler, and **nobody awaits what that returns**: converting a Blob inline
+    // would deliver a later text frame before an earlier binary one, and
+    // delivery order would become an implementation detail of how fast each
+    // conversion happened. Serialising is what keeps it a promise instead.
+    //
+    // Frames that need no conversion are **delivered synchronously as before**,
+    // and the chain is only created by a frame that needs one. So a run on a
+    // platform that honours `binaryType` — every browser that supports it, and
+    // Node's `ws` — pays one property read per frame and nothing else, and its
+    // delivery stays synchronous for the whole connection.
+    if (isConvertibleBlob(data) || this._inboundChain !== null) {
+      this._enqueueInboundFrame(data);
       return;
     }
 
+    this._deliverFrame(data);
+  }
+
+  /**
+   * Append one frame to the serial inbound chain.
+   *
+   * The stored chain **never rejects**: a frame that fails to convert or decode is
+   * reported and dropped, and the frame behind it still has to be delivered. A
+   * rejected chain would strand every later frame, which turns one bad frame into
+   * a permanently deaf socket — the exact shape this path exists to remove.
+   *
+   * **This guard is currently unreachable, and a mutation check says so.** Removing it
+   * kills no test, because nothing can reject: `_convertAndDeliver` catches its own
+   * conversion and decode failures, and `_emit` catches everything a caller's handler
+   * can throw. It stays for the same reason the `_evictionCandidate` repair in
+   * `invalidate` stays — the invariant is real, the *only* thing enforcing it today is
+   * two unrelated try/catch blocks, and a future edit that let either one propagate would
+   * fail silently. Do not read this as tested.
+   *
+   * @param {*} data The raw frame: a `Blob`, or bytes/text needing no conversion.
+   * @private
+   * @returns {void}
+   */
+  _enqueueInboundFrame(data) {
+    const start = this._inboundChain ?? Promise.resolve();
+    const step = start.then(() => this._convertAndDeliver(data));
+    this._inboundChain = step.then(
+      () => {},
+      () => {}
+    );
+  }
+
+  /**
+   * Resolve once every frame queued so far has been converted, decoded and delivered.
+   *
+   * **A test seam, and deliberately not public API.** Once a `Blob` has been seen the
+   * inbound path is asynchronous, so a test asserting on `received` or on a `message`
+   * listener needs a way to wait for the queue — and `await null` is not a thing a
+   * caller can be handed. Exposing `drainInbound()` on the public surface would be
+   * worse than the gap: every caller who did not have this exact problem would have to
+   * read the documentation to learn it could be ignored.
+   *
+   * The loop, rather than a single `await`, because a frame can be enqueued *while*
+   * this is waiting — from a test, or from a socket that delivers in the same tick as
+   * a conversion settles. Comparing against the chain it captured is what stops it
+   * spinning on a chain nobody is extending.
+   *
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _settleInbound() {
+    for (;;) {
+      const chain = this._inboundChain;
+      if (chain === null) return;
+      await chain;
+      if (this._inboundChain === chain) return;
+    }
+  }
+
+  /**
+   * Convert a frame if it needs it, then decode and deliver it.
+   *
+   * @param {*} data
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _convertAndDeliver(data) {
+    let frame = data;
+    if (isConvertibleBlob(data)) {
+      // RT-036. **The refusal is still reported once, and the advice changed.**
+      // Part 1 told the caller to pass a `WebSocketImpl` or send text frames,
+      // because a Blob could not be decoded. It now is decoded here, so that
+      // advice was wrong: what remains true is that the platform ignored an
+      // option this client set, which is worth saying once and is not an error
+      // the caller has to act on before anything works.
+      // **Gated on `_binaryTypeUnsupported`, not on having seen a Blob.** A Blob can
+      // arrive on a socket that never refused anything — a caller's `WebSocketImpl`
+      // that yields Blobs on purpose, or a caller driving `_handleMessage` directly —
+      // and reporting "this platform refused binaryType" there would be inventing a
+      // diagnosis the client has no evidence for. `test/powerWebSocketClient.maxPayload.test.js`
+      // is what caught this: it handed in a Blob on a socket whose `binaryType` took,
+      // and got told the platform had refused.
+      if (this._binaryTypeUnsupported && !this._reportedBinaryTypeUnsupported) {
+        this._reportedBinaryTypeUnsupported = true;
+        this._emit(
+          'error',
+          new Error(
+            'PowerWebSocketClient: this platform refused binaryType="arraybuffer", so binary ' +
+              'frames arrive as Blob and are converted here instead. Conversion is ' +
+              'asynchronous, so inbound delivery becomes asynchronous once it first happens: ' +
+              'frames are still delivered in order, but no longer inside the "message" ' +
+              'listener. Pass a WebSocketImpl that honours binaryType to avoid both. ' +
+              'Conversion costs about 0.045 ms per 64 KiB frame.'
+          )
+        );
+      }
+      try {
+        frame = new Uint8Array(await data.arrayBuffer());
+      } catch (e) {
+        // Counted and reported per frame, because unlike the refusal above this
+        // failure is not necessarily the same failure twice. A peer that keeps
+        // sending unreadable frames should look like it in `stats()`.
+        this._counters.decodeErrors += 1;
+        this._emit('error', e);
+        return;
+      }
+    }
+    this._deliverFrame(frame);
+  }
+
+  /**
+   * Decode one already-usable frame and emit it.
+   *
+   * @param {*} data Bytes, text, or anything `decodeMessage` accepts.
+   * @private
+   * @returns {void}
+   */
+  _deliverFrame(data) {
     let message;
     try {
       message = decodeMessage(data).value;
@@ -1291,6 +1449,56 @@ export class PowerWebSocketClient {
     this._writer = null;
     this._streamReader = null;
     this._state = READY_STATE.CLOSED;
+    // RT-036. **The teardown above is synchronous; the notification below is ordered.**
+    //
+    // A `Blob` conversion can still be in flight when the peer closes, and a `close`
+    // emitted now would reach the caller *before* the `message` for a frame that
+    // arrived before it. That is the same ordering contract the chain exists to
+    // protect, and a caller that treats `close` as "nothing more will arrive" would be
+    // wrong once per connection.
+    //
+    // Timers and `readyState` are **not** deferred, deliberately: `CLOSED` is the fact
+    // the socket is telling us now, and a reconnect that waited on a conversion would be
+    // delayed by a peer that is already gone. Only the notification waits.
+    this._emitCloseAndReconnect(event);
+  }
+
+  /**
+   * Emit `close`, then decide whether to reconnect — behind the inbound chain.
+   *
+   * RT-036. Split out of `_handleClose` so the notification can wait for a pending
+   * `Blob` conversion while the teardown stays synchronous. See that call site for why
+   * the split falls where it does.
+   *
+   * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`,
+   *   absent on a synthetic close.
+   * @private
+   * @returns {void}
+   */
+  _emitCloseAndReconnect(event) {
+    // **Join the inbound chain rather than running now.** Only when there is one: the
+    // overwhelmingly common case has nothing pending, and a `close` caller sees on the
+    // same tick as before. Waiting unconditionally would put every close a microtask
+    // later for a conversion that does not exist.
+    if (this._inboundChain !== null) {
+      const pending = this._inboundChain;
+      this._inboundChain = pending.then(
+        () => this._finishClose(event),
+        () => this._finishClose(event)
+      );
+      return;
+    }
+    this._finishClose(event);
+  }
+
+  /**
+   * The `close` notification and the reconnect decision, once the inbound chain is dry.
+   *
+   * @param {{code?: number, reason?: string}} [event] The DOM `CloseEvent`.
+   * @private
+   * @returns {void}
+   */
+  _finishClose(event) {
     this._emit('close', event, this);
     // The reconnect run begins at the **outage**, not at the first retry, which
     // is what makes the elapsed budget mean what it says. A probe with a budget

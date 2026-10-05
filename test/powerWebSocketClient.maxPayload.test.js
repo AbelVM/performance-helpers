@@ -121,7 +121,7 @@ describe('RT-009: maxPayloadSizeBytes reports an oversized frame without stoppin
     expect(() => client({ maxPayloadSizeBytes: -1 })).toThrow(TypeError);
   });
 
-  it('reads the length from a Blob as readily as from bytes', () => {
+  it('reads the length from a Blob as readily as from bytes', async () => {
     // A `message` event carries a `Blob` for binary frames by default, so a size
     // check that only understood `byteLength` would miss exactly the shape the
     // platform hands out most often. `Blob` is available in Node 18+, which is
@@ -134,18 +134,33 @@ describe('RT-009: maxPayloadSizeBytes reports an oversized frame without stoppin
     expect(blob.size, 'the fixture really is Blob-shaped').toBe(bytes.length);
 
     c._handleMessage({ data: blob });
+    await c._settleInbound();
 
     expect(c.stats().oversizeFrames, 'a Blob is measured, not skipped').toBe(1);
-    // **Two errors, not one, and the second is not this change's.** The size
-    // report fires first, then `decodeMessage` cannot read a `Blob` synchronously
-    // and raises its own `decodeErrors`. That is pre-existing behaviour — a client
-    // has to set `binaryType` to get bytes rather than a Blob — and RT-009 only
-    // has to work on the *measurement*, which is the assertion above. Asserting a
-    // single error here would have pinned a fix to the decode path that this row
-    // does not ask for.
-    expect(errors).toHaveLength(2);
+    // **One error, and this assertion was two.** The second used to be
+    // `PowerMessageCodec: expected a Uint8Array`, raised because `decodeMessage`
+    // cannot read a `Blob` synchronously — documented here as pre-existing
+    // behaviour that this row did not ask to fix.
+    //
+    // **RT-036's note predicted this test would "still pass unchanged" after part 2,
+    // and that prediction was wrong.** Its reasoning was that the test drives
+    // `_handleMessage` with no recorded refusal — but part 2 does not condition on a
+    // recorded refusal, it converts whatever arrives as a `Blob`.
+    //
+    // So the codec error is **gone rather than replaced**, and the second assertion I
+    // wrote here first (`decodeErrors === 1`, on the theory that the converted filler
+    // would fail to parse) was wrong: `frameOf(500)` is `encodeMessage` of a 500-byte
+    // pad, so it is a *valid* message that merely happens to be large. It converts and
+    // it decodes. Asserting 1 would have pinned a decode failure that does not happen.
+    //
+    // What is left is the size report alone, which is the thing this test exists for —
+    // and it is still first, because `frameByteLength` reads a Blob's `.size` before any
+    // conversion is attempted.
+    expect(errors).toHaveLength(1);
     expect(String(errors[0].message)).toMatch(/detection, not prevention/);
-    expect(String(errors[1].message)).toMatch(/PowerMessageCodec: expected a Uint8Array/);
+    // A Blob is no longer a decode failure. Before part 2 this read 1.
+    expect(c.stats().decodeErrors, 'a Blob converts; it is not unreadable').toBe(0);
+    expect(c.stats().received, 'and the oversized frame is still delivered').toBe(1);
   });
 
   it('counts every oversized frame rather than stopping at the first', () => {
