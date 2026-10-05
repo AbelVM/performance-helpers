@@ -251,6 +251,36 @@ _other_ branch. Read the code.
 ⬜ for three commits while its work sat in the tree. A stale row is worse than a
 missing one: it sends someone to build something twice.
 
+**After an edit that lands next to a structural boundary, verify the pairing — no
+gate here will.** Three defects in one session shared a shape: a doc comment
+orphaned from its function by inserting a new function between them, a changeset
+section header consumed as an edit anchor (three times, and the _third_ time
+after the second had been repaired), and a table row left with seven columns
+because a script's `split(' | ')`/`join(' | ')` round-trip double-added the
+leading pipe and dropped the trailing one. **Lint, `docs:claims`, `docs:drift`,
+`test/docsCodeAgreement`, the type ratchet and 2885 tests were all green through
+every one of them.** None of these is a value error, so nothing type-related or
+behavioural can see it; the failure lives entirely in the arrangement of text
+around a boundary.
+
+So the check has to be structural and explicit, and it is the same discipline as
+the mutation checks:
+
+- **A doc comment belongs to the function immediately below it.** After inserting a
+  function above an existing one, confirm the `@param` still sits on the method it
+  names — a duplicate JSDoc block is not an error to any tool, and typedoc simply
+  attaches the first one it finds.
+- **Never anchor a replacement on a neighbouring section header.** Anchor on a
+  unique _body_ string instead. Or, if the header must be the anchor, assert that
+  the text following the replacement is the expected next header and **abort
+  rather than guess** — that assertion is what turned the third occurrence into
+  one wasted step instead of a corrupted changeset, and it is worth writing
+  before the edit rather than after the mistake.
+- **Count the columns after rewriting a table row, both ends.** `review:check`
+  catches the result, but only once the file is already written; verify against a
+  backup that the diff is _one_ changed line, and remember that a `|` inside
+  backticks — `a || b` — splits a cell just as a bare one does.
+
 ## Documentation
 
 Three kinds, and they are not interchangeable:
@@ -410,7 +440,12 @@ helper`) carries `src/helpers/powerRTCChannel.js` — **783 lines**, an entire
   sample points at whichever file sorts first — which was `WorkerAgnostic.js`
   both times, so I attributed my own three errors to a concurrent session twice.
   `npm run typecheck` prints per file. **Check your own files first**, then
-  theirs.
+  theirs. When your own change is the cause, get the _new_ errors by running
+  `tsc` against a pristine `git archive HEAD` and diffing per file — a total
+  plus a sample cannot tell you which of yours are new, and the line numbers
+  shift under you so the diff must be on **message text**, not positions.
+  Raise the ceiling only for debt that was already there: `--raise --reason` is
+  for a file that is itself known debt, never for debt a change just introduced.
 - **Do not edit `review.md` with a multi-step script, and do not trust one that
   reported success.** It is 450 KB+, gitignored — so `git checkout` cannot undo a
   bad edit and no commit ever holds it — and a markdown table row cannot contain
@@ -433,6 +468,12 @@ helper`) carries `src/helpers/powerRTCChannel.js` — **783 lines**, an entire
 - Do not put a bare `|` in a `review.md` cell. Escape it as `\|`. The same
   applies to a shell operator inside backticks — `a || b` splits a cell, and the
   table test reports a _column_ error for a _character_ mistake.
+  - **A `split(' | ')` / `join(' | ')` round-trip is not round-trip safe.**
+    Splitting `| a | b |` leaves `| a` in the first element, so re-joining
+    and re-adding a leading pipe gives `|| a | b |`; set the last element
+    and the trailing pipe goes with it, leaving a seven-column row that
+    `review:check` catches only after the file is written. Build the row as
+    one string from cells you construct, and assert both ends of the line.
 
 ## Before you finish
 
