@@ -1619,6 +1619,55 @@ export type PowerSchedulerOptions = {
     onError?: ((error: unknown) => void) | null | undefined;
 };
 /**
+ * Options for `PowerCrossLock`.
+ */
+export type PowerCrossLockOptions = {
+    /**
+     * A default lock name for this instance. Optional: most callers
+     * name the lock per resource, and a default here is a convenience rather than a default
+     * that silently serialises unrelated work.
+     */
+    name?: string | undefined;
+};
+/**
+ * Per-call options for `PowerCrossLock.run()`.
+ */
+export type PowerCrossLockRunOptions = {
+    /**
+     * Cancels the *wait*, not the holder — an abort rejects
+     * the request with `AbortError` and the callback is never invoked.
+     */
+    signal?: AbortSignal | undefined;
+    /**
+     * Take the lock from its current holder. Measured, and **not a
+     * polite hand-over**: the holder's `request()` promise rejects with `AbortError` while its
+     * callback keeps running, so the lock is free before the previous work stops. Opt-in per
+     * call for that reason.
+     */
+    steal?: boolean | undefined;
+};
+/**
+ * `PowerCrossLock.stats()`.
+ */
+export type PowerCrossLockStats = {
+    /**
+     * Whether this platform has a cross-worker lock manager.
+     */
+    supported: boolean;
+    /**
+     * Critical sections that ran to completion on this instance.
+     */
+    acquisitions: number;
+    /**
+     * Calls that passed `steal`.
+     */
+    steals: number;
+    /**
+     * Requests rejected by an `AbortSignal`, or displaced by a steal.
+     */
+    aborted: number;
+};
+/**
  * Subscriber-set options for `PowerSubscriberSet`.
  *
  * Distinct from {@link PowerEventBusOptions}, which it does not extend, because

@@ -209,6 +209,14 @@ const CROSS_CLASS = new Set([
   // abort listener is the caller's own risk") is only meaningful against the
   // platform's own method.
   'abort',
+  // `LockManager.request()`, named by the powerCrossLock guide's sections on
+  // `steal`, the sync-throw leak and the per-threadness of `query()`. It is the
+  // platform's own method and **not** a member of `PowerCrossLock` — the guide
+  // names it because the whole row this implements spelled it `acquire`, and
+  // every one of these citations is the reason the correction is legible. Same
+  // category as `createDataChannel` above: a platform method the guide
+  // describes rather than one this helper declares.
+  'request',
   // `RTCPeerConnection.createDataChannel()`, named in the RT-017 guide's usage
   // and worker sections. It is the platform's own method and **not** a member of
   // `PowerRTCChannel`, which deliberately takes an existing channel rather than

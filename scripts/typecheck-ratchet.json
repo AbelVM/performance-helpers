@@ -1,6 +1,6 @@
 {
-  "ceiling": 147,
+  "ceiling": 146,
   "minFilesWithDiagnostics": 12,
-  "recordedAt": "2026-10-04",
-  "reason": "powerBuffer: o2b now returns an owning ArrayBuffer for SAB-backed views, and the shared-buffer test is routed through one typed helper (PERF-005)"
+  "recordedAt": "2026-10-05",
+  "reason": "GAP-008: query() filter callbacks were implicitly any; replaced the two Array.filter calls with for-loops, which infer the element type under checkJs. One error (147 -> 146); the other was pre-existing."
 }

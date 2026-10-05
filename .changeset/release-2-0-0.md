@@ -3868,6 +3868,80 @@ comment.
 
 Closes GAP-013.
 
+#### `PowerCrossLock`: a cross-worker mutex, and four measurements that changed its shape
+
+`PowerCrossLock` is a fair mutex shared by every worker and thread in the process,
+over the platform's Web Locks implementation (`node:worker_threads` `locks`, or
+`navigator.locks` in a browser). One lock, one queue, FIFO, and it lives in the
+platform's lock manager rather than in this library — so the guarantee reaches any
+other worker, and any other process, that asks for the same name.
+
+```js
+const lock = new PowerCrossLock();
+await lock.run('cache:warm', async () => {
+  // No other worker or thread can be inside this block for this name.
+  await warmTheCache();
+});
+```
+
+The API is **callback-scoped rather than a handle-and-`release()`**, and that is the
+decision, not an oversight. The plan row asked for `acquire(name, {steal, signal})`
+returning a handle. A manual release is the wrong shape for a lock shared across
+worker boundaries: a caller that forgets it wedges _every other worker_ for the life
+of the process, with no error and no local state to inspect. Scoping the lock to the
+callback makes the release unconditional — a throw, a rejection and a `return` all
+release it, because the platform holds the lock across the callback's promise rather
+than across a line of the caller's code.
+
+**Four platform findings, all measured on Node 24.18, and all four changed the code.**
+
+1. **The row named the wrong method.** It specified `locks.acquire(name, {steal,
+signal})`; `acquire` is an _earlier Web Locks draft_ spelling. What ships is
+   `LockManager.request(name, options, callback)`. Measured: `worker_threads.locks`
+   exposes exactly `request` and `query` on its prototype, and `acquire` is
+   `undefined`. A wrapper written to the row's spelling would have called
+   `undefined` and thrown `TypeError` on every acquisition.
+
+2. **`ifAvailable` is a no-op.** It never refuses — not in the same thread, not in
+   a different one. So `tryRun()` could only have been built on
+   `query()`-then-`request()`, which is **not atomic**: the lock can change hands
+   between the two calls. A best-effort answer presented as a guarantee is the silent
+   substitution this library rejects elsewhere, so **the method is absent rather
+   than approximated**, and `waiterCount(name)` is the honest way to ask whether a
+   name is busy.
+
+3. **`query()` is per-thread.** A lock held in a `Worker` is invisible to the main
+   thread's `query()`. The cross-worker guarantee rests on `request()` alone, which
+   is atomic and shared. The method is documented rather than promoted.
+
+4. **`steal` aborts the holder's promise but does not stop its work.** With one
+   holder inside `request()` and a second `request(name, {steal: true})`: the second
+   callback runs, the first holder's `request()` promise rejects with
+   `DOMException [AbortError]` (`code: 20`), and the first holder's callback **keeps
+   running** while the lock is free to everyone else. The error carries no lock name
+   and no own properties (checked), so a stolen holder cannot tell a steal from its
+   own signal. Hence opt-in per call, and the guide's advice to make the critical
+   section idempotent before using it.
+
+**A real leak, found by mutation.** `request(name, {}, fn)` holds the lock **forever**
+when `fn` throws **synchronously** — async rejection and normal return both release.
+Isolated to the exact boundary: synchronous throw → permanently held, async
+rejection → released, value return → released, and independent of arity. The fix is
+wrapping the callback in `async () => fn()`, converting the throw into the rejection
+that does release. The consequence of not fixing it is the worst shape available:
+the caller's own error surfaces correctly, so the failure looks handled, while that
+lock _name_ is wedged for the life of the process with nothing to indicate why.
+
+**Nine mutants, eight killed, one a comment.** The sole survivor is a comment-only
+deletion, which is not a defect. The leak fix is the one whose mutant is killed by a
+timeout rather than an assertion — `releases the lock when the section throws` waits
+5006 ms for a release that never comes.
+
+`test/powerCrossLock.test.js`, 22 tests, 8 of 9 injected mutants killed by a named
+test.
+
+Closes GAP-008.
+
 #### A batch the limiter could admit, and one it could never admit
 
 `PowerGCRA` admitted a batch whose own span did not fit inside the delay

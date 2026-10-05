@@ -58,6 +58,7 @@ describe('API surface', () => {
         'PowerChunker',
         'PowerCircuit',
         'PowerCron',
+        'PowerCrossLock',
         'PowerDeadline',
         'PowerDefer',
         'PowerEventBus',
@@ -240,12 +241,13 @@ describe('API surface', () => {
     // The pre-existing test covered 3 of these. If this count changes, a
     // subpath was added or removed and this file needs updating deliberately -
     // the count is here so that cannot happen by accident.
-    // 39 after `./powerRTCChannel` (RT-017). 38 was after `./powerServo`, which is
-    // the subpath the gate above could not ask for; 37 was after `./metrics`
-    // (FEAT-007). The comment above is the point: this number is here so a
-    // subpath cannot be added or removed by accident, and the only legitimate
-    // way past it is to edit this line on purpose.
-    expect(subpaths.length).toBe(39);
+    // 40 after `./powerCrossLock` (GAP-008). 39 was after `./powerRTCChannel`
+    // (RT-017). 38 was after `./powerServo`, which is the subpath the gate above
+    // could not ask for; 37 was after `./metrics` (FEAT-007). The comment above
+    // is the point: this number is here so a subpath cannot be added or removed
+    // by accident, and the only legitimate way past it is to edit this line on
+    // purpose.
+    expect(subpaths.length).toBe(40);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

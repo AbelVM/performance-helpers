@@ -510,6 +510,7 @@ Choose the left-hand option when in doubt:
 - `PowerTimedCache` over `PowerCache` for simple TTL caching.
 - `PowerMemoizer` over `PowerCache` for function result reuse.
 - `PowerSemaphore` over `PowerPermitGate` for normal concurrency limits.
+- `PowerCrossLock` over `PowerSemaphore` when the thing you must exclude is running in another thread.
 - `PowerBulkhead` over `PowerSemaphore` when noisy-neighbor protection matters.
 - `PowerPool` over `PowerChunker` when worker behavior itself is part of the design.
 - `PowerDeadline` over `PowerRetry` when time budget matters at all.
@@ -537,6 +538,7 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `PowerBackpressure`: Producer-facing admission control.
 - `PowerBatch`: Coalesce many calls into one flush.
 - `PowerSemaphore`: Global async concurrency gate.
+- `PowerCrossLock`: Cross-worker mutex. Use it when the thing you must exclude is running in _another_ thread — `PowerSemaphore` cannot do that, because every instance is local to its thread.
 - `PowerBulkhead`: Partitioned concurrency isolation.
 - `PowerPermitGate`: Low-level permit primitive used by higher-level gates.
 - `PowerScheduler`: Small flush scheduler for deferred work.

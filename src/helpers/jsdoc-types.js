@@ -1169,6 +1169,37 @@ export {};
  */
 
 /**
+ * Options for `PowerCrossLock`.
+ *
+ * @typedef {Object} PowerCrossLockOptions
+ * @property {string} [name] A default lock name for this instance. Optional: most callers
+ *   name the lock per resource, and a default here is a convenience rather than a default
+ *   that silently serialises unrelated work.
+ */
+
+/**
+ * Per-call options for `PowerCrossLock.run()`.
+ *
+ * @typedef {Object} PowerCrossLockRunOptions
+ * @property {AbortSignal} [signal] Cancels the *wait*, not the holder — an abort rejects
+ *   the request with `AbortError` and the callback is never invoked.
+ * @property {boolean} [steal] Take the lock from its current holder. Measured, and **not a
+ *   polite hand-over**: the holder's `request()` promise rejects with `AbortError` while its
+ *   callback keeps running, so the lock is free before the previous work stops. Opt-in per
+ *   call for that reason.
+ */
+
+/**
+ * `PowerCrossLock.stats()`.
+ *
+ * @typedef {Object} PowerCrossLockStats
+ * @property {boolean} supported Whether this platform has a cross-worker lock manager.
+ * @property {number} acquisitions Critical sections that ran to completion on this instance.
+ * @property {number} steals Calls that passed `steal`.
+ * @property {number} aborted Requests rejected by an `AbortSignal`, or displaced by a steal.
+ */
+
+/**
  * Subscriber-set options for `PowerSubscriberSet`.
  *
  * Distinct from {@link PowerEventBusOptions}, which it does not extend, because

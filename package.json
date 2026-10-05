@@ -201,6 +201,11 @@
       "import": "./src/helpers/powerSemaphore.js",
       "default": "./src/helpers/powerSemaphore.js"
     },
+    "./powerCrossLock": {
+      "types": "./types/helpers/powerCrossLock.d.ts",
+      "import": "./src/helpers/powerCrossLock.js",
+      "default": "./src/helpers/powerCrossLock.js"
+    },
     "./powerServo": {
       "types": "./types/helpers/powerServo.d.ts",
       "import": "./src/helpers/powerServo.js",

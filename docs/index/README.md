@@ -258,6 +258,12 @@ Re-exports [PowerCron](../helpers/powerCron/classes/PowerCron.md)
 
 ***
 
+### PowerCrossLock
+
+Re-exports [PowerCrossLock](../helpers/powerCrossLock/classes/PowerCrossLock.md)
+
+***
+
 ### PowerDeadline
 
 Re-exports [PowerDeadline](../helpers/powerDeadline/classes/PowerDeadline.md)

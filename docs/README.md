@@ -16,6 +16,7 @@
 - [helpers/powerChunking](helpers/powerChunking/README.md)
 - [helpers/powerCircuit](helpers/powerCircuit/README.md)
 - [helpers/powerCron](helpers/powerCron/README.md)
+- [helpers/powerCrossLock](helpers/powerCrossLock/README.md)
 - [helpers/powerDeadline](helpers/powerDeadline/README.md)
 - [helpers/powerDefer](helpers/powerDefer/README.md)
 - [helpers/powerEventBus](helpers/powerEventBus/README.md)

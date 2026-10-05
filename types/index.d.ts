@@ -9,6 +9,7 @@ export { PowerPermitGate } from "./helpers/powerPermitGate.js";
 export { PowerScheduler } from "./helpers/powerScheduler.js";
 export { PowerSubscriberSet } from "./helpers/powerSubscriberSet.js";
 export { PowerSemaphore } from "./helpers/powerSemaphore.js";
+export { PowerCrossLock } from "./helpers/powerCrossLock.js";
 export { PowerDefer } from "./helpers/powerDefer.js";
 export { PowerTTLMap } from "./helpers/powerTTLMap.js";
 export { detectWebTransportSupport } from "./utils/webtransport.js";
