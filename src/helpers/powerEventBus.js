@@ -51,6 +51,7 @@ import { neutralise } from '../utils/neutralise.js';
  *   await it still can.
  */
 function notifyListener(fn, payload) {
+  /** @type {any} */
   let result;
   try {
     result = fn(payload);
@@ -68,6 +69,9 @@ function notifyListener(fn, payload) {
   return result;
 }
 
+/**
+ * @template [T=Record<string, any>]
+ */
 export class PowerEventBus {
   /**
    * @param {PowerEventBusOptions} [options] - `maxListeners` caps listeners per
@@ -151,7 +155,7 @@ export class PowerEventBus {
 
   /**
    * Subscribe to an event.
-   * @param {string} event - Event name to subscribe to.
+   * @param {keyof T & string} event - Event name to subscribe to.
    * @param {(payload:any)=>void} fn - Listener function.
    * @returns {() => void} unsubscribe
    * @throws {TypeError} When `fn` is not a function.
@@ -310,7 +314,7 @@ export class PowerEventBus {
 
   /**
    * Subscribe once to an event. Listener is removed after first invocation.
-   * @param {string} event
+   * @param {keyof T & string} event
    * @param {(payload:any)=>void} fn
    * @throws {TypeError} When `fn` is not a function.
    * @returns {() => void} unsubscribe
@@ -336,7 +340,7 @@ export class PowerEventBus {
 
   /**
    * Remove a specific listener for an event.
-   * @param {string} event
+   * @param {keyof T & string} event
    * @param {(payload:any)=>void} fn
    */
   off(event, fn) {
@@ -358,7 +362,7 @@ export class PowerEventBus {
    * reach the process. See {@link notifyListener}, which is where both are
    * observed.
    *
-   * @param {string} event
+   * @param {keyof T & string} event
    * @param {any} [payload]
    * @returns {boolean}
    */
@@ -436,7 +440,7 @@ export class PowerEventBus {
    * Supports bounded concurrency so long listener lists can be processed in
    * batches without flooding the event loop.
    * Errors thrown or rejected by listeners are swallowed.
-   * @param {string} event
+   * @param {keyof T & string} event
    * @param {any} [payload]
    * @param {{concurrency?: number}} [options] - `concurrency` caps how many
    *   listeners are awaited at once (`Infinity`, the default, is unbounded).
@@ -490,7 +494,7 @@ export class PowerEventBus {
 
   /**
    * Return array of listeners for an event (copy).
-   * @param {string} event
+   * @param {keyof T & string} event
    * @returns {SubscriberListener[]}
    */
   listeners(event) {
@@ -504,7 +508,7 @@ export class PowerEventBus {
 
   /**
    * Clear listeners for an event or all events when called without args.
-   * @param {string} [event]
+   * @param {keyof T & string} [event]
    */
   clear(event) {
     if (event === undefined) {

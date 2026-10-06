@@ -89,7 +89,7 @@ number of currently active (dispatched) tasks across all workers
 
 ### \_bus
 
-> **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md)
+> **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md)\<`Record`\<`string`, `any`\>\>
 
 ***
 

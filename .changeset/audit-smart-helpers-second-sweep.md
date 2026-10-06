@@ -11,5 +11,6 @@ Audit `smart.md` and document the enforcement gaps, hidden coupling, race condit
 - **RT-014**: added `nonRetryableCloseCodes` to `PowerWebSocketClient` with `reconnectExhaustedBy: 'close-code'` stats tracking.
 - **RT-003**: added per-topic rate limiting to `PowerRealtimeHub` via `rateLimit` option; drops messages for over-budget topics and increments `stats().rateLimited`.
 - **RT-006**: added `connectionUptime` and `backpressureRatio` to `PowerWebSocketClient.stats()`.
+- **DX-004**: added generic type parameter `T` to `PowerEventBus` with default `Record<string, any>`. Public methods now accept `keyof T & string` for event names, so a typo is caught at compile time. Updated `guides/powerEventBus.md` and added type tests in `test/types.test-d.ts`.
 
 No breaking behaviour changes in this commit; the changeset records the findings and the implementation tasks (T-015–T-042) that follow from them.

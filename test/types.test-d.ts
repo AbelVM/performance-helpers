@@ -257,6 +257,24 @@ bus.on('x', () => {});
 bus.emit('x', { a: 1 });
 bus.dispose();
 
+// DX-004: typed event names catch typos at compile time.
+interface AppEvents {
+  stateChange: { state: string };
+  userLogin: { userId: string };
+}
+const typedBus = new PowerEventBus<AppEvents>();
+typedBus.on('stateChange', ({ state }) => {});
+typedBus.emit('stateChange', { state: 'active' });
+typedBus.once('userLogin', ({ userId }) => {});
+typedBus.emitAsync('userLogin', { userId: 'u1' });
+typedBus.off('stateChange', () => {});
+typedBus.listeners('stateChange');
+typedBus.clear('stateChange');
+// @ts-expect-error 'stateChagne' is not a key of AppEvents.
+typedBus.emit('stateChagne', { state: 'active' });
+// @ts-expect-error 'unknownEvent' is not a key of AppEvents.
+typedBus.on('unknownEvent', () => {});
+
 const observer = new PowerObserver(0);
 observer.subscribe((next: number) => void next);
 // No `next()`: PowerObserver has no externally callable emit. The public surface

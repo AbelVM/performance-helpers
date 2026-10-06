@@ -4,13 +4,23 @@
 
 [performance-helpers](../../../README.md) / [helpers/powerEventBus](../README.md) / PowerEventBus
 
-# Class: PowerEventBus
+# Class: PowerEventBus\<T\>
+
+## Template
+
+**T**
+
+## Type Parameters
+
+### T
+
+`T` = `Record`\<`string`, `any`\>
 
 ## Constructors
 
 ### Constructor
 
-> **new PowerEventBus**(`options?`): `PowerEventBus`
+> **new PowerEventBus**\<`T`\>(`options?`): `PowerEventBus`\<`T`\>
 
 #### Parameters
 
@@ -24,7 +34,7 @@
 
 #### Returns
 
-`PowerEventBus`
+`PowerEventBus`\<`T`\>
 
 ## Properties
 
@@ -205,7 +215,7 @@ Clear listeners for an event or all events when called without args.
 
 ##### event?
 
-`string`
+keyof `T` & `string`
 
 #### Returns
 
@@ -245,7 +255,7 @@ observed.
 
 ##### event
 
-`string`
+keyof `T` & `string`
 
 ##### payload?
 
@@ -270,7 +280,7 @@ Errors thrown or rejected by listeners are swallowed.
 
 ##### event
 
-`string`
+keyof `T` & `string`
 
 ##### payload?
 
@@ -301,7 +311,7 @@ Return array of listeners for an event (copy).
 
 ##### event
 
-`string`
+keyof `T` & `string`
 
 #### Returns
 
@@ -319,7 +329,7 @@ Remove a specific listener for an event.
 
 ##### event
 
-`string`
+keyof `T` & `string`
 
 ##### fn
 
@@ -341,7 +351,7 @@ Subscribe to an event.
 
 ##### event
 
-`string`
+keyof `T` & `string`
 
 Event name to subscribe to.
 
@@ -373,7 +383,7 @@ Subscribe once to an event. Listener is removed after first invocation.
 
 ##### event
 
-`string`
+keyof `T` & `string`
 
 ##### fn
 

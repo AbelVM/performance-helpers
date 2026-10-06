@@ -38,7 +38,7 @@ Use for isolating flaky downstream dependencies and to avoid cascading failures.
 
 ### \_bus
 
-> **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md) \| `null`
+> **\_bus**: [`PowerEventBus`](../../powerEventBus/classes/PowerEventBus.md)\<`Record`\<`string`, `any`\>\> \| `null`
 
 ***
 

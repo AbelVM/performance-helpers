@@ -9,6 +9,32 @@ Typed micro event bus for intra-process pub/sub. Useful for wiring multiple help
 | `maxListeners` |  `number` |     `0` | Maximum listeners per event; `0` means unlimited.                                               |
 | `weak`         | `boolean` | `false` | When `true` listeners are stored as `WeakRef` (when supported) and automatically cleaned by GC. |
 
+## Type-safe event names
+
+`PowerEventBus` accepts an optional generic type parameter that maps event
+names to their payload shapes. When provided, `on`, `emit`, and the other
+public methods only accept event names that exist on the type, so a typo such
+as `bus.emit('stateChagne', ...)` is caught at compile time instead of
+silently dropping the event.
+
+```typescript
+interface AppEvents {
+  stateChange: { state: string };
+  userLogin: { userId: string };
+}
+
+const bus = new PowerEventBus<AppEvents>();
+
+bus.on('stateChange', ({ state }) => {
+  /* ... */
+});
+bus.emit('stateChange', { state: 'active' });
+bus.emit('stateChagne', { state: 'active' }); // Type error: 'stateChagne' is not a key of AppEvents
+```
+
+Without a type argument the bus falls back to the untyped form and accepts any
+string event name, which is the existing runtime behaviour.
+
 ## API
 
 - `on(evt, fn)` — Subscribe to events named `evt`. `fn(payload)` will be called for each emit. Returns an unsubscribe function. Listener errors are swallowed — including a rejection from a listener that returned a promise (see [async listeners](#async-listeners-are-observed-too)).
@@ -102,36 +128,36 @@ thenable — anything with a callable `.then` — is handled the same way, since
 
 `PowerEventBus` coordinates **within one process**. Measured on this build:
 
-| operation                          | ns/op (min / median / max) |
-| ---------------------------------- | -------------------------: |
-| `emit`, 1 listener                  |  34 / **49** / 136         |
-| `emit`, 10 listeners                |  56 / **61** / 124         |
-| `emit`, 100 listeners               | 453 / **482** / 618        |
-| in-process relay (bus → bus)        |  80 / **107** / 284        |
-| a full `BroadcastChannel` relay     | 706 / **856** / 1025       |
+| operation                       | ns/op (min / median / max) |
+| ------------------------------- | -------------------------: |
+| `emit`, 1 listener              |          34 / **49** / 136 |
+| `emit`, 10 listeners            |          56 / **61** / 124 |
+| `emit`, 100 listeners           |        453 / **482** / 618 |
+| in-process relay (bus → bus)    |         80 / **107** / 284 |
+| a full `BroadcastChannel` relay |       706 / **856** / 1025 |
 
 About 4.8 ns per subscriber, one synchronous call, no copies and no serialization
 — a bus was never doing the thing a broadcast channel is good at, which is
-replacing *N posts with 1*. The relay row is the honest comparison: bridging
+replacing _N posts with 1_. The relay row is the honest comparison: bridging
 across a `BroadcastChannel` costs **1.5× the entire 100-listener emit it would be
 replacing**.
 
 Two further costs if you bridge anyway:
 
 - **The obvious bridge is an infinite loop.** `BroadcastChannel` excludes only
-  the *posting* context, not a relay *listener*, so A posts → B's relay fires → B
+  the _posting_ context, not a relay _listener_, so A posts → B's relay fires → B
   posts → A's relay fires, forever. One injected message produced **89 142 posts
   in 300 ms** with two contexts. Damping it needs a per-message origin id and a
   seen-set — a protocol, not an adapter.
 - **`maxListeners` never fires for a remote listener.** The cap is checked when a
-  listener is *added*; a remote one is synthesised inside `emit`. 10 remote emits
+  listener is _added_; a remote one is synthesised inside `emit`. 10 remote emits
   against a `maxListeners: 2` bus produced **zero warnings**, so the leak the cap
   exists to surface is invisible across a boundary.
 
 **Recommendation: do not cross context boundaries with this class.** If you need
 cross-tab eventing, an origin-tagged protocol in the application that needs it
 can answer the membership and loop questions from its own requirements; and for
-cross-*context* fan-out with bounded queues,
+cross-_context_ fan-out with bounded queues,
 [PowerRealtimeHub](powerRealtimeHub.md) is the class whose guarantees are about
 that. See [troubleshooting](troubleshooting.md#a-broadcastchannel-hangs-the-process-or-a-slow-receiver-eats-all-your-memory)
 for the two platform properties that make this counter-intuitive.

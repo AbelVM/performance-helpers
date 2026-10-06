@@ -1282,7 +1282,7 @@ export type PowerCircuitOptions = {
      * - When
      * given, transitions are also emitted on it as `stateChange`.
      */
-    eventBus?: import("./powerEventBus.js").PowerEventBus | undefined;
+    eventBus?: import("./powerEventBus.js").PowerEventBus<Record<string, any>> | undefined;
 };
 /**
  * The three states a `PowerCircuit` moves between.

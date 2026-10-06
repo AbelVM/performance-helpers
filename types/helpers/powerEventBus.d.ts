@@ -1,4 +1,7 @@
-export class PowerEventBus {
+/**
+ * @template [T=Record<string, any>]
+ */
+export class PowerEventBus<T = Record<string, any>> {
     /**
      * @param {PowerEventBusOptions} [options] - `maxListeners` caps listeners per
      *   event (`0`, the default, is unlimited); `weak` stores them behind
@@ -26,12 +29,12 @@ export class PowerEventBus {
     cleanup(): void;
     /**
      * Subscribe to an event.
-     * @param {string} event - Event name to subscribe to.
+     * @param {keyof T & string} event - Event name to subscribe to.
      * @param {(payload:any)=>void} fn - Listener function.
      * @returns {() => void} unsubscribe
      * @throws {TypeError} When `fn` is not a function.
      */
-    on(event: string, fn: (payload: any) => void): () => void;
+    on(event: keyof T & string, fn: (payload: any) => void): () => void;
     /**
      * The live bucket for an event, migrating a legacy plain `Set` of listeners
      * into a `PowerSubscriberSet` the first time it is read.
@@ -73,18 +76,18 @@ export class PowerEventBus {
     _clearWeakListenerEvent(event: string): void;
     /**
      * Subscribe once to an event. Listener is removed after first invocation.
-     * @param {string} event
+     * @param {keyof T & string} event
      * @param {(payload:any)=>void} fn
      * @throws {TypeError} When `fn` is not a function.
      * @returns {() => void} unsubscribe
      */
-    once(event: string, fn: (payload: any) => void): () => void;
+    once(event: keyof T & string, fn: (payload: any) => void): () => void;
     /**
      * Remove a specific listener for an event.
-     * @param {string} event
+     * @param {keyof T & string} event
      * @param {(payload:any)=>void} fn
      */
-    off(event: string, fn: (payload: any) => void): void;
+    off(event: keyof T & string, fn: (payload: any) => void): void;
     /**
      * Emit an event to all subscribers. Returns true if any listeners were notified.
      *
@@ -93,11 +96,11 @@ export class PowerEventBus {
      * reach the process. See {@link notifyListener}, which is where both are
      * observed.
      *
-     * @param {string} event
+     * @param {keyof T & string} event
      * @param {any} [payload]
      * @returns {boolean}
      */
-    emit(event: string, payload?: any): boolean;
+    emit(event: keyof T & string, payload?: any): boolean;
     /**
      * Iterate live listener functions from a bucket without allocating snapshots.
      * @private
@@ -109,26 +112,26 @@ export class PowerEventBus {
      * Supports bounded concurrency so long listener lists can be processed in
      * batches without flooding the event loop.
      * Errors thrown or rejected by listeners are swallowed.
-     * @param {string} event
+     * @param {keyof T & string} event
      * @param {any} [payload]
      * @param {{concurrency?: number}} [options] - `concurrency` caps how many
      *   listeners are awaited at once (`Infinity`, the default, is unbounded).
      * @returns {Promise<boolean>}
      */
-    emitAsync(event: string, payload?: any, { concurrency }?: {
+    emitAsync(event: keyof T & string, payload?: any, { concurrency }?: {
         concurrency?: number;
     }): Promise<boolean>;
     /**
      * Return array of listeners for an event (copy).
-     * @param {string} event
+     * @param {keyof T & string} event
      * @returns {SubscriberListener[]}
      */
-    listeners(event: string): SubscriberListener[];
+    listeners(event: keyof T & string): SubscriberListener[];
     /**
      * Clear listeners for an event or all events when called without args.
-     * @param {string} [event]
+     * @param {keyof T & string} [event]
      */
-    clear(event?: string): void;
+    clear(event?: keyof T & string): void;
     /**
      * Alias for {@link PowerEventBus#clear}.
      *
