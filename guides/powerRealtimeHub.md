@@ -139,7 +139,7 @@ options against this list.
 
 ## API
 
-- `subscribe(topic, handler, options)` → `unsubscribe()`. Options: `maxQueue` (default 64), `slowConsumer`, `maxBatch` (default 32), `id`, `transport`.
+- `subscribe(topic, handler, options)` → `unsubscribe()`. Options: `maxQueue` (default 64), `slowConsumer`, `maxBatch` (default 32), `id`, `transport`, `priority`, `bytesAcknowledged`.
 - `publish(topic, message, { retain })` → number of subscribers queued for. `retain: true` keeps the message for later subscribers, in a log bounded to 32 per topic.
 
   The replay is real and works whether or not anyone was listening when you published — publishing into a topic with no subscribers is the case this option exists for. A new subscriber receives the retained log in publish order, **through the same queue and the same slow-consumer policy as any live delivery**, so a subscriber whose `maxQueue` cannot hold the log drops it by the rules it chose rather than by a second, quieter mechanism. A replay does **not** increment `published`: it is not a publication, and counting it would make that counter jump by the length of every retained log on every `subscribe`. The log is released when the **last** subscriber on that topic leaves — one subscriber unsubscribing does not destroy the history the others still depend on — and `close()` releases the rest.
@@ -205,6 +205,51 @@ The two reconcile, which is what makes the per-subscriber number worth trusting:
 ```javascript
 hub.stats().bytesOut === hub.stats().list.reduce((n, s) => n + s.bytesSent, 0); // true
 ```
+
+### `bytesAcknowledged` — transport-reported acknowledgement
+
+`bytesSent` counts bytes the hub **handed to the adapter**. On HTTP/2 a transport
+reports per-stream acknowledgement, which is a strictly better figure — it
+counts bytes the peer has actually received, not bytes the hub offered. So
+`subscribe()` accepts an optional `bytesAcknowledged` callback:
+
+```javascript
+hub.subscribe('prices', handler, {
+  bytesAcknowledged: (bytes, sub) => gauge.set(sub.id, bytes),
+});
+```
+
+It is a **function, not a number** — a value captured at subscribe time would be
+stale by the next flush. The hub invokes it in the same statement that increments
+`bytesSent`, so the two move together, and it is **per-subscriber**: a callback
+wired up for one subscriber is never invoked for another.
+
+It is optional and the normal case is to omit it. The hub keeps `bytesSent` as
+the floor, so on transports that do not report acknowledgement nothing changes —
+the callback is simply not supplied. `null` is accepted as an explicit
+"not supplied" sentinel, and a non-function is rejected at subscribe time: it
+would be invoked after every flush and would throw, turning a routine delivery
+into an unhandled rejection. A callback that throws is reported through `onError`
+rather than breaking delivery, because a bad accounting callback must not become
+a delivery failure.
+
+### `priority` — drain order
+
+`subscribe()` accepts a `priority` number (default `0`). On every flush,
+subscribers with queued work are visited **highest priority first**, ties broken
+by insertion order. It is a number, not a name, and the hub does not weight or
+decay it — so a caller who sets one subscriber to `1` and everything else to `0`
+has granted that subscriber a permanent advantage. The starvation risk is real
+either way, and it is the reason `priority` is a number rather than a label: a
+hot source stays hot until the caller changes it.
+
+```javascript
+hub.subscribe('alerts', handler, { priority: 10 }); // served before priority-0 peers
+```
+
+`stats().list` reflects `priority` back rather than re-deriving it: it is a value
+the caller supplied, so reporting it is honest and recomputing it would be
+inventing one.
 
 ## Example
 

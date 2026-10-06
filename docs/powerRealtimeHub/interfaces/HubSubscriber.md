@@ -19,6 +19,18 @@ The promise for the send
 
 ***
 
+### bytesAcknowledged?
+
+> `optional` **bytesAcknowledged?**: ((`arg0`, `arg1`) => `void`) \| `null`
+
+**WT-004.** The callback the caller supplied at subscribe time, or
+  `null` when none was supplied — which is the normal case, because the
+  hub's own `bytesSent` is the floor and needs no callback. Invoked
+  after the transport has taken the frame, in the same statement that
+  increments `bytesSent`, so the two move together.
+
+***
+
 ### bytesSent
 
 > **bytesSent**: `number`
@@ -101,8 +113,8 @@ Sends currently awaiting the transport.
 > **priority**: `number`
 
 Drain order. Higher numbers are delivered
-  first; `0` is the default and is indistinguishable from a subscriber that
-  asked for `0`, so the common case stays a stable insertion-order walk.
+first; `0` is the default and is indistinguishable from a subscriber that
+asked for `0`, so the common case stays a stable insertion-order walk.
 
 ***
 

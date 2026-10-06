@@ -383,6 +383,48 @@ Subscriber id.
 
 ***
 
+### \_validateAcknowledged()
+
+> `static` **\_validateAcknowledged**(`fn`): ((`arg0`, `arg1`) => `void`) \| `null`
+
+Validate a `bytesAcknowledged` callback supplied to [subscribe](#subscribe).
+
+WT-004. `bytesAcknowledged` is transport-reported per stream and is a
+strictly better figure than the hub's own `bytesSent` when the connection
+is over HTTP/2 — it counts bytes the peer has actually acknowledged, not
+bytes handed to the adapter. But it is **not** a replacement: it is only
+available on transports that report it, and on others it is absent. So the
+hub keeps `bytesSent` as the floor and exposes this as an **optional**
+callback the caller wires up at subscribe time.
+
+The shape is a function rather than a number, because the value moves:
+a number captured at subscribe time would be stale by the next flush.
+The callback is invoked **after** the transport has taken the frame, in the
+same place `bytesSent` is incremented, so the two move together.
+
+#### Parameters
+
+##### fn
+
+`any`
+
+#### Returns
+
+((`arg0`, `arg1`) => `void`) \| `null`
+
+The callback, or `null`
+  when the caller supplied `null` or `undefined` — both are the "not
+  supplied" sentinel, and the field is typed `function | null` so a caller
+  passing `null` explicitly gets the no-op rather than an error.
+
+#### Throws
+
+When `fn` is not a function and not `null`.
+
+#### Static
+
+***
+
 ### \_validatePriority()
 
 > `static` **\_validatePriority**(`priority`): `number`

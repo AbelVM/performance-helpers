@@ -80,8 +80,14 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {SlowConsumerPolicy} slowConsumer
  * @property {boolean} closed
  * @property {number} priority - Drain order. Higher numbers are delivered
- *   first; `0` is the default and is indistinguishable from a subscriber that
- *   asked for `0`, so the common case stays a stable insertion-order walk.
+ * first; `0` is the default and is indistinguishable from a subscriber that
+ * asked for `0`, so the common case stays a stable insertion-order walk.
+ * @property {((arg0: number, arg1: HubSubscriber) => void)|null} [bytesAcknowledged] -
+ *   **WT-004.** The callback the caller supplied at subscribe time, or
+ *   `null` when none was supplied — which is the normal case, because the
+ *   hub's own `bytesSent` is the floor and needs no callback. Invoked
+ *   after the transport has taken the frame, in the same statement that
+ *   increments `bytesSent`, so the two move together.
  * @property {function(any, HubSubscriber):void} handler - Invoked with each
  *   delivered message, after the transport accepted it, plus the subscriber it
  *   was delivered to. Spelled as a call signature so the two arguments the hub
@@ -107,6 +113,16 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * case stays a stable insertion-order walk. A non-finite value is rejected
  * at subscribe time, because it would coerce to `NaN` and sort to an
  * arbitrary position silently.
+ * @property {((arg0: number, arg1: HubSubscriber) => void)|null} [bytesAcknowledged] -
+ *   **WT-004.** Optional callback reporting bytes the transport has
+ *   *acknowledged* for this subscriber, as opposed to bytes the hub handed
+ *   over. Transport-reported per stream, so on HTTP/2 it matches the hub's
+ *   own `bytesSent`; on transports that do not report it the callback is
+ *   simply not supplied and the hub keeps `bytesSent` as the floor. Invoked
+ *   after the transport has taken the frame, in the same statement that
+ *   increments `bytesSent`, so the two move together. The hub does not
+ *   validate the number the callback reports — it is the caller's transport,
+ *   and the hub's job is to call it, not to audit it.
  * @property {*} [transport] - Carried through to the stored
  * {@link HubSubscriber} untouched, for the caller's own `send`/`close`
  * adapters to use.
@@ -225,6 +241,46 @@ export class PowerRealtimeHub {
       );
     }
     return n;
+  }
+
+  /**
+   * Validate a `bytesAcknowledged` callback supplied to {@link subscribe}.
+   *
+   * WT-004. `bytesAcknowledged` is transport-reported per stream and is a
+   * strictly better figure than the hub's own `bytesSent` when the connection
+   * is over HTTP/2 — it counts bytes the peer has actually acknowledged, not
+   * bytes handed to the adapter. But it is **not** a replacement: it is only
+   * available on transports that report it, and on others it is absent. So the
+   * hub keeps `bytesSent` as the floor and exposes this as an **optional**
+   * callback the caller wires up at subscribe time.
+   *
+   * The shape is a function rather than a number, because the value moves:
+   * a number captured at subscribe time would be stale by the next flush.
+   * The callback is invoked **after** the transport has taken the frame, in the
+   * same place `bytesSent` is incremented, so the two move together.
+   *
+   * @param {*} fn
+   * @returns {((arg0: number, arg1: HubSubscriber) => void)|null} The callback, or `null`
+   *   when the caller supplied `null` or `undefined` — both are the "not
+   *   supplied" sentinel, and the field is typed `function | null` so a caller
+   *   passing `null` explicitly gets the no-op rather than an error.
+   * @throws {TypeError} When `fn` is not a function and not `null`.
+   * @static
+   */
+  static _validateAcknowledged(fn) {
+    // `null` is the explicit "not supplied" sentinel. It is accepted alongside
+    // `undefined` because the field is typed `function | null` and a caller
+    // passing `null` should get the no-op, not a TypeError. Anything else
+    // that is not a function is a caller error: it would be invoked after
+    // every flush and would throw, turning a routine delivery into an
+    // unhandled rejection.
+    if (fn === null || fn === undefined) return null;
+    if (typeof fn !== 'function') {
+      throw new TypeError(
+        'PowerRealtimeHub: `bytesAcknowledged` must be a function or null (got ' + String(fn) + ')'
+      );
+    }
+    return fn;
   }
 
   /**
@@ -357,6 +413,7 @@ export class PowerRealtimeHub {
       maxBatch = 32,
       id,
       priority: rawPriority,
+      bytesAcknowledged: rawAcknowledged,
     } = options || {};
     if (!SLOW_CONSUMER_POLICIES.includes(slowConsumer)) {
       throw new TypeError(
@@ -379,6 +436,14 @@ export class PowerRealtimeHub {
     // indistinguishable from a subscriber that asked for `0`.
     const validatedPriority =
       rawPriority === undefined ? 0 : PowerRealtimeHub._validatePriority(rawPriority);
+    // WT-004: `bytesAcknowledged` is optional. Omitting it (or passing `null`)
+    // is the normal case — the hub keeps its own `bytesSent` as the floor and
+    // nothing else is needed. Supplying a non-function is a caller error: it
+    // would be called after every flush and would throw, turning a routine
+    // delivery into an unhandled rejection. Validate at subscribe time so
+    // the failure is loud and attributable. `_validateAcknowledged` accepts
+    // `null`/`undefined` itself, so the sentinel does not need handling here.
+    const validatedAcknowledged = PowerRealtimeHub._validateAcknowledged(rawAcknowledged);
     // **The `raw` codec check lives here, and this is the only place it can.**
     // `_flushSubscriber` splices the batch off `sub.queue` *before* `_encodeBatch`
     // throws "the `raw` codec delivers one message per frame", so the messages
@@ -414,6 +479,12 @@ export class PowerRealtimeHub {
       // ask for priority is indistinguishable from one that asked for `0`,
       // which is what keeps the common case a stable insertion-order walk.
       priority: validatedPriority,
+      // WT-004: transport-reported acknowledged bytes. `null` when the caller
+      // did not supply a callback, which is the normal case — the hub's own
+      // `bytesSent` is the floor and needs no callback. Stored on the
+      // subscriber rather than read from `options` at flush time because the
+      // callback is per-subscriber and the flush walk already has the sub.
+      bytesAcknowledged: validatedAcknowledged,
       queue: [],
       inFlight: 0,
       /** @type {?Promise<void>} */
@@ -894,6 +965,20 @@ export class PowerRealtimeHub {
     // (it replaced `bytesQueued`, which was initialised to 0 and never written).
     sub.bytesSent += frame.length;
     this._counters.bytesOut += frame.length;
+    // WT-004: if the caller wired up a `bytesAcknowledged` callback, it is
+    // invoked **here**, in the same statement, so it reports the same frame
+    // the hub just handed over. The hub does not validate the number the
+    // callback reports — that is the caller's transport, and the hub's job is
+    // to call it, not to audit it. A callback that throws is reported through
+    // `onError` rather than taking the subscriber down, because a bad
+    // accounting callback must not become a delivery failure.
+    if (sub.bytesAcknowledged) {
+      try {
+        sub.bytesAcknowledged(frame.length, sub);
+      } catch (err) {
+        this._notify(err, sub);
+      }
+    }
 
     const chain = Promise.resolve(result)
       .then(
