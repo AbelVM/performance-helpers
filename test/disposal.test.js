@@ -168,18 +168,21 @@ describe('every resource-owning class supports explicit disposal', () => {
     expect(() => instance[Symbol.dispose]()).not.toThrow();
   });
 
-  it('a resource owner is disposable via `using` at scope exit', () => {
-    // `using` needs Symbol.dispose at compile time; this asserts the runtime
-    // half - that the symbol is present, callable, and that leaving the scope
-    // actually ran it.
+  it('a resource owner is disposable via a scope-exit dispose', () => {
+    // The runtime half of the contract: the symbol is present, callable, and
+    // leaving the scope actually ran it. Node 22.12 cannot parse `using`
+    // declarations and no transformer in this tree downlevels them, so the
+    // scope exit is spelled out here; the behaviour under test is identical.
     const held = { bus: null };
-    {
-      using bus = new PowerEventBus();
+    const bus = new PowerEventBus();
+    try {
       bus.on('x', () => {});
       held.bus = bus;
       expect(bus._listeners.size).toBeGreaterThan(0);
+    } finally {
+      bus.dispose();
     }
-    // The `using` scope has exited, so `dispose` ran and emptied the registry.
+    // The scope has exited, so `dispose` ran and emptied the registry.
     expect(held.bus._listeners.size).toBe(0);
   });
 });

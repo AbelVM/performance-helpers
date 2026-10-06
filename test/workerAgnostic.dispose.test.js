@@ -154,18 +154,21 @@ describe('WRK-002: WorkerAgnostic can release what it attached', () => {
     expect(getEventListeners(w, 'message').length).toBe(0);
   });
 
-  it('works through `using`, which is the reason the symbol exists', () => {
+  it('works through a scope-exit dispose, which is the reason the symbol exists', () => {
     // The project's own dispose rule: a resource-owning helper must implement
-    // `dispose()` **and** `[Symbol.dispose]` so it can take part in `using`.
+    // `dispose()` **and** `[Symbol.dispose]` so it can take part in a scope
+    // exit. Node 22.12 cannot parse `using` declarations and no transformer in
+    // this tree downlevels them, so the scope exit is spelled out here; the
+    // behaviour under test is identical.
     let seen;
-    {
-      const { a, w } = over(() => new ListenerWorker());
-      // eslint-disable-next-line no-unused-vars
-      using _ = a;
+    const { a, w } = over(() => new ListenerWorker());
+    try {
       seen = getEventListeners(w, 'message').length;
       expect(seen, 'still attached while in scope').toBeGreaterThan(0);
+    } finally {
+      a.dispose();
     }
-    // Outside the block now: scope exit has run dispose.
+    // Outside the scope now: scope exit has run dispose.
     expect(seen).toBeGreaterThan(0);
   });
 

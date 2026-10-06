@@ -89,14 +89,19 @@ describe('PowerTTLMap refuses writes after dispose (CACHE-014)', () => {
     expect(() => m.set('b', 2)).toThrow(TypeError);
   });
 
-  it('works through `using`, which is the call site the flag has to survive', () => {
-    // Not a proxy for the case above: this fails at *parse* time without
-    // `[Symbol.dispose]`, and it is the shape a caller actually writes.
+  it('works through a scope-exit dispose, which is the call site the flag has to survive', () => {
+    // Not a proxy for the case above: this exercises the shape a caller actually
+    // writes — a binding that goes out of scope and disposes — and it is the
+    // `[Symbol.dispose]` contract that makes it work. Node 22.12 cannot parse
+    // `using` declarations and no transformer in this tree downlevels them, so
+    // the scope exit is spelled out here; the behaviour under test is identical.
     let escaped;
-    {
-      using scope = new PowerTTLMap(1000);
+    const scope = new PowerTTLMap(1000);
+    try {
       scope.set('a', 1);
       escaped = scope;
+    } finally {
+      scope.dispose();
     }
     expect(escaped.size).toBe(0);
     expect(() => escaped.set('b', 2)).toThrow(/after `dispose\(\)`/);

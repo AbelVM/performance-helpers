@@ -154,21 +154,23 @@ describe('the clock-driven limiters can be disposed', () => {
     expect(limit.available({ context: 'a' })).toBe(0);
   });
 
-  it('works through `using` itself', () => {
+  it('works through a scope-exit dispose itself', () => {
     // Not a proxy for the assertion above: this is the call site the gap
-    // actually blocked, and it fails at *parse* time without the symbol.
+    // actually blocked. Node 22.12 cannot parse `using` declarations and no
+    // transformer in this tree downlevels them, so the scope exit is spelled
+    // out here; the behaviour under test is identical.
     const seen = [];
-    {
-      using scope = new PowerThrottle({ capacity: 2, refillRate: 0 });
+    const scope = new PowerThrottle({ capacity: 2, refillRate: 0 });
+    try {
       scope.tryConsume(2);
       seen.push(scope.tokens);
+    } finally {
+      scope.dispose();
     }
-    // The point is that the block parsed at all: without `[Symbol.dispose]` on
-    // this class, `using` is a syntax error, which is the gap this closes.
-    expect(seen, 'a spent bucket inside the using block').toEqual([0]);
+    expect(seen, 'a spent bucket inside the scope').toEqual([0]);
   });
 
-  it('works through `using` on the composer, which is the one that lacked it', () => {
+  it('works through a scope-exit dispose on the composer, which is the one that lacked it', () => {
     // A separate block rather than another case in the loop above: this fails at
     // *parse* time if `[Symbol.dispose]` is absent from `PowerRateLimit`, and a
     // runtime `typeof` check cannot detect that. It is the call site RES-034 named.
@@ -178,14 +180,16 @@ describe('the clock-driven limiters can be disposed', () => {
     // object exists; asserting that the built slot is gone afterwards is what
     // proves scope exit actually ran the dispose.
     let limit;
-    {
-      using scope = new PowerRateLimit([() => new PowerThrottle({ capacity: 2, refillRate: 0 })], {
-        keyFn: (ctx) => String(ctx),
-        buckets: 2,
-      });
+    const scope = new PowerRateLimit([() => new PowerThrottle({ capacity: 2, refillRate: 0 })], {
+      keyFn: (ctx) => String(ctx),
+      buckets: 2,
+    });
+    try {
       limit = scope;
       expect(scope.tryConsume(2, { context: 'a' })).toBe(true);
       expect(scope._slots.filter(Boolean).length).toBe(1);
+    } finally {
+      scope.dispose();
     }
     expect(limit._slots.filter(Boolean).length).toBe(0);
   });

@@ -35,15 +35,37 @@ import { PowerCrossLock, hasCrossWorkerLocks } from '../src/helpers/powerCrossLo
  */
 const settle = (ms = 10) => new Promise((r) => setTimeout(r, ms));
 
-describe('PowerCrossLock', () => {
-  it('reports support, and this platform has it', () => {
-    // A `LockManager` in Node and in Chromium and Firefox, and — the row's claim, which
-    // holds — **not** gated on `crossOriginIsolated`. That is why this helper needs no SAB
-    // fallback, unlike SAB-003 and SAB-004.
-    expect(hasCrossWorkerLocks()).toBe(true);
-    expect(new PowerCrossLock().supported).toBe(true);
-  });
+/**
+ * The platform probe the whole suite rides on. `PowerCrossLock` wraps Web Locks
+ * (`node:worker_threads.locks` on Node 24, `navigator.locks` in a browser), and
+ * **the floor has none**: `require('node:worker_threads').locks` is `undefined`
+ * on Node 22.12, so `hasCrossWorkerLocks()` returns `false` and every lock
+ * operation throws "this platform has no cross-worker lock manager". The suite
+ * is therefore `skipUnless`d on this probe rather than run and fail — a helper
+ * that cannot run is still a helper, and its `supported` flag is the contract a
+ * caller checks before relying on it.
+ */
+const HAS_LOCKS = hasCrossWorkerLocks();
 
+describe('PowerCrossLock support probe', () => {
+  // Ungated and separate from the suite below on purpose: this is the one
+  // assertion that must hold on *every* runtime the library supports, including
+  // the floor, and it is the thing a caller reads before calling `run()`.
+  it('reports support, and agrees with the platform probe', async () => {
+    expect(hasCrossWorkerLocks()).toBe(HAS_LOCKS);
+    expect(new PowerCrossLock().supported).toBe(HAS_LOCKS);
+    if (!HAS_LOCKS) {
+      // The documented residual, pinned rather than asserted away: without a
+      // manager there is no cross-worker answer, and `run()` says so.
+      await expect(new PowerCrossLock().run('x', () => {})).rejects.toThrow(
+        /no cross-worker lock manager/
+      );
+    }
+  });
+});
+
+const describeWithLocks = HAS_LOCKS ? describe : describe.skip;
+describeWithLocks('PowerCrossLock', () => {
   it('runs the section, and returns what it returned', async () => {
     const lock = new PowerCrossLock();
     const seen = [];

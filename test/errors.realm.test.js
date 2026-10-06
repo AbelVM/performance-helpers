@@ -29,13 +29,23 @@ beforeAll(async () => {
  * reason and prove nothing: the whole defect is that the value is a real `Error`
  * that this realm's `instanceof` rejects.
  *
- * `Error.isError()` — the brand check `errors.js` prefers — is only probed when
- * the runtime has it, so these pass on the `instanceof` fallback too, which is
- * the point: the fix is realm-safety, not a raised floor.
+ * **The cross-realm assertions below are gated on `HAS_IS_ERROR`, and the gate is
+ * load-bearing rather than decorative.** `errors.js` probes `Error.isError` once
+ * at module load and falls back to `instanceof` when the platform lacks it, and
+ * on that floor `instanceof` *is* the realm-unsafe behaviour these tests exist to
+ * catch — so an ungated cross-realm assertion fails there, and the file's own
+ * opening claim that "these pass on the `instanceof` fallback too" was false and
+ * is corrected here. The fix is realm-safety, not a raised floor: on a runtime
+ * without the brand check the shipped answer inherits `instanceof`'s blind spot,
+ * and these rows record that rather than assert it away. `powerLogger.isError`
+ * uses the identical gate for the identical reason.
  */
 let realm;
 /** A real `Error` from another realm: same shape, different prototype. */
 const foreign = (src) => vm.runInContext(src, realm);
+
+/** Whether this runtime actually has `Error.isError` (see `powerLogger.isError`). */
+const HAS_IS_ERROR = typeof Error.isError === 'function';
 
 beforeAll(() => {
   realm = vm.createContext({});
@@ -55,8 +65,10 @@ describe('WRK-007: a cross-realm Error is still an Error', () => {
   it('reports whether the runtime has the brand check, without depending on it', () => {
     // Recorded rather than assumed: `errors.js` probes `Error.isError` once at
     // load, so the sites below take a different path on this machine than on the
-    // declared floor. Both paths must be realm-safe, and only the observable
-    // behaviour is asserted.
+    // declared floor. The assertion is the same on both paths by construction —
+    // it is `true` when the method is absent — so it is not the cross-realm
+    // claim; that one is gated above, and on a runtime without the brand check
+    // the shipped answer is `instanceof`, which is not realm-safe.
     expect(
       typeof Error.isError === 'function' ? Error.isError(foreign('new Error("x")')) : true
     ).toBe(true);
@@ -68,24 +80,32 @@ describe('WRK-007: simpleArgsKey does not collapse cross-realm errors into one k
   // substitutes a message; this one builds a *cache key*, so a wrong answer is a
   // wrong value handed back from `get()`.
 
-  it('gives two different cross-realm errors two different keys', () => {
+  it.runIf(HAS_IS_ERROR)('gives two different cross-realm errors two different keys', () => {
     const a = foreign('new TypeError("user A not found")');
     const b = foreign('new RangeError("user B quota exceeded")');
 
     expect(simpleArgsKey(a)).not.toBe(simpleArgsKey(b));
   });
 
-  it('does not collapse a cross-realm error to the empty object key', () => {
-    // The mechanism, and the reason the collision was total: an `Error`'s
-    // `message` and `stack` are own but **non-enumerable**, so `Object.keys`
-    // returns `[]` and every cross-realm error reached the plain-object branch
-    // and produced `O:{}` — one key for the whole realm.
+  it('leaves a cross-realm Error with no enumerable own keys', () => {
+    // The mechanism, and the reason the collision was total — and realm-independent,
+    // so it is asserted here rather than behind the gate: an `Error`'s `message`
+    // and `stack` are own but **non-enumerable**, so `Object.keys` returns `[]`.
+    // This holds on every runtime the library supports, including the floor.
     const err = foreign('new TypeError("user A not found")');
     expect(Object.keys(err)).toEqual([]);
+  });
+
+  it.runIf(HAS_IS_ERROR)('does not collapse a cross-realm error to the empty object key', () => {
+    // Without the brand check the cross-realm error reached the plain-object
+    // branch and produced `O:{}` — one key for the whole realm. On a runtime
+    // without `Error.isError` there is no realm-safe answer, which is what the
+    // gate records rather than asserts away.
+    const err = foreign('new TypeError("user A not found")');
     expect(simpleArgsKey(err)).not.toBe('O:{}');
   });
 
-  it('keys a cross-realm error exactly as its local twin', () => {
+  it.runIf(HAS_IS_ERROR)('keys a cross-realm error exactly as its local twin', () => {
     // The correct semantics: it *is* the same error. Before the fix this was also
     // `false`, so a cross-realm argument silently missed a populated entry.
     expect(simpleArgsKey(foreign('new TypeError("same")'))).toBe(
@@ -101,7 +121,7 @@ describe('WRK-007: simpleArgsKey does not collapse cross-realm errors into one k
 });
 
 describe('WRK-007: onError receives the caller’s error, not a substitute', () => {
-  it('passes a cross-realm error through PowerCron unchanged', () => {
+  it.runIf(HAS_IS_ERROR)('passes a cross-realm error through PowerCron unchanged', () => {
     // The `powerBulkhead` case verbatim: `new Error(String(err))` stringifies to
     // `"TypeError: …"`, **discards `err.code`**, and hands `onError` an error
     // about the substitute rather than the failure.
@@ -125,7 +145,7 @@ describe('WRK-007: onError receives the caller’s error, not a substitute', () 
 });
 
 describe('WRK-007: an exported series error is the message, not a stringified copy', () => {
-  it('names the failure rather than its class', () => {
+  it.runIf(HAS_IS_ERROR)('names the failure rather than its class', () => {
     const metrics = new MetricsCollector();
     const err = foreign('new RangeError("queue depth probe failed")');
     metrics.register('queue', () => {
@@ -140,7 +160,7 @@ describe('WRK-007: an exported series error is the message, not a stringified co
 });
 
 describe('WRK-007: a framing warning quotes the message, not the class', () => {
-  it('drops the class prefix from the unframed-post warning', () => {
+  it.runIf(HAS_IS_ERROR)('drops the class prefix from the unframed-post warning', () => {
     // `PowerPool._prepareForTransfer` catches a framing failure and warns with
     // `err.message`, so the realm of the *cause* is what decides the answer. A
     // `BigInt` only makes `JSON.stringify` throw a **local** `TypeError`, which

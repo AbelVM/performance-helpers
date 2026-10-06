@@ -2,4 +2,12 @@
 'performance-helpers': minor
 ---
 
-Audit `smart.md` and document the enforcement gaps, hidden coupling, race conditions, default-value traps, test coverage holes, and API inconsistencies found in the second deeper sweep. No behaviour changes in this commit; the changeset records the findings and the implementation tasks (T-015–T-042) that follow from them.
+Audit `smart.md` and document the enforcement gaps, hidden coupling, race conditions, default-value traps, test coverage holes, and API inconsistencies found in the second deeper sweep. Completed implementation tasks from that audit:
+
+- **CQ-002**: deduplicate `getStats()` boilerplate — created `guides/stats-naming.md`, replaced 13 verbose JSDoc blocks across 13 helper files with a 5-line cross-reference.
+- **CQ-004**: document error-code table — created `guides/errors.md` with `## Codes outside the pool` table (10 codes), satisfying `test/errorCodes.test.js`.
+- **DUP-003**: removed local `num()` helper from `normalizeAdaptive()` in `src/helpers/powerBackpressure.js`; replaced with `assertLimitRequired`.
+- **FEAT-004**: refuted — premise inverted. `PowerBatch` does not flush-on-size; it flushes on every microtask. `maxWaitMs` would add latency, not reduce it.
+- **RT-014**: added `nonRetryableCloseCodes` to `PowerWebSocketClient` with `reconnectExhaustedBy: 'close-code'` stats tracking.
+
+No breaking behaviour changes in this commit; the changeset records the findings and the implementation tasks (T-015–T-042) that follow from them.

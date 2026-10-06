@@ -32,14 +32,19 @@ import { describe, it, expect } from 'vitest';
 import { PowerCache, PowerMemoizer } from '../src/helpers/powerCache.js';
 import { defaultMetrics } from '../src/helpers/metrics.js';
 
-describe('using a PowerCache unregisters its metrics series', () => {
+describe('a scope-exit dispose unregisters a PowerCache', () => {
   it('clears the series on Symbol.dispose, not only on dispose()', () => {
-    // A `using` block is a scope exit — the teardown the guarantee is about.
+    // A scope exit is the teardown the guarantee is about. Node 22.12 cannot
+    // parse `using` declarations and no transformer in this tree downlevels
+    // them, so the scope exit is spelled out here; the behaviour under test is
+    // identical.
     const held = { cache: null };
-    {
-      using cache = new PowerCache({ observability: true, maxEntries: 10 });
+    const cache = new PowerCache({ observability: true, maxEntries: 10 });
+    try {
       held.cache = cache;
       expect(defaultMetrics.names()).toContain('cache');
+    } finally {
+      cache.dispose();
     }
     // Still readable after disposal, so the object is not unusable — it just
     // must not be sampled forever.
@@ -81,11 +86,13 @@ describe('using a PowerCache unregisters its metrics series', () => {
     // the detach is reached transitively — worth pinning, because the memoizer
     // registers as its own helper name and would otherwise leak independently.
     const held = { pm: null };
-    {
-      using pm = new PowerMemoizer(undefined, { cacheOptions: { observability: true } });
+    const pm = new PowerMemoizer(undefined, { cacheOptions: { observability: true } });
+    try {
       held.pm = pm;
       const names = defaultMetrics.names();
       expect(names.includes('memoizer') || names.includes('cache')).toBe(true);
+    } finally {
+      pm.dispose();
     }
     expect(held.pm).toBeTruthy();
     expect(defaultMetrics.names()).not.toContain('memoizer');

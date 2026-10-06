@@ -385,15 +385,19 @@ describe('PowerSocketAdapter dispose', () => {
     expect(onMessage).not.toHaveBeenCalled();
   });
 
-  it('is idempotent and supports `using`', () => {
+  it('is idempotent and supports a scope-exit dispose', () => {
     const ws = new FakeWsSocket();
     const adapter = new PowerSocketAdapter(ws, {});
     adapter.dispose();
     expect(() => adapter.dispose()).not.toThrow();
     expect(adapter[Symbol.dispose]).toBeInstanceOf(Function);
     expect(() => {
-      using scoped = new PowerSocketAdapter(new FakeWsSocket(), {});
-      expect(scoped).toBeInstanceOf(PowerSocketAdapter);
+      const scoped = new PowerSocketAdapter(new FakeWsSocket(), {});
+      try {
+        expect(scoped).toBeInstanceOf(PowerSocketAdapter);
+      } finally {
+        scoped.dispose();
+      }
     }).not.toThrow();
   });
 

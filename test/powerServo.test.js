@@ -426,14 +426,16 @@ describe('PowerServo', () => {
       expect(servo.integral).toBe(0);
     });
 
-    it('has Symbol.dispose, so it works with `using`', () => {
+    it('has Symbol.dispose, and a scope-exit dispose resets it', () => {
       expect(typeof PowerServo.prototype[Symbol.dispose]).toBe('function');
       let captured;
-      {
-        using servo = new PowerServo({ setpoint: 10, kp: 1, ki: 1, min: -1e9, max: 1e9 });
+      const servo = new PowerServo({ setpoint: 10, kp: 1, ki: 1, min: -1e9, max: 1e9 });
+      try {
         captured = servo;
         servo.step(0, 1);
         expect(captured.integral).toBe(10);
+      } finally {
+        servo.dispose();
       }
       expect(captured.integral).toBe(0);
     });

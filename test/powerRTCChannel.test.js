@@ -426,13 +426,15 @@ describe('PowerRTCChannel close and dispose', () => {
     expect(channel.send(frame(4))).toBe(false);
   });
 
-  it('works as a `using` resource', () => {
+  it('works as a scope-exit resource', () => {
     const dc = new FakeDataChannel();
     let seen;
-    {
-      using channel = new PowerRTCChannel(dc);
+    const channel = new PowerRTCChannel(dc);
+    try {
       seen = channel;
       expect(channel.isOpen).toBe(true);
+    } finally {
+      channel.dispose();
     }
     expect(seen.isOpen).toBe(false);
     expect(dc.totalListeners()).toBe(0);

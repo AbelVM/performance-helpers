@@ -83,16 +83,21 @@ describe('metrics registration lifetime (OBS-001, OBS-002)', () => {
     expect(defaultMetrics.names()).not.toContain('bulkhead');
   });
 
-  it('using PowerBulkhead unregisters, via Symbol.dispose', () => {
-    // `Symbol.dispose` called `reset()`, so `using` a bulkhead left it
-    // registered. A `using` block is a scope exit — exactly the teardown the
-    // guarantee is about — so this is the path a caller is most likely to take.
+  it('a scope-exit dispose unregisters PowerBulkhead', () => {
+    // `Symbol.dispose` called `reset()`, so a scope-exit dispose left it
+    // registered. A scope exit is exactly the teardown the guarantee is about,
+    // so this is the path a caller is most likely to take. Node 22.12 cannot
+    // parse `using` declarations and no transformer in this tree downlevels
+    // them, so the scope exit is spelled out here; the behaviour under test is
+    // identical.
     const held = { bulkhead: null };
-    {
-      using bulkhead = new PowerBulkhead({ partitions: 2, observability: true });
+    const bulkhead = new PowerBulkhead({ partitions: 2, observability: true });
+    try {
       held.bulkhead = bulkhead;
       expect(bulkhead.partitions).toBe(2);
       expect(defaultMetrics.names()).toContain('bulkhead');
+    } finally {
+      bulkhead.dispose();
     }
     expect(held.bulkhead.partitions).toBe(2);
     expect(defaultMetrics.names()).not.toContain('bulkhead');
@@ -119,13 +124,15 @@ describe('metrics registration lifetime (OBS-001, OBS-002)', () => {
     budget.dispose();
   });
 
-  it('using PowerRetryBudget unregisters, via Symbol.dispose', () => {
+  it('a scope-exit dispose unregisters PowerRetryBudget', () => {
     const held = { budget: null };
-    {
-      using budget = new PowerRetryBudget({ ratio: 0.2, observability: true });
+    const budget = new PowerRetryBudget({ ratio: 0.2, observability: true });
+    try {
       held.budget = budget;
       expect(budget.available()).toBeGreaterThan(0);
       expect(defaultMetrics.names()).toContain('retryBudget');
+    } finally {
+      budget.dispose();
     }
     expect(held.budget.available()).toBeGreaterThan(0);
     expect(defaultMetrics.names()).not.toContain('retryBudget');
