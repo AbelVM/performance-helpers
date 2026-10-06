@@ -2,6 +2,18 @@ import { describe, it, expect } from 'vitest';
 import vm from 'node:vm';
 import { PowerBulkhead } from '../src/index.js';
 
+/**
+ * Whether this runtime actually has the brand check the cross-realm assertions
+ * below depend on. `errors.js` probes `Error.isError` once at load and falls
+ * back to `instanceof` when the platform lacks it — and on that floor
+ * `instanceof` *is* the realm-unsafe behaviour these tests exist to catch, so
+ * an ungated cross-realm assertion fails there. The gate is load-bearing, not
+ * decorative: it records that the fix is realm-safety, not a raised floor.
+ * `powerLogger.isError.test.js` uses the identical gate for the identical
+ * reason.
+ */
+const HAS_IS_ERROR = typeof Error.isError === 'function';
+
 // The one remaining `instanceof Error` in the class, found by the same
 // reasoning that closed the `abortReason()` defect in GAP-012 rather than by a
 // failing test.
@@ -59,17 +71,27 @@ describe("PowerBulkhead#reset: the caller's reason reaches the waiter intact", (
     expect(seen.message).toBe('maintenance window');
   });
 
-  it("keeps a cross-realm reason's code and message", async () => {
-    // The defect. A `vm`-created error is a perfectly good Error; `instanceof`
-    // says otherwise only because it compares against *this* realm's prototype.
+  it('a cross-realm error is still not an Error in this realm', () => {
+    // The premise, pinned so the claim below cannot pass for the wrong reason:
+    // if this were same-realm the test would prove nothing. Realm-independent,
+    // so ungated — `instanceof` is false across realms on every runtime.
     const foreign = vm.runInNewContext(
       'const e = new Error("foreign reason"); e.code = "FOREIGN_CODE"; e'
     );
-    // The premise, pinned so the test cannot pass for the wrong reason: if this
-    // were same-realm, the test above would prove nothing.
     expect(foreign instanceof Error).toBe(false);
     expect(foreign.code).toBe('FOREIGN_CODE');
+  });
 
+  it.runIf(HAS_IS_ERROR)("keeps a cross-realm reason's code and message", async () => {
+    // The defect. A `vm`-created error is a perfectly good Error; `instanceof`
+    // says otherwise only because it compares against *this* realm's prototype.
+    // Gated on the brand check the fix depends on: on a runtime without
+    // `Error.isError` the shipped answer inherits `instanceof`'s blind spot and
+    // substitutes a stamped error, which is the behaviour this row exists to
+    // remove. The premise itself is pinned by the test above.
+    const foreign = vm.runInNewContext(
+      'const e = new Error("foreign reason"); e.code = "FOREIGN_CODE"; e'
+    );
     const seen = await reasonGivenToGate(foreign);
     expect(seen.code).toBe('FOREIGN_CODE');
     expect(seen.message).toBe('foreign reason');

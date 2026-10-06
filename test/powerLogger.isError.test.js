@@ -229,7 +229,7 @@ describe('powerLogger.error() - realm-safe, and pinned as such', () => {
     return { log, seen };
   }
 
-  it('formats a cross-realm Error identically to a local one', () => {
+  it.runIf(HAS_IS_ERROR)('formats a cross-realm Error identically to a local one', () => {
     const { log, seen } = capturingLogger();
     log.error(foreignError('TypeError', 'same message'));
     log.error(new TypeError('same message'));
