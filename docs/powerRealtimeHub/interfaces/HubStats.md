@@ -48,6 +48,14 @@ Total messages accepted by `publish`.
 
 ***
 
+### rateLimited
+
+> **rateLimited**: `number`
+
+Total messages dropped by the rate limiter.
+
+***
+
 ### subscribers
 
 > **subscribers**: `number`

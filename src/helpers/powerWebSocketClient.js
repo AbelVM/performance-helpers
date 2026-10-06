@@ -660,6 +660,10 @@ export class PowerWebSocketClient {
     this._heartbeatDeadline = null;
     this._reconnectTimer = null;
     this._paused = false;
+    // RT-006: connection quality metrics.
+    this._connectedAt = 0;
+    this._pausedAt = 0;
+    this._totalPausedMs = 0;
     this._lastPollInterval = this._pollBase;
     this._lastPongAt = 0;
     this._pingSentAt = 0;
@@ -991,6 +995,15 @@ export class PowerWebSocketClient {
         // is the honest answer: unmeasured is not zero.
         canPing: typeof this._socket?.ping === 'function',
       },
+      // RT-006: connection quality metrics.
+      connectionUptime: this._connectedAt ? nowMs() - this._connectedAt : 0,
+      backpressureRatio: (() => {
+        if (!this._connectedAt) return 0;
+        const pausedMs =
+          this._totalPausedMs + (this._paused && this._pausedAt ? nowMs() - this._pausedAt : 0);
+        const uptime = nowMs() - this._connectedAt;
+        return uptime > 0 ? pausedMs / uptime : 0;
+      })(),
     };
   }
 
@@ -1212,6 +1225,10 @@ export class PowerWebSocketClient {
     this._reconnectExhaustedBy = null;
     this._lastPollInterval = this._pollBase;
     this._lastPongAt = nowMs();
+    // RT-006: connection quality metrics. `_connectedAt` is the timestamp of the
+    // current open, used to compute `connectionUptime` and as the denominator for
+    // `backpressureRatio`.
+    this._connectedAt = nowMs();
     this._schedulePoll();
     this._scheduleHeartbeat();
     this._emit('open', this);
@@ -1475,6 +1492,11 @@ export class PowerWebSocketClient {
     this._setPaused(false);
     this._writer = null;
     this._streamReader = null;
+    // RT-006: clear connection-quality anchors so `stats()` reports 0 / `null`
+    // for uptime and ratio after the socket is closed.
+    this._connectedAt = 0;
+    this._pausedAt = 0;
+    this._totalPausedMs = 0;
     this._state = READY_STATE.CLOSED;
     // RT-036. **The teardown above is synchronous; the notification below is ordered.**
     //
@@ -1653,6 +1675,13 @@ export class PowerWebSocketClient {
   _setPaused(paused) {
     if (this._paused === paused) return;
     this._paused = paused;
+    // RT-006: accumulate paused duration for `backpressureRatio`.
+    if (paused) {
+      this._pausedAt = nowMs();
+    } else if (this._pausedAt) {
+      this._totalPausedMs += nowMs() - this._pausedAt;
+      this._pausedAt = 0;
+    }
     // Reset the back-off when resuming so the next pause polls promptly.
     if (!paused) this._lastPollInterval = this._pollBase;
     this._emit(paused ? 'pause' : 'resume', this);

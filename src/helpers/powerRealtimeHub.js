@@ -131,6 +131,7 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {number} published - Total messages accepted by `publish`.
  * @property {number} delivered - Total messages handed to a `send` adapter.
  * @property {number} dropped - Total messages discarded by a policy.
+ * @property {number} rateLimited - Total messages dropped by the rate limiter.
  * @property {number} disconnected - Subscribers closed for falling behind.
  * @property {number} bytesOut - Approximate bytes handed to the adapter.
  */
@@ -165,6 +166,11 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {'json'|'raw'} [codec='json'] - Payload codec for outgoing frames.
  * @property {function(Error, object):void} [onError] - Called when the `send`
  *   adapter rejects or throws, instead of leaving an unhandled rejection.
+ * @property {import('./powerRateLimit.js').PowerRateLimit|null} [rateLimit] - Optional
+ *   per-topic rate limiter. When set, `publish()` calls `tryConsume(1, { context:
+ *   { topic } })` before enqueuing; a `false` return drops the message for that
+ *   topic and increments `stats().rateLimited`. The caller is expected to configure
+ *   `keyFn` on the `PowerRateLimit` so the topic is routed to its own limiter slot.
  */
 
 let _nextSubId = 0;
@@ -238,6 +244,8 @@ export class PowerRealtimeHub {
     this._subs = new Map();
     /** @type {Map<string, any[]>} topic -> retained messages (bounded) */
     this._retained = new Map();
+    /** @type {import('./powerRateLimit.js').PowerRateLimit|null} */
+    this._rateLimit = null;
     this._flushScheduled = false;
     this._flushTimer = null;
     this._closed = false;
@@ -249,6 +257,7 @@ export class PowerRealtimeHub {
       disconnected: 0,
       bytesOut: 0,
       encoded: 0,
+      rateLimited: 0,
     };
     // RT-006: one encoded frame per `(topic, batch)` instead of one per
     // subscriber. The memo is a **single entry**, which is the right shape for the
@@ -432,6 +441,15 @@ export class PowerRealtimeHub {
     // write with no dependency on `bucket`.
     if (options?.retain) this._retain(topic, message);
     if (!bucket || bucket.size === 0) return 0;
+    // RT-003: per-topic rate limiting. Check before enqueuing so a noisy
+    // publisher cannot fan out to N subscribers when the topic is over budget.
+    if (this._rateLimit) {
+      const outcome = this._rateLimit.tryConsume(1, { context: { topic } });
+      if (!outcome) {
+        this._counters.rateLimited += 1;
+        return 0;
+      }
+    }
 
     let queued = 0;
     for (const sub of bucket.values()) {

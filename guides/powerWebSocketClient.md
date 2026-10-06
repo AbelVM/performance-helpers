@@ -267,7 +267,7 @@ A measured cost was never the objection — `arrayBuffer()` is ~0.045 ms for a 6
 - `await client[Symbol.asyncDispose]()` — present so `await using` works. **A delegation to `dispose()`, not a graceful path**: this client's teardown is `close()`, which is synchronous and already complete, so there is nothing to await. Compare `PowerRealtimeHub`, whose `asyncDispose` flushes pending frames first because it has some.
 - `on(type, handler)` → one-shot unsubscribe; `off(type)`. Types: `message`, `open`, `close`, `error`, `pause`, `resume`. One handler per event; registering again replaces.
 - `ping()` — application-level ping, for protocols that expose one.
-- `stats()` → `{ readyState, backpressureMode, paused, bufferedAmount, highWaterMark, lowWaterMark, reconnectAttempts, reconnectExhaustedBy, sent, received, drops, decodeErrors, oversizeFrames, reconnects, heartbeatTimeouts, heartbeats, rtt }`. `reconnectExhaustedBy` is `'attempts'`, `'elapsed'`, `'close-code'`, or `null`.
+- `stats()` → `{ readyState, backpressureMode, paused, bufferedAmount, highWaterMark, lowWaterMark, reconnectAttempts, reconnectExhaustedBy, sent, received, drops, decodeErrors, oversizeFrames, reconnects, heartbeatTimeouts, heartbeats, rtt, connectionUptime, backpressureRatio }`. `reconnectExhaustedBy` is `'attempts'`, `'elapsed'`, `'close-code'`, or `null`. `connectionUptime` is ms since the current open; `backpressureRatio` is the fraction of that time the producer was paused.
 - Getters: `isOpen`, `paused`, `bufferedAmount`, `readyState`, `backpressureMode`.
 
 ## Error handling

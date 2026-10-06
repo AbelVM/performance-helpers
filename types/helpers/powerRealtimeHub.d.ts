@@ -7,6 +7,7 @@ export class PowerRealtimeHub {
     /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
     /** @type {Map<string, HubSubscriber>} subscriberId -> sub */
     /** @type {Map<string, any[]>} topic -> retained messages (bounded) */
+    /** @type {import('./powerRateLimit.js').PowerRateLimit|null} */
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -324,6 +325,10 @@ export type HubStats = {
      */
     dropped: number;
     /**
+     * - Total messages dropped by the rate limiter.
+     */
+    rateLimited: number;
+    /**
      * - Subscribers closed for falling behind.
      */
     disconnected: number;
@@ -382,4 +387,12 @@ export type HubOptions = {
      * adapter rejects or throws, instead of leaving an unhandled rejection.
      */
     onError?: ((arg0: Error, arg1: object) => void) | undefined;
+    /**
+     * - Optional
+     * per-topic rate limiter. When set, `publish()` calls `tryConsume(1, { context:
+     * { topic } })` before enqueuing; a `false` return drops the message for that
+     * topic and increments `stats().rateLimited`. The caller is expected to configure
+     * `keyFn` on the `PowerRateLimit` so the topic is routed to its own limiter slot.
+     */
+    rateLimit?: import("./powerRateLimit.js").PowerRateLimit | null | undefined;
 };

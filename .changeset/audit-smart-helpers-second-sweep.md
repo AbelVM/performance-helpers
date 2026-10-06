@@ -9,5 +9,7 @@ Audit `smart.md` and document the enforcement gaps, hidden coupling, race condit
 - **DUP-003**: removed local `num()` helper from `normalizeAdaptive()` in `src/helpers/powerBackpressure.js`; replaced with `assertLimitRequired`.
 - **FEAT-004**: refuted — premise inverted. `PowerBatch` does not flush-on-size; it flushes on every microtask. `maxWaitMs` would add latency, not reduce it.
 - **RT-014**: added `nonRetryableCloseCodes` to `PowerWebSocketClient` with `reconnectExhaustedBy: 'close-code'` stats tracking.
+- **RT-003**: added per-topic rate limiting to `PowerRealtimeHub` via `rateLimit` option; drops messages for over-budget topics and increments `stats().rateLimited`.
+- **RT-006**: added `connectionUptime` and `backpressureRatio` to `PowerWebSocketClient.stats()`.
 
 No breaking behaviour changes in this commit; the changeset records the findings and the implementation tasks (T-015–T-042) that follow from them.

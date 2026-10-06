@@ -96,6 +96,18 @@ Called when the `send`
 
 ***
 
+### rateLimit?
+
+> `optional` **rateLimit?**: [`PowerRateLimit`](../../helpers/powerRateLimit/classes/PowerRateLimit.md) \| `null`
+
+Optional
+  per-topic rate limiter. When set, `publish()` calls `tryConsume(1, { context:
+  { topic } })` before enqueuing; a `false` return drops the message for that
+  topic and increments `stats().rateLimited`. The caller is expected to configure
+  `keyFn` on the `PowerRateLimit` so the topic is routed to its own limiter slot.
+
+***
+
 ### send
 
 > **send**: (`arg0`, `arg1`) => `void` \| `Promise`\<`void`\>

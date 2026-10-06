@@ -85,6 +85,10 @@
 
 > **published**: `number` = `0`
 
+#### rateLimited
+
+> **rateLimited**: `number` = `0`
+
 ***
 
 ### \_flushScheduled
@@ -132,6 +136,12 @@
 ### \_onError
 
 > **\_onError**: ((`arg0`, `arg1`) => `void`) \| `null`
+
+***
+
+### \_rateLimit
+
+> **\_rateLimit**: [`PowerRateLimit`](../../helpers/powerRateLimit/classes/PowerRateLimit.md) \| `null`
 
 ***
 

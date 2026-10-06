@@ -48,6 +48,12 @@
 
 ***
 
+### \_connectedAt
+
+> **\_connectedAt**: `number`
+
+***
+
 ### \_connectTimeoutMs
 
 > **\_connectTimeoutMs**: `number`
@@ -218,6 +224,12 @@
 
 ***
 
+### \_pausedAt
+
+> **\_pausedAt**: `number`
+
+***
+
 ### \_pingSentAt
 
 > **\_pingSentAt**: `number`
@@ -313,6 +325,12 @@ decorrelated-jitter backoff cursor, in ms
 ### \_streamReader
 
 > **\_streamReader**: `ReadableStreamDefaultReader`\<`any`\> \| `null`
+
+***
+
+### \_totalPausedMs
+
+> **\_totalPausedMs**: `number`
 
 ***
 
