@@ -32,11 +32,17 @@ export type PostMessageOptions = {
      * inert, so a pool that has not opted in pays a Map lookup and nothing else. The key is claimed
      * `in-flight` before dispatch and marked `settled` once the task is on its way, which is what
      * separates a concurrent duplicate (nothing has run yet) from a retry across a timeout
-     * (something almost certainly has). A post the pool *refuses* releases the claim instead of
+     * (something almost certainly has). A post the pool *refuses* releases its claim instead of
      * settling it, so a rejected post can be retried. `string|number` because the pool coerces with
      * `String()`.
      */
     idempotencyKey?: string | number | undefined;
+    /**
+     * - Task priority for queue ordering. Higher values are
+     * dispatched before lower values when the pool is saturated. Tasks with the same
+     * priority maintain FIFO order. Defaults to `0`.
+     */
+    priority?: number | undefined;
 };
 /**
  * Entry used to track pending responses for `awaitResponse` callers.

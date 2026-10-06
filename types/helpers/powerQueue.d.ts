@@ -164,6 +164,32 @@ export class PowerQueue {
      */
     get totalWeight(): number;
     /**
+     * Remove the item at logical index `index` (0 = head) and shift subsequent
+     * items forward to fill the gap. Returns the removed item, or `undefined` if
+     * the index is out of range.
+     *
+     * This is O(n) in the number of items after the removed index, which is the
+     * same cost as `shift()` when the head is removed and acceptable for the
+     * bounded queues this helper is designed for.
+     *
+     * @param {number} index - Logical index from the head (0-based).
+     * @returns {any|undefined}
+     */
+    removeAt(index: number): any | undefined;
+    /**
+     * Remove and return the item with the highest priority according to
+     * `priorityFn`. When multiple items share the same priority, the one closest
+     * to the head (lowest logical index) is returned, preserving FIFO order among
+     * equal-priority items.
+     *
+     * Returns `undefined` when the queue is empty.
+     *
+     * @param {(item: any) => number} priorityFn - Function that returns a numeric
+     *   priority for an item. Higher numbers win.
+     * @returns {any|undefined}
+     */
+    shiftHighestPriority(priorityFn: (item: any) => number): any | undefined;
+    /**
      * Prepend multiple items to the head of the queue.
      * The first element of `items` will become the next value returned by `shift()`.
      * @param {Array<any>} items

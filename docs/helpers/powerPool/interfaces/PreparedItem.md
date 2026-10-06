@@ -25,6 +25,16 @@ The value to post. A `Uint8Array` under a framing codec,
 
 ***
 
+### priority?
+
+> `optional` **priority?**: `number`
+
+Task priority for queue ordering. Higher values
+  are dispatched before lower values when the pool is saturated. Defaults to `0`
+  when absent.
+
+***
+
 ### transfer
 
 > **transfer**: `TransferList` \| `undefined`

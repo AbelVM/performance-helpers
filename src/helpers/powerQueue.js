@@ -397,6 +397,63 @@ export class PowerQueue {
   }
 
   /**
+   * Remove the item at logical index `index` (0 = head) and shift subsequent
+   * items forward to fill the gap. Returns the removed item, or `undefined` if
+   * the index is out of range.
+   *
+   * This is O(n) in the number of items after the removed index, which is the
+   * same cost as `shift()` when the head is removed and acceptable for the
+   * bounded queues this helper is designed for.
+   *
+   * @param {number} index - Logical index from the head (0-based).
+   * @returns {any|undefined}
+   */
+  removeAt(index) {
+    if (index < 0 || index >= this._size) return undefined;
+    const buf = this._buffer;
+    const mask = this._mask;
+    const head = this._head;
+    const removed = buf[(head + index) & mask];
+    // shift everything after `index` forward by one slot
+    for (let i = index; i < this._size - 1; i++) {
+      buf[(head + i) & mask] = buf[(head + i + 1) & mask];
+    }
+    // clear the now-vacant tail slot
+    const tail = (head + this._size - 1) & mask;
+    buf[tail] = undefined;
+    this._tail = tail;
+    this._size--;
+    this._totalWeight -= itemWeight(removed);
+    return removed;
+  }
+
+  /**
+   * Remove and return the item with the highest priority according to
+   * `priorityFn`. When multiple items share the same priority, the one closest
+   * to the head (lowest logical index) is returned, preserving FIFO order among
+   * equal-priority items.
+   *
+   * Returns `undefined` when the queue is empty.
+   *
+   * @param {(item: any) => number} priorityFn - Function that returns a numeric
+   *   priority for an item. Higher numbers win.
+   * @returns {any|undefined}
+   */
+  shiftHighestPriority(priorityFn) {
+    if (this._size === 0) return undefined;
+    let bestIdx = 0;
+    let bestPri = priorityFn(this._buffer[this._head & this._mask]);
+    for (let i = 1; i < this._size; i++) {
+      const pri = priorityFn(this._buffer[(this._head + i) & this._mask]);
+      if (pri > bestPri) {
+        bestPri = pri;
+        bestIdx = i;
+      }
+    }
+    return this.removeAt(bestIdx);
+  }
+
+  /**
    * Prepend multiple items to the head of the queue.
    * The first element of `items` will become the next value returned by `shift()`.
    * @param {Array<any>} items

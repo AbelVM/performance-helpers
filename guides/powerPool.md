@@ -17,6 +17,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 | `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                                                                                                                           |
 | `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                                                                                                                       |
 | `options.maxQueueLength`                                |                                            `number` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                                                                                                                        |
+| `options.priority`                                      |                                            `number` |                                            `0` | Default task priority for queued messages. Higher values are dispatched before lower values when the pool is saturated. Tasks with the same priority maintain FIFO order. Can be overridden per-message via `postMessage(msg, transfer, { priority })`. See [Task priority](#task-priority).                                                                                                                                             |
 | `options.maxDrainWaiters`                               |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be _waiting_ at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners.                                                                                                                                                                                                                                    |
 | `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                                                                                                                            |
 | `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                                                                                                                                     |
@@ -195,6 +196,31 @@ try {
 A batch is capped as a group: if 8 of 10 items do not fit, the first 2 are queued and the remaining 8 slots in the result array are `false`. The pool does not queue what fits and then silently drop the rest.
 
 If you would rather be **told** about pressure without refusing anything, set `options.queueHighThreshold` instead. It emits `pool:queue:high` on the first crossing (and not again until the queue drains back below it) and changes nothing else — see [Events and handlers](#events-and-handlers). The two compose: use the threshold for alerting, the cap for safety.
+
+## Task priority
+
+When the pool is saturated and tasks are queued, `PowerPool` dispatches them in priority order rather than pure FIFO. Set a default for all posts with `options.priority` in the constructor, or override per-message with the third argument to `postMessage`:
+
+```js
+const pool = new PowerPool(WorkerScript, {
+  taskQueue: true,
+  priority: 0, // default for every post
+});
+
+// high-priority work jumps ahead of the default-priority backlog
+pool.postMessage(urgentTask, undefined, { priority: 10 });
+pool.postMessage(normalTask); // priority 0
+```
+
+**Rules:**
+
+- Higher numbers run first. `priority: 10` jumps ahead of `priority: 0`.
+- Equal-priority tasks keep FIFO order. Two posts with the same priority run in the order they arrived.
+- The default is `0`. Omitting `priority` is the same as `0`.
+- Priority is a property of the queued item, not the pool. Every post can choose its own priority regardless of the constructor default.
+- Priority composes with `queuePolicy`. `drop-oldest` still evicts the oldest entry when over `maxQueueLength`; `drop-newest` and `reject` still refuse the newcomer. Priority only changes the order in which queued items are _dispatched_, not which items are _admitted_ or _dropped_.
+
+**Batch posts.** `postMessageBatch` accepts `options.priority` and applies it to every item in the batch. Individual items cannot carry different priorities in the same batch — if you need mixed priorities, post them in separate batches or individual posts.
 
 ## Autoscaling
 

@@ -1159,6 +1159,12 @@ export type PreparedItem = {
      * - Framing is still owed; see above.
      */
     deferred?: boolean | undefined;
+    /**
+     * - Task priority for queue ordering. Higher values
+     * are dispatched before lower values when the pool is saturated. Defaults to `0`
+     * when absent.
+     */
+    priority?: number | undefined;
 };
 export type WorkerLike = import("./jsdoc-types.js").WorkerLike;
 export type WorkerObj = import("./jsdoc-types.js").WorkerObj;

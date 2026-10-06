@@ -120,6 +120,9 @@ function poolRefusal(code, message) {
  *   `message` is a shared buffer: a transfer list detaches its entries, and a
  *   detached cache entry is the bug `clone` exists to avoid.
  * @property {boolean} [deferred] - Framing is still owed; see above.
+ * @property {number} [priority] - Task priority for queue ordering. Higher values
+ *   are dispatched before lower values when the pool is saturated. Defaults to `0`
+ *   when absent.
  */
 
 /**
@@ -423,6 +426,7 @@ export class PowerPool {
         'encodeCacheLimit',
         'encodeCacheByteLimit',
         'idempotencyTtlMs',
+        'priority',
       ],
       'PowerPool'
     );
@@ -1426,7 +1430,7 @@ export class PowerPool {
    *   which is the shape of the POOL-003 defect.
    * @private
    */
-  _enqueueOrReject(prepared, wantResponse, correlationKey, pendingPromise) {
+  _enqueueOrReject(prepared, wantResponse, correlationKey, pendingPromise, options) {
     const policy = this._queuePolicy;
     if (policy === 'reject') {
       if (wantResponse && correlationKey) {
@@ -1473,14 +1477,11 @@ export class PowerPool {
       }
       return false;
     }
-    /** @type {PreparedItem & {correlationId?: string}} */
+    /** @type {PreparedItem & {correlationId?: string, priority?: number}} */
     const queuedItem = { message: prepared.message, transfer: prepared.transfer };
-    // A deferred item is still un-encoded, and the drain site resolves the
-    // carrier for whichever worker ends up taking it. Dropping this flag would
-    // post the caller's object raw, which is the one outcome negotiation is not
-    // allowed to produce.
     if (prepared.deferred === true) queuedItem.deferred = true;
     if (wantResponse && correlationKey) queuedItem.correlationId = correlationKey;
+    if (options?.priority != null) queuedItem.priority = options.priority;
     this.queue.push(queuedItem);
     try {
       if (
@@ -2533,7 +2534,7 @@ export class PowerPool {
         this.queue.length > 0 &&
         workerObj.tasks < this._maxTasksPerWorker
       ) {
-        const item = this.queue.shift();
+        const item = this.queue.shiftHighestPriority((item) => item.priority ?? 0);
         try {
           const dispatch = this._encodeForWorker(workerObj, item);
           this._dispatchToWorker(workerObj, dispatch, {
@@ -3071,7 +3072,7 @@ export class PowerPool {
     // pool full and all workers at capacity (or targeted worker busy/missing)
     if (this.taskQueueEnabled) {
       const prepared = this._prepareForTransfer(message, transfer, options);
-      return this._enqueueOrReject(prepared, wantResponse, correlationId, pendingPromise);
+      return this._enqueueOrReject(prepared, wantResponse, correlationId, pendingPromise, options);
     }
 
     // fallback: round-robin dispatch. Use modulo to keep `_nextIndex` bounded
@@ -3404,7 +3405,8 @@ export class PowerPool {
           this._prepareForTransfer(message, transfer, options),
           false,
           undefined,
-          undefined
+          undefined,
+          options
         );
       } catch (e) {
         this._logger.error(e, 'stopThePress: enqueue after reset failed');
@@ -3608,6 +3610,7 @@ export class PowerPool {
               message: prepared.message,
               transfer: prepared.transfer,
               index: i,
+              priority: options?.priority ?? 0,
             });
             results[i] = true;
           }
