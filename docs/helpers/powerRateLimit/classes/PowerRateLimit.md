@@ -538,3 +538,15 @@ Per-call overrides; `atomic`
 `true` only when every composed limiter
   allowed it. Returns a promise when `sharedState` is configured and its
   adapter is async.
+
+***
+
+### builder()
+
+> `static` **builder**(): [`PowerRateLimitBuilder`](PowerRateLimitBuilder.md)
+
+Create a fluent builder for PowerRateLimit.
+
+#### Returns
+
+[`PowerRateLimitBuilder`](PowerRateLimitBuilder.md)

@@ -9,6 +9,7 @@
 ## Classes
 
 - [PowerRateLimit](classes/PowerRateLimit.md)
+- [PowerRateLimitBuilder](classes/PowerRateLimitBuilder.md)
 
 ## Type Aliases
 

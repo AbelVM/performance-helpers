@@ -312,6 +312,69 @@ export class PowerRateLimit {
      */
     [Symbol.dispose](): void;
 }
+export namespace PowerRateLimit {
+    /**
+     * Create a fluent builder for {@link PowerRateLimit}.
+     * @returns {PowerRateLimitBuilder}
+     */
+    function builder(): PowerRateLimitBuilder;
+}
+/**
+ * Fluent builder for {@link PowerRateLimit}. Allows ergonomic construction of
+ * composed limiters without manually building the options object.
+ *
+ * @example
+ * const limit = PowerRateLimit.builder()
+ *   .add(new PowerThrottle({ capacity: 100, refillRate: 10 }))
+ *   .add(new PowerSlidingWindow({ capacity: 1000, windowMs: 60000 }))
+ *   .atomic(true)
+ *   .build();
+ */
+export class PowerRateLimitBuilder {
+    /** @type {RateLimiterLike[]} */
+    /** @type {PowerRateLimitOptions} */
+    /**
+     * Add a limiter to the composition.
+     * @param {RateLimiterLike} limiter
+     * @returns {PowerRateLimitBuilder}
+     */
+    add(limiter: RateLimiterLike): PowerRateLimitBuilder;
+    /**
+     * Set the `atomic` option. When true, all-or-nothing semantics are attempted.
+     * @param {boolean} value
+     * @returns {PowerRateLimitBuilder}
+     */
+    atomic(value: boolean): PowerRateLimitBuilder;
+    /**
+     * Set the `keyFn` option for per-key limiting.
+     * @param {((ctx: any) => string) | null} value
+     * @returns {PowerRateLimitBuilder}
+     */
+    keyFn(value: ((ctx: any) => string) | null): PowerRateLimitBuilder;
+    /**
+     * Set the `buckets` option for the per-key slot array size.
+     * @param {number} value
+     * @returns {PowerRateLimitBuilder}
+     */
+    buckets(value: number): PowerRateLimitBuilder;
+    /**
+     * Set the `sharedState` adapter for distributed rate limiting.
+     * @param {import('./jsdoc-types.js').PowerSharedStateAdapter | null} value
+     * @returns {PowerRateLimitBuilder}
+     */
+    sharedState(value: import("./jsdoc-types.js").PowerSharedStateAdapter | null): PowerRateLimitBuilder;
+    /**
+     * Set the `degrade` mode for shared-state backend errors.
+     * @param {'local' | 'fail-closed'} value
+     * @returns {PowerRateLimitBuilder}
+     */
+    degrade(value: "local" | "fail-closed"): PowerRateLimitBuilder;
+    /**
+     * Build the {@link PowerRateLimit} instance.
+     * @returns {PowerRateLimit}
+     */
+    build(): PowerRateLimit;
+}
 export default PowerRateLimit;
 export type LimiterNowOptions = import("../utils/limiterClock.js").LimiterNowOptions;
 /**

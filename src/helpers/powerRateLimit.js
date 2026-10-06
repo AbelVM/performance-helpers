@@ -838,4 +838,98 @@ export class PowerRateLimit {
   }
 }
 
+/**
+ * Fluent builder for {@link PowerRateLimit}. Allows ergonomic construction of
+ * composed limiters without manually building the options object.
+ *
+ * @example
+ * const limit = PowerRateLimit.builder()
+ *   .add(new PowerThrottle({ capacity: 100, refillRate: 10 }))
+ *   .add(new PowerSlidingWindow({ capacity: 1000, windowMs: 60000 }))
+ *   .atomic(true)
+ *   .build();
+ */
+export class PowerRateLimitBuilder {
+  /** @type {RateLimiterLike[]} */
+  _limiters = [];
+  /** @type {PowerRateLimitOptions} */
+  _options = {};
+
+  /**
+   * Add a limiter to the composition.
+   * @param {RateLimiterLike} limiter
+   * @returns {PowerRateLimitBuilder}
+   */
+  add(limiter) {
+    this._limiters.push(limiter);
+    return this;
+  }
+
+  /**
+   * Set the `atomic` option. When true, all-or-nothing semantics are attempted.
+   * @param {boolean} value
+   * @returns {PowerRateLimitBuilder}
+   */
+  atomic(value) {
+    this._options.atomic = value;
+    return this;
+  }
+
+  /**
+   * Set the `keyFn` option for per-key limiting.
+   * @param {((ctx: any) => string) | null} value
+   * @returns {PowerRateLimitBuilder}
+   */
+  keyFn(value) {
+    this._options.keyFn = value;
+    return this;
+  }
+
+  /**
+   * Set the `buckets` option for the per-key slot array size.
+   * @param {number} value
+   * @returns {PowerRateLimitBuilder}
+   */
+  buckets(value) {
+    this._options.buckets = value;
+    return this;
+  }
+
+  /**
+   * Set the `sharedState` adapter for distributed rate limiting.
+   * @param {import('./jsdoc-types.js').PowerSharedStateAdapter | null} value
+   * @returns {PowerRateLimitBuilder}
+   */
+  sharedState(value) {
+    this._options.sharedState = value;
+    return this;
+  }
+
+  /**
+   * Set the `degrade` mode for shared-state backend errors.
+   * @param {'local' | 'fail-closed'} value
+   * @returns {PowerRateLimitBuilder}
+   */
+  degrade(value) {
+    this._options.degrade = value;
+    return this;
+  }
+
+  /**
+   * Build the {@link PowerRateLimit} instance.
+   * @returns {PowerRateLimit}
+   */
+  build() {
+    return new PowerRateLimit(this._limiters.slice(), this._options);
+  }
+}
+
+/**
+ * Create a fluent builder for {@link PowerRateLimit}.
+ * @returns {PowerRateLimitBuilder}
+ */
+PowerRateLimit.builder = function builder() {
+  return new PowerRateLimitBuilder();
+};
+
 export default PowerRateLimit;

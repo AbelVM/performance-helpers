@@ -26,6 +26,8 @@
  * @module
  */
 
+import { HyperLogLog } from './hyperLogLog.js';
+
 /** Default sketch width (columns per row), per row. */
 const DEFAULT_WIDTH = 64;
 /** Default number of hash rows. Count-Min's accuracy/error trade-off. */
@@ -167,6 +169,8 @@ export class SmallLfuSketch {
     this.sample = 0;
     this.resets = 0;
     this.seed = (Number.isFinite(seed) ? Number(seed) : Math.floor(Math.random() * 0xffffffff)) | 0;
+    /** @private */
+    this._hll = new HyperLogLog();
 
     /**
      * Stable integer id per object key, so the sketch's notion of a key matches
@@ -305,6 +309,7 @@ export class SmallLfuSketch {
       }
     }
     if (!advanced) return;
+    this._hll.addHash(hash);
     this.sample += 1;
     if (this.sample >= this.sampleSize) {
       this.reset();
@@ -380,6 +385,13 @@ export class SmallLfuSketch {
       c[i] = ((c[i] >>> 1) & 0x07) | (((c[i] >>> 5) & 0x07) << 4);
     }
     this.resets += 1;
+    // ALG-005. Auto-tune `sampleSize` from the HLL's distinct-key estimate so
+    // the half-life adapts to the actual working-set size rather than a fixed
+    // multiple of `maxEntries`. The HLL is reset alongside the sketch so it
+    // tracks the current half-life window's cardinality, not the all-time total.
+    const cardinality = this._hll.cardinality();
+    this._hll.reset();
+    this.sampleSize = Math.max(10, Math.round(10 * cardinality));
   }
 
   /**

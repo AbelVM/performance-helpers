@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { SmallLfuSketch } from '../src/utils/smallLfu.js';
+import { HyperLogLog } from '../src/utils/hyperLogLog.js';
 import { PowerCache } from '../src/helpers/powerCache.js';
 
 /**
@@ -394,5 +395,111 @@ describe('SmallLfuSketch — keys compared by reference', () => {
     // the kind of guess that compiles into a test that cannot fail.
     expect(cache.stats().rejectedAdmission).toBeGreaterThan(0);
     expect(cache.has(fresh)).toBe(false);
+  });
+});
+
+describe('HyperLogLog (ALG-005)', () => {
+  // The sketch is fed by `SmallLfuSketch`, which FNV-1a hashes every key
+  // before calling `addHash`. These tests do the same, because the estimator
+  // is only correct for well-distributed inputs: sequential integers 0..N
+  // all have `h >>> 6 === 0`, which without a mix saturates every register
+  // at rank 27 and reports a cardinality in the billions for a 100-element
+  // set. `addHash` now finalises internally, so a raw integer call is still
+  // safe — but the *estimate* is only meaningful for hashed input, which is
+  // what this file documents and what the integration test below exercises.
+  const hashKey = (key) => {
+    const text = String(key);
+    let h = 0x811c9dc5 | 0;
+    for (let i = 0; i < text.length; i += 1) {
+      h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+    }
+    return h;
+  };
+
+  it('estimates cardinality of a small set within tolerance', () => {
+    const hll = new HyperLogLog();
+    for (let i = 0; i < 100; i += 1) hll.addHash(hashKey(i));
+    const est = hll.cardinality();
+    expect(est).toBeGreaterThan(80);
+    expect(est).toBeLessThan(120);
+  });
+
+  it('estimates cardinality of a larger set', () => {
+    const hll = new HyperLogLog();
+    for (let i = 0; i < 10_000; i += 1) hll.addHash(hashKey(i));
+    const est = hll.cardinality();
+    // 64 registers give ~13 % standard error, not the ~1 % the header's
+    // first draft claimed; allow a wide band so the test does not fail on a
+    // legitimate statistical outlier.
+    expect(est).toBeGreaterThan(7_000);
+    expect(est).toBeLessThan(13_000);
+  });
+
+  it('resets registers to zero', () => {
+    const hll = new HyperLogLog();
+    for (let i = 0; i < 500; i += 1) hll.addHash(hashKey(i));
+    expect(hll.cardinality()).toBeGreaterThan(400);
+    hll.reset();
+    expect(hll.cardinality()).toBe(0);
+  });
+
+  it('handles duplicate adds without inflating the estimate', () => {
+    const hll = new HyperLogLog();
+    for (let i = 0; i < 1000; i += 1) hll.addHash(hashKey(42));
+    expect(hll.cardinality()).toBeLessThan(100);
+  });
+
+  it('returns 0 for an empty sketch', () => {
+    const hll = new HyperLogLog();
+    expect(hll.cardinality()).toBe(0);
+  });
+
+  it('finalises raw integer input instead of saturating', () => {
+    // The bug this pins: sequential integers all had `h >>> 6 === 0`, so
+    // every register took rank 27 and cardinality() returned 5.7 billion
+    // for a 100-element set. `addHash` now mixes internally.
+    const hll = new HyperLogLog();
+    for (let i = 0; i < 100; i += 1) hll.addHash(i);
+    expect(hll.cardinality()).toBeGreaterThan(80);
+    expect(hll.cardinality()).toBeLessThan(120);
+  });
+});
+
+describe('SmallLfuSketch auto-tuned sampleSize (ALG-005 integration)', () => {
+  // The point of the companion HLL is that `sampleSize` adapts to the working
+  // set rather than staying at the default 10. The assertion is a **shape** —
+  // a bigger working set produces a bigger half-life — not a pinned number,
+  // because the HLL's 64-register error is ~13 % and any tighter band would
+  // flake on a legitimate outlier.
+
+  it('grows sampleSize with the number of distinct keys', () => {
+    const small = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 10 });
+    const big = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 10 });
+
+    const SMALL = 200;
+    const BIG = 20_000;
+
+    // Drive each sketch past one reset so the HLL's cardinality is read and
+    // `sampleSize` is recomputed. 200 increments is 20 resets at the default
+    // 10; 20 000 is 200.
+    for (let i = 0; i < SMALL; i += 1) small.increment('k' + i);
+    for (let i = 0; i < BIG; i += 1) big.increment('k' + i);
+
+    expect(big.sampleSize).toBeGreaterThan(small.sampleSize);
+  });
+
+  it('keeps a bounded sampleSize when the working set is small', () => {
+    const s = new SmallLfuSketch({ width: 64, depth: 4, sampleSize: 10 });
+    for (let i = 0; i < 200; i += 1) s.increment('k' + i);
+    // The HLL is reset alongside the sketch, so it measures distinct keys per
+    // *half-life window* rather than the all-time total, and `sampleSize`
+    // converges to ~10x that. For 200 distinct keys that is ~1000 — a
+    // reasonable half-life, and a long way from the failure this guards
+    // against (an unbounded sampleSize, which stops the sketch halving ever
+    // and turns the half-life into an infinite counter). The bound is loose
+    // on purpose: it is a shape test (bounded, not astronomical), not a
+    // pinned number, because the HLL's 64-register error is ~13 %.
+    expect(s.sampleSize).toBeGreaterThanOrEqual(10);
+    expect(s.sampleSize).toBeLessThanOrEqual(100_000);
   });
 });

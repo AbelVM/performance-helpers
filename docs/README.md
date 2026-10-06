@@ -50,6 +50,7 @@
 - [utils/abort](utils/abort/README.md)
 - [utils/errors](utils/errors/README.md)
 - [utils/frameSize](utils/frameSize/README.md)
+- [utils/hyperLogLog](utils/hyperLogLog/README.md)
 - [utils/limiterClock](utils/limiterClock/README.md)
 - [utils/liveness](utils/liveness/README.md)
 - [utils/neutralise](utils/neutralise/README.md)

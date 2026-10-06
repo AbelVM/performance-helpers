@@ -28,6 +28,8 @@ export class SmallLfuSketch {
     sample: number;
     resets: number;
     seed: number;
+    /** @private */
+    private _hll;
     /**
      * Stable integer id per object key, so the sketch's notion of a key matches
      * the `Map`'s. Absent until an object key arrives — a cache that only ever
