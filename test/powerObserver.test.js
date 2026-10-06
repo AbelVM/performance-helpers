@@ -301,4 +301,59 @@ describe('PowerObserver derived observables (ALG-008)', () => {
       expect(() => PowerObserver.combineLatest(a, 5)).toThrow(/PowerObserver instances/);
     });
   });
+
+  describe('computed', () => {
+    it('derives a value and subscribes lazily', () => {
+      const a = new PowerObserver(2, { async: false });
+      const doubled = a.computed((v) => v * 2);
+      expect(doubled).not.toBe(a);
+      const seen = [];
+      doubled.subscribe((v) => seen.push(v));
+      a.value = 5;
+      expect(seen).toEqual([10]);
+      expect(a.value).toBe(5);
+    });
+
+    it('releases upstream when unsubscribed', () => {
+      const a = new PowerObserver(0, { async: false });
+      const d = a.computed((v) => v + 1);
+      const off = d.subscribe(() => {});
+      expect(a.size).toBe(1);
+      off();
+      expect(a.size).toBe(0);
+    });
+  });
+
+  describe('effect', () => {
+    it('runs side-effect on change and returns dispose', () => {
+      const a = new PowerObserver(1, { async: false });
+      const seen = [];
+      const off = a.effect((next, prev) => {
+        seen.push([prev, next]);
+      });
+      a.value = 2;
+      expect(seen).toEqual([[1, 2]]);
+      off();
+      a.value = 3;
+      expect(seen).toEqual([[1, 2]]);
+    });
+
+    it('calls cleanup before next invocation and on dispose', () => {
+      const a = new PowerObserver(1, { async: false });
+      const cleanups = [];
+      const off = a.effect((next) => {
+        return () => cleanups.push(next);
+      });
+      a.value = 2;
+      a.value = 3;
+      expect(cleanups).toEqual([2]);
+      off();
+      expect(cleanups).toEqual([2, 3]);
+    });
+
+    it('throws when fn is not a function', () => {
+      const a = new PowerObserver(1, { async: false });
+      expect(() => a.effect(null)).toThrow(TypeError);
+    });
+  });
 });

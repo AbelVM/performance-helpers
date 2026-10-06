@@ -100,6 +100,32 @@ export class PowerEventBus {
     this._finalizationRefs = new WeakMap();
     /** @type {Map<string, Set<WeakRef<SubscriberListener>>>} */
     this._eventFinalizationRefs = new Map();
+    /** @type {Map<string, EventBusBucket>} */
+    this._wildcards = new Map();
+  }
+
+  /**
+   * Check whether an event name is a wildcard pattern (contains `*`).
+   * @param {string} event
+   * @returns {boolean}
+   * @private
+   */
+  _isWildcard(event) {
+    return event.includes('*');
+  }
+
+  /**
+   * Convert a wildcard pattern to a RegExp. `*` matches any sequence of
+   * characters except `:` — the bus's own topic separator — so `user:*` matches
+   * `user:login` but not `user:profile:name`.
+   *
+   * @param {string} pattern
+   * @returns {RegExp}
+   * @private
+   */
+  _wildcardRegex(pattern) {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^:]*');
+    return new RegExp(`^${escaped}$`);
   }
 
   /**
@@ -151,21 +177,31 @@ export class PowerEventBus {
         this._listeners.delete(event);
       }
     }
+    for (const [pattern, bucket] of this._wildcards) {
+      cleanupWeakRefs(bucket);
+      if (bucket.size === 0) {
+        this._clearWeakListenerEvent(pattern);
+        this._wildcards.delete(pattern);
+      }
+    }
   }
 
   /**
    * Subscribe to an event.
-   * @param {keyof T & string} event - Event name to subscribe to.
+   * @param {keyof T & string} event - Event name to subscribe to. Supports
+   *   wildcard patterns containing `*` (e.g. `user:*` matches `user:login`).
    * @param {(payload:any)=>void} fn - Listener function.
    * @returns {() => void} unsubscribe
    * @throws {TypeError} When `fn` is not a function.
    */
   on(event, fn) {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
-    let bucket = this._getBucket(event);
+    const isWildcard = this._isWildcard(event);
+    const store = isWildcard ? this._wildcards : this._listeners;
+    let bucket = this._getBucket(event, store);
     if (!bucket) {
       bucket = new PowerSubscriberSet({ maxListeners: this._maxListeners, weak: this._weak });
-      this._listeners.set(event, bucket);
+      store.set(event, bucket);
     }
 
     const unsubscribe = bucket.add(fn);
@@ -189,10 +225,11 @@ export class PowerEventBus {
    * replaced externally, so it stays.
    *
    * @param {string} event
+   * @param {Map<string, EventBusBucket>} [store] - Defaults to `_listeners`.
    * @returns {PowerSubscriberSet|null}
    */
-  _getBucket(event) {
-    const bucket = this._listeners.get(event);
+  _getBucket(event, store = this._listeners) {
+    const bucket = store.get(event);
     if (!bucket) return null;
     if (bucket instanceof PowerSubscriberSet) return bucket;
 
@@ -204,7 +241,7 @@ export class PowerEventBus {
       const fn = 'deref' in entry ? entry.deref() : entry;
       if (fn) migrated.add(fn);
     }
-    this._listeners.set(event, migrated);
+    store.set(event, migrated);
     return migrated;
   }
 
@@ -314,17 +351,19 @@ export class PowerEventBus {
 
   /**
    * Subscribe once to an event. Listener is removed after first invocation.
-   * @param {keyof T & string} event
+   * @param {keyof T & string} event - Supports wildcard patterns containing `*`.
    * @param {(payload:any)=>void} fn
    * @throws {TypeError} When `fn` is not a function.
    * @returns {() => void} unsubscribe
    */
   once(event, fn) {
     if (typeof fn !== 'function') throw new TypeError('listener must be a function');
-    let bucket = this._getBucket(event);
+    const isWildcard = this._isWildcard(event);
+    const store = isWildcard ? this._wildcards : this._listeners;
+    let bucket = this._getBucket(event, store);
     if (!bucket) {
       bucket = new PowerSubscriberSet({ maxListeners: this._maxListeners, weak: this._weak });
-      this._listeners.set(event, bucket);
+      store.set(event, bucket);
     }
 
     const unsubscribe = bucket.addOnce(fn);
@@ -340,17 +379,19 @@ export class PowerEventBus {
 
   /**
    * Remove a specific listener for an event.
-   * @param {keyof T & string} event
+   * @param {keyof T & string} event - Supports wildcard patterns containing `*`.
    * @param {(payload:any)=>void} fn
    */
   off(event, fn) {
-    const bucket = this._getBucket(event);
+    const isWildcard = this._isWildcard(event);
+    const store = isWildcard ? this._wildcards : this._listeners;
+    const bucket = this._getBucket(event, store);
     if (!bucket) return;
     bucket.delete(fn);
     this._unregisterWeakListener(fn, event);
     if (bucket.size === 0) {
       this._clearWeakListenerEvent(event);
-      this._listeners.delete(event);
+      store.delete(event);
     }
   }
 
@@ -367,50 +408,70 @@ export class PowerEventBus {
    * @returns {boolean}
    */
   emit(event, payload) {
+    let notified = false;
+
+    // Direct listeners
     const bucket = this._listeners.get(event);
-    if (!bucket || bucket.size === 0) return false;
-
-    if (bucket instanceof PowerSubscriberSet) {
-      let notified = false;
-      // OBS-008. **A snapshot, not `forEach`.** `PowerSubscriberSet.forEach` walks its
-      // backing `Set`, and `Set` iteration visits entries added *during* traversal - so
-      // a listener that re-subscribes on every call is invoked again inside the same
-      // `emit`, forever. Measured with a listener that subscribes a fresh closure per
-      // call, capped at 40: `emit` invoked it **40 times**, `emitAsync` invoked it
-      // **once**. The same listener graph, two answers, from one class.
-      //
-      // `values()` is already the snapshot form - it copies into a fresh array - so
-      // this is a one-word change rather than a new mechanism, and it is why the
-      // helper has that method at all.
-      for (const fn of bucket.values()) {
-        notified = true;
-        notifyListener(fn, payload);
+    if (bucket && bucket.size > 0) {
+      if (bucket instanceof PowerSubscriberSet) {
+        for (const fn of bucket.values()) {
+          notified = true;
+          notifyListener(fn, payload);
+        }
+        if (bucket.size === 0) {
+          this._clearWeakListenerEvent(event);
+          this._listeners.delete(event);
+        }
+      } else {
+        const hadEntries = bucket.size > 0;
+        for (const entry of [...bucket]) {
+          const fn = 'deref' in entry ? entry.deref() : entry;
+          if (!fn) {
+            bucket.delete(entry);
+            continue;
+          }
+          notified = true;
+          notifyListener(fn, payload);
+        }
+        if (bucket.size === 0) {
+          this._clearWeakListenerEvent(event);
+          this._listeners.delete(event);
+        }
+        if (hadEntries) notified = true;
       }
-      if (bucket.size === 0) {
-        this._clearWeakListenerEvent(event);
-        this._listeners.delete(event);
-      }
-      return notified;
     }
 
-    const hadEntries = bucket.size > 0;
-    // Snapshot for the same reason as the arm above, and the spread is also what makes
-    // the `bucket.delete(entry)` below safe: deleting from a `Set` while iterating it
-    // is defined, but it makes the loop's behaviour depend on where it is, and this
-    // loop already has a `continue` in it.
-    for (const entry of [...bucket]) {
-      const fn = 'deref' in entry ? entry.deref() : entry;
-      if (!fn) {
-        bucket.delete(entry);
-        continue;
+    // Wildcard listeners
+    for (const [pattern, wBucket] of this._wildcards) {
+      if (!this._wildcardRegex(pattern).test(event)) continue;
+      if (wBucket.size === 0) continue;
+      if (wBucket instanceof PowerSubscriberSet) {
+        for (const fn of wBucket.values()) {
+          notified = true;
+          notifyListener(fn, payload);
+        }
+        if (wBucket.size === 0) {
+          this._clearWeakListenerEvent(pattern);
+          this._wildcards.delete(pattern);
+        }
+      } else {
+        for (const entry of [...wBucket]) {
+          const fn = 'deref' in entry ? entry.deref() : entry;
+          if (!fn) {
+            wBucket.delete(entry);
+            continue;
+          }
+          notified = true;
+          notifyListener(fn, payload);
+        }
+        if (wBucket.size === 0) {
+          this._clearWeakListenerEvent(pattern);
+          this._wildcards.delete(pattern);
+        }
       }
-      notifyListener(fn, payload);
     }
-    if (bucket.size === 0) {
-      this._clearWeakListenerEvent(event);
-      this._listeners.delete(event);
-    }
-    return hadEntries;
+
+    return notified;
   }
 
   /**
@@ -448,7 +509,7 @@ export class PowerEventBus {
    */
   async emitAsync(event, payload, { concurrency = Infinity } = {}) {
     const bucket = this._listeners.get(event);
-    if (!bucket || bucket.size === 0) return false;
+    if ((!bucket || bucket.size === 0) && this._wildcards.size === 0) return false;
 
     const normalizeConcurrency =
       Number.isFinite(+concurrency) && +concurrency > 0
@@ -467,27 +528,40 @@ export class PowerEventBus {
     const inFlight = new Set();
     let notified = false;
 
-    for (const fn of this._iterBucketListeners(bucket)) {
-      if (!fn) continue;
-      notified = true;
-      const p = Promise.resolve()
-        .then(() => invoke(fn))
-        .finally(() => {
-          inFlight.delete(p);
-        });
-      inFlight.add(p);
+    /** @param {EventBusBucket} b @param {string} evt */
+    const processBucket = async (b, evt) => {
+      for (const fn of this._iterBucketListeners(b)) {
+        if (!fn) continue;
+        notified = true;
+        const p = Promise.resolve()
+          .then(() => invoke(fn))
+          .finally(() => {
+            inFlight.delete(p);
+          });
+        inFlight.add(p);
 
-      if (Number.isFinite(normalizeConcurrency) && inFlight.size >= normalizeConcurrency) {
-        await Promise.race(inFlight);
+        if (Number.isFinite(normalizeConcurrency) && inFlight.size >= normalizeConcurrency) {
+          await Promise.race(inFlight);
+        }
       }
+
+      if (b.size === 0) {
+        this._clearWeakListenerEvent(evt);
+        this._listeners.delete(evt);
+      }
+    };
+
+    if (bucket && bucket.size > 0) {
+      await processBucket(bucket, event);
+    }
+
+    for (const [pattern, wBucket] of this._wildcards) {
+      if (!this._wildcardRegex(pattern).test(event)) continue;
+      if (wBucket.size === 0) continue;
+      await processBucket(wBucket, pattern);
     }
 
     if (inFlight.size) await Promise.all(inFlight);
-
-    if (bucket.size === 0) {
-      this._clearWeakListenerEvent(event);
-      this._listeners.delete(event);
-    }
 
     return notified;
   }
@@ -498,12 +572,30 @@ export class PowerEventBus {
    * @returns {SubscriberListener[]}
    */
   listeners(event) {
+    const result = [];
     const bucket = this._listeners.get(event);
-    if (!bucket) return [];
-    if (bucket instanceof PowerSubscriberSet) return bucket.values();
-    return Array.from(bucket)
-      .map((entry) => ('deref' in entry ? entry.deref() : entry))
-      .filter(Boolean);
+    if (bucket) {
+      if (bucket instanceof PowerSubscriberSet) {
+        result.push(...bucket.values());
+      } else {
+        for (const entry of bucket) {
+          const fn = 'deref' in entry ? entry.deref() : entry;
+          if (fn) result.push(fn);
+        }
+      }
+    }
+    for (const [pattern, wBucket] of this._wildcards) {
+      if (!this._wildcardRegex(pattern).test(event)) continue;
+      if (wBucket instanceof PowerSubscriberSet) {
+        result.push(...wBucket.values());
+      } else {
+        for (const entry of wBucket) {
+          const fn = 'deref' in entry ? entry.deref() : entry;
+          if (fn) result.push(fn);
+        }
+      }
+    }
+    return result;
   }
 
   /**
@@ -516,10 +608,17 @@ export class PowerEventBus {
       this._eventFinalizationRefs.clear();
       this._finalizationRefs = new WeakMap();
       this._listeners.clear();
+      this._wildcards.clear();
       return;
     }
     this._clearWeakListenerEvent(event);
     this._listeners.delete(event);
+    for (const [pattern] of this._wildcards) {
+      if (this._wildcardRegex(pattern).test(event)) {
+        this._clearWeakListenerEvent(pattern);
+        this._wildcards.delete(pattern);
+      }
+    }
   }
 
   /**
@@ -531,7 +630,7 @@ export class PowerEventBus {
    * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
    * would read as the opposite, and the two are deliberately not synonyms.
    *
-   * @param {string} [event] - Passed through to `clear()`; clears just that
+   * @param {keyof T & string} [event] - Passed through to `clear()`; clears just that
    *   event's listeners when given, and every listener when omitted.
    * @returns {void}
    */

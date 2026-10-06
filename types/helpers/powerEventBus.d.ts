@@ -12,6 +12,22 @@ export class PowerEventBus<T = Record<string, any>> {
     /** @type {?(FinalizationRegistry<EventBusWeakToken>)} */
     /** @type {WeakMap<SubscriberListener, Map<string, Set<WeakRef<SubscriberListener>>>>} */
     /** @type {Map<string, Set<WeakRef<SubscriberListener>>>} */
+    /** @type {Map<string, EventBusBucket>} */
+    /**
+     * Check whether an event name is a wildcard pattern (contains `*`).
+     * @param {string} event
+     * @returns {boolean}
+     * @private
+     */
+    /**
+     * Convert a wildcard pattern to a RegExp. `*` matches any sequence of
+     * characters except `:` — the bus's own topic separator — so `user:*` matches
+     * `user:login` but not `user:profile:name`.
+     *
+     * @param {string} pattern
+     * @returns {RegExp}
+     * @private
+     */
     /**
      * Lazily build the `FinalizationRegistry` that prunes collected weak
      * listeners. Returns `null` when weak mode is off or the runtime has no
@@ -29,7 +45,8 @@ export class PowerEventBus<T = Record<string, any>> {
     cleanup(): void;
     /**
      * Subscribe to an event.
-     * @param {keyof T & string} event - Event name to subscribe to.
+     * @param {keyof T & string} event - Event name to subscribe to. Supports
+     *   wildcard patterns containing `*` (e.g. `user:*` matches `user:login`).
      * @param {(payload:any)=>void} fn - Listener function.
      * @returns {() => void} unsubscribe
      * @throws {TypeError} When `fn` is not a function.
@@ -45,9 +62,10 @@ export class PowerEventBus<T = Record<string, any>> {
      * replaced externally, so it stays.
      *
      * @param {string} event
+     * @param {Map<string, EventBusBucket>} [store] - Defaults to `_listeners`.
      * @returns {PowerSubscriberSet|null}
      */
-    _getBucket(event: string): PowerSubscriberSet | null;
+    _getBucket(event: string, store?: Map<string, EventBusBucket>): PowerSubscriberSet | null;
     /**
      * Track a weak listener with the bus's `FinalizationRegistry`, so the
      * bookkeeping sets can drop it when it is collected.
@@ -76,7 +94,7 @@ export class PowerEventBus<T = Record<string, any>> {
     _clearWeakListenerEvent(event: string): void;
     /**
      * Subscribe once to an event. Listener is removed after first invocation.
-     * @param {keyof T & string} event
+     * @param {keyof T & string} event - Supports wildcard patterns containing `*`.
      * @param {(payload:any)=>void} fn
      * @throws {TypeError} When `fn` is not a function.
      * @returns {() => void} unsubscribe
@@ -84,7 +102,7 @@ export class PowerEventBus<T = Record<string, any>> {
     once(event: keyof T & string, fn: (payload: any) => void): () => void;
     /**
      * Remove a specific listener for an event.
-     * @param {keyof T & string} event
+     * @param {keyof T & string} event - Supports wildcard patterns containing `*`.
      * @param {(payload:any)=>void} fn
      */
     off(event: keyof T & string, fn: (payload: any) => void): void;
@@ -141,11 +159,11 @@ export class PowerEventBus<T = Record<string, any>> {
      * `PowerThrottle` and `PowerPermitGate`, `reset()` *refills* and `clear()`
      * would read as the opposite, and the two are deliberately not synonyms.
      *
-     * @param {string} [event] - Passed through to `clear()`; clears just that
+     * @param {keyof T & string} [event] - Passed through to `clear()`; clears just that
      *   event's listeners when given, and every listener when omitted.
      * @returns {void}
      */
-    reset(event?: string): void;
+    reset(event?: keyof T & string): void;
     /**
      * Release every listener, and reset the `FinalizationRegistry` so the
      * registry's retained callbacks become garbage.

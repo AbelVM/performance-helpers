@@ -72,6 +72,12 @@
 
 > **\_weak**: `boolean`
 
+***
+
+### \_wildcards
+
+> **\_wildcards**: `Map`\<`string`, [`EventBusBucket`](../type-aliases/EventBusBucket.md)\>
+
 ## Methods
 
 ### \_clearWeakListenerEvent()
@@ -108,7 +114,7 @@ listeners. Returns `null` when weak mode is off or the runtime has no
 
 ### \_getBucket()
 
-> **\_getBucket**(`event`): [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
+> **\_getBucket**(`event`, `store?`): [`PowerSubscriberSet`](../../powerSubscriberSet/classes/PowerSubscriberSet.md) \| `null`
 
 The live bucket for an event, migrating a legacy plain `Set` of listeners
 into a `PowerSubscriberSet` the first time it is read.
@@ -123,6 +129,12 @@ replaced externally, so it stays.
 ##### event
 
 `string`
+
+##### store?
+
+`Map`\<`string`, [`EventBusBucket`](../type-aliases/EventBusBucket.md)\> = `...`
+
+Defaults to `_listeners`.
 
 #### Returns
 
@@ -331,6 +343,8 @@ Remove a specific listener for an event.
 
 keyof `T` & `string`
 
+Supports wildcard patterns containing `*`.
+
 ##### fn
 
 (`payload`) => `void`
@@ -353,7 +367,8 @@ Subscribe to an event.
 
 keyof `T` & `string`
 
-Event name to subscribe to.
+Event name to subscribe to. Supports
+  wildcard patterns containing `*` (e.g. `user:*` matches `user:login`).
 
 ##### fn
 
@@ -384,6 +399,8 @@ Subscribe once to an event. Listener is removed after first invocation.
 ##### event
 
 keyof `T` & `string`
+
+Supports wildcard patterns containing `*`.
 
 ##### fn
 
@@ -417,7 +434,7 @@ would read as the opposite, and the two are deliberately not synonyms.
 
 ##### event?
 
-`string`
+keyof `T` & `string`
 
 Passed through to `clear()`; clears just that
   event's listeners when given, and every listener when omitted.

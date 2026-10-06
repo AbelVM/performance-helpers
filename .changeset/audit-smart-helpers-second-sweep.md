@@ -12,5 +12,7 @@ Audit `smart.md` and document the enforcement gaps, hidden coupling, race condit
 - **RT-003**: added per-topic rate limiting to `PowerRealtimeHub` via `rateLimit` option; drops messages for over-budget topics and increments `stats().rateLimited`.
 - **RT-006**: added `connectionUptime` and `backpressureRatio` to `PowerWebSocketClient.stats()`.
 - **DX-004**: added generic type parameter `T` to `PowerEventBus` with default `Record<string, any>`. Public methods now accept `keyof T & string` for event names, so a typo is caught at compile time. Updated `guides/powerEventBus.md` and added type tests in `test/types.test-d.ts`.
+- **FEAT-005**: added `computed()` and `effect()` reactive primitives to `PowerObserver`. `computed()` derives a signal from other signals; `effect()` runs a callback on change and supports cleanup functions.
+- **FEAT-006**: added wildcard/glob subscription support to `PowerEventBus`. Callers can subscribe to `'user:*'` and receive all `user.created`, `user.updated`, etc. events. Matches literal events first, then wildcards; unsubscription removes both literal and wildcard listeners.
 
 No breaking behaviour changes in this commit; the changeset records the findings and the implementation tasks (T-015–T-042) that follow from them.

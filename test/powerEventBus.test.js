@@ -71,4 +71,61 @@ describe('PowerEventBus', () => {
     const ok = await bus.emitAsync('e', 1);
     expect(ok).toBe(true);
   });
+
+  describe('wildcard subscriptions', () => {
+    it('on/once with * pattern matches multiple events', () => {
+      const bus = new PowerEventBus();
+      const seen = [];
+      bus.on('user:*', (p) => seen.push(p));
+      bus.once('user:login', (p) => seen.push('once:' + p));
+      bus.emit('user:login', 1);
+      bus.emit('user:logout', 2);
+      bus.emit('admin:login', 3);
+      expect(seen).toEqual(['once:1', 1, 2]);
+    });
+
+    it('off removes wildcard listener', () => {
+      const bus = new PowerEventBus();
+      const fn = () => {};
+      bus.on('user:*', fn);
+      bus.off('user:*', fn);
+      expect(bus.emit('user:login', 1)).toBe(false);
+    });
+
+    it('emitAsync invokes wildcard listeners', async () => {
+      const bus = new PowerEventBus();
+      const seen = [];
+      bus.on('user:*', async (p) => {
+        seen.push(p);
+        await Promise.resolve();
+      });
+      const ok = await bus.emitAsync('user:login', 1);
+      expect(ok).toBe(true);
+      expect(seen).toEqual([1]);
+    });
+
+    it('listeners includes wildcard matches', () => {
+      const bus = new PowerEventBus();
+      const fn = () => {};
+      bus.on('user:*', fn);
+      expect(bus.listeners('user:login')).toContain(fn);
+      expect(bus.listeners('admin:login')).toEqual([]);
+    });
+
+    it('clear removes wildcard listeners', () => {
+      const bus = new PowerEventBus();
+      const fn = () => {};
+      bus.on('user:*', fn);
+      bus.clear('user:login');
+      expect(bus.emit('user:login', 1)).toBe(false);
+    });
+
+    it('clear without args removes all wildcard listeners', () => {
+      const bus = new PowerEventBus();
+      const fn = () => {};
+      bus.on('user:*', fn);
+      bus.clear();
+      expect(bus.emit('user:login', 1)).toBe(false);
+    });
+  });
 });

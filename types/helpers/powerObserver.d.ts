@@ -44,6 +44,31 @@ export class PowerObserver {
      */
     map(fn: ((value: any) => any) | null): void;
     /**
+     * Create a **computed** observer: a new observer whose value is recomputed from
+     * this one, and which only exists as long as something subscribes to it.
+     *
+     * This is the explicit counterpart to `derive()` for values that are pure
+     * computations of the source. The upstream subscription is created on first
+     * subscribe and released on last unsubscribe.
+     *
+     * @param {(value:any, prev:any)=>any} fn - Compute the next value.
+     * @returns {PowerObserver} A new observer, already holding `fn(this.value)`.
+     */
+    computed(fn: (value: any, prev: any) => any): PowerObserver;
+    /**
+     * Run a side-effect whenever the value changes. The effect is subscribed
+     * immediately and runs on the next change (including the initial change if
+     * the value is set after `effect()` is called).
+     *
+     * If the effect function returns a function, that function is treated as a
+     * cleanup and is called before the next effect invocation and when the
+     * effect is disposed.
+     *
+     * @param {(next:any, prev:any)=>void|(()=>void)} fn - Side-effect to run.
+     * @returns {() => void} dispose function that unsubscribes and runs cleanup.
+     */
+    effect(fn: (next: any, prev: any) => void | (() => void)): () => void;
+    /**
      * Create a **derived** observer: a new observer whose value is recomputed from
      * this one, and which only exists as long as something subscribes to it.
      *
