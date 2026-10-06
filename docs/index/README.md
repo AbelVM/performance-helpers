@@ -270,6 +270,12 @@ Re-exports [PowerCrossLock](../helpers/powerCrossLock/classes/PowerCrossLock.md)
 
 ***
 
+### PowerDatagramChannel
+
+Re-exports [PowerDatagramChannel](../powerDatagramChannel/classes/PowerDatagramChannel.md)
+
+***
+
 ### PowerDeadline
 
 Re-exports [PowerDeadline](../helpers/powerDeadline/classes/PowerDeadline.md)

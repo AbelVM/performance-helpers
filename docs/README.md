@@ -40,6 +40,7 @@
 - [helpers/powerTTLMap](helpers/powerTTLMap/README.md)
 - [helpers/WorkerAgnostic](helpers/WorkerAgnostic/README.md)
 - [index](index/README.md)
+- [powerDatagramChannel](powerDatagramChannel/README.md)
 - [powerGCRA](powerGCRA/README.md)
 - [powerMessageCodec](powerMessageCodec/README.md)
 - [powerMessagePort](powerMessagePort/README.md)

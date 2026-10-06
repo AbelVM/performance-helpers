@@ -46,6 +46,7 @@ export { PowerWebSocketClient, READY_STATE } from './helpers/powerWebSocketClien
 export { PowerSocketAdapter, detectSocketKind } from './helpers/powerSocketAdapter.js';
 export { createWebTransportAdapter } from './helpers/powerWebTransportAdapter.js';
 export { PowerRTCChannel } from './helpers/powerRTCChannel.js';
+export { PowerDatagramChannel } from './helpers/powerDatagramChannel.js';
 export {
   PowerMessageCodec,
   MESSAGE_PROTOCOL_VERSION,

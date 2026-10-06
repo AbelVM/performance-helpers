@@ -87,6 +87,7 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 - [PowerSocketAdapter: One interface over three socket models](guides/powerSocketAdapter.md). Normalise a Node `ws` socket, a browser `WebSocket`, or a `WebSocketStream` behind one API. They are genuinely incompatible — a `ws` `message` handler receives `(data, isBinary)`, an `EventTarget` one receives an event object, and a `WebSocketStream` has neither `on`, `readyState`, nor `bufferedAmount` — and the mismatches fail silently. Adds socket-level liveness, per-message rate limiting, and a graceful `drain()` for shutdown. The server-side counterpart to the client above; there is no WebSocket server here, and there should not be.
 - [PowerRTCChannel: One `RTCDataChannel` behind the same shape as `PowerSocketAdapter`](guides/powerRTCChannel.md) — string `readyState` normalised, SCTP's message-size ceiling enforced, and back-pressure that arrives as a push signal instead of a poll timer. A data channel's `readyState` is `'open'`, not `1`, so the `=== READY_STATE.OPEN` guard every other transport satisfies is silently false on a healthy channel. `send()` **throws** above the SCTP ceiling where a `WebSocket` would buffer, which is the one case a hub can actually see — a `false` is invisible to `PowerRealtimeHub`, so watch `sendRefusals`. `binaryType` is already `arraybuffer`, so the framed codec works unchanged; `expectUnreliable` asserts the `ordered:false, maxRetransmits:0` this class cannot set for you.
+- [PowerDatagramChannel: Bounded, drop-counting datagram wrapper](guides/powerDatagramChannel.md). Enforces a hard `maxDatagramSizeBytes` ceiling before the platform sees the datagram, so an oversize frame is refused with a `TypeError` and counted in `stats().oversizeDatagrams` rather than silently discarded. When the internal queue is full, the oldest queued datagram is dropped first and the new one is queued in its place, so the loss is observable in `droppedCount`. This is **not** a hub `send` adapter: `retain` and datagrams contradict each other. Use it directly for bounded, counted datagram delivery, or wrap it in your own adapter that knows how to frame and retain.
 - [PowerWebTransportAdapter: `WebTransportBidirectionalStream` behind the same shape as `PowerSocketAdapter`](guides/powerWebTransportAdapter.md). Wraps a `WebTransport` session's bidirectional stream and decodes inbound frames with `createFrameDecoder` so split frames do not surface as `RangeError`s at the reader. `maxFrameBytes` is `Infinity`; enforcement is left to `PowerSocketAdapter`'s `maxPayloadSizeBytes`.
 
 - [WebTransport feature detection](guides/webTransportSupport.md). `detectWebTransportSupport()` — a pure probe for what a build actually supports, with no connection opened. Three of the surfaces it reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so `reliableOnly` is the one flag to branch on: it is `true` only when every surface present is Baseline.
@@ -140,13 +141,7 @@ versioned names.
 
 Requirements: Node.js and npm.
 
-Install dependencies:
-
-```bash
-npm install
-```
-
-Install the package from npm for direct use in your project:
+Install the package:
 
 ```bash
 npm install --save performance-helpers
@@ -157,7 +152,7 @@ yarn add performance-helpers
 Run tests:
 
 ```bash
-npm run test
+npm test
 ```
 
 Run coverage (v8):
@@ -267,7 +262,7 @@ You can import the package directly from a CDN for quick demos. Example using un
 
 ```html
 <script type="module">
-  import { PowerMemoizer } from 'https://unpkg.com/performance-helpers@latest?module';
+  import { PowerMemoizer } from 'https://unpkg.com/performance-helpers@latest/dist/performance-helpers.es.js';
   const fetchUser = async (id) => fetch(`/users/${id}`).then((r) => r.json());
   const pm = new PowerMemoizer(fetchUser);
   console.log(await pm.run(1));

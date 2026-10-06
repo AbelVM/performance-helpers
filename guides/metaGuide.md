@@ -40,6 +40,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Push to a socket without unbounded client-side buffering               | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                                 |
 | Handle an accepted socket without knowing which library produced it    | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
 | Push to a WebRTC peer without tripping over the channel's string state | `PowerRTCChannel`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | `dc.readyState === READY_STATE.OPEN`, which is always false             |
+| Push datagrams to a transport without silent loss                      | `PowerDatagramChannel`                             | `PowerMessageCodec`                                        | hand-rolled `send()` with no size check                                 |
 | Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `PowerWebTransportAdapter`                                 | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
 | Process a very large iterable in parallel                              | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
 | Smooth bursts from producers                                           | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                                  |
@@ -643,6 +644,14 @@ channel, and the other two sit between them.
   needs one watermark option and no poll timer where the client needs four. Bring your own
   `RTCDataChannel` — there is no `RTCPeerConnection`, signalling or ICE here. Wire it as the hub's
   `send` adapter via `transport`, and watch `stats().sendRefusals`: the hub cannot see a `false`.
+- `PowerDatagramChannel`: a bounded, drop-counting wrapper for a datagram-style transport. It
+  enforces a hard `maxDatagramSizeBytes` ceiling before the platform sees the datagram, so an
+  oversize frame is refused with a `TypeError` and counted in `stats().oversizeDatagrams` rather
+  than silently discarded. When the internal queue is full, the oldest queued datagram is dropped
+  first and the new one is queued in its place, so the loss is observable in `droppedCount`. This
+  is **not** a hub `send` adapter: `retain` and datagrams contradict each other. Use it directly
+  for bounded, counted datagram delivery, or wrap it in your own adapter that knows how to frame
+  and retain.
 - `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing any `WebTransport` branch, and note it is detection only. The transport adapter is [`PowerWebTransportAdapter`](powerWebTransportAdapter.md) — wrap a `WebTransport` session's `createBidirectionalStream()` in the `kind: 'stream'` socket shape `PowerSocketAdapter` expects. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
   reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so a build can
   expose one and still throw from it. Every non-Baseline surface defaults to `false` rather than

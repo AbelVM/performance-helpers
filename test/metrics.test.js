@@ -27,6 +27,7 @@ import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
 import { PowerRateLimit } from '../src/helpers/powerRateLimit.js';
 import { PowerMessagePort } from '../src/helpers/powerMessagePort.js';
+import { PowerDatagramChannel } from '../src/helpers/powerDatagramChannel.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -240,6 +241,14 @@ describe('observability: true on the helpers', () => {
   const HELPERS = [
     ['PowerCache', () => new PowerCache({ observability: true }), 'cache'],
     ['PowerBulkhead', () => new PowerBulkhead({ observability: true }), 'bulkhead'],
+    [
+      'PowerDatagramChannel',
+      () =>
+        new PowerDatagramChannel(/** @type {any} */ ({ send: () => {}, readyState: 'open' }), {
+          observability: true,
+        }),
+      'datagramChannel',
+    ],
     ['PowerGCRA', () => new PowerGCRA({ rate: 1, per: 1000, observability: true }), 'gcra'],
     [
       'PowerRetryBudget',
