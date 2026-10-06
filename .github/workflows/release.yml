@@ -38,54 +38,35 @@ jobs:
 
       - run: npx changeset status --since=origin/${{ github.base_ref }}
 
-  # Cuts the version. `release:version` runs `changeset version`, regenerates the
-  # committed `types/*.d.ts`, and stages the result; the action then opens (or
-  # updates) a "chore: version packages" PR. That PR is the reviewable record of
-  # exactly what the next release contains, and merging it is what publishes.
-  version:
-    name: version packages
+  # Publishes whatever version is currently in `package.json`. The version cut is
+  # made by a maintainer pushing to `main` (running `changeset version` by hand
+  # or through `npm run release:version`), not by this workflow.
+  #
+  # **This workflow never cuts a version and never opens a pull request, and
+  # that is the fix.** The previous shape had a `version` job that ran
+  # `changesets/action` with `commit`/`title`, which pushes the version commit to
+  # a branch and then creates a "chore: version packages" pull request from it.
+  # This repository does not permit GitHub Actions to create or approve pull
+  # requests, so that job failed on every release: the version was cut in the
+  # working tree and then the job errored before it reached `publish`, which is
+  # the step that actually ships. A job-level `pull-requests: write` permission
+  # cannot fix it — that is a repository setting, not a workflow permission — so
+  # the PR-creating half of the flow is deleted rather than worked around.
+  #
+  # The version PR was never the thing that shipped a release. It was a review
+  # surface for a diff of `package.json` + `CHANGELOG.md` + `types/`; the diff
+  # still lands on `main` in the maintainer's own commit, and this job publishes
+  # from it. `changeset publish` no-ops when the version on npm already matches
+  # `package.json`, so a push to `main` that is not a version cut is a cheap
+  # no-op rather than a failed release.
+  publish:
+    name: publish
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          # The action authenticates with GITHUB_TOKEN explicitly below.
-          persist-credentials: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.12'
-          cache: npm
-          registry-url: 'https://registry.npmjs.org'
-
-      - run: npm ci
-
-      - uses: changesets/action@v1
-        with:
-          version: npm run release:version
-          commit: 'chore: version packages'
-          title: 'chore: version packages'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-  # Runs on the push that merges the version PR. `changeset publish` no-ops when
-  # the version on npm already matches package.json, so a push to main that did
-  # not come from a version PR is a cheap no-op.
-  publish:
-    name: publish
-    needs: version
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
       # Granted so npm provenance can be switched on, but not switched on yet -
-      # see the note at the bottom of this file.
+      # see the note at the bottom of the file.
       id-token: write
     steps:
       - uses: actions/checkout@v4
