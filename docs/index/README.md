@@ -48,6 +48,12 @@ Re-exports [createFrameDecoder](../powerMessageCodec/functions/createFrameDecode
 
 ***
 
+### createWebTransportAdapter
+
+Re-exports [createWebTransportAdapter](../powerWebTransportAdapter/functions/createWebTransportAdapter.md)
+
+***
+
 ### decodeInbound
 
 Re-exports [decodeInbound](../powerMessageCodec/functions/decodeInbound.md)

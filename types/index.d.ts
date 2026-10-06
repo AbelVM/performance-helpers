@@ -28,6 +28,7 @@ export { PowerGCRA } from "./helpers/powerGCRA.js";
 export { PowerEventLoopMonitor } from "./helpers/powerEventLoopMonitor.js";
 export { PowerRealtimeHub } from "./helpers/powerRealtimeHub.js";
 export { PowerMessagePort } from "./helpers/powerMessagePort.js";
+export { createWebTransportAdapter } from "./helpers/powerWebTransportAdapter.js";
 export { PowerRTCChannel } from "./helpers/powerRTCChannel.js";
 export { o2b, o2u8, u82o, b2o } from "./helpers/powerBuffer.js";
 export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./helpers/powerCache.js";

@@ -46,6 +46,7 @@
 - [powerRealtimeHub](powerRealtimeHub/README.md)
 - [powerRetry](powerRetry/README.md)
 - [powerWebSocketClient](powerWebSocketClient/README.md)
+- [powerWebTransportAdapter](powerWebTransportAdapter/README.md)
 - [utils/abort](utils/abort/README.md)
 - [utils/errors](utils/errors/README.md)
 - [utils/frameSize](utils/frameSize/README.md)

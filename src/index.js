@@ -44,6 +44,7 @@ export { PowerRealtimeHub } from './helpers/powerRealtimeHub.js';
 export { PowerMessagePort } from './helpers/powerMessagePort.js';
 export { PowerWebSocketClient, READY_STATE } from './helpers/powerWebSocketClient.js';
 export { PowerSocketAdapter, detectSocketKind } from './helpers/powerSocketAdapter.js';
+export { createWebTransportAdapter } from './helpers/powerWebTransportAdapter.js';
 export { PowerRTCChannel } from './helpers/powerRTCChannel.js';
 export {
   PowerMessageCodec,

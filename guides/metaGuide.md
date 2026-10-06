@@ -40,7 +40,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Push to a socket without unbounded client-side buffering               | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                                 |
 | Handle an accepted socket without knowing which library produced it    | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
 | Push to a WebRTC peer without tripping over the channel's string state | `PowerRTCChannel`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | `dc.readyState === READY_STATE.OPEN`, which is always false             |
-| Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | —                                                          | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
+| Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `PowerWebTransportAdapter`                                 | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
 | Process a very large iterable in parallel                              | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
 | Smooth bursts from producers                                           | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                                  |
 | Limit concurrent async work globally                                   | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block                      |
@@ -643,8 +643,7 @@ channel, and the other two sit between them.
   needs one watermark option and no poll timer where the client needs four. Bring your own
   `RTCDataChannel` — there is no `RTCPeerConnection`, signalling or ICE here. Wire it as the hub's
   `send` adapter via `transport`, and watch `stats().sendRefusals`: the hub cannot see a `false`.
-- `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing any `WebTransport` branch, and note it is detection only — there is no WebTransport transport in
-  this package. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
+- `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing any `WebTransport` branch, and note it is detection only. The transport adapter is [`PowerWebTransportAdapter`](powerWebTransportAdapter.md) — wrap a `WebTransport` session's `createBidirectionalStream()` in the `kind: 'stream'` socket shape `PowerSocketAdapter` expects. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
   reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so a build can
   expose one and still throw from it. Every non-Baseline surface defaults to `false` rather than
   optimistic `true`, and the probe opens no connection — so the instance-level answers

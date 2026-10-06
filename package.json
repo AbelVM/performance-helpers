@@ -241,6 +241,11 @@
       "import": "./src/helpers/powerTTLMap.js",
       "default": "./src/helpers/powerTTLMap.js"
     },
+    "./powerWebTransportAdapter": {
+      "types": "./types/helpers/powerWebTransportAdapter.d.ts",
+      "import": "./src/helpers/powerWebTransportAdapter.js",
+      "default": "./src/helpers/powerWebTransportAdapter.js"
+    },
     "./metrics": {
       "types": "./types/helpers/metrics.d.ts",
       "import": "./src/helpers/metrics.js",

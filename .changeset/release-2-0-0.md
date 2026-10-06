@@ -9643,3 +9643,36 @@ ignored.
 
 14 tests, mutation-checked. No changes to existing helpers beyond the new export
 from `src/index.js`.
+
+## `PowerWebTransportAdapter`: WebTransport stream adapter
+
+Add `createWebTransportAdapter(session)` — a `kind: 'stream'` socket for
+`PowerRealtimeHub` that pumps a `WebTransport` bidirectional stream through the
+codec's `createFrameDecoder({ maxFrameBytes: Infinity })`. The receive side
+handles split frames without `RangeError`. `close()` calls
+`session.close({ closeCode, reason })` per TypeScript's `WebTransportCloseInfo`
+shape, then closes/aborts the writable and cancels the readable.
+
+9 tests pass. Supersedes RT-021.
+
+## `PowerWebSocketClient`: `nonRetryableCloseCodes`
+
+Add `nonRetryableCloseCodes` (opt-in, default `[]`) to `PowerWebSocketClient`.
+A 1008 / 1001 / 1002 close is reconnected immediately, forever, by every client
+at once — the reconnect stampede the backoff exists to prevent. The opt-in list
+ships first; the callback form (`shouldReconnect`) is behaviour-changing and
+deferred.
+
+A matching code arms no reconnect timer; the check runs ahead of every reconnect
+input (`autoReconnect`, `maxReconnectAttempts`, `maxReconnectElapsedMs`) so a
+bound cannot re-enable it. Settlement matches a caller-initiated close exactly:
+`readyState` CLOSED, the close event still fires, heartbeat and poll timers
+cleared, no reconnect timer. **Not latched** — `connect()` afterwards works,
+because a code can be terminal for one close and wrong for the next.
+
+`stats().reconnectExhaustedBy` gained a third value, `'close-code'`, which is the
+only thing that distinguishes "stopped because you said so" from "stopped because
+`autoReconnect: false`".
+
+17 tests, mutation-checked: 15 mutants all killed, and three tests were added
+after the first pass because three were un-killed — they were decoration.

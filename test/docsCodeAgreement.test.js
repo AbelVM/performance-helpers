@@ -225,6 +225,17 @@ const CROSS_CLASS = new Set([
   // library does *not* call it: a reader who found `createDataChannel` on the
   // adapter would be reading a false API.
   'createDataChannel',
+  // `WebTransport.createBidirectionalStream()`, named in the WT-002 guide's
+  // usage section. It is the platform's own method and **not** a member of
+  // `PowerWebTransportAdapter`, which wraps an existing stream rather than
+  // creating one — so the per-guide rule cannot resolve it. Listed explicitly
+  // because the guide's whole claim is that the caller supplies the session.
+  'createBidirectionalStream',
+  // `PowerSocketAdapter._handleMessage`, named in the WT-002 guide when
+  // explaining how decoded frames reach the hub. It is a method of another
+  // helper, not of `PowerWebTransportAdapter`, so the per-guide rule cannot
+  // resolve it.
+  '_handleMessage',
 ]);
 
 /** Everything this test is willing to accept without it being a method. */
@@ -480,6 +491,7 @@ const everythingDeclared = (() => {
  */
 const CROSS_CUTTING_NOT_CALLS = new Set([
   'fn', // a parameter name: `measureSync(fn)` in guides/now.md
+  'createBidirectionalStream', // WebTransport API method, named in metaGuide and webTransportSupport
 ]);
 
 const crossCuttingMismatches = (() => {
