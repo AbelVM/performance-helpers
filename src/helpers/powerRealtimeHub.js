@@ -79,6 +79,9 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {number} maxBatch
  * @property {SlowConsumerPolicy} slowConsumer
  * @property {boolean} closed
+ * @property {number} priority - Drain order. Higher numbers are delivered
+ *   first; `0` is the default and is indistinguishable from a subscriber that
+ *   asked for `0`, so the common case stays a stable insertion-order walk.
  * @property {function(any, HubSubscriber):void} handler - Invoked with each
  *   delivered message, after the transport accepted it, plus the subscriber it
  *   was delivered to. Spelled as a call signature so the two arguments the hub
@@ -98,9 +101,15 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  *   when `maxQueue` is exceeded.
  * @property {number} [maxBatch=32] - Maximum messages coalesced into one send.
  * @property {string} [id] - Stable identifier; generated when omitted.
+ * @property {number} [priority=0] - Drain order. Higher numbers are delivered
+ * first within a topic on the next flush; `0` is the default and is
+ * indistinguishable from a subscriber that asked for `0`, so the common
+ * case stays a stable insertion-order walk. A non-finite value is rejected
+ * at subscribe time, because it would coerce to `NaN` and sort to an
+ * arbitrary position silently.
  * @property {*} [transport] - Carried through to the stored
- *   {@link HubSubscriber} untouched, for the caller's own `send`/`close`
- *   adapters to use.
+ * {@link HubSubscriber} untouched, for the caller's own `send`/`close`
+ * adapters to use.
  */
 
 /**
@@ -122,6 +131,11 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {number} inFlight
  * @property {number} maxQueue
  * @property {SlowConsumerPolicy} slowConsumer
+ * @property {number} priority - Drain order, so a caller reading `stats().list`
+ *   can see *why* a subscriber was served before another rather than guessing
+ *   from `queued`/`inFlight`. Reflected from the stored subscriber, not
+ *   re-derived: it is a value the caller supplied, so reporting it back is the
+ *   honest thing and recomputing it would be inventing a value.
  */
 
 /**
@@ -186,13 +200,41 @@ const RETAIN_LIMIT = 32;
 
 export class PowerRealtimeHub {
   /**
+   * Validate a `priority` value supplied to {@link subscribe}.
+   *
+   * Extracted from `subscribe` because that method was already at the
+   * cyclomatic-complexity ceiling and this check is its own branch — and
+   * because the rule it enforces is worth stating once rather than inline.
+   *
+   * `priority` is a drain order, and the failure mode it guards against is
+   * specifically the silent one: a non-finite value coerces to `NaN`, which
+   * compares unequal to everything, so `Array.sort` lands the subscriber in an
+   * arbitrary position without throwing. The caller would get a wrong-order
+   * delivery with no error, months after the subscribe that accepted it.
+   *
+   * @param {*} priority
+   * @returns {number} A finite number. `0` when the caller omitted it.
+   * @throws {TypeError} When `Number(priority)` is not finite.
+   * @static
+   */
+  static _validatePriority(priority) {
+    const n = Number(priority);
+    if (!Number.isFinite(n)) {
+      throw new TypeError(
+        `PowerRealtimeHub: \`priority\` must be a finite number (got ${String(priority)})`
+      );
+    }
+    return n;
+  }
+
+  /**
    * @param {HubOptions} options - `send` is required; the constructor throws
-   *   without it, so the parameter is not defaulted.
+   * without it, so the parameter is not defaulted.
    */
   constructor(options) {
     assertKnownOptions(
       options,
-      ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError'],
+      ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError', 'rateLimit'],
       'PowerRealtimeHub'
     );
     const { send, close, batch = true, batchDelayMs = 0, codec = 'json', onError } = options || {};
@@ -309,7 +351,13 @@ export class PowerRealtimeHub {
     if (typeof handler !== 'function') {
       throw new TypeError('PowerRealtimeHub: `handler` must be a function');
     }
-    const { maxQueue = 64, slowConsumer = 'drop-oldest', maxBatch = 32, id } = options || {};
+    const {
+      maxQueue = 64,
+      slowConsumer = 'drop-oldest',
+      maxBatch = 32,
+      id,
+      priority: rawPriority,
+    } = options || {};
     if (!SLOW_CONSUMER_POLICIES.includes(slowConsumer)) {
       throw new TypeError(
         `PowerRealtimeHub: \`slowConsumer\` must be one of ${SLOW_CONSUMER_POLICIES.join(', ')}`
@@ -321,6 +369,16 @@ export class PowerRealtimeHub {
     if (!Number.isFinite(Number(maxBatch)) || Number(maxBatch) < 1) {
       throw new TypeError('PowerRealtimeHub: `maxBatch` must be >= 1');
     }
+    // WT-005: `priority` is a drain order, not a name. A non-finite value
+    // coerces to `NaN`, which compares unequal to everything, so `Array.sort`
+    // lands the subscriber in an arbitrary position without throwing — a
+    // wrong-order delivery with no error, months after the subscribe that
+    // accepted it. Extracted to `_validatePriority` because this method was
+    // already at the cyclomatic-complexity ceiling and the check is its own
+    // branch. Omitting `priority` yields `0`, which is the default and is
+    // indistinguishable from a subscriber that asked for `0`.
+    const validatedPriority =
+      rawPriority === undefined ? 0 : PowerRealtimeHub._validatePriority(rawPriority);
     // **The `raw` codec check lives here, and this is the only place it can.**
     // `_flushSubscriber` splices the batch off `sub.queue` *before* `_encodeBatch`
     // throws "the `raw` codec delivers one message per frame", so the messages
@@ -352,6 +410,10 @@ export class PowerRealtimeHub {
       maxQueue: Math.floor(Number(maxQueue)),
       slowConsumer,
       maxBatch: Math.floor(Number(maxBatch)),
+      // WT-005: drain order. `0` is the default — a subscriber that did not
+      // ask for priority is indistinguishable from one that asked for `0`,
+      // which is what keeps the common case a stable insertion-order walk.
+      priority: validatedPriority,
       queue: [],
       inFlight: 0,
       /** @type {?Promise<void>} */
@@ -511,6 +573,7 @@ export class PowerRealtimeHub {
         inFlight: s.inFlight,
         maxQueue: s.maxQueue,
         slowConsumer: s.slowConsumer,
+        priority: s.priority,
       })),
     };
   }
@@ -674,13 +737,39 @@ export class PowerRealtimeHub {
   }
 
   /**
+   * Subscribers with queued work, highest priority first, ties broken by
+   * insertion order.
+   *
+   * Extracted rather than inlined in `_drain` because `flush()` walks the same
+   * set through `_flushAll`, and a priority that only applied to the
+   * microtask path would be invisible to the caller-driven path — the two
+   * would disagree about who gets served first, which is exactly the kind of
+   * divergence a row like this exists to prevent.
+   *
+   * The sort is stable in every engine this package supports, so subscribers
+   * at equal priority keep the order they were subscribed in.
+   * @private
+   * @returns {HubSubscriber[]}
+   */
+  _queuedSubscribers() {
+    const subs = Array.from(this._subs.values());
+    subs.sort((a, b) => b.priority - a.priority);
+    return subs.filter((sub) => !sub.closed && sub.queue.length > 0);
+  }
+
+  /**
    * Drain every subscriber with queued work, one batch per send.
+   *
+   * Subscribers are visited **highest priority first**, and ties fall back to
+   * insertion order. A subscriber with nothing queued is skipped, so the walk
+   * is O(subscribers) rather than a sort over the whole set — but the relative
+   * order of two subscribers that *both* have queued work is decided by
+   * priority, which is the only ordering this method is asked to guarantee.
    * @private
    * @returns {void}
    */
   _drain() {
-    for (const sub of Array.from(this._subs.values())) {
-      if (sub.closed || sub.queue.length === 0) continue;
+    for (const sub of this._queuedSubscribers()) {
       // One frame in flight per subscriber. Without this a second drain started
       // a second send while the first was still awaiting the transport, so two
       // frames for the same subscriber were outstanding at once and could reach
@@ -705,8 +794,7 @@ export class PowerRealtimeHub {
     // that subscriber's queue undelivered, which is precisely the case the option
     // exists to serve.
     const pending = [];
-    for (const sub of Array.from(this._subs.values())) {
-      if (sub.closed || sub.queue.length === 0) continue;
+    for (const sub of this._queuedSubscribers()) {
       pending.push(this._drainSubscriberFully(sub));
     }
     await Promise.all(pending);

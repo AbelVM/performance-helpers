@@ -96,6 +96,16 @@ Sends currently awaiting the transport.
 
 ***
 
+### priority
+
+> **priority**: `number`
+
+Drain order. Higher numbers are delivered
+  first; `0` is the default and is indistinguishable from a subscriber that
+  asked for `0`, so the common case stays a stable insertion-order walk.
+
+***
+
 ### queue
 
 > **queue**: `any`[]

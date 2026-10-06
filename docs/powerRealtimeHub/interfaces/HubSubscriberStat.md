@@ -48,6 +48,18 @@ Bytes handed to this subscriber's transport so
 
 ***
 
+### priority
+
+> **priority**: `number`
+
+Drain order, so a caller reading `stats().list`
+  can see *why* a subscriber was served before another rather than guessing
+  from `queued`/`inFlight`. Reflected from the stored subscriber, not
+  re-derived: it is a value the caller supplied, so reporting it back is the
+  honest thing and recomputing it would be inventing a value.
+
+***
+
 ### queued
 
 > **queued**: `number`

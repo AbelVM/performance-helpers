@@ -19,7 +19,7 @@
 [`HubOptions`](../interfaces/HubOptions.md)
 
 `send` is required; the constructor throws
-  without it, so the parameter is not defaulted.
+without it, so the parameter is not defaulted.
 
 #### Returns
 
@@ -380,3 +380,39 @@ Subscriber id.
 `boolean`
 
 `true` when a subscription was removed.
+
+***
+
+### \_validatePriority()
+
+> `static` **\_validatePriority**(`priority`): `number`
+
+Validate a `priority` value supplied to [subscribe](#subscribe).
+
+Extracted from `subscribe` because that method was already at the
+cyclomatic-complexity ceiling and this check is its own branch — and
+because the rule it enforces is worth stating once rather than inline.
+
+`priority` is a drain order, and the failure mode it guards against is
+specifically the silent one: a non-finite value coerces to `NaN`, which
+compares unequal to everything, so `Array.sort` lands the subscriber in an
+arbitrary position without throwing. The caller would get a wrong-order
+delivery with no error, months after the subscribe that accepted it.
+
+#### Parameters
+
+##### priority
+
+`any`
+
+#### Returns
+
+`number`
+
+A finite number. `0` when the caller omitted it.
+
+#### Throws
+
+When `Number(priority)` is not finite.
+
+#### Static

@@ -1,7 +1,26 @@
 export class PowerRealtimeHub {
     /**
+     * Validate a `priority` value supplied to {@link subscribe}.
+     *
+     * Extracted from `subscribe` because that method was already at the
+     * cyclomatic-complexity ceiling and this check is its own branch — and
+     * because the rule it enforces is worth stating once rather than inline.
+     *
+     * `priority` is a drain order, and the failure mode it guards against is
+     * specifically the silent one: a non-finite value coerces to `NaN`, which
+     * compares unequal to everything, so `Array.sort` lands the subscriber in an
+     * arbitrary position without throwing. The caller would get a wrong-order
+     * delivery with no error, months after the subscribe that accepted it.
+     *
+     * @param {*} priority
+     * @returns {number} A finite number. `0` when the caller omitted it.
+     * @throws {TypeError} When `Number(priority)` is not finite.
+     * @static
+     */
+    static _validatePriority(priority: any): number;
+    /**
      * @param {HubOptions} options - `send` is required; the constructor throws
-     *   without it, so the parameter is not defaulted.
+     * without it, so the parameter is not defaulted.
      */
     constructor(options: HubOptions);
     /** @type {Map<string, Map<string, HubSubscriber>>} topic -> subscriberId -> sub */
@@ -109,7 +128,28 @@ export class PowerRealtimeHub {
      * @private
      */
     /**
+     * Subscribers with queued work, highest priority first, ties broken by
+     * insertion order.
+     *
+     * Extracted rather than inlined in `_drain` because `flush()` walks the same
+     * set through `_flushAll`, and a priority that only applied to the
+     * microtask path would be invisible to the caller-driven path — the two
+     * would disagree about who gets served first, which is exactly the kind of
+     * divergence a row like this exists to prevent.
+     *
+     * The sort is stable in every engine this package supports, so subscribers
+     * at equal priority keep the order they were subscribed in.
+     * @private
+     * @returns {HubSubscriber[]}
+     */
+    /**
      * Drain every subscriber with queued work, one batch per send.
+     *
+     * Subscribers are visited **highest priority first**, and ties fall back to
+     * insertion order. A subscriber with nothing queued is skipped, so the walk
+     * is O(subscribers) rather than a sort over the whole set — but the relative
+     * order of two subscribers that *both* have queued work is decided by
+     * priority, which is the only ordering this method is asked to guarantee.
      * @private
      * @returns {void}
      */
@@ -235,6 +275,12 @@ export type HubSubscriber = {
     slowConsumer: SlowConsumerPolicy;
     closed: boolean;
     /**
+     * - Drain order. Higher numbers are delivered
+     * first; `0` is the default and is indistinguishable from a subscriber that
+     * asked for `0`, so the common case stays a stable insertion-order walk.
+     */
+    priority: number;
+    /**
      * - Invoked with each
      * delivered message, after the transport accepted it, plus the subscriber it
      * was delivered to. Spelled as a call signature so the two arguments the hub
@@ -270,6 +316,15 @@ export type SubscriberOptions = {
      */
     id?: string | undefined;
     /**
+     * - Drain order. Higher numbers are delivered
+     * first within a topic on the next flush; `0` is the default and is
+     * indistinguishable from a subscriber that asked for `0`, so the common
+     * case stays a stable insertion-order walk. A non-finite value is rejected
+     * at subscribe time, because it would coerce to `NaN` and sort to an
+     * arbitrary position silently.
+     */
+    priority?: number | undefined;
+    /**
      * - Carried through to the stored
      * {@link HubSubscriber} untouched, for the caller's own `send`/`close`
      * adapters to use.
@@ -302,6 +357,14 @@ export type HubSubscriberStat = {
     inFlight: number;
     maxQueue: number;
     slowConsumer: SlowConsumerPolicy;
+    /**
+     * - Drain order, so a caller reading `stats().list`
+     * can see *why* a subscriber was served before another rather than guessing
+     * from `queued`/`inFlight`. Reflected from the stored subscriber, not
+     * re-derived: it is a value the caller supplied, so reporting it back is the
+     * honest thing and recomputing it would be inventing a value.
+     */
+    priority: number;
 };
 export type HubStats = {
     /**
