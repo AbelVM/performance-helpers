@@ -83,10 +83,19 @@ export class PowerCache {
      */
     /** @type {CacheNode|null} */
     /**
+     * SIEVE eviction hand pointer. Scans from tail toward head during eviction.
+     * Visited entries get a second chance (bit cleared), unvisited are evicted.
+     * @type {CacheNode|null}
+     */
+    /**
      * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
      * behaviour. `'slru'` splits the list into a probation segment and a
      * protected segment and promotes on access, which makes the cache far more
      * resistant to a one-off sequential scan evicting the working set.
+     * `'sieve'` uses the SIEVE algorithm (NSDI '24): a FIFO queue with a
+     * visited bit per entry and a scanning hand pointer. On eviction, the hand
+     * scans toward the head; visited entries get their bit cleared (second
+     * chance), unvisited entries are evicted.
      */
     /**
      * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when

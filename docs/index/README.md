@@ -48,6 +48,12 @@ Re-exports [createFrameDecoder](../powerMessageCodec/functions/createFrameDecode
 
 ***
 
+### createSseAdapter
+
+Re-exports [createSseAdapter](../powerSseAdapter/functions/createSseAdapter.md)
+
+***
+
 ### createWebTransportAdapter
 
 Re-exports [createWebTransportAdapter](../powerWebTransportAdapter/functions/createWebTransportAdapter.md)
@@ -453,6 +459,12 @@ Re-exports [PowerTTLMap](../helpers/powerTTLMap/classes/PowerTTLMap.md)
 ### PowerWebSocketClient
 
 Re-exports [PowerWebSocketClient](../powerWebSocketClient/classes/PowerWebSocketClient.md)
+
+***
+
+### PowerWebTransportClient
+
+Re-exports [PowerWebTransportClient](../powerWebTransportClient/classes/PowerWebTransportClient.md)
 
 ***
 

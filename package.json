@@ -141,6 +141,11 @@
       "import": "./src/helpers/powerWebSocketClient.js",
       "default": "./src/helpers/powerWebSocketClient.js"
     },
+    "./powerWebTransportClient": {
+      "types": "./types/helpers/powerWebTransportClient.d.ts",
+      "import": "./src/helpers/powerWebTransportClient.js",
+      "default": "./src/helpers/powerWebTransportClient.js"
+    },
     "./powerSocketAdapter": {
       "types": "./types/helpers/powerSocketAdapter.d.ts",
       "import": "./src/helpers/powerSocketAdapter.js",
@@ -150,6 +155,16 @@
       "types": "./types/helpers/powerRTCChannel.d.ts",
       "import": "./src/helpers/powerRTCChannel.js",
       "default": "./src/helpers/powerRTCChannel.js"
+    },
+    "./powerSseAdapter": {
+      "types": "./types/helpers/powerSseAdapter.d.ts",
+      "import": "./src/helpers/powerSseAdapter.js",
+      "default": "./src/helpers/powerSseAdapter.js"
+    },
+    "./powerDatagramChannel": {
+      "types": "./types/helpers/powerDatagramChannel.d.ts",
+      "import": "./src/helpers/powerDatagramChannel.js",
+      "default": "./src/helpers/powerDatagramChannel.js"
     },
     "./powerHistogram": {
       "types": "./types/helpers/powerHistogram.d.ts",

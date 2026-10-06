@@ -105,6 +105,22 @@ const ALLOWED = new Map([
   ],
   ['// swallow subscriber errors', [2, 'A subscriber error must not break the emitter.']],
   ['// swallow', [2, 'Same judgement as `/* swallow */`.']],
+  [
+    '// ignore; reader is already closed or closing',
+    [1, 'Reader teardown is best-effort; the close path handles the real error.'],
+  ],
+  [
+    '// ignore; writer is already closed or closing',
+    [2, 'Writer teardown is best-effort; the close path handles the real error.'],
+  ],
+  [
+    '// ignore; transport is already closed or closing',
+    [1, 'Transport teardown is best-effort; the close path handles the real error.'],
+  ],
+  [
+    '// ignore; stream is closed or aborted',
+    [1, 'Stream read errors are reported through the close path.'],
+  ],
 ]);
 
 /**

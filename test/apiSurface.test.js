@@ -96,6 +96,7 @@ describe('API surface', () => {
         'PowerThrottle',
         'PowerTimedCache',
         'PowerWebSocketClient',
+        'PowerWebTransportClient',
         'PowerSocketAdapter',
         'PowerRTCChannel',
         'detectSocketKind',
@@ -107,6 +108,7 @@ describe('API surface', () => {
         'collectTransferables',
         'createFrameDecoder',
         'createWebTransportAdapter',
+        'createSseAdapter',
         'decodeInbound',
         'decodeMessage',
         'detectEnv',
@@ -251,7 +253,7 @@ describe('API surface', () => {
     // (FEAT-007). The comment above is the point: this number is here so a subpath
     // cannot be added or removed by accident, and the only legitimate way past it is
     // to edit this line on purpose.
-    expect(subpaths.length).toBe(43);
+    expect(subpaths.length).toBe(45);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

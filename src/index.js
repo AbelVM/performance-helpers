@@ -42,11 +42,13 @@ export { PowerGCRA } from './helpers/powerGCRA.js';
 export { PowerEventLoopMonitor } from './helpers/powerEventLoopMonitor.js';
 export { PowerRealtimeHub } from './helpers/powerRealtimeHub.js';
 export { PowerMessagePort } from './helpers/powerMessagePort.js';
-export { PowerWebSocketClient, READY_STATE } from './helpers/powerWebSocketClient.js';
-export { PowerSocketAdapter, detectSocketKind } from './helpers/powerSocketAdapter.js';
+export { PowerWebSocketClient } from './helpers/powerWebSocketClient.js';
+export { PowerWebTransportClient } from './helpers/powerWebTransportClient.js';
+export { PowerSocketAdapter, detectSocketKind, READY_STATE } from './helpers/powerSocketAdapter.js';
 export { createWebTransportAdapter } from './helpers/powerWebTransportAdapter.js';
 export { PowerRTCChannel } from './helpers/powerRTCChannel.js';
 export { PowerDatagramChannel } from './helpers/powerDatagramChannel.js';
+export { createSseAdapter } from './helpers/powerSseAdapter.js';
 export {
   PowerMessageCodec,
   MESSAGE_PROTOCOL_VERSION,

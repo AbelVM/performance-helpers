@@ -454,6 +454,7 @@ export class PowerCache {
         prev: null,
         next: null,
         inWindow: false,
+        visited: false,
       });
 
     this._currentWeight = 0;
@@ -519,12 +520,22 @@ export class PowerCache {
     // eviction sweeps. Kept in sync with head mutations.
     this._evictionCandidate = null;
     /**
+     * SIEVE eviction hand pointer. Scans from tail toward head during eviction.
+     * Visited entries get a second chance (bit cleared), unvisited are evicted.
+     * @type {CacheNode|null}
+     */
+    this._sieveHand = null;
+    /**
      * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
      * behaviour. `'slru'` splits the list into a probation segment and a
      * protected segment and promotes on access, which makes the cache far more
      * resistant to a one-off sequential scan evicting the working set.
+     * `'sieve'` uses the SIEVE algorithm (NSDI '24): a FIFO queue with a
+     * visited bit per entry and a scanning hand pointer. On eviction, the hand
+     * scans toward the head; visited entries get their bit cleared (second
+     * chance), unvisited entries are evicted.
      */
-    this._policy = policy === 'slru' ? 'slru' : 'lru';
+    this._policy = policy === 'slru' ? 'slru' : policy === 'sieve' ? 'sieve' : 'lru';
 
     // CACHE-020. Validated here, ahead of the sketch branch below rather than
     // inside it, so a bad `seed` is rejected even when no sketch is built. `seed`
@@ -715,6 +726,9 @@ export class PowerCache {
       // at insert — the window path sets it, the plain path never reads it, and
       // a stale `true` from a pooled node would misplace a fresh entry.
       inWindow: false,
+      // SIEVE visited bit: set on access, cleared by the hand during eviction
+      // scanning. A pooled node carries its last role's flag, so reset here.
+      visited: false,
     };
     node.key = key;
     node.value = value;
@@ -723,6 +737,7 @@ export class PowerCache {
     node.prev = null;
     node.next = null;
     node.inWindow = false;
+    node.visited = false;
     return node;
   }
 

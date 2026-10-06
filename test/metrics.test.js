@@ -22,6 +22,7 @@ import { PowerEventLoopMonitor } from '../src/helpers/powerEventLoopMonitor.js';
 import { PowerSocketAdapter } from '../src/helpers/powerSocketAdapter.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 import { PowerWebSocketClient } from '../src/helpers/powerWebSocketClient.js';
+import { PowerWebTransportClient } from '../src/helpers/powerWebTransportClient.js';
 import { PowerRTCChannel } from '../src/helpers/powerRTCChannel.js';
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
@@ -291,6 +292,36 @@ describe('observability: true on the helpers', () => {
       'PowerWebSocketClient',
       () => new PowerWebSocketClient({ url: 'ws://test/', observability: true }),
       'ws',
+    ],
+    [
+      'PowerWebTransportClient',
+      () =>
+        new PowerWebTransportClient({
+          url: 'https://example.test/feed',
+          WebTransportImpl: class {
+            constructor() {
+              return {
+                ready: Promise.resolve(),
+                closed: Promise.resolve(),
+                createBidirectionalStream() {
+                  return {
+                    readable: new ReadableStream({
+                      start(controller) {
+                        controller.enqueue(new Uint8Array());
+                      },
+                    }),
+                    writable: new WritableStream({
+                      write() {},
+                    }),
+                  };
+                },
+                close() {},
+              };
+            }
+          },
+          observability: true,
+        }),
+      'wt',
     ],
     // A factory source needs no preload, which is what makes a pool testable
     // without a real worker file.
