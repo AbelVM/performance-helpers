@@ -203,14 +203,10 @@ export class PowerRTCChannel {
      */
     stats(): object;
     /**
-     * Alias for {@link stats}, so a caller who learned `getStats()` from
-     * `PowerPool` — the one class that has always spelled it this way — is not
-     * handed `TypeError: x.getStats is not a function` here.
+     * Alias for {@link stats}.
      *
-     * Written out per class rather than installed on the prototype: a dynamic
-     * `Object.defineProperty` is invisible to `tsc`, so the generated `types/`
-     * omitted it and a TypeScript caller got a type error on a method that worked
-     * at runtime. `test/statsNaming.test.js` pins the descriptor being present.
+     * See `guides/stats-naming.md` for why both spellings exist and why this
+     * method is written out per class.
      */
     getStats(): object;
     /**

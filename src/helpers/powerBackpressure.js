@@ -7,7 +7,7 @@
  */
 import { PowerPermitGate } from './powerPermitGate.js';
 import { setSafeTimeout } from '../utils/timers.js';
-import { assertKnownOptions } from '../utils/options.js';
+import { assertKnownOptions, assertLimitRequired } from '../utils/options.js';
 import { neutralise } from '../utils/neutralise.js';
 import {
   DEFAULT_QUEUE_CAPACITY,
@@ -48,21 +48,50 @@ function normalizeAdaptive(option, baseRefill) {
   if (!option) return off;
   const cfg = option === true ? {} : option;
   if (typeof cfg !== 'object') return off;
-  /**
-   * @param {*} v
-   * @param {number} fallback
-   * @returns {number}
-   */
-  const num = (v, fallback) =>
-    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback;
   return {
     enabled: cfg.enabled !== false,
     // TCP additive increase is one segment per RTT. One permit per refill tick
     // is the same shape here, since a tick is the unit of observation.
-    additiveIncrease: Math.max(1, Math.floor(num(cfg.additiveIncrease, 1))),
-    beta: Math.min(0.99, Math.max(0.1, num(cfg.beta, 0.5))),
-    min: Math.max(1, Math.floor(num(cfg.min, 1))),
-    max: Math.max(1, Math.floor(num(cfg.max, 1_000_000))),
+    additiveIncrease: Math.max(
+      1,
+      Math.floor(
+        assertLimitRequired(cfg.additiveIncrease, {
+          min: 1,
+          integer: true,
+          fallback: 1,
+          className: 'PowerBackpressure',
+          name: 'additiveIncrease',
+        })
+      )
+    ),
+    beta: Math.min(
+      0.99,
+      Math.max(0.1, typeof cfg.beta === 'number' && Number.isFinite(cfg.beta) ? cfg.beta : 0.5)
+    ),
+    min: Math.max(
+      1,
+      Math.floor(
+        assertLimitRequired(cfg.min, {
+          min: 1,
+          integer: true,
+          fallback: 1,
+          className: 'PowerBackpressure',
+          name: 'adaptive.min',
+        })
+      )
+    ),
+    max: Math.max(
+      1,
+      Math.floor(
+        assertLimitRequired(cfg.max, {
+          min: 1,
+          integer: true,
+          fallback: 1_000_000,
+          className: 'PowerBackpressure',
+          name: 'adaptive.max',
+        })
+      )
+    ),
   };
 }
 

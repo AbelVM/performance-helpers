@@ -521,13 +521,14 @@ describe('a cross-cutting guide only names calls that exist somewhere (GATE-005)
     // scans one file. Before this existed these guides and their distinct call
     // names were invisible to every check in the repository.
     //
-    // The count moved 6 -> 7 when `webTransportSupport.md` was added, and that is
-    // the pin doing its job rather than failing: the set is derived, not listed,
-    // and a guide whose name does not match a `src/helpers/<name>.js` is exactly
-    // what this rule is for. Its implementation lives at `src/utils/webtransport.js`,
-    // so the per-guide loop cannot reach it by name — which is why its seven
+    // The count moved 6 -> 7 when `webTransportSupport.md` was added, and 7 -> 8
+    // when `stats-naming.md` was added. That is the pin doing its job rather than
+    // failing: the set is derived, not listed, and a guide whose name does not
+    // match a `src/helpers/<name>.js` is exactly what this rule is for. Its
+    // implementation lives at `src/helpers/metrics.js` and `src/helpers/powerCache.js`
+    // etc., so the per-guide loop cannot reach it by name — which is why its
     // backticked calls are only checked because it is counted in here.
-    expect(CROSS_CUTTING.length).toBe(7);
+    expect(CROSS_CUTTING.length).toBe(8);
     expect(crossCuttingMismatches.checked).toBeGreaterThan(15);
     // And it is a strict complement: nothing is checked by both rules, which is
     // what makes this additive rather than a second copy.

@@ -166,12 +166,10 @@ afterwards so nothing fails visibly.
 
 > **getStats**(): `object`
 
-Alias for [stats](#stats), so a caller who learned `getStats()` from
-`PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+Alias for [stats](#stats).
 
-No `@returns` tag on purpose — see `PowerThrottle.getStats()` and
-`PowerGCRA.getStats()` for why a hand-written copy of the shape is the thing
-to avoid.
+See `guides/stats-naming.md` for why both spellings exist and why this
+method is written out per class.
 
 #### Returns
 

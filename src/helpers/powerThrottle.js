@@ -245,15 +245,10 @@ export class PowerThrottle {
   }
 
   /**
-   * Alias for {@link stats}, so a caller who learned `getStats()` from
-   * `PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+   * Alias for {@link stats}.
    *
-   * **No `@returns` tag, and that is load-bearing.** See `PowerGCRA.getStats()`:
-   * a hand-copied return shape drifts the moment `stats()` changes, and a test
-   * asserting the two stay in sync only papers over the duplication. Inference
-   * gives a byte-identical published type that cannot drift, and
-   * `test/types.test-d.ts` asserts the two are mutually assignable — the property
-   * a consumer relies on.
+   * See `guides/stats-naming.md` for why both spellings exist and why this
+   * method is written out per class.
    */
   getStats() {
     return this.stats();

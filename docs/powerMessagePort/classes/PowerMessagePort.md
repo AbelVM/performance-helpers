@@ -158,8 +158,10 @@ adapter per port for the life of the process.
 
 > **getStats**(): `object`
 
-Alias for [PowerMessagePort#stats](#stats), so callers that learned
-`getStats()` from `PowerPool` are not handed a `TypeError`.
+Alias for [stats](#stats).
+
+See `guides/stats-naming.md` for why both spellings exist and why this
+method is written out per class.
 
 #### Returns
 

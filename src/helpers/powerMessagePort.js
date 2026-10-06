@@ -180,8 +180,10 @@ export class PowerMessagePort {
   }
 
   /**
-   * Alias for {@link PowerMessagePort#stats}, so callers that learned
-   * `getStats()` from `PowerPool` are not handed a `TypeError`.
+   * Alias for {@link stats}.
+   *
+   * See `guides/stats-naming.md` for why both spellings exist and why this
+   * method is written out per class.
    */
   getStats() {
     return this.stats();

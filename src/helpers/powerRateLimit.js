@@ -759,11 +759,10 @@ export class PowerRateLimit {
   }
 
   /**
-   * Alias for {@link stats}, so a caller who learned `getStats()` from
-   * `PowerPool` is not handed `TypeError: x.getStats is not a function` here.
+   * Alias for {@link stats}.
    *
-   * No `@returns` tag on purpose — see `PowerThrottle.getStats()` for why the
-   * shape is inferred rather than copied.
+   * See `guides/stats-naming.md` for why both spellings exist and why this
+   * method is written out per class.
    */
   getStats() {
     return this.stats();

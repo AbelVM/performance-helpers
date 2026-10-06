@@ -1,5 +1,12 @@
 # PowerPool Autoscaling
 
+> ⚠️ **`autoScale.policy` is computed and published, but not enforced.**
+> The `aimd`, `vegas`, and `gradient2` policies compute a concurrency limit and
+> expose it via `getStats().performance.concurrencyLimit`, but **nothing on the
+> dispatch path reads that limit**. Worker count is the only admission gate.
+> Treat `policy` as a reported diagnostic, not as a concurrency controller.
+> See `smart.md` §2.7 and §9 for the full analysis.
+
 PowerPool supports an optional autoscaling mode to grow or shrink the worker pool based on recent observed task latency (EWMA) and queue pressure.
 
 ## Enabling
