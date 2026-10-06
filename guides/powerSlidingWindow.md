@@ -110,71 +110,16 @@ pool.terminate();
 ## Clocks
 
 Every limiter reads time, and the clock it reads is **`monoMs()`, not
-`nowMs()`** (RES-019). `nowMs()` is two clock reads per call — the
-high-resolution one and `Date.now()`, the second purely to check the two have
-not diverged under a test harness — and measures about **141 ns**.
-`monoMs()` reads **one**, because it never consults `Date.now()` at all, and that
-is not only cheaper: it is what stops an NTP adjustment from becoming elapsed
-time inside the limiter. See [Which clock](#which-clock) below.
+`nowMs()`** (RES-019). The full explanation — why `monoMs()` is cheaper, why
+`nowMs()` is two reads, and why an injected `now` wins over everything — is in
+[PowerThrottle → Clocks](powerThrottle.md#clocks). The summary here is the part
+that is specific to this helper:
 
-Two knobs address that, and they are deliberately not symmetric:
-
-| Where                     | Type                 | Used by                                                |
-| ------------------------- | -------------------- | ------------------------------------------------------ |
-| `now` constructor option  | `function(): number` | tests, and any caller driving a fake clock             |
-| `{ now }` per-call option | `number`             | `PowerRateLimit`, threading one reading into every leg |
-
-**A limiter constructed with its own `now` ignores any per-call value.** An
-explicitly injected clock always wins. The reason is not precedence taste: a
-limiter built with a fake clock is a limiter _under test_, and if a composition
-overrode its notion of time mid-run, the test would silently start measuring
-something else. That is the hardest kind of failure to notice, and it happens
-exactly when you are most likely to be looking for a different bug.
-
-A limiter that takes no second argument simply reads its own clock, which is
-why threading needs no capability check on the limiter and works with
-third-party limiters unchanged.
-
-```javascript
-// A driven clock, for anything deterministic.
-let clock = 0;
-const throttle = new PowerThrottle({ capacity: 10, refillRate: 100, now: () => clock });
-
-// One reading, shared by every leg of a composition.
-rateLimit.tryConsume(1, { now: Date.now() });
-```
-
-Note the sharp edge: a threaded `now` is **authoritative**, so a value far in the
-future will legitimately empty a sliding window. That is correct — it is what a
-real clock jumping would do — but it is why a caller should thread one instant
-for the whole composition rather than letting each leg drift.
-
-### Which clock
-
-A limiter subtracts readings; it never needs to know what time it is. So its
-default clock is `monoMs()`, anchored to the monotonic source
-(`performance.now()`, or `process.hrtime.bigint()` on Node) with an epoch offset
-captured once at module load. The value is still an epoch timestamp, so
-`stats().tat` and `tryReserve().runAt` remain the instants they are documented to
-be — but a **wall-clock adjustment cannot move it**.
-
-Measured, with zero real milliseconds elapsed:
-
-| What moved                 | Before                                        | Now                    |
-| -------------------------- | --------------------------------------------- | ---------------------- |
-| wall clock +5 s            | `available()` 0 -> 2, the whole burst granted | stays 0, still refused |
-| `PowerCircuit` open window | `open` -> `half-open` on a +60 s step         | stays `open`           |
-
-The direction matters, because the intuitive version is backwards: a step
-_backwards_ was always harmless here (`PowerGCRA` clamps with
-`Math.max(now, _tat)`). It is a step **forwards** that hands out budget nobody
-spent.
-
-**What this costs you:** faking `Date.now()` no longer drives a limiter. If you
-need to control the clock, inject it — the `now` constructor option, or
-the per-call `{ now }` for a composition. That has always been the supported
-route and it still wins over everything. `PowerCircuit` has no `now` option, so
-for that class there was never a documented way in.
+- The `now` constructor option lets tests and fake-clock callers drive the
+  window deterministically.
+- A limiter constructed with its own `now` ignores any per-call value. That is
+  not precedence taste: a limiter built with a fake clock is a limiter _under
+  test_, and a mid-run override would silently start measuring something else.
 
 ## Metrics
 

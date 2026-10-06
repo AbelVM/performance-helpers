@@ -448,6 +448,34 @@ try {
 }
 ```
 
+## Disposal
+
+`PowerPool` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown, like every other
+long-lived helper here.
+
+```javascript
+{
+  using pool = new PowerPool(WorkerScript, { size: 2 });
+  // ...
+} // dispose() runs here, calling terminate() synchronously
+```
+
+**There are timers and workers to cancel.** The pool owns a reaper interval,
+worker threads, and pending `awaitResponse` bookkeeping. `dispose()` calls
+`terminate()` synchronously, which clears the reaper, terminates every worker,
+and rejects any pending response Promises with `PowerPoolShutdownError`. Use
+`dispose()` when you are finished with the pool.
+
+`[Symbol.asyncDispose]()` is the graceful cousin: it awaits `drain()` first,
+letting in-flight work finish, and then calls `terminate()`. Use it when you
+want the pool to complete its current work before shutting down.
+
+`shutdown()` and `terminate()` are the underlying primitives. `shutdown()`
+performs the same hard stop as `dispose()` but returns a `Promise` that rejects
+with `PowerPoolShutdownError`; `terminate()` is the synchronous version. Both
+are safe to call multiple times.
+
 ## Batch examples
 
 ```javascript

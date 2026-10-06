@@ -4,9 +4,9 @@ Lightweight async concurrency gate for IO-heavy fanout. Use a semaphore when you
 
 ## Constructor
 
-| Option | Type | Default | Description |
-|---|---:|---:|---|
-| `limit` | `number` | `1` | Maximum number of concurrent holders.
+| Option  |     Type | Default | Description                           |
+| ------- | -------: | ------: | ------------------------------------- |
+| `limit` | `number` |     `1` | Maximum number of concurrent holders. |
 
 ## API
 
@@ -18,6 +18,30 @@ Lightweight async concurrency gate for IO-heavy fanout. Use a semaphore when you
 - `available` — Number of permits still available.
 - `pending` — Number of callers waiting for a permit.
 - `isLocked` — `true` when the semaphore is fully acquired.
+- `dispose()` / `[Symbol.dispose]()` — Release resources and detach any internal state. Supports `using` / `await using`. See [Disposal](#disposal).
+
+## Disposal
+
+`PowerSemaphore` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown, like every other
+long-lived helper here.
+
+```javascript
+{
+  using semaphore = new PowerSemaphore(3);
+  const release = await semaphore.acquire();
+  // ...
+} // dispose() runs here
+```
+
+**There is no timer to cancel.** `PowerSemaphore` holds no timer and no listener
+registry; its state is a count and a queue of waiters. `dispose()` is a state
+reset: it clears the queue and releases any held permits, so a torn-down
+semaphore stops being sampled and does not keep waiters pending.
+
+`reset()` is the reversible cousin: it clears the queue and resets the count to
+`limit`, but it does **not** release held permits. Use `reset()` to pause a
+semaphore for a while; use `dispose()` when you are finished with it.
 
 ## Example
 

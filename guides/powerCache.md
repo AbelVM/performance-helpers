@@ -54,6 +54,31 @@ An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an opti
 - `getOrSetAsync(key, asyncFactory, { ttl, weight, staleWhileRevalidate })` — the factory is called as `asyncFactory(signal)` and receives an **`AbortSignal`**, as `fetch` does. It is signalled when the key is **evicted** or **deleted**, when the cache is **cleared**, and when the caller's **timeout** elapses. A factory that ignores the signal is unaffected — aborting is a request, not a kill, and its value is still cached. See [Cancelling an in-flight fetch](#cancelling-an-in-flight-fetch).
 - `getOrFetch(key, factory?, options?)` — `getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is given. The reason it exists: a `fetchMethod` on the instance removes a function literal from **every** call site, which is most of the cost of the async API in a hot path. A per-call factory still wins, so one cache can serve more than one kind of resource. Rejects with a `TypeError` if there is neither.
 
+## Disposal
+
+`PowerCache` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown, like every other
+long-lived helper here.
+
+```javascript
+{
+  using cache = new PowerCache({ maxEntries: 3000, defaultTTL: 60_000 });
+  // ...
+} // dispose() runs here, stopping cleanup and clearing entries
+```
+
+**There is a timer to cancel.** The periodic cleanup loop (`startCleanup()`) runs
+on an interval, and `dispose()` stops it. `dispose()` also detaches the metrics
+registration and clears the cache, so a torn-down instance stops being sampled
+and does not keep entries alive.
+
+`clear()` is the reversible cousin: it removes all entries but keeps the cache
+writable and the cleanup loop running. Use `clear()` to reset a cache you intend
+to reuse; use `dispose()` when you are finished with it.
+
+`stopCleanup()` stops the timer but leaves the cache populated. Use it when you
+want to freeze the current state without discarding it.
+
 ### Stale-while-revalidate, and bounding it
 
 An expired entry is a miss. `staleWhileRevalidate` changes that: it returns the
@@ -250,8 +275,8 @@ for (const k of Array.from(c.keys())) c.get(k);
 
 `Array.from` is not incidental advice — it is the general answer for any loop body
 that mutates recency, and it is also what you want before a bulk export you intend
-to keep iterating. `review.md`'s **CACHE-019** records the defect and the
-measurement behind the bound.
+to keep iterating. The defect and the measurement behind the bound are recorded in
+the review notes for this change.
 
 ### Opt-in: eager cleanup on read
 

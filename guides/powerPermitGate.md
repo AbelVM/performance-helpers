@@ -114,6 +114,27 @@ rather than mistakes:
 - `queueCapacity` — Maximum allowed queue size.
 - `isFull` — `true` when the wait queue is saturated.
 
+## Cancelling a wait
+
+`acquire({ signal })` accepts an `AbortSignal`. Aborting the signal rejects the
+wait with an `AbortError` and the waiter leaves the queue without consuming a
+permit:
+
+```javascript
+const controller = new AbortController();
+const releasePromise = gate.acquire({ signal: controller.signal });
+
+// later — stop waiting
+controller.abort();
+```
+
+Cancellation is **O(1)**. The entry is marked and the promise rejected; the
+queue is not walked. Cancelled entries are compacted the next time the gate
+serves waiters, so a cancellation storm does not pay an O(n) cost per abort.
+
+`reset()` clears the cancelled-waiter counter along with the queue, so a reset
+after many cancellations does not carry the accounting forward.
+
 ## Example
 
 ```js

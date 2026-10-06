@@ -218,5 +218,5 @@ The rule that separates the two cases:
 ## Related
 
 - [PowerBackpressure](powerBackpressure.md) — loss-based AIMD on an outstanding count, for the case with no setpoint.
-- [PowerPool autoscaling](powerPool.md#adaptive-concurrency-policies) — delay-based controllers on a latency signal.
+- [PowerPool autoscaling](powerPool.md#autoscaling) — delay-based controllers on a latency signal.
 - [ADR 0005](../adr/0005-feedback-signal-picks-the-controller.md) — the signal taxonomy and the two rejected consolidations.

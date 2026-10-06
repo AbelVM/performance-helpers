@@ -85,7 +85,7 @@ not two.
 
 ### `PowerMessagePort` decodes the native path for you
 
-[`PowerMessagePort`](powerRealtimeHub.md#built-in-adapters) is the companion
+[`PowerMessagePort`](powerRealtimeHub.md) is the companion
 adapter for the hub. It listens on `port.onmessage` and calls `decodeInbound`
 for you, so a `MessagePort` subscriber receives the original `Map`, `Set`,
 `Date`, `BigInt` and binary values without any JSON round-trip:

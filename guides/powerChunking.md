@@ -118,7 +118,6 @@ pool.terminate();
   a `PowerPool` directly.
 - The helper returns what `PowerPool.postMessageBatch` returns: an array of
   per-chunk results (`true|false`) or Promises when `awaitResponse` is used.
-- When `fnComplexity` is not provided the helper will examine the source of `fn` and attempt
 - When `fnComplexity` is not provided the helper uses a lightweight heuristic to infer complexity:
   it treats `AsyncFunction` or `GeneratorFunction` as `heavy` and uses the function's declared
   arity (number of formal parameters) as a signal; otherwise it defaults to `medium`.

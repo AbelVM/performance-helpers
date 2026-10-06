@@ -4,6 +4,18 @@ Producer-facing backpressure controller with adaptive refill.
 
 `PowerBackpressure` is designed to help producers throttle themselves when downstream capacity is limited. It provides a permit-based API and automatically refills permits when pressure is high.
 
+## Constructor
+
+| Option           |                Type |                                  Default | Description                                                                                                                                                               |
+| ---------------- | ------------------: | ---------------------------------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capacity`       |            `number` |                                    `100` | Maximum number of concurrent permits.                                                                                                                                     |
+| `queueCapacity`  |            `number` |                                   `1000` | Maximum number of producers that may wait for a permit.                                                                                                                   |
+| `lowWaterMark`   |            `number` |             `Math.ceil(capacity * 0.25)` | When available permits fall below this threshold, adaptive refill begins.                                                                                                 |
+| `refillAmount`   |            `number` | `Math.max(1, Math.ceil(capacity * 0.1))` | Base number of permits restored during each adaptive refill.                                                                                                              |
+| `refillInterval` |            `number` |                                    `200` | Refill interval in milliseconds when pressure is high.                                                                                                                    |
+| `initialTokens`  |            `number` |                               `capacity` | Initial available permits.                                                                                                                                                |
+| `adaptive`       | `boolean`\|`Object` |                                  `false` | AIMD tuning of `refillAmount`. `true` takes the defaults; an object configures `additiveIncrease`, `beta`, `min` and `max`. See [Adaptive refill](#adaptive-refill-aimd). |
+
 ## API
 
 - `acquire()` — Returns a `Promise<Function>` that resolves when a permit is available. The resolved function releases the permit.
@@ -15,6 +27,30 @@ Producer-facing backpressure controller with adaptive refill.
 - `pending` — Number of waiting producers.
 - `queueCapacity` — Maximum queued producers.
 - `isFull` — `true` when the waiting queue is saturated.
+- `dispose()` / `[Symbol.dispose]()` — Release resources and detach any internal timers. Supports `using` / `await using`. See [Disposal](#disposal).
+
+## Disposal
+
+`PowerBackpressure` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown, like every other
+long-lived helper here.
+
+```javascript
+{
+  using bp = new PowerBackpressure({ capacity: 64, queueCapacity: 100 });
+  const release = await bp.acquire();
+  // ...
+} // dispose() runs here
+```
+
+**There is a timer to cancel.** The adaptive refill path schedules a recurring
+refill tick when pressure is high, and `dispose()` cancels it. Saying it "is a
+state reset" would describe the limiters, not this helper: the timer is real, and
+leaving it running after teardown would keep the process alive for no reason.
+
+`reset()` does **not** cancel the timer. It returns the window to its configured
+`refillAmount` and clears waiting producers, but the tick continues. Use
+`dispose()` when you are finished with the instance.
 
 ## Adaptive refill (AIMD)
 

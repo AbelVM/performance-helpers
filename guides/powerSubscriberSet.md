@@ -19,6 +19,29 @@ Shared subscriber registry used by `PowerEventBus` and `PowerObserver`.
 - `clear()` — Remove all listeners.
 - `values()` — Return a safe array copy of currently live listeners.
 - `[Symbol.iterator]()` — Iterate live listeners in insertion order.
+- `dispose()` / `[Symbol.dispose]()` — Release the registry and detach any weak-reference cleanup. Supports `using` / `await using`. See [Disposal](#disposal).
+
+## Disposal
+
+`PowerSubscriberSet` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown, like every other
+long-lived helper here.
+
+```javascript
+{
+  using subs = new PowerSubscriberSet({ weak: true, maxListeners: 10 });
+  const unsub = subs.add(listener);
+  // ...
+} // dispose() runs here
+```
+
+**There is no timer to cancel.** The set holds listeners and, when `weak: true`,
+`WeakRef` handles. `dispose()` clears the listener list and releases the weak
+references, so a torn-down set does not keep callbacks alive.
+
+`clear()` is the reversible cousin: it removes all listeners but keeps the set
+writable. Use `clear()` to reset a set you intend to reuse; use `dispose()` when
+you are finished with it.
 
 ## Example
 
