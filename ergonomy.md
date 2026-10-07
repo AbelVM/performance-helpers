@@ -60,9 +60,8 @@ Verified against the current tree:
 - `tsconfig.json`: JavaScript source with `allowJs: true`, declaration emit,
   and `checkJs: false`; consumer declaration tests are run separately through
   `tsconfig.types.json`.
-- Focused validation: the reported lint command currently completes quietly;
-  the three focused test files pass (72 tests), and the test command also
-  invokes the build successfully.
+- Validation: `npm run test --silent` passes with 314 test files and 3,163
+  tests passed (7 skipped); the command also invokes the production build.
 
 External guidance used for the recommendations:
 
