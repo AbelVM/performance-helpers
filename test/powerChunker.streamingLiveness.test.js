@@ -158,9 +158,7 @@ describe('RT-010: streaming mode returns the pool before the iterable is exhaust
     // returns is the pool: terminating it stops the workers but leaves the
     // generator being pulled. Until the return contract is a decision, any
     // "fix" here trades one unbounded behaviour for another.
-    const { PowerChunker: Chunker } = await import(
-      /* @vite-ignore */ '/data/projects/performance-helpers/src/helpers/powerChunking.js'
-    );
+    const { PowerChunker: Chunker } = await import(/* @vite-ignore */ CHUNKER);
     function* finite() {
       yield 1;
       yield 2;
@@ -183,9 +181,7 @@ describe('RT-010: streaming mode returns the pool before the iterable is exhaust
     // Asserted in-process with a counter rather than by timing, because the thing
     // being checked is a *count that stops increasing*, which a duration cannot
     // distinguish from a pump that is merely slow.
-    const { PowerChunker: Chunker } = await import(
-      /* @vite-ignore */ '/data/projects/performance-helpers/src/helpers/powerChunking.js'
-    );
+    const { PowerChunker: Chunker } = await import(/* @vite-ignore */ CHUNKER);
     let pulled = 0;
     function* counted() {
       while (true) {
@@ -217,9 +213,7 @@ describe('RT-010: streaming mode returns the pool before the iterable is exhaust
     //
     // `fn` is called once per element (`fn(item, index, chunk)`), so the counter
     // is the item count rather than the chunk count.
-    const { PowerChunker: Chunker } = await import(
-      /* @vite-ignore */ '/data/projects/performance-helpers/src/helpers/powerChunking.js'
-    );
+    const { PowerChunker: Chunker } = await import(/* @vite-ignore */ CHUNKER);
     let processed = 0;
     function* many() {
       for (let i = 0; i < 2000; i += 1) yield i;
