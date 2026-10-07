@@ -149,6 +149,13 @@ pipeline.
 
 **New**
 
+- **Metrics observations** - `createObservation()` records sample count, window
+  duration, freshness, and observation time around an existing flat metrics
+  series; `diffObservation()` computes numeric deltas without coercing missing,
+  stale, or non-finite values to zero.
+
+- **`PowerPool` adaptive concurrency policies now enforce their computed limit.** `aimd`, `vegas` and `gradient2` hold new tasks in the configured queue once active work reaches the published limit; with `taskQueue: false`, the post is rejected instead of silently exceeding the controller.
+
 - **`PowerMessageCodec`** - explicit versioned framing for structured messages
   (`json`/`raw`), plus `encodeNative` for the platform structured clone. It
   throws on a short header, an unknown version, an unknown codec, or a truncated
@@ -170,6 +177,11 @@ pipeline.
 - **`PowerCache` `{ policy: 'slru' }`** - probation/protected segments, opt-in.
   Under a 500-key one-off scan over a 40-key hot set, 40/40 keys survive with
   `slru` against 0/40 with `lru`.
+- **`PowerCache` refresh diagnostics** - `stats()` now reports
+  `refreshesFailed` for rejected background refreshes and `refreshesAborted` for
+  refreshes signalled after eviction, deletion, clearing, or timeout. These are
+  separate from `refreshesSkipped`, which counts refreshes that never started
+  because `maxInflightRefreshes` was reached.
 - **`autoScale.policy`** gains `aimd`, `vegas` and `gradient2` alongside the
   existing `ewma` default.
 - Every resource-owning class gained `dispose()` and `[Symbol.dispose]`, so
