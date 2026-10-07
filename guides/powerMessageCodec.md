@@ -194,7 +194,7 @@ The two only separate when a frame is big enough for the copy to matter — 1.9�
 
 ## Negotiation: the carrier is a per-worker decision
 
-The frame is the default because it is portable. It is also lossy, silently, for a class of values a worker will reasonably be handed. Measured through the shipped path (`node bench/claims.js carrier`):
+The frame is the default because it is portable. It is also lossy, silently, for a class of values a worker will reasonably be handed. Through the shipped path:
 
 | value sent                | what the worker receives                                      |
 | ------------------------- | ------------------------------------------------------------- |
@@ -252,16 +252,11 @@ parentPort.postMessage(
 
 ### It is not a speedup
 
-The release note for this originally claimed 2–5×. `node bench/claims.js carrier` says otherwise:
-
-| payload              |  framed |  native | ratio |
-| -------------------- | ------: | ------: | ----: |
-| small object (210 B) | ~3.4 µs | ~3.8 µs |  1.11 |
-| 1 KB string          | ~4.2 µs | ~1.5 µs |  0.37 |
-| 64 KB string         | ~171 µs | ~8.9 µs |  0.05 |
-| 200 nested objects   |  ~51 µs |  ~87 µs |  1.71 |
-
-A tie for small objects, up to ~1.7× **slower** for deep structure, and faster only for string-heavy payloads. Timings are indicative — BENCH-001 measured a 28% spread on this machine — but the direction is consistent across runs, and a pool that posted envelopes for the speed would have been slower for the payloads a worker actually receives. Negotiation is justified by the fidelity table above, and the per-worker decision is what keeps a pool from adopting it where it does not pay.
+Negotiation exists for fidelity, not throughput. Structured clone is a tie for small
+objects, slower for deeply nested structure, and faster only for string-heavy payloads.
+A pool that posted envelopes for the speed would have been slower for the payloads a
+worker actually receives. The fidelity table above is the reason to adopt it, and the
+per-worker decision is what keeps a pool from adopting it where it does not pay.
 
 ## Errors
 

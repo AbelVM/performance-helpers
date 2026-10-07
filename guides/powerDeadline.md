@@ -108,9 +108,8 @@ try {
   (and with the internal deadline controller) so a single `signal` parameter
   covers all three. The combination is **detached in the attempt's `finally`**,
   so a long-lived signal — a request-scoped one, passed to every operation in the
-  request — does not accumulate a listener per attempt. Before 2.0 it did:
-  20 runs × 4 attempts left **80 retained `abort` listeners** on one shared
-  signal, because `AbortSignal` is an `EventTarget` and `{ once: true }` only
+  request — does not accumulate a listener per attempt. Before 2.0 it did: each
+  attempt added an `abort` listener on the shared signal, and `{ once: true }` only
   avoids a _second_ invocation after an event that, on a successful run, never
   fires. The consequence of detaching is that the combined signal **stops
   observing aborts once the attempt has settled** — it is scoped to that attempt,

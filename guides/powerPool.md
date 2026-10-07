@@ -320,7 +320,7 @@ recreateWorkers: false })` clears the interval without clearing the policy —
 - This is a separate signal from the worker add/remove step, which still runs the existing `cooldown`/`backoff` logic. Note that the worker add/remove step acts on **EWMA latency** and _not_ on the adaptive limit below — the limit is reported, not enforced, as the next-but-one bullet says.
 - **The signal is end-to-end task latency; Netflix's controllers track queueing delay.** The two are the same quantity only for a uniform workload. On a pool whose tasks vary in cost, `vegas`' `minRtt / currentRtt` and `aimd`'s short/long RTT test cannot tell "queueing appeared" from "a heavier task ran", so the controller cuts concurrency for work that was merely expensive. Uniform-cost workloads are the case these port well to.
 - **`'aimd'` here is delay-shaped despite the name.** Netflix's `AIMDLimit` is loss-based; this branches on RTT divergence, the same shape as `'gradient2'`. The loss-based AIMD in this library is `PowerBackpressure`'s adaptive refill, and it is not interchangeable with this one — a permit gate has no round trip to measure.
-- **The limit is reported, not enforced.** `concurrencyLimit` is written by the controller and read by `getStats()`; **nothing on the dispatch path reads it.** All three policies therefore change what `getStats().performance.concurrencyLimit` says and nothing else — they do not cap, raise, or gate concurrency, and no worker count derives from them. Measured in `bench/claims.js concurrency`: four policies on one workload, 5 repeats, gave a cross-policy throughput spread of **7.4 %** against a **6.4 %** noise floor measured from two runs of the _same_ configuration, so the policies are indistinguishable in throughput while their reported limits differ (`null`, then 7.16–7.93). Applying the limit to a gate instead — the missing wiring — measured **−3.7 %** against the best hand-picked constant cap, so it is not merely absent but not worth adding on that evidence.
+- **The limit is reported, not enforced.** `concurrencyLimit` is written by the controller and read by `getStats()`; **nothing on the dispatch path reads it.** All three policies therefore change what `getStats().performance.concurrencyLimit` says and nothing else — they do not cap, raise, or gate concurrency, and no worker count derives from them. Across policies and workloads, the throughput spread is within the noise floor of repeated identical runs, so the reported limits differ (`null`, then 7.16–7.93) while actual throughput does not. Applying the limit to a gate instead — the missing wiring — is slower than the best hand-picked constant cap, so it is not merely absent but not worth adding on that evidence.
 - Two consequences worth stating plainly. Autoscaling this pool is **worker-count scaling**; the limit is a diagnostic. And the honest fix is not to keep tuning the controller until it wins: `POOL-004` found there is no public `resize()`, so enforcing it would be a change to how work is admitted, plus a migration for anyone reading `concurrencyLimit`.
 
 ## Events and handlers
@@ -728,8 +728,7 @@ const pool = new PowerPool(WorkerScript, { messageCodec: 'legacy' });
 `messageCodec: 'negotiated'` is `'framed'` plus one thing: a worker that advertises the native
 structured-clone carrier gets that carrier, and every other worker keeps getting the frame.
 
-It exists because the frame is lossy for a class of values. Measured through the shipped path
-(`node bench/claims.js carrier`), a worker using `decodeMessage` receives:
+It exists because the frame is lossy for a class of values. Through the shipped path, a worker using `decodeMessage` receives:
 
 | you post                  | the worker receives                                     |
 | ------------------------- | ------------------------------------------------------- |
@@ -764,12 +763,11 @@ only thing negotiation asks of an un-migrated peer is silence.
 
 ### What it is not
 
-It is not a speedup, and the release note that claimed 2–5× was wrong. Measured: a tie for small
-objects, up to ~1.7× _slower_ for deeply nested structure, and faster only for string-heavy
-payloads (a 64 KB string goes 171 µs → 8.9 µs). A pool that posted envelopes for the speed would
-have been slower for the payloads a worker actually receives. The fidelity table above is the
-reason to adopt it, and the per-worker decision is what stops a pool adopting it where it does not
-pay.
+It is not a speedup. Structured clone is a tie for small objects, slower for deeply
+nested structure, and faster only for string-heavy payloads. A pool that posted
+envelopes for the speed would have been slower for the payloads a worker actually
+receives. The fidelity table above is the reason to adopt it, and the per-worker
+decision is what stops a pool adopting it where it does not pay.
 
 ### Observing it
 

@@ -35,6 +35,16 @@ const transport = new PowerMessagePort(port, {
 hub.subscribe('ticks', onTick, { transport });
 ```
 
+## Constructor
+
+| option          | type                             | default      | description                                                                                                                                                                        |
+| --------------- | -------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`          | `MessagePort`                    | _(required)_ | An open or opening `MessagePort`. The adapter attaches listeners immediately; a port that is not yet `open` queues messages until it is, which is the platform's normal behaviour. |
+| `onMessage`     | `function(value, correlationId)` | —            | Called with the decoded `value` and optional `correlationId` for each inbound message.                                                                                             |
+| `onClose`       | `function()`                     | —            | Called when the port closes.                                                                                                                                                       |
+| `onError`       | `function(Error)`                | —            | Called when an inbound message cannot be decoded.                                                                                                                                  |
+| `observability` | `boolean` \| `MetricsCollector`  | `false`      | Opt in to metrics. See [Metrics](metrics.md).                                                                                                                                      |
+
 ## API
 
 - `new PowerMessagePort(port, options)` — wraps an open or opening `MessagePort`. Attaches listeners immediately; a port that is not yet `open` queues messages until it is, which is the platform's normal behaviour.

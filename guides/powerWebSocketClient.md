@@ -1,5 +1,8 @@
 # PowerWebSocketClient
 
+> **Client-side helper** — dials out and owns the connection lifecycle. The
+> server-side counterpart is [`PowerSocketAdapter`](powerSocketAdapter.md).
+
 Reconnecting WebSocket client with **explicit back-pressure**, heartbeats, and `PowerMessageCodec` framing.
 
 ## The problem this exists for
@@ -239,7 +242,10 @@ one error: this platform refused binaryType="arraybuffer", so binary frames arri
 Blob and are converted here instead. Conversion is asynchronous, so inbound delivery
 becomes asynchronous once it first happens: frames are still delivered in order, but no
 longer inside the "message" listener. Pass a WebSocketImpl that honours binaryType to
-avoid both. Conversion costs about 0.045 ms per 64 KiB frame.
+avoid both. Conversion is asynchronous, so inbound delivery
+becomes asynchronous once it first happens: frames are still delivered in order, but no
+longer inside the "message" listener. Pass a WebSocketImpl that honours binaryType to
+avoid both.
 ```
 
 Two things follow from that, and both are contract rather than implementation detail.

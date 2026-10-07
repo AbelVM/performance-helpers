@@ -955,6 +955,11 @@ export {};
  *   window path. Declared here rather than left to the object literal in
  *   `_allocNode`, because a property the typedef does not mention is a property
  *   every other reference to a node has to be narrowed around.
+ * @property {boolean} visited - SIEVE visited bit: set on access, cleared by
+ *   the hand during eviction scanning. A pooled node carries its last role's
+ *   flag, so reset on every allocation rather than at insert.
+ * @property {string} queue - S3-FIFO queue assignment: `'main'`, `'small'`,
+ *   or `'ghost'`. Reset on allocation.
  */
 
 /**
@@ -1006,9 +1011,13 @@ export {};
  *   **not** a recommendation: the window meets three of ADR 0003's four
  *   acceptance criteria and misses cold start by 79 points, which is the case it
  *   was built to fix. See `adr/0003-tinylfu-admission-window.md`.
- * @property {'lru'|'slru'} [policy] - Eviction policy. `'slru'` (opt-in) splits
- *   the list into probation and protected segments and promotes on access, which
- *   resists a one-off sequential scan. Defaults to `'lru'`.
+ * @property {'lru'|'slru'|'sieve'|'s3fifo'} [policy] - Eviction policy.
+ *   `'slru'` (opt-in) splits the list into probation and protected segments and
+ *   promotes on access, which resists a one-off sequential scan.
+ *   `'sieve'` (NSDI '24) is a FIFO queue with a visited bit per entry and a
+ *   scanning hand pointer: visited entries get a second chance, unvisited are
+ *   evicted. `'s3fifo'` (SOSP '23) uses three static FIFO queues (Small, Main,
+ *   Ghost) for workload-oblivious high hit ratios. Defaults to `'lru'`.
  * @property {number} [seed] - Hash seed for the TinyLFU sketch behind
  *   `{ admission: 'tinylfu' }`, and **only** for it: `'none'` and `'slru'` never
  *   build a sketch, so the option has no effect there. Must be a whole number in

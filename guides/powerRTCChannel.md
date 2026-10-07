@@ -1,5 +1,9 @@
 # PowerRTCChannel
 
+> **Transport adapter (server-side)** — wraps an existing `RTCDataChannel`.
+> Bring your own channel; this class normalises it so the rest of your code
+> does not know it is not a socket.
+
 One `RTCDataChannel` behind the same shape as [`PowerSocketAdapter`](powerSocketAdapter.md) — string `readyState` normalised, SCTP's message-size ceiling enforced, and back-pressure that arrives as a push signal instead of a poll timer.
 
 ## Why this exists, and what it deliberately is not

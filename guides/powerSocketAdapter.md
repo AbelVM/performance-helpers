@@ -1,5 +1,9 @@
 # PowerSocketAdapter
 
+> **Server-side helper** — wraps an externally-managed socket accepted by
+> another library (e.g. `ws`). The client-side counterpart is
+> [`PowerWebSocketClient`](powerWebSocketClient.md).
+
 One socket interface over Node `ws`, browser `WebSocket`, and `WebSocketStream` — with liveness, per-message rate limiting, and a graceful drain.
 
 ## Why this exists

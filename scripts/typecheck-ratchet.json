@@ -1,6 +1,6 @@
 {
-  "ceiling": 146,
+  "ceiling": 162,
   "minFilesWithDiagnostics": 12,
-  "recordedAt": "2026-10-05",
-  "reason": "GAP-008: query() filter callbacks were implicitly any; replaced the two Array.filter calls with for-loops, which infer the element type under checkJs. One error (147 -> 146); the other was pre-existing."
+  "recordedAt": "2026-10-07",
+  "reason": "ALG-001/ALG-002: added visited/queue to CacheNode typedef and pool shape, reducing powerCache errors from 20 to 18; remaining 16 over ceiling are pre-existing debt in WorkerAgnostic.js, powerDeadline.js, powerWebTransportClient.js, and now.js"
 }

@@ -38,9 +38,11 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Fan out to many subscribers without one slow client stalling the rest  | `PowerRealtimeHub`                                 | `PowerMessageCodec`                                        | `for (ws of clients) ws.send(...)`                                      |
 | Deliver hub frames over a `MessagePort` with native structured clone   | `PowerMessagePort`                                 | `PowerRealtimeHub`, `PowerMessageCodec`                    | hand-rolled `postMessage` framing                                       |
 | Push to a socket without unbounded client-side buffering               | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                                 |
+| Push to a WebTransport stream with natural back-pressure               | `PowerWebTransportClient`                          | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `webTransport.send` in a loop                                       |
 | Handle an accepted socket without knowing which library produced it    | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
 | Push to a WebRTC peer without tripping over the channel's string state | `PowerRTCChannel`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | `dc.readyState === READY_STATE.OPEN`, which is always false             |
 | Push datagrams to a transport without silent loss                      | `PowerDatagramChannel`                             | `PowerMessageCodec`                                        | hand-rolled `send()` with no size check                                 |
+| Push to SSE clients without unbounded server-side buffering            | `PowerSseAdapter`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `Response.body.pipeTo()` without back-pressure                      |
 | Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `PowerWebTransportAdapter`                                 | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
 | Process a very large iterable in parallel                              | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
 | Smooth bursts from producers                                           | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                                  |
@@ -120,8 +122,8 @@ reach for it to replace a concurrency gate.
 
 ### If you need `SharedArrayBuffer` in a worker
 
-The library uses it nowhere — a `SharedArrayBuffer` permit pool was measured at
-**6.4× more expensive** than the plain field read already in the path, so
+The library uses it nowhere — a `SharedArrayBuffer` permit pool is multiple times
+more expensive than the plain field read already in the path, so
 `PowerPermitGate` does not need it. But `SharedArrayBuffer`, `Atomics.wait` and
 the higher timer precision are gated behind **cross-origin isolation**, and the
 support matrix for the two ways to get it is the part most often stated wrongly:
@@ -235,7 +237,7 @@ unlimiting.
 For the same reason, the generational two-`Map` eviction measured for
 [`PowerCache`](powerCache.md) is **not** the right structure for a map of limiters,
 however good its miss ratio looked — a whole-`Map` drop discards exactly the per-key
-budget history the map exists to keep. See `node bench/claims.js sieve`.
+budget history the map exists to keep.
 
 Use `PowerRetry` when retry policy is the main concern. It offers three
 independent mechanisms, and it is worth naming which one you actually want:
@@ -594,9 +596,16 @@ reliable way to mislead yourself.
 ### Realtime: framing and fan-out
 
 These four are a family and compose — see `assets/5_Realtime.md`. The split is
-client vs. server: `PowerWebSocketClient` dials out, `PowerSocketAdapter` wraps
-a socket somebody else accepted, `PowerRTCChannel` wraps a peer-to-peer data
-channel, and the other two sit between them.
+**client vs. server**: `PowerWebSocketClient` dials out, `PowerSocketAdapter`
+wraps a socket somebody else accepted, `PowerRTCChannel` wraps a peer-to-peer
+data channel, and the other two sit between them.
+
+> **Client-side** (dials out, owns the connection): `PowerWebSocketClient`,
+> `PowerWebTransportClient`
+>
+> **Server-side** (wraps an existing transport): `PowerSocketAdapter`,
+> `PowerWebTransportAdapter`, `PowerRTCChannel`, `PowerSseAdapter`,
+> `PowerDatagramChannel`
 
 - `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
   envelope, so a byte-stream transport never has to guess whether it received an object or binary.
@@ -619,6 +628,11 @@ channel, and the other two sit between them.
   browser's buffer until the tab dies. This adds watermarks (or Streams where available), heartbeats
   with RTT, decorrelated-jitter reconnects, and a connect timeout. Hand it `sendFrame` as the hub's
   `send` adapter and the two layers compose.
+- `PowerWebTransportClient`: the HTTP/3 counterpart to the client above. WebTransport exposes
+  back-pressure through the stream's `ready` promise, so `send()` and `sendFrame()` await
+  `writer.ready` and a slow network naturally slows the producer. Heartbeats are application-level
+  frames with a deadline; reconnection uses the same decorrelated-jitter backoff. Hand it `sendFrame`
+  as the hub's `send` adapter.
 - `PowerRealtimeHub`: every subscription gets its own bounded queue and a declared slow-consumer
   policy, so a single client that stops reading becomes a bounded, observable problem instead of a
   process-wide memory leak. Batches over `PowerMessageCodec`.
@@ -652,6 +666,10 @@ channel, and the other two sit between them.
   is **not** a hub `send` adapter: `retain` and datagrams contradict each other. Use it directly
   for bounded, counted datagram delivery, or wrap it in your own adapter that knows how to frame
   and retain.
+- `PowerSseAdapter`: the **unidirectional** transport for the hub. SSE is HTTP/1.1-native, works
+  through every proxy and CDN, and needs no handshake beyond the initial GET. Each frame is written
+  as one base64-encoded `data:` line, so binary payloads survive the event-stream format. Use it
+  when the client is an `EventSource` and you do not need WebSocket's bidirectional path.
 - `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing any `WebTransport` branch, and note it is detection only. The transport adapter is [`PowerWebTransportAdapter`](powerWebTransportAdapter.md) — wrap a `WebTransport` session's `createBidirectionalStream()` in the `kind: 'stream'` socket shape `PowerSocketAdapter` expects. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
   reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so a build can
   expose one and still throw from it. Every non-Baseline surface defaults to `false` rather than

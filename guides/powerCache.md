@@ -449,13 +449,13 @@ The constructor always returns a `PowerMemoizer` instance. Use the instance meth
 
 #### Memoizer constructor params
 
-| param                  |                       type |         default | description                                                                                                                                                                                                                                                                                                                                                                                            |
-| ---------------------- | -------------------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `fn`                   |                `Function?` |               — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied).                                                                                                                                                 |
-| `options.keyResolver`  | `function(...args):string` | `simpleArgsKey` | Function mapping call args to a stable cache key. **Changed in 2.0**: the default was `(...args) => JSON.stringify(args)`, which is ~35% slower for scalar arguments but **aliased distinct arguments onto one key** — `undefined`, functions, and every `Map`/`Set`/`RegExp` all collapsed to `null` or `{}`. See [below](#memoizer). The key _format_ differs, so a caller reading keys will see it. |
-| `options.cacheOptions` |                   `Object` |            `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                                                                                                                                                                            |
-| `options.ttl`          |                  `number?` |     `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                                                                                                                                                     |
-| `options.weight`       |                  `number?` |     `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                                                                                                                                                       |
+| param                  |                       type |         default | description                                                                                                                                                                                                                                                                                                                                                                                       |
+| ---------------------- | -------------------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fn`                   |                `Function?` |               — | Optional function to register with the instance. The constructor will not return a bare function; call `pm.memoize(fn)` to obtain a memoized wrapper (the instance will create a convenience wrapper accessible via `pm.run()` when `fn` is supplied).                                                                                                                                            |
+| `options.keyResolver`  | `function(...args):string` | `simpleArgsKey` | Function mapping call args to a stable cache key. **Changed in 2.0**: the default was `(...args) => JSON.stringify(args)`, which is slower for scalar arguments but **aliased distinct arguments onto one key** — `undefined`, functions, and every `Map`/`Set`/`RegExp` all collapsed to `null` or `{}`. See [below](#memoizer). The key _format_ differs, so a caller reading keys will see it. |
+| `options.cacheOptions` |                   `Object` |            `{}` | Options forwarded to the underlying `PowerCache` constructor (e.g. `defaultTTL`, `maxEntries`, `weightFn`).                                                                                                                                                                                                                                                                                       |
+| `options.ttl`          |                  `number?` |     `undefined` | Default TTL (ms) used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                                                                                                                                                |
+| `options.weight`       |                  `number?` |     `undefined` | Default weight used when caching results for the `fn` passed to the constructor.                                                                                                                                                                                                                                                                                                                  |
 
 You can create an empty `PowerMemoizer` instance and memoize multiple functions that share the same underlying cache by calling `memoize(fn)`:
 
@@ -515,18 +515,16 @@ larger key space evicts the entire working set — every scan key is the _most
 recently used_ by definition. A frequency filter asks a different question: is
 the thing I would evict still wanted?
 
-> **Experimental, and currently a net loss. Measured, not assumed.**
+> **Experimental, and currently a net loss.**
 > On a cold 40-entry cache preceded by a 460-key scan burst,
-> `admission: 'tynilfu'` measured a **0.0 % hit rate against plain LRU's
-> 80.0 %**, retaining **0 of 40** working-set keys against LRU's 40/40
-> (`node bench/claims.js coldstart`). On the sustained Zipf + scan mix below it
-> is a mild loss. **Do not enable it on the strength of the theory — measure your
-> workload first**, and prefer `policy: 'slru'`, which resists the same scan and
-> is not experimental.
+> `admission: 'tynilfu'` admits **0 of 40** working-set keys, against plain LRU's
+> 40/40. On the sustained Zipf + scan mix below it is a mild loss. **Do not enable it
+> on the strength of the theory — measure your workload first**, and prefer
+> `policy: 'slru'`, which resists the same scan and is not experimental.
 
 Sustained Zipf + scan workload — 40-key working set, a 25-key one-shot scan
 every 40 hot accesses, 5 paired repeats so every variant sees a byte-identical
-key stream (`node bench/claims.js zipf`):
+key stream:
 
 | Configuration                            | Working-set hit rate |     Survivors |
 | ---------------------------------------- | -------------------: | ------------: |
@@ -598,9 +596,9 @@ not recommended, because it fixes the sustained case and not the cold one:
 | + `windowSize: 16`     |                70.6 % |               1.5 % |
 | `policy: 'slru'`       |            **89.4 %** |                   — |
 
-Both columns are `node bench/claims.js zipf` and `node bench/claims.js coldstart`.
-The window beats plain LRU on the sustained mix and does nothing for the cold
-one, because a working-set key arriving into a cold sketch ties with the scan
+Both columns are the sustained Zipf + scan workload and the cold-start scan
+workload. The window beats plain LRU on the sustained mix and does nothing for the
+cold one, because a working-set key arriving into a cold sketch ties with the scan
 keys already resident — and a key that is never admitted never accumulates the
 frequency that would let it win. `policy: 'slru'` remains the answer to scan
 resistance. `adr/0003-tinylfu-admission-window.md` has the full sweep, the
@@ -630,14 +628,11 @@ Independent of the admission defect, these hold and are worth keeping:
   that had only just been learned.
 - **The sketch's own halving runs four bytes per iteration.** It halves two 4-bit
   counters packed into each byte, and doing that one byte at a time made it the
-  dominant cost of the whole admission filter: measured at the sketch's own
-  defaults (`width 16384, depth 4, sampleSize 10`), the halving cost **0.069 ms**
-  against **0.072 ms** for the ten increments it served — **96% of the work between
-  halvings**. It now processes a `Uint32Array` view four bytes at a time, which is
-  **4.5× faster** and brings that share to **46%**. The half-life is unchanged, so
-  no admission decision differs: `test/smallLfu.reset.test.js` asserts byte-for-byte
-  equality against the previous scalar loop from an all-`0xFF` counter state, the
-  same fixed point after ten consecutive halvings, and the same **admission
+  dominant cost of the whole admission filter. It now processes a `Uint32Array` view
+  four bytes at a time, which is faster and brings that share down. The half-life is
+  unchanged, so no admission decision differs: `test/smallLfu.reset.test.js` asserts
+  byte-for-byte equality against the previous scalar loop from an all-`0xFF` counter
+  state, the same fixed point after ten consecutive halvings, and the same **admission
   decision stream** over 4000 increments. (The halving lives on the internal
   `SmallLfuSketch`, not on `PowerCache` — the cache exposes `clear()` instead.)
 - Note that `sampleSize` remains a real tuning knob, and a cheaper halving moves
@@ -665,7 +660,7 @@ Independent of the admission defect, these hold and are worth keeping:
   keys get distinct answers, which is the property that matters.
 
   It is also **faster than what it replaced**, because `String(obj)` allocates and
-  walks a string. `node bench/claims.js sketch`, increment plus estimate:
+  walks a string. Increment plus estimate:
 
   | key                                    |       was |          2.0 |
   | -------------------------------------- | --------: | -----------: |
@@ -762,7 +757,7 @@ window stays **off by default** (`windowSize: 0`), documented as not
 recommended, and `policy: 'slru'` remains the answer to scan resistance.
 
 **What is kept is the evidence.** The mechanism stays reachable behind the
-opt-in flag, the sweep stays in `bench/claims.js zipf`, the cold-start case
+opt-in flag, the sweep stays in the admission-window tests, the cold-start case
 stays a workload of its own, and the tests keep both honest. A mechanism whose
 only record is a paragraph in a design note is one refactor away from being
 rediscovered as promising — which is how the first three attempts at this

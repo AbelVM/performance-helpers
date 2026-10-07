@@ -86,7 +86,7 @@ If you want idle work, drive it from something that does not promise latency —
 a chunked cleanup loop that yields between batches, rather than a scheduler
 flush.
 
-### Cancellation needs a generation counter here, and that claim was retracted once
+### Cancellation uses a generation counter
 
 A `scheduler.yield()` continuation is already queued the moment it is requested
 and returns only a promise: **there is no handle to detach**. So `flush()` and
@@ -95,28 +95,16 @@ defence — `_run()` opens with `if (!this._scheduled) return`, so an abandoned
 continuation that arrives after a `cancel()` finds the schedule closed and does
 nothing.
 
-**That is not sufficient, and this subsection previously said it was.** The
-first implementation concluded that no generation counter was needed because
-removing one left all seven yield-path tests green — an _equivalent mutant_ by
-mutation testing, which is normally a good reason to delete machinery nobody can
-distinguish from its absence. It was deleted.
+**That is not sufficient on its own.** `cancel()` clears `_scheduled` first;
+**`flush()` does not** — `_run()` clears it as a side effect of running the flush.
+So after `schedule(); flush(); schedule()` the flag is true again, the abandoned
+first continuation finds a **live** schedule, and runs it. Resuming the abandoned
+continuation in that state produces a second flush and a nulled `_timer` — the newer
+schedule ran early and its handle was clobbered on the way past.
 
-It was wrong, and it was wrong in one clause. `cancel()` does clear `_scheduled`
-first; **`flush()` does not** — `_run()` clears it, as a side effect of _running_
-the flush. So after `schedule(); flush(); schedule()` the flag is true again, the
-abandoned first continuation finds a **live** schedule, and runs it. Measured
-with a controllable `scheduler.yield`: that sequence left one flush and two
-queued continuations, and resuming the abandoned one produced a **second flush
-and a nulled `_timer`** — the newer schedule ran early and its handle was
-clobbered on the way past. The seven tests stayed green throughout because none
-of them resumed an abandoned continuation.
-
-So the counter is here: `const generation = ++this._generation` at the arm,
-compared on resumption. The check has to be on the generation rather than the
-flag, precisely because the later `schedule()` re-sets the flag. This is
-`RES-006`, and the comment in `powerScheduler.js` records the same history — the
-retracted claim is kept in both places rather than deleted, so the next reader
-who re-derives it finds it already answered.
+The fix is a generation counter: `const generation = ++this._generation` at the arm,
+compared on resumption. The check has to be on the generation rather than the flag,
+because the later `schedule()` re-sets the flag.
 
 ## `postTask` scheduling, and why it is a fourth strategy rather than a better `yield`
 

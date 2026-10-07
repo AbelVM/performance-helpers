@@ -116,7 +116,12 @@ const NOT_CALLS = new Set([
   'fn',
   'cb',
   'predicate',
+  // `createSseAdapter` returns a plain object, not a class, so the method
+  // scanner below cannot see its properties. Listed explicitly so the
+  // per-guide check does not treat them as missing APIs.
   'send',
+  'register',
+  'close',
   'one',
   'min',
   'slice',
@@ -200,6 +205,7 @@ const CROSS_CLASS = new Set([
   'releaseLock',
   'write',
   'ping',
+  'pong',
   // Node process metrics, referenced from powerEventLoopMonitor.
   'eventLoopUtilization',
   // `AbortSignal` / `AbortController` members, named by the cancellation

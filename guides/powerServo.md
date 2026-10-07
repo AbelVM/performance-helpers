@@ -13,9 +13,9 @@ where the controller term C(s) is PI by default. You supply both terms of the er
 `PowerPool`'s `targetMs` autoscale sizes its **worker step** with it. The direction
 of a scale action is still the latency EWMA against `targetMs` with a hysteresis
 band; the _size_ of the step is chosen by this controller on the relative error, up
-to the caller's `stepUp`/`stepDown` ceiling. Measured by
-`bench/claims.js stepsize`: peak/final/overshoot of **5/1/4** for the old fixed
-step against **3/3/0**. At the default `stepUp: 1` nothing changes, because a
+to the caller's `stepUp`/`stepDown` ceiling. In testing, the old fixed step
+reached peak/final/overshoot of **5/1/4**; the adaptive controller reached
+**3/3/0**. At the default `stepUp: 1` nothing changes, because a
 ceiling of one worker is one worker — see the [autoscale
 guide](autoscale.md#how-big-a-step).
 

@@ -202,8 +202,8 @@ browser there is no event loop to hold open, so it is Node-only.
 
 **There is no backpressure.** `BroadcastChannel` has no `bufferedAmount`, no
 `readyState`, no `desiredSize`, and `postMessage` returns `undefined`. The queue
-is invisible and unbounded: posting 400 000 × 1 kB messages at a receiver doing
-1 ms of work per message drove RSS to **203 MB** with no signal and no throw. The
+is invisible and unbounded: a large burst of messages at a receiver doing
+non-trivial work per message can drive RSS to **hundreds of MB** with no signal and no throw. The
 **only** transports in this library that can report pressure are the WebSocket
 family (`bufferedAmount`) — a `MessagePort` does not report it either.
 
@@ -225,8 +225,7 @@ conclusion for cross-context eventing.
 ## "Should the pool use `SharedArrayBuffer`?"
 
 No, and the reason is a measurement rather than a preference — so this section exists to
-stop the question being re-asked with a new rationale each time. Run it yourself:
-`node bench/claims.js permit`.
+stop the question being re-asked with a new rationale each time.
 
 `PowerPool` gates every dispatch with `tasks < this._maxTasksPerWorker`: a plain field
 read. A shared-memory permit pool makes the same decision through an atomic. Measured over
@@ -239,14 +238,14 @@ read. A shared-memory permit pool makes the same decision through an atomic. Mea
 | `Atomics.add`            | 11.04 ns | **5.8×**          |
 
 A proposal once called this "the one change that could move the pool's floor cost". It is
-6.3× **more** expensive than the field read already in the path.
+multiple times more expensive than the field read already in the path.
 
 **The blocking mechanism is the harder no.** `Atomics.wait` parked the thread for its
-full timeout — 1054 ms for 1000 × 1 ms waits — and it is forbidden on a browser main
+full timeout — a thread-blocking call that scales poorly with wait count — and it is forbidden on a browser main
 thread and requires cross-origin isolation. `PowerSemaphore` documents itself as an async
 gate that does not block the event loop, so the one mechanism that would block is the one
 you would have to use. `Atomics.waitAsync` does not block, which means it is a timer, and
-a timer adds nothing an async queue does not already do (0.9 ms for the same 1000 waits).
+a timer adds nothing an async queue does not already do.
 
 **When it would be worth it**, if you are building the browser app rather than using this
 library: a large, string-heavy per-message payload — the measurement puts the crossover at
@@ -257,16 +256,16 @@ not merely slow, it is absent.
 
 **When it is definitely not worth it**, which is most of the time:
 
-- **Node.** The permit decision is 6.3× more expensive and there is no shipping blocker
+- **Node.** The permit decision is more expensive and there is no shipping blocker
   to trade against.
 - **Small payloads.** Below the ~32 KB crossover there is nothing to save; above it,
-  compression is the wrong tool for a thread boundary anyway. `node bench/claims.js
-payload`: at 652 781 bytes gzip costs **1207 µs** in the sender to save 92 % of the
-  bytes, brotli costs **419 ms**, and simply _transferring_ the same payload rather than
-  copying it costs **29.1 µs** — which the pool already does. There is no size at which
-  compression pays, because a `Worker` port does not charge per byte.
+  compression is the wrong tool for a thread boundary anyway. Compression costs
+  measurable time in the sender to save bytes, and simply _transferring_ the same
+  payload rather than copying it costs far less — which the pool already does. There
+  is no size at which compression pays, because a `Worker` port does not charge per
+  byte.
 - **Deeply nested payloads.** Carrier overhead scales with structure, not bytes — see
-  `node bench/claims.js carrier`.
+  the carrier fidelity table in the codec guide.
 
 If you have measured your own workload and the pool is genuinely the bottleneck, that is a
 real result and it belongs in an ADR. What does not belong is re-deriving the ratio above.

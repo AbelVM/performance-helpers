@@ -19,6 +19,12 @@ half: one lock, one queue, FIFO, visible to every worker and every thread in the
 process — and to any other process, because the lock lives in the platform's lock
 manager rather than in this library.
 
+## Constructor
+
+| option | type     | default | description                                                                                                                                                                                  |
+| ------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name` | `string` | `''`    | A default lock name for this instance. Optional: most callers name the lock per resource, and a default here is a convenience rather than a default that silently serialises unrelated work. |
+
 ## What it is, and what it is not
 
 The lock manager is in Node (24.x), in Chromium and in Firefox. It is **not** gated on

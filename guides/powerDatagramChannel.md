@@ -1,5 +1,8 @@
 # PowerDatagramChannel
 
+> **Server-side helper** — wraps an existing datagram-style transport and
+> makes oversize refusals and silent discards loud and countable.
+
 A bounded, drop-counting wrapper for a datagram-style transport (`RTCDataChannel`,
 `WebTransport` datagram stream, or anything with a `send(data)` method).
 

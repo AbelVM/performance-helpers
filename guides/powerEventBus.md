@@ -126,21 +126,11 @@ thenable — anything with a callable `.then` — is handled the same way, since
 
 ### This bus is intra-process, and that is the fast part
 
-`PowerEventBus` coordinates **within one process**. Measured on this build:
-
-| operation                       | ns/op (min / median / max) |
-| ------------------------------- | -------------------------: |
-| `emit`, 1 listener              |          34 / **49** / 136 |
-| `emit`, 10 listeners            |          56 / **61** / 124 |
-| `emit`, 100 listeners           |        453 / **482** / 618 |
-| in-process relay (bus → bus)    |         80 / **107** / 284 |
-| a full `BroadcastChannel` relay |       706 / **856** / 1025 |
-
-About 4.8 ns per subscriber, one synchronous call, no copies and no serialization
-— a bus was never doing the thing a broadcast channel is good at, which is
-replacing _N posts with 1_. The relay row is the honest comparison: bridging
-across a `BroadcastChannel` costs **1.5× the entire 100-listener emit it would be
-replacing**.
+`PowerEventBus` coordinates **within one process**. The cost is a small constant per
+subscriber, one synchronous call, no copies and no serialization — a bus was never
+doing the thing a broadcast channel is good at, which is replacing _N posts with 1_.
+The relay row is the honest comparison: bridging across a `BroadcastChannel` costs
+more than the entire multi-listener emit it would be replacing.
 
 Two further costs if you bridge anyway:
 

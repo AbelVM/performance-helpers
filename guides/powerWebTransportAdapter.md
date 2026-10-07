@@ -1,5 +1,9 @@
 # PowerWebTransportAdapter
 
+> **Server-side helper** — wraps a `WebTransport` session's bidirectional
+> stream. The client-side counterpart is
+> [`PowerWebTransportClient`](powerWebTransportClient.md).
+
 Wrap a `WebTransport` session's `createBidirectionalStream()` in the `kind: 'stream'` socket shape [`PowerSocketAdapter`](powerSocketAdapter.md) expects, and decode the inbound byte stream with [`createFrameDecoder`](powerMessageCodec.md) so split frames do not surface as `RangeError`s at the reader.
 
 ## Why this exists
