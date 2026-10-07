@@ -214,6 +214,18 @@ whether the pool is considered idle (no active tasks and empty queue)
 
 ***
 
+### \_lastAutoScaleOutcome
+
+> **\_lastAutoScaleOutcome**: `string` \| `null`
+
+***
+
+### \_lastAutoScaleReason
+
+> **\_lastAutoScaleReason**: `string` \| `null`
+
+***
+
 ### \_logger
 
 > **\_logger**: [`PowerLogger`](../../powerLogger/classes/PowerLogger.md)
@@ -337,6 +349,12 @@ framed path rather than throwing per message.
 
 ***
 
+### \_priorityAgingMs
+
+> **\_priorityAgingMs**: `number`
+
+***
+
 ### \_queueHighCrossed
 
 > **\_queueHighCrossed**: `boolean`
@@ -360,6 +378,36 @@ whether queued dispatch is paused
 ### \_queuePolicy
 
 > **\_queuePolicy**: `"enqueue"` \| `"drop-oldest"` \| `"drop-newest"` \| `"reject"`
+
+***
+
+### \_queueWaitMax
+
+> **\_queueWaitMax**: `number`
+
+***
+
+### \_queueWaitMin
+
+> **\_queueWaitMin**: `number`
+
+***
+
+### \_queueWaitWelfordCount
+
+> **\_queueWaitWelfordCount**: `number`
+
+***
+
+### \_queueWaitWelfordM2
+
+> **\_queueWaitWelfordM2**: `number`
+
+***
+
+### \_queueWaitWelfordMean
+
+> **\_queueWaitWelfordMean**: `number`
 
 ***
 
@@ -744,6 +792,22 @@ A worker count in `[1, ceiling]`.
 
 ***
 
+### \_recordQueueWait()
+
+> **\_recordQueueWait**(`wait`): `void`
+
+#### Parameters
+
+##### wait
+
+`any`
+
+#### Returns
+
+`void`
+
+***
+
 ### \_updateAdaptiveLimit()
 
 > **\_updateAdaptiveLimit**(): `number` \| `undefined`
@@ -933,9 +997,17 @@ Return stats for debugging and telemetry.
 
 > **performance**: `Object`
 
+##### queueDepth
+
+> **queueDepth**: `number`
+
 ##### queueLength
 
 > **queueLength**: `number`
+
+##### queuePressure
+
+> **queuePressure**: `number`
 
 ##### status
 

@@ -252,6 +252,18 @@ promotes a node to the tail. `null` when the list is empty.
 
 ***
 
+### \_refreshesAborted
+
+> **\_refreshesAborted**: `number`
+
+***
+
+### \_refreshesFailed
+
+> **\_refreshesFailed**: `number`
+
+***
+
 ### \_refreshesSkipped
 
 > **\_refreshesSkipped**: `number`
@@ -1044,6 +1056,14 @@ method is written out per class.
 
 > **poolSize**: `number`
 
+##### refreshesAborted
+
+> **refreshesAborted**: `number`
+
+##### refreshesFailed
+
+> **refreshesFailed**: `number`
+
 ##### refreshesSkipped
 
 > **refreshesSkipped**: `number`
@@ -1410,6 +1430,14 @@ field missing from `stats()` is a field no collector can ever see.
 ##### poolSize
 
 > **poolSize**: `number`
+
+##### refreshesAborted
+
+> **refreshesAborted**: `number`
+
+##### refreshesFailed
+
+> **refreshesFailed**: `number`
 
 ##### refreshesSkipped
 

@@ -54,6 +54,18 @@ Re-exports [createFrameDecoder](../powerMessageCodec/functions/createFrameDecode
 
 ***
 
+### createObservation
+
+Re-exports [createObservation](../helpers/metrics/functions/createObservation.md)
+
+***
+
+### createOperationContext
+
+Re-exports [createOperationContext](../helpers/powerOperationContext/functions/createOperationContext.md)
+
+***
+
 ### createSseAdapter
 
 Re-exports [createSseAdapter](../powerSseAdapter/functions/createSseAdapter.md)
@@ -96,6 +108,12 @@ Re-exports [detectWebTransportSupport](../utils/webtransport/functions/detectWeb
 
 ***
 
+### diffObservation
+
+Re-exports [diffObservation](../helpers/metrics/functions/diffObservation.md)
+
+***
+
 ### encodeMessage
 
 Re-exports [encodeMessage](../powerMessageCodec/functions/encodeMessage.md)
@@ -129,6 +147,12 @@ Re-exports [frameEncodedJson](../powerMessageCodec/functions/frameEncodedJson.md
 ### frameTransferList
 
 Re-exports [frameTransferList](../powerMessageCodec/functions/frameTransferList.md)
+
+***
+
+### getResourcePressure
+
+Re-exports [getResourcePressure](../helpers/powerBrownout/functions/getResourcePressure.md)
 
 ***
 
@@ -234,6 +258,18 @@ Re-exports [o2u8](../helpers/powerBuffer/functions/o2u8.md)
 
 ***
 
+### OBSERVATION\_VERSION
+
+Re-exports [OBSERVATION_VERSION](../helpers/metrics/variables/OBSERVATION_VERSION.md)
+
+***
+
+### PowerAdaptiveProposal
+
+Re-exports [PowerAdaptiveProposal](../powerAdaptiveProposal/classes/PowerAdaptiveProposal.md)
+
+***
+
 ### PowerBackpressure
 
 Re-exports [PowerBackpressure](../helpers/powerBackpressure/classes/PowerBackpressure.md)
@@ -243,6 +279,12 @@ Re-exports [PowerBackpressure](../helpers/powerBackpressure/classes/PowerBackpre
 ### PowerBatch
 
 Re-exports [PowerBatch](../helpers/powerBatch/classes/PowerBatch.md)
+
+***
+
+### PowerBrownout
+
+Re-exports [PowerBrownout](../helpers/powerBrownout/classes/PowerBrownout.md)
 
 ***
 

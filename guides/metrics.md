@@ -1,3 +1,31 @@
+## Observation metadata and deltas
+
+When a controller needs evidence rather than a raw snapshot, wrap the flat
+series with sampling metadata. `samples`, `windowMs`, `fresh`, and
+`confidence` are explicit so an unavailable, stale, or weak signal is not
+mistaken for zero:
+
+```js
+import { createObservation, diffObservation } from 'performance-helpers/metrics';
+
+const before = createObservation(metrics.snapshot().series, {
+  samples: 20,
+  windowMs: 1000,
+  confidence: 0.9,
+});
+// ... collect the next window
+const after = createObservation(metrics.snapshot().series, {
+  samples: 24,
+  windowMs: 1000,
+  confidence: 0.95,
+});
+const delta = diffObservation(after, before);
+```
+
+`diffObservation()` returns `null` for a missing, non-numeric, or non-finite
+pair. Controllers should wait for a fresh window with enough samples and
+adequate confidence before changing a bound.
+
 # Metrics
 
 A stable shape over the numbers the helpers already report.

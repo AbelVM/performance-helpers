@@ -96,7 +96,7 @@ export class PowerBulkhead {
     drain(): Promise<void>;
     /**
      * Snapshot of the bulkhead's counters.
-     * @returns {{active:number, pending:number, queueCapacity:number, partitions:number, maxConcurrency:number, saturated:boolean}}
+     * @returns {{active:number, pending:number, queueCapacity:number, partitions:number, maxConcurrency:number, saturated:boolean, pressure:number, shed:number, partitionStates:Array<{active:number,pending:number,saturated:boolean}>}}
      */
     stats(): {
         active: number;
@@ -105,6 +105,13 @@ export class PowerBulkhead {
         partitions: number;
         maxConcurrency: number;
         saturated: boolean;
+        pressure: number;
+        shed: number;
+        partitionStates: Array<{
+            active: number;
+            pending: number;
+            saturated: boolean;
+        }>;
     };
     /**
      * Alias for {@link stats}.
@@ -119,6 +126,13 @@ export class PowerBulkhead {
         partitions: number;
         maxConcurrency: number;
         saturated: boolean;
+        pressure: number;
+        shed: number;
+        partitionStates: Array<{
+            active: number;
+            pending: number;
+            saturated: boolean;
+        }>;
     };
     /**
      * Reject every queued waiter across all partitions and return the bulkhead

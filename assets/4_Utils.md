@@ -8,4 +8,4 @@
 - [PowerSubscriberSet: Shared listener registry](../guides/powerSubscriberSet.md). Internal subscriber helper with optional weak references and once-listener support.
 - [PowerObserver: Lightweight reactive value](../guides/powerObserver.md). Tiny observable primitive for synchronous subscriptions to a single value.
 - [Now utilities: high-resolution timers and measure helpers](../guides/now.md) — `nowMs()`, `measureSync()`, `measureAsync()` and timing best-practices.
-- [Errors utilities: recommended error shapes and patterns](../guides/errors.md) — guidance for attaching `duration`, `correlationId` and structured diagnostics to errors and responses
+- [Errors utilities: recommended error shapes and patterns](../guides/errors.md) — guidance for attaching `duration`, `correlationId` and structured diagnostics to errors and responses.

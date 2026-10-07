@@ -32,7 +32,15 @@ export class PowerBulkhead {
   constructor(options = {}) {
     assertKnownOptions(
       options,
-      ['partitions', 'maxConcurrency', 'queueCapacity', 'observability', 'partitioner', 'onError'],
+      [
+        'partitions',
+        'maxConcurrency',
+        'queueCapacity',
+        'observability',
+        'partitioner',
+        'onError',
+        'onShed',
+      ],
       'PowerBulkhead'
     );
     const {
@@ -41,12 +49,14 @@ export class PowerBulkhead {
       queueCapacity = DEFAULT_QUEUE_CAPACITY,
       partitioner = null,
       onError = null,
+      onShed = null,
     } = options || {};
 
     // `onError` is consulted whenever a user-supplied `release()`/task hook
     // throws. It was previously read via `this._onError?.()` but never
     // assigned, so those failures were silently discarded.
     this._onError = typeof onError === 'function' ? onError : null;
+    this._onShed = typeof onShed === 'function' ? onShed : null;
 
     // All three are limits, and each was coerced into a plausible-looking number
     // rather than reporting a bad configuration:
@@ -99,6 +109,7 @@ export class PowerBulkhead {
     // window resolves `drain()` while a task is still owed. One counter of admitted
     // work has no such gap.
     this._outstanding = 0;
+    this._shed = 0;
     // Each partition owns its own queue budget. It used to be one global
     // budget enforced against a single `_pendingCount`, so partition A filling
     // its share refused partition C's work — measured, 2 partitions,
@@ -114,6 +125,7 @@ export class PowerBulkhead {
     // bulkhead checks first so the refusal is this class's error and not
     // `PowerPermitGate`'s.
     this._buckets = Array.from({ length: this._partitions }, () => ({
+      shed: 0,
       gate: new PowerPermitGate({
         capacity: this._maxConcurrency,
         queueCapacity: this._queueCapacity,
@@ -226,6 +238,17 @@ export class PowerBulkhead {
     // global pending count against one partition's budget is what let a noisy
     // partition refuse a critical one.
     if (willQueue && bucket.gate.pending >= this._queueCapacity) {
+      this._shed += 1;
+      bucket.shed += 1;
+      try {
+        this._onShed?.({
+          partition,
+          pending: bucket.gate.pending,
+          queueCapacity: this._queueCapacity,
+        });
+      } catch (e) {
+        this._onError?.(e);
+      }
       return Promise.reject(queueFullError('PowerBulkhead', this._queueCapacity));
     }
 
@@ -327,7 +350,7 @@ export class PowerBulkhead {
 
   /**
    * Snapshot of the bulkhead's counters.
-   * @returns {{active:number, pending:number, queueCapacity:number, partitions:number, maxConcurrency:number, saturated:boolean}}
+   * @returns {{active:number, pending:number, queueCapacity:number, partitions:number, maxConcurrency:number, saturated:boolean, pressure:number, shed:number, partitionStates:Array<{active:number,pending:number,saturated:boolean}>}}
    */
   stats() {
     return {
@@ -340,6 +363,20 @@ export class PowerBulkhead {
       // not that one partition is busy. See the getter for why `every` and
       // not `some` — a single busy partition is the normal state here.
       saturated: this.isFull,
+      pressure: Math.min(
+        1,
+        Math.max(
+          this._activeCount / Math.max(1, this._maxConcurrency),
+          this.pending / Math.max(1, this._queueCapacity)
+        )
+      ),
+      shed: this._shed,
+      partitionStates: this._buckets.map((bucket) => ({
+        active: Math.max(0, this._maxConcurrency - bucket.gate.available),
+        pending: bucket.gate.pending,
+        saturated: bucket.gate.pending >= this._queueCapacity,
+        shed: bucket.shed,
+      })),
     };
   }
 
@@ -393,6 +430,8 @@ export class PowerBulkhead {
     /** @type {BulkheadResetError} */
     const coded = reason;
     coded.code = coded.code || 'ERR_BULKHEAD_RESET';
+    this._shed = 0;
+    for (const bucket of this._buckets) bucket.shed = 0;
     for (const bucket of this._buckets) {
       bucket.gate.reset({ available, reason: coded });
     }

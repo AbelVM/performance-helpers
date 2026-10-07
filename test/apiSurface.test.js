@@ -51,8 +51,10 @@ describe('API surface', () => {
         'CODECS',
         'HEADER_BYTES',
         'MESSAGE_PROTOCOL_VERSION',
+        'PowerAdaptiveProposal',
         'PowerBackpressure',
         'PowerBatch',
+        'PowerBrownout',
         'PowerBulkhead',
         'PowerCache',
         'PowerChunker',
@@ -86,6 +88,7 @@ describe('API surface', () => {
         'PowerSubscriberSet',
         'PowerTTLMap',
         'MetricsCollector',
+        'OBSERVATION_VERSION',
         // Re-exported so the one-liner both `guides/metrics.md` and the
         // `attach()` JSDoc show can be followed literally. Without it,
         // `defaultMetrics` is reachable only via the `/metrics` subpath, which
@@ -101,13 +104,17 @@ describe('API surface', () => {
         'PowerRTCChannel',
         'detectSocketKind',
         'detectWebTransportSupport',
+        'diffObservation',
         'READY_STATE',
         'WorkerAgnostic',
         'b2o',
         'canUseNativeClone',
         'collectTransferables',
         'createBroadcastBus',
+        'createOperationContext',
+        'getResourcePressure',
         'createFrameDecoder',
+        'createObservation',
         'createWebTransportAdapter',
         'createSseAdapter',
         'decodeInbound',
@@ -254,7 +261,7 @@ describe('API surface', () => {
     // (FEAT-007). The comment above is the point: this number is here so a subpath
     // cannot be added or removed by accident, and the only legitimate way past it is
     // to edit this line on purpose.
-    expect(subpaths.length).toBe(46);
+    expect(subpaths.length).toBe(49);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

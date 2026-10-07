@@ -103,6 +103,8 @@ export class PowerCache {
     _misses: number;
     _evictions: number;
     _refreshesSkipped: number;
+    _refreshesFailed: number;
+    _refreshesAborted: number;
     _rejected: number;
     _rejectedAdmission: number;
     _expirations: number;
@@ -1013,7 +1015,8 @@ export class PowerCache {
      *
      * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
      *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
-     *   weightErrors:number, refreshesSkipped:number, poolSize:number}}
+    *   weightErrors:number, refreshesSkipped:number, refreshesFailed:number,
+    *   refreshesAborted:number, poolSize:number}}
      */
     stats(): {
         size: number;
@@ -1027,6 +1030,8 @@ export class PowerCache {
         rejectedAdmission: number;
         weightErrors: number;
         refreshesSkipped: number;
+        refreshesFailed: number;
+        refreshesAborted: number;
         poolSize: number;
     };
     /**
@@ -1047,6 +1052,8 @@ export class PowerCache {
         rejectedAdmission: number;
         weightErrors: number;
         refreshesSkipped: number;
+        refreshesFailed: number;
+        refreshesAborted: number;
         poolSize: number;
     };
     /**

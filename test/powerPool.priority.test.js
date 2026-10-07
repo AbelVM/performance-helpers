@@ -91,6 +91,19 @@ describe('PowerPool task priority', () => {
     expect(dispatch3.message).toBe('c');
   });
 
+  it('accepts priority aging to bound low-priority starvation', () => {
+    const pool = saturatedPoolWithQueue({ priorityAgingMs: 100 });
+    pool.postMessage('old', undefined, { priority: 0 });
+    pool.postMessage('new', undefined, { priority: 5 });
+    const [old, fresh] = pool.queue.toArray();
+    old.enqueuedAt -= 1000;
+    const next = pool.queue.shiftHighestPriority(
+      (item) => (item.priority ?? 0) + (Date.now() - item.enqueuedAt) / pool._priorityAgingMs
+    );
+    expect(next.message).toBe('old');
+    expect(fresh.message).toBe('new');
+  });
+
   it('allows negative priorities and orders them correctly', () => {
     const pool = saturatedPoolWithQueue();
     pool.postMessage('neg', undefined, { priority: -5 });

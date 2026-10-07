@@ -68,6 +68,8 @@ export class PowerTimedCache {
         rejectedAdmission: number;
         weightErrors: number;
         refreshesSkipped: number;
+        refreshesFailed: number;
+        refreshesAborted: number;
         poolSize: number;
     };
     /**
@@ -192,6 +194,8 @@ export class PowerTimedCache {
         rejectedAdmission: number;
         weightErrors: number;
         refreshesSkipped: number;
+        refreshesFailed: number;
+        refreshesAborted: number;
         poolSize: number;
     };
     startCleanup(intervalOrOptions?: undefined): void;

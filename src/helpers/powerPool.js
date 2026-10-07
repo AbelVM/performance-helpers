@@ -427,6 +427,7 @@ export class PowerPool {
         'encodeCacheByteLimit',
         'idempotencyTtlMs',
         'priority',
+        'priorityAgingMs',
       ],
       'PowerPool'
     );
@@ -456,7 +457,12 @@ export class PowerPool {
       awaitResponseTimeout = DEFAULT_TIMEOUT_MS,
       slowTaskThreshold = Infinity,
       autoScale = false,
+      priorityAgingMs = 0,
     } = options;
+    if (!Number.isFinite(priorityAgingMs) || priorityAgingMs < 0) {
+      throw new RangeError('PowerPool: `priorityAgingMs` must be finite and >= 0');
+    }
+    this._priorityAgingMs = priorityAgingMs;
     const maxTasksPerWorker =
       maxTasksPerWorkerOption === undefined && autoScale
         ? 1
@@ -557,6 +563,11 @@ export class PowerPool {
     this._taskDurationsWelfordM2 = 0;
     this._taskDurationsMin = Number.POSITIVE_INFINITY;
     this._taskDurationsMax = Number.NEGATIVE_INFINITY;
+    this._queueWaitWelfordCount = 0;
+    this._queueWaitWelfordMean = 0;
+    this._queueWaitWelfordM2 = 0;
+    this._queueWaitMin = Number.POSITIVE_INFINITY;
+    this._queueWaitMax = Number.NEGATIVE_INFINITY;
     // Threshold (ms) above which a completed task is counted as "slow".
     // `Infinity` disables slow-task counting so `percentSlowTasks` stays 0.
     this._slowTaskThreshold = Number.isFinite(slowTaskThreshold)
@@ -568,6 +579,8 @@ export class PowerPool {
     this._autoScale = null; // { enabled, intervalMs, targetMs, alpha, cooldownMs, hysteresis }
     this._autoScaleInterval = null;
     this._lastAutoScaleAt = 0; // timestamp (ms) of last scale action (0=never)
+    this._lastAutoScaleReason = null;
+    this._lastAutoScaleOutcome = null;
     // running aggregate for terminated workers: total completed tasks and count
     this._terminatedWorkerTaskCountsTotal = 0;
     this._terminatedWorkerTaskCountsCount = 0;
@@ -764,8 +777,8 @@ export class PowerPool {
       //   'aimd'      - additive increase, multiplicative decrease
       //   'vegas'     - Vegas: infer bottleneck queue from min vs current RTT
       //   'gradient2' - Netflix Gradient2: long/short RTT EWMA divergence
-      // See `_updateAdaptiveLimit`, and ADR 0005 for why each of these is a
-      // *delay* signal here and why none of them is offered on the gate.
+      // See `_updateAdaptiveLimit` and ADR 0005 for why each controller uses a
+      // *delay* signal here; non-EWMA policies also gate new admissions.
       const AUTOSCALE_POLICIES = ['ewma', 'aimd', 'vegas', 'gradient2'];
       const policy = AUTOSCALE_POLICIES.includes(as.policy) ? as.policy : 'ewma';
 
@@ -1199,6 +1212,17 @@ export class PowerPool {
     return startTime;
   }
 
+  _recordQueueWait(wait) {
+    if (!Number.isFinite(wait)) return;
+    const count = this._queueWaitWelfordCount + 1;
+    const delta = wait - this._queueWaitWelfordMean;
+    this._queueWaitWelfordMean += delta / count;
+    this._queueWaitWelfordM2 += delta * (wait - this._queueWaitWelfordMean);
+    this._queueWaitWelfordCount = count;
+    this._queueWaitMin = Math.min(this._queueWaitMin, wait);
+    this._queueWaitMax = Math.max(this._queueWaitMax, wait);
+  }
+
   /**
    * Report a batched post that could not be dispatched.
    *
@@ -1478,7 +1502,12 @@ export class PowerPool {
       return false;
     }
     /** @type {PreparedItem & {correlationId?: string, priority?: number}} */
-    const queuedItem = { message: prepared.message, transfer: prepared.transfer };
+    const queuedItem = {
+      message: prepared.message,
+      transfer: prepared.transfer,
+      enqueuedAt: nowMs(),
+    };
+    if (options?.deadlineAt !== undefined) queuedItem.deadlineAt = options.deadlineAt;
     if (prepared.deferred === true) queuedItem.deferred = true;
     if (wantResponse && correlationKey) queuedItem.correlationId = correlationKey;
     if (options?.priority != null) queuedItem.priority = options.priority;
@@ -2534,16 +2563,34 @@ export class PowerPool {
         this.queue.length > 0 &&
         workerObj.tasks < this._maxTasksPerWorker
       ) {
-        const item = this.queue.shiftHighestPriority((item) => item.priority ?? 0);
-        try {
-          const dispatch = this._encodeForWorker(workerObj, item);
-          this._dispatchToWorker(workerObj, dispatch, {
-            correlationId: item.correlationId,
-            startTime: now,
+        let item;
+        while (this.queue.length > 0) {
+          item = this.queue.shiftHighestPriority((queuedItem) => {
+            const priority = queuedItem.priority ?? 0;
+            return this._priorityAgingMs > 0
+              ? priority + Math.max(0, now - queuedItem.enqueuedAt) / this._priorityAgingMs
+              : priority;
           });
-        } catch (err) {
-          this._debugLog?.(err, 'dispatch queued message to worker failed');
-          this._logger.error(err, 'Failed to dispatch queued message to worker');
+          if (item.deadlineAt === undefined || item.deadlineAt > now) break;
+          if (item.correlationId != null) {
+            const err = new Error('postMessage queued task deadline elapsed');
+            err.code = 'EDEADLINE';
+            this._cleanupPendingResponse(item.correlationId, { rejectWith: err });
+          }
+          item = null;
+        }
+        if (item) {
+          try {
+            this._recordQueueWait(now - item.enqueuedAt);
+            const dispatch = this._encodeForWorker(workerObj, item);
+            this._dispatchToWorker(workerObj, dispatch, {
+              correlationId: item.correlationId,
+              startTime: now,
+            });
+          } catch (err) {
+            this._debugLog?.(err, 'dispatch queued message to worker failed');
+            this._logger.error(err, 'Failed to dispatch queued message to worker');
+          }
         }
         // after removing one queued item, if we dropped below threshold clear the crossed flag
         if (this._queueHighCrossed && this.queue.length <= this._queueHighThreshold) {
@@ -2960,6 +3007,9 @@ export class PowerPool {
     options = options || undefined;
     // capture a single timestamp for this dispatch to avoid multiple syscalls
     const now = nowMs();
+    if (options?.deadlineAt !== undefined && !Number.isFinite(options.deadlineAt)) {
+      throw new TypeError('postMessage deadlineAt must be finite');
+    }
     // support explicit per-worker targeting via `options.workerId`
     const targetWorkerId = options?.workerId != null ? options.workerId : null;
     const singleWorkerDirectFastPath =
@@ -2999,6 +3049,39 @@ export class PowerPool {
       const created = this._createPendingResponsePromise(correlationId, options);
       pendingPromise = created.pendingPromise;
       correlationId = created.correlationKey;
+    }
+    if (options?.deadlineAt !== undefined && options.deadlineAt <= now) {
+      const err = new Error('postMessage deadline elapsed');
+      err.code = 'EDEADLINE';
+      if (wantResponse && correlationId) {
+        this._cleanupPendingResponse(correlationId, { rejectWith: err });
+        return pendingPromise;
+      }
+      return false;
+    }
+
+    const adaptiveLimit =
+      this._autoScale?.policy && this._autoScale.policy !== 'ewma'
+        ? Math.max(1, Math.ceil(this._adaptiveLimit))
+        : null;
+    if (adaptiveLimit !== null && this._activeTasks >= adaptiveLimit) {
+      if (this.taskQueueEnabled) {
+        const prepared = this._prepareForTransfer(message, transfer, options);
+        return this._enqueueOrReject(
+          prepared,
+          wantResponse,
+          correlationId,
+          pendingPromise,
+          options
+        );
+      }
+      if (wantResponse && correlationId) {
+        this._cleanupPendingResponse(correlationId, {
+          rejectWith: new Error('adaptive concurrency limit reached'),
+        });
+        return pendingPromise;
+      }
+      return false;
     }
 
     // (moved to class method `_prepareForTransfer`) use that instead
@@ -3495,6 +3578,14 @@ export class PowerPool {
     const preparedItems = this.prepareBuffers(items, {
       zeroCopy: Boolean(options?.zeroCopy),
     });
+    const adaptiveLimit =
+      this._autoScale?.policy && this._autoScale.policy !== 'ewma'
+        ? Math.max(1, Math.ceil(this._adaptiveLimit))
+        : null;
+    let adaptiveSlots =
+      adaptiveLimit === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, adaptiveLimit - this._activeTasks);
 
     // Single-worker opt-in fast path: avoid repeated worker selection and
     // queueing overhead when there is only one worker and it can accept
@@ -3502,7 +3593,8 @@ export class PowerPool {
     if (
       targetWorkerId == null &&
       this.workers.length === 1 &&
-      this._maxTasksPerWorker === Infinity
+      this._maxTasksPerWorker === Infinity &&
+      adaptiveLimit === null
     ) {
       const obj = this.workers[0];
       let idleStateDirty = false;
@@ -3541,6 +3633,21 @@ export class PowerPool {
       const prepared = preparedItems[i] || { message: it.message, transfer: it.transfer };
       let dispatched = false;
 
+      if (adaptiveSlots <= 0) {
+        if (this.taskQueueEnabled) {
+          queuedPrepared.push({
+            message: prepared.message,
+            transfer: prepared.transfer,
+            index: i,
+            priority: options?.priority ?? 0,
+          });
+          results[i] = true;
+        } else {
+          results[i] = false;
+        }
+        continue;
+      }
+
       // If chosen worker is saturated, clear it so we re-select on demand
       if (chosen?.tasks >= this._maxTasksPerWorker) chosen = null;
 
@@ -3554,6 +3661,7 @@ export class PowerPool {
           idleStateDirty = true;
           results[i] = true;
           dispatched = true;
+          adaptiveSlots--;
           // keep using this worker until it becomes saturated
           chosen = least.tasks < this._maxTasksPerWorker ? least : null;
         } catch (err) {
@@ -3575,6 +3683,7 @@ export class PowerPool {
               idleStateDirty = true;
               results[i] = true;
               dispatched = true;
+              adaptiveSlots--;
               // prefer using the newly-created worker for next items
               chosen = obj.tasks < this._maxTasksPerWorker ? obj : null;
             }
@@ -3626,6 +3735,7 @@ export class PowerPool {
               this._dispatchToWorker(fallback, prepared, { startTime: now });
               idleStateDirty = true;
               results[i] = true;
+              adaptiveSlots--;
             } catch (err) {
               results[i] = false;
               this._logger.error(err, 'Failed to postMessage to fallback worker');
@@ -3658,6 +3768,8 @@ export class PowerPool {
           );
         } else {
           // queue stores plain objects `{message,transfer}` so we can pass the array directly
+          const enqueuedAt = nowMs();
+          for (const item of queuedPrepared) item.enqueuedAt = enqueuedAt;
           this.queue.pushMany(queuedPrepared);
           idleStateDirty = true;
           // emit queue high-watermark event when threshold crossed (avoid spamming)
@@ -4003,7 +4115,7 @@ export class PowerPool {
    */
   _autoScaleTick() {
     try {
-      if (!this._autoScale || !this._autoScale.enabled) return;
+      if (this._terminated || !this._autoScale || !this._autoScale.enabled) return;
       const now = nowMs();
       const cfg = this._autoScale;
 
@@ -4043,17 +4155,23 @@ export class PowerPool {
       const needScaleUp = ewma != null ? ewma > upThreshold : false;
       const queuePressure = this.queue.length > Math.ceil(workers * (1 + hysteresis));
       if (needScaleUp || queuePressure) {
+        this._lastAutoScaleReason =
+          needScaleUp && queuePressure ? 'latency+queue' : needScaleUp ? 'latency' : 'queue';
         if (workers < this.maxSize) {
           try {
             const stepCeiling = cfg.stepUp || 1;
             const steps = this._autoscaleSteps(ewma, target, stepCeiling, cfg.intervalMs / 1000);
             const maxAdd = Math.min(this.maxSize - workers, steps);
+            let added = 0;
+            let addFailed = false;
             for (let i = 0; i < maxAdd; i++) {
               try {
                 const before = this.workers.length;
                 this._addWorkerInstance();
                 if (this.workers.length === before) break;
+                added++;
               } catch (e) {
+                addFailed = true;
                 this._debugLog?.(e, 'autoScale: addWorker failed');
                 try {
                   this._bus.emit('pool:error', { phase: 'autoScale:add', error: e });
@@ -4063,16 +4181,22 @@ export class PowerPool {
                 break;
               }
             }
-            this._lastAutoScaleAt = now;
-            // increase backoff multiplier for successive rapid scales
-            // Cap the backoff multiplier to avoid unbounded growth.
-            this._autoScaleBackoffMultiplier = Math.min(
-              (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1),
-              cfg.backoffMaxMultiplier || 8
-            );
+            this._lastAutoScaleOutcome = added > 0 ? 'added' : addFailed ? 'failed' : 'no-op';
+            if (added > 0) {
+              this._lastAutoScaleAt = now;
+              // increase backoff multiplier for successive rapid scales
+              // Cap the backoff multiplier to avoid unbounded growth.
+              this._autoScaleBackoffMultiplier = Math.min(
+                (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1),
+                cfg.backoffMaxMultiplier || 8
+              );
+            }
           } catch (e) {
+            this._lastAutoScaleOutcome = 'failed';
             this._debugLog?.(e, 'autoScale: addWorker failed outer');
           }
+        } else {
+          this._lastAutoScaleOutcome = 'blocked';
         }
         return;
       }
@@ -4090,6 +4214,7 @@ export class PowerPool {
         this._autoscaleServo.reset();
       }
       if (needScaleDown && this.queue.length === 0) {
+        this._lastAutoScaleReason = 'latency';
         if (workers > this.minSize) {
           try {
             const stepCeilingDown = cfg.stepDown || 1;
@@ -4119,16 +4244,22 @@ export class PowerPool {
             }
             // Only record a scale action when we actually removed workers.
             if (removed > 0) {
+              this._lastAutoScaleOutcome = 'removed';
               this._lastAutoScaleAt = now;
               // Cap the backoff multiplier to avoid unbounded growth.
               this._autoScaleBackoffMultiplier = Math.min(
                 (this._autoScaleBackoffMultiplier || 1) * (cfg.backoffFactor || 1),
                 cfg.backoffMaxMultiplier || 8
               );
+            } else {
+              this._lastAutoScaleOutcome = 'blocked';
             }
           } catch (e) {
+            this._lastAutoScaleOutcome = 'failed';
             this._debugLog?.(e, 'autoScale: remove worker failed');
           }
+        } else {
+          this._lastAutoScaleOutcome = 'blocked';
         }
       }
     } catch (e) {
@@ -4309,7 +4440,7 @@ export class PowerPool {
 
   /**
    * Return stats for debugging and telemetry.
-   * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
+   * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,queueDepth:number,queuePressure:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
    */
   getStats() {
     const status = this.workers.map((w) => ({
@@ -4365,6 +4496,15 @@ export class PowerPool {
       // `slowTaskThreshold`. Stays 0 when the threshold is disabled (Infinity).
       percentSlowTasks = count > 0 ? ((this._slowTaskCount || 0) / count) * 100 : 0;
     }
+    const queueWaitCount = this._queueWaitWelfordCount || 0;
+    const queueWaitVariance = queueWaitCount > 1 ? this._queueWaitWelfordM2 / queueWaitCount : 0;
+    const queueWait = {
+      count: queueWaitCount,
+      min: queueWaitCount > 0 ? this._queueWaitMin : 0,
+      max: queueWaitCount > 0 ? this._queueWaitMax : 0,
+      average: queueWaitCount > 0 ? this._queueWaitWelfordMean : 0,
+      stddev: Math.sqrt(queueWaitVariance),
+    };
 
     return {
       status,
@@ -4375,6 +4515,7 @@ export class PowerPool {
         totalTasksPerformed,
         averageTasksPerWorkerUntilTermination: avgTasksPerWorkerUntilTermination,
         timePerTask: { max, min, average, stddev },
+        queueWait,
         percentSlowTasks,
         // Adaptive concurrency controller.
         //
@@ -4400,6 +4541,8 @@ export class PowerPool {
             : null,
         autoScalePolicy: this._autoScale && this._autoScaleInterval ? this._autoScale.policy : null,
         congestion: this._autoScale ? Boolean(this._congestion) : null,
+        lastScaleReason: this._autoScale ? this._lastAutoScaleReason : null,
+        lastScaleOutcome: this._autoScale ? this._lastAutoScaleOutcome : null,
         // **Whether the idle reaper is actually running.** The reaper had no field
         // at all, which is how POOL-007's second half stayed invisible: the
         // interval is cleared by `stopThePress(..., { recreateWorkers: false })`
@@ -4435,6 +4578,12 @@ export class PowerPool {
         size: this._idempotencySize,
       },
       queueLength: this.queue.length,
+      queueDepth: this.queue.length,
+      queuePressure: Number.isFinite(this._maxQueueLength)
+        ? Math.min(1, this.queue.length / Math.max(1, this._maxQueueLength))
+        : this.queue.length > 0
+          ? 1
+          : 0,
       activeTasks: this._activeTasks,
       workerCount: this.workers.length,
       minSize: this.minSize,
@@ -4696,12 +4845,20 @@ export class PowerPool {
     if (this._queuePaused || !this.taskQueueEnabled || this.queue.length === 0) return;
     const queue = this.queue;
     const maxTasksPerWorker = this._maxTasksPerWorker;
+    const adaptiveLimit =
+      this._autoScale?.policy && this._autoScale.policy !== 'ewma'
+        ? Math.max(1, Math.ceil(this._adaptiveLimit))
+        : null;
+    let adaptiveSlots =
+      adaptiveLimit === null
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, adaptiveLimit - this._activeTasks);
     const now = nowMs();
     let dispatched = false;
 
     for (const workerObj of this.workers) {
       let remainingSlots = maxTasksPerWorker - workerObj.tasks;
-      while (remainingSlots > 0 && queue.length > 0) {
+      while (remainingSlots > 0 && adaptiveSlots > 0 && queue.length > 0) {
         const item = queue.shift();
         try {
           const dispatch = this._encodeForWorker(workerObj, item);
@@ -4710,7 +4867,7 @@ export class PowerPool {
             startTime: now,
           });
           remainingSlots--;
-          this._activeTasks++;
+          adaptiveSlots--;
           workerObj.lastActive = now;
           dispatched = true;
         } catch (err) {

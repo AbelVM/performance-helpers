@@ -19,4 +19,16 @@ describe('PowerThrottle refill behavior', () => {
     t._refill(start + 2000);
     expect(t.tokens).toBe(2);
   });
+
+  it('clamps suspension jumps and ignores backward clock steps', () => {
+    const t = new PowerThrottle({ capacity: 2, tokens: 0, refillRate: 1 });
+    const start = t._lastRefill;
+
+    t._refill(start + 86_400_000);
+    expect(t.tokens).toBe(2);
+
+    t.reset(0);
+    t._refill(start - 1000);
+    expect(t.tokens).toBe(0);
+  });
 });

@@ -328,6 +328,14 @@ method is written out per class.
 
 > **poolSize**: `number`
 
+##### refreshesAborted
+
+> **refreshesAborted**: `number`
+
+##### refreshesFailed
+
+> **refreshesFailed**: `number`
+
 ##### refreshesSkipped
 
 > **refreshesSkipped**: `number`
@@ -601,6 +609,14 @@ Ignored when this instance has a constructor TTL.
 ##### poolSize
 
 > **poolSize**: `number`
+
+##### refreshesAborted
+
+> **refreshesAborted**: `number`
+
+##### refreshesFailed
+
+> **refreshesFailed**: `number`
 
 ##### refreshesSkipped
 

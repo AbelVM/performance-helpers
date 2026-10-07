@@ -111,6 +111,57 @@ describe('PowerRetry decorrelated jitter', () => {
     }
   });
 
+  it('lets an upstream retry-after hint override local backoff', async () => {
+    vi.useFakeTimers();
+    try {
+      const delays = [];
+      const settled = captureRejection(
+        PowerRetry.run(
+          async () => {
+            throw new Error('throttled');
+          },
+          {
+            maxAttempts: 2,
+            baseDelay: 50,
+            maxDelay: 100,
+            retryAfter: () => 7,
+            onRetry: (_attempt, _err, delay) => delays.push(delay),
+          }
+        )
+      );
+      await vi.runAllTimersAsync();
+      expect((await settled).message).toBe('throttled');
+      expect(delays).toEqual([7]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('classifies failures into the shared retry budget', async () => {
+    const budget = new PowerRetryBudget({ capacity: 2 });
+    const settled = captureRejection(
+      PowerRetry.run(
+        async () => {
+          throw new Error('429');
+        },
+        {
+          maxAttempts: 2,
+          baseDelay: 0,
+          jitter: false,
+          budget,
+          classifyError: () => ({ kind: 'throttled' }),
+        }
+      )
+    );
+    expect((await settled).message).toBe('429');
+    expect(budget.stats()).toMatchObject({
+      available: 0,
+      outcomes: { throttled: 2 },
+      retryRate: 0,
+      refusalRate: 0,
+    });
+  });
+
   it('is not merely the exponential curve in disguise', async () => {
     // The defining property of the AWS formulation is that each delay is drawn
     // against the *previous* delay, so the sample is not reproducible from the
@@ -235,6 +286,12 @@ describe('PowerRetryBudget', () => {
     expect(budget.tryConsumeRetry()).toBe(false);
   });
 
+  it('executes through the same budget and records the operation', async () => {
+    const budget = new PowerRetryBudget({ ratio: 0.5, capacity: 2 });
+    await expect(budget.execute(() => 'ok')).resolves.toBe('ok');
+    expect(budget.stats().executions).toBe(1);
+  });
+
   it('refunds tokens as requests are recorded, and caps at capacity', () => {
     const budget = new PowerRetryBudget({ ratio: 0.5, capacity: 3 });
     budget.reset();
@@ -248,6 +305,17 @@ describe('PowerRetryBudget', () => {
     // Never more than capacity, however much traffic is recorded.
     for (let i = 0; i < 100; i++) budget.recordRequest();
     expect(budget.available()).toBe(3);
+  });
+
+  it('accepts explicit upstream outcome feedback', () => {
+    const budget = new PowerRetryBudget({ capacity: 2 });
+    budget.recordOutcome({ kind: 'throttled' });
+    budget.recordOutcome({ kind: 'cancellation' });
+    budget.recordOutcome({ kind: 'failure', penalty: 0.25 });
+    expect(budget.stats()).toMatchObject({
+      available: 0.75,
+      outcomes: { throttled: 1, cancellation: 1, failure: 1 },
+    });
   });
 
   it('rejects a ratio above 1, which is not a budget', () => {

@@ -187,6 +187,7 @@ export class PowerEventLoopMonitor {
      *   p99_9: number|null,
      *   blockedOver10ms: number,
      *   blockedMs: number,
+     *   eventLoopPressure: number,
      *   droppedSamples: number,
      *   coverage: number|null
      * }}
@@ -203,6 +204,7 @@ export class PowerEventLoopMonitor {
         p99_9: number | null;
         blockedOver10ms: number;
         blockedMs: number;
+        eventLoopPressure: number;
         droppedSamples: number;
         coverage: number | null;
     };
@@ -224,6 +226,7 @@ export class PowerEventLoopMonitor {
         p99_9: number | null;
         blockedOver10ms: number;
         blockedMs: number;
+        eventLoopPressure: number;
         droppedSamples: number;
         coverage: number | null;
     };

@@ -56,8 +56,9 @@ Declare the transport dead if
 
 > `optional` **maxPayloadSizeBytes?**: `number`
 
-Frames larger than this are
-  **reported, not prevented**. Counts `oversizeFrames` and emits `error`.
+Maximum accepted size for
+  incoming framed data. Oversized frames are rejected by the decoder and are
+  not delivered.
 
 ***
 

@@ -160,6 +160,10 @@ async function ingestStream(stream) {
 
 Use `PowerBackpressure` when a producer must slow down to match downstream capacity or avoid unbounded queue growth. It is a good fit in front of `PowerPool`, stream processing, or network request emitters.
 
+`stats().pressure` is a normalized value from `0` to `1`, derived from held
+permits. Applications can use it as a local signal for coordinating another
+bounded helper without introducing a global controller.
+
 ```javascript
 import { PowerBackpressure } from '../src/helpers/powerBackpressure.js';
 import { PowerPool } from '../src/helpers/powerPool.js';

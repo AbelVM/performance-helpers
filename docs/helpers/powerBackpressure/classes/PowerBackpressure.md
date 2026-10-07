@@ -103,6 +103,12 @@
 
 ***
 
+### \_congestionSteps
+
+> **\_congestionSteps**: `number`
+
+***
+
 ### \_held
 
 > `protected` **\_held**: `number`
@@ -146,6 +152,12 @@ a subclass reading a base field is precisely what the tag describes.
 #### Inherited from
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_queueCapacity`](../../powerPermitGate/classes/PowerPermitGate.md#_queuecapacity)
+
+***
+
+### \_recoverySteps
+
+> **\_recoverySteps**: `number`
 
 ***
 
@@ -516,6 +528,54 @@ Reset the controller to its initial capacity and clear waiting producers.
 #### Overrides
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`reset`](../../powerPermitGate/classes/PowerPermitGate.md#reset)
+
+***
+
+### stats()
+
+> **stats**(): `object`
+
+Current pressure and recovery signals.
+
+#### Returns
+
+`object`
+
+##### active
+
+> **active**: `number`
+
+##### adaptive
+
+> **adaptive**: `boolean`
+
+##### available
+
+> **available**: `number`
+
+##### capacity
+
+> **capacity**: `number`
+
+##### congestionSteps
+
+> **congestionSteps**: `number`
+
+##### pending
+
+> **pending**: `number`
+
+##### pressure
+
+> **pressure**: `number`
+
+##### recoverySteps
+
+> **recoverySteps**: `number`
+
+##### refillAmount
+
+> **refillAmount**: `number`
 
 ***
 

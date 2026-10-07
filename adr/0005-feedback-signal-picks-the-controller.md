@@ -123,7 +123,8 @@ caller ignores — the same trade ADR 0004 made for
   control: `_updateAdaptiveLimit` returns the seed value untouched, and
   autoscaling is worker-count scaling only. `guides/powerPool.md` says this and
   `AutoScaleOptions.policy` now says it in the published type.
-- **Open, and deliberately not resolved here:** the pool's `_adaptiveLimit` is
+- **Historical open question, recorded before admission wiring:** the pool's
+  `_adaptiveLimit` was
   written by the controller and read by `getStats()`. It is not read on the
   dispatch path, so `concurrencyLimit` reports a belief the pool does not
   currently act on. Confirmed by exhaustive read of every occurrence in
@@ -152,13 +153,21 @@ caller ignores — the same trade ADR 0004 made for
   reported number and observed concurrency, and this shows none. So the field is
   reported-only, and the three policies move a number the pool does not act on.
 
-  **The decision is still open and is not taken here.** The measurement above
+  **The decision was still open at the time of this measurement.** The measurement above
   settles _what the code does_; it says nothing about _whether the policies are worth
   having_, which needs the comparison this ADR already says is missing — a
   saturating workload against fixed-limit / AIMD / gradient-AIMD on throughput and
   p99. The honest alternative on current evidence is to document the policies as
   reported-only, and that documentation should not be written until the comparison
   exists, or it will ossify a claim nothing has tested.
+
+  **Current implementation note:** the deferred wiring was subsequently
+  implemented. `aimd`, `vegas`, and `gradient2` now use `_adaptiveLimit` to
+  gate new admissions; `ewma` remains worker-count scaling only. Queued work
+  still follows `taskQueue`, `maxQueueLength`, and `queuePolicy`, so the
+  controller's limit is enforced without changing the queue contract. The
+  measurements above remain historical evidence for the pre-wiring behavior,
+  not the behavior of the current implementation.
 
 ## Alternatives considered
 

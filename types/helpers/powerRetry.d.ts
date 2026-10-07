@@ -57,6 +57,23 @@ export class PowerRetryBudget {
      */
     tryConsumeRetry(): boolean;
     /**
+     * Record an external outcome so upstream throttling can tighten this budget.
+     * `penalty` is measured in retry tokens and defaults by outcome kind.
+     * @param {{kind?:string, penalty?:number}} [outcome]
+     * @returns {number} Tokens remaining after the adjustment.
+     */
+    recordOutcome(outcome?: {
+        kind?: string;
+        penalty?: number;
+    }): number;
+    /**
+     * Run one operation against this shared request budget.
+     * @param {Function} fn
+     * @param {PowerRetryOptions} [options]
+     * @returns {Promise<any>}
+     */
+    execute(fn: Function, options?: PowerRetryOptions): Promise<any>;
+    /**
      * Current retry tokens available.
      * @returns {number}
      */

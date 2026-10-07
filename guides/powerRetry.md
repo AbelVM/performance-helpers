@@ -27,18 +27,28 @@ Or use the static convenience: `await PowerRetry.run(fn, options?)`.
 
 ## Options
 
-| Option           |                                                     Type |         Default | Description                                                                                                                                            |
-| ---------------- | -------------------------------------------------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `maxAttempts`    |                                                 `number` |             `3` | Maximum attempts (initial try + retries). Must be `>= 1`.                                                                                              |
-| `backoff`        | `'exponential' \| 'linear' \| 'fixed' \| 'decorrelated'` | `'exponential'` | Backoff strategy. An unrecognised value throws.                                                                                                        |
-| `baseDelay`      |                                            `number` (ms) |           `100` | Base delay used to compute backoff.                                                                                                                    |
-| `maxDelay`       |                                            `number` (ms) |         `10000` | Maximum delay between retries.                                                                                                                         |
-| `jitter`         |                                                `boolean` |          `true` | Randomise the delay within `[0.5 * delay, delay]`. Rejected when `backoff` is `decorrelated`.                                                          |
-| `retryIf`        |                                    `Function \| boolean` |    `() => true` | Predicate `(err) => boolean` to decide whether to retry on a given error. A non-function is read as a fixed policy. **A throw is treated as `false`.** |
-| `onRetry`        |                                               `Function` |     `undefined` | Callback `(attempt, err, delay) => void` invoked before waiting the delay. Throwing here does not change the outcome.                                  |
-| `attemptTimeout` |                                            `number` (ms) |     `undefined` | Per-attempt timeout. An attempt that exceeds it is rejected and **counted as a failed attempt**, so it is retried like any other.                      |
-| `budget`         |      `PowerRetryBudget \| { ratio, capacity } \| number` |     `undefined` | Retry budget. See [Retry budget](#retry-budget).                                                                                                       |
-| `hedgeDelay`     |                                            `number` (ms) |             `0` | Send a duplicate of the **first** attempt if it has not returned in this long. `0` disables hedging. See [Hedging](#hedging).                          |
+| Option           |                                                     Type |         Default | Description                                                                                                                                             |
+| ---------------- | -------------------------------------------------------: | --------------: | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxAttempts`    |                                                 `number` |             `3` | Maximum attempts (initial try + retries). Must be `>= 1`.                                                                                               |
+| `backoff`        | `'exponential' \| 'linear' \| 'fixed' \| 'decorrelated'` | `'exponential'` | Backoff strategy. An unrecognised value throws.                                                                                                         |
+| `baseDelay`      |                                            `number` (ms) |           `100` | Base delay used to compute backoff.                                                                                                                     |
+| `maxDelay`       |                                            `number` (ms) |         `10000` | Maximum delay between retries.                                                                                                                          |
+| `jitter`         |                                                `boolean` |          `true` | Randomise the delay within `[0.5 * delay, delay]`. Rejected when `backoff` is `decorrelated`.                                                           |
+| `retryIf`        |                                    `Function \| boolean` |    `() => true` | Predicate `(err) => boolean` to decide whether to retry on a given error. A non-function is read as a fixed policy. **A throw is treated as `false`.**  |
+| `onRetry`        |                                               `Function` |     `undefined` | Callback `(attempt, err, delay) => void` invoked before waiting the delay. Throwing here does not change the outcome.                                   |
+| `retryAfter`     |                                               `Function` |     `undefined` | Optional `(err, attempt) => milliseconds` hint from an upstream rate limiter. Finite non-negative values override local backoff and respect `maxDelay`. |
+| `attemptTimeout` |                                            `number` (ms) |     `undefined` | Per-attempt timeout. An attempt that exceeds it is rejected and **counted as a failed attempt**, so it is retried like any other.                       |
+| `budget`         |      `PowerRetryBudget \| { ratio, capacity } \| number` |     `undefined` | Retry budget. See [Retry budget](#retry-budget).                                                                                                        |
+| `hedgeDelay`     |                                            `number` (ms) |             `0` | Send a duplicate of the **first** attempt if it has not returned in this long. `0` disables hedging. See [Hedging](#hedging).                           |
+
+When an HTTP or service client receives `Retry-After`, pass the parsed delay
+through `retryAfter` rather than making the retry loop know about HTTP:
+
+```javascript
+const retryer = new PowerRetry({
+  retryAfter: (error) => error.retryAfterMs,
+});
+```
 
 ## Example
 
@@ -201,6 +211,21 @@ budget.stats();
 `refused` growing while `available` sits at 0 is the signature of a dependency
 in trouble. Wire it to a log line, or pair the budget with `PowerCircuit`.
 
+### Feeding upstream outcomes back
+
+Local refusal is not the only overload signal. An adapter that sees an
+upstream throttle or timeout can tighten the shared bucket explicitly:
+
+```javascript
+budget.recordOutcome({ kind: 'throttled' });
+budget.recordOutcome({ kind: 'timeout' });
+budget.recordOutcome({ kind: 'failure', penalty: 0.25 });
+```
+
+`success` and `cancellation` have no default penalty. The outcome counts appear
+in `stats().outcomes`, so an operator can distinguish external throttling from
+ordinary retry exhaustion.
+
 ## Hedging
 
 A hedge sends a **second copy of the first request** if the first has not
@@ -266,17 +291,17 @@ any request is sent**:
 
 ## PowerRetryBudget API
 
-| Member                                      | Description                                                     |
-| ------------------------------------------- | --------------------------------------------------------------- |
-| `new PowerRetryBudget({ ratio, capacity })` | `ratio` defaults to `0.2`, `capacity` to `10`.                  |
-| `recordRequest()`                           | Fund the bucket by one request. Returns the new token count.    |
-| `tryConsumeRetry()`                         | Spend one retry token. Returns `false` when empty.              |
-| `available()`                               | Current tokens.                                                 |
-| `stats()`                                   | `{ ratio, capacity, available, requests, retries, refused }`.   |
-| `reset()`                                   | Refill to capacity and zero the counters.                       |
-| `dispose()`                                 | Release the metrics registration. Terminal. `reset()` does not, |
-|                                             | because a budget can be reset and reused.                       |
-| `ratio` / `capacity`                        | The configured values.                                          |
+| Member                                      | Description                                                                           |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `new PowerRetryBudget({ ratio, capacity })` | `ratio` defaults to `0.2`, `capacity` to `10`.                                        |
+| `recordRequest()`                           | Fund the bucket by one request. Returns the new token count.                          |
+| `tryConsumeRetry()`                         | Spend one retry token. Returns `false` when empty.                                    |
+| `available()`                               | Current tokens.                                                                       |
+| `stats()`                                   | `{ ratio, capacity, available, requests, retries, refused, retryRate, refusalRate }`. |
+| `reset()`                                   | Refill to capacity and zero the counters.                                             |
+| `dispose()`                                 | Release the metrics registration. Terminal. `reset()` does not,                       |
+|                                             | because a budget can be reset and reused.                                             |
+| `ratio` / `capacity`                        | The configured values.                                                                |
 
 ## Cancelling a run
 

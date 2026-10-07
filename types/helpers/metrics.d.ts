@@ -18,6 +18,53 @@
  */
 export function toSeries(helper: string, stats: any): Record<string, number | boolean | null | string>;
 /**
+ * Add explicit sampling metadata to a flat series.
+ *
+ * The collector remains pull-based; this envelope records the evidence a
+ * controller needs before it changes a value. Missing fields are intentional:
+ * an unavailable signal must not become a zero.
+ *
+ * @param {Record<string, number|boolean|null|string>} series
+ * @param {Object} [options]
+ * @param {number} [options.observedAt=Date.now()]
+ * @param {number} [options.samples=0]
+ * @param {number} [options.windowMs=0]
+ * @param {boolean} [options.fresh=true]
+ * @param {number} [options.confidence=1] Evidence confidence in `[0, 1]`.
+ * @returns {{version: number, observedAt: number, samples: number, windowMs: number, fresh: boolean, confidence: number, series: Record<string, number|boolean|null|string>}}
+ */
+export function createObservation(series: Record<string, number | boolean | null | string>, options?: {
+    observedAt?: number | undefined;
+    samples?: number | undefined;
+    windowMs?: number | undefined;
+    fresh?: boolean | undefined;
+    confidence?: number | undefined;
+}): {
+    version: number;
+    observedAt: number;
+    samples: number;
+    windowMs: number;
+    fresh: boolean;
+    confidence: number;
+    series: Record<string, number | boolean | null | string>;
+};
+/**
+ * Calculate numeric changes between two observations.
+ *
+ * A missing or non-numeric pair is reported as `null`, rather than coerced to
+ * zero. That keeps a controller from treating a newly-added or unavailable
+ * signal as evidence of a drop.
+ *
+ * @param {{series: Record<string, number|boolean|null|string>}} current
+ * @param {{series: Record<string, number|boolean|null|string>}} [previous]
+ * @returns {Record<string, number|null>}
+ */
+export function diffObservation(current: {
+    series: Record<string, number | boolean | null | string>;
+}, previous?: {
+    series: Record<string, number | boolean | null | string>;
+}): Record<string, number | null>;
+/**
  * Wire a helper's `stats()` into a collector, and hand back the receipt that
  * undoes it.
  *
@@ -62,6 +109,13 @@ export function detach(receipt: {
     name: string;
 } | null): boolean;
 export const METRICS_VERSION: 1;
+/**
+ * Version of the optional observation envelope returned by
+ * {@link createObservation}.
+ *
+ * @type {number}
+ */
+export const OBSERVATION_VERSION: number;
 /**
  * Collects point-in-time snapshots from one or more helpers.
  *

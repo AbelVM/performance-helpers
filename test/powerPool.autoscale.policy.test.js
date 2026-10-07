@@ -131,6 +131,25 @@ describe('PowerPool autoscale policy', () => {
     pool.terminate();
   });
 
+  it('does not start cooldown when scaling is blocked at maxSize', () => {
+    const pool = makePool(
+      { cooldownMs: 1000, backoffFactor: 4, backoffMaxMultiplier: 8 },
+      { maxSize: 1 }
+    );
+    pool._ewmaLatency = 10_000;
+
+    pool._autoScaleTick();
+
+    expect(pool.workers).toHaveLength(1);
+    expect(pool._lastAutoScaleAt).toBe(0);
+    expect(pool._autoScaleBackoffMultiplier).toBe(1);
+    expect(pool.getStats().performance).toMatchObject({
+      lastScaleReason: 'latency',
+      lastScaleOutcome: 'blocked',
+    });
+    pool.terminate();
+  });
+
   it('resets the backoff multiplier after backoffResetMs of quiet', async () => {
     // A multiplier that never resets would freeze the pool at a wide cooldown
     // forever, even after a long healthy period - the pool could not scale up

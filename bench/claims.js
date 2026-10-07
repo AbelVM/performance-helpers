@@ -71,6 +71,7 @@ import {
   decodeInbound,
 } from '../src/helpers/powerMessageCodec.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
+import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 
 // ─── Reproducibility (same approach as BENCH-001) ───────────────────────────
 
@@ -4133,6 +4134,128 @@ async function runKeyShapeWorkload() {
   return { intGetUs, strGetUs, objGetUs };
 }
 
+// ─── Workload 12: static versus adaptive refill under burst + steady load ───
+
+/**
+ * Measure whether a tiny AIMD refill controller earns its extra state before
+ * adding an adaptive limiter to the public API. This is a workload benchmark,
+ * not a production controller: the candidate only changes the existing
+ * PowerThrottle refillRate between fixed observation windows.
+ */
+function runRateLimitWorkload() {
+  const REPEATS = Math.max(1, Number(process.env.CLAIM_RATELIMIT_REPEATS || 5));
+  const DURATION_MS = Math.max(1000, Number(process.env.CLAIM_RATELIMIT_DURATION_MS || 10000));
+  const CAPACITY = Math.max(1, Number(process.env.CLAIM_RATELIMIT_CAPACITY || 20));
+  const WINDOW_MS = Math.max(50, Number(process.env.CLAIM_RATELIMIT_WINDOW_MS || 250));
+  const BURST_EVERY_MS = Math.max(1, Number(process.env.CLAIM_RATELIMIT_BURST_EVERY_MS || 1000));
+  const BURST_SIZE = Math.max(1, Number(process.env.CLAIM_RATELIMIT_BURST_SIZE || 30));
+  const STEADY_EVERY_MS = Math.max(1, Number(process.env.CLAIM_RATELIMIT_STEADY_EVERY_MS || 40));
+  const FIXED_RATES = [5, 15, 30];
+
+  const run = (kind, configuredRate) => {
+    let now = 0;
+    const throttle = new PowerThrottle({
+      capacity: CAPACITY,
+      refillRate: configuredRate,
+      now: () => now,
+    });
+    let admitted = 0;
+    let rejected = 0;
+    let windowAdmitted = 0;
+    let windowRejected = 0;
+    let nextWindow = WINDOW_MS;
+    let burstCount = 0;
+    let nextBurst = 0;
+    let nextSteady = 0;
+    let peakRate = throttle.refillRate;
+
+    while (now < DURATION_MS) {
+      const nextEvent = Math.min(nextBurst, nextSteady, nextWindow, DURATION_MS);
+      now = nextEvent;
+      if (now === nextBurst) {
+        for (let i = 0; i < BURST_SIZE; i += 1) {
+          if (throttle.tryConsume()) {
+            admitted += 1;
+            windowAdmitted += 1;
+          } else {
+            rejected += 1;
+            windowRejected += 1;
+          }
+        }
+        burstCount += 1;
+        nextBurst += BURST_EVERY_MS;
+      }
+      if (now === nextSteady) {
+        if (throttle.tryConsume()) {
+          admitted += 1;
+          windowAdmitted += 1;
+        } else {
+          rejected += 1;
+          windowRejected += 1;
+        }
+        nextSteady += STEADY_EVERY_MS;
+      }
+      if (now === nextWindow) {
+        if (kind === 'adaptive') {
+          const total = windowAdmitted + windowRejected;
+          const rejectionRate = total === 0 ? 0 : windowRejected / total;
+          if (rejectionRate > 0.2) {
+            throttle.refillRate = Math.max(1, throttle.refillRate * 0.5);
+          } else if (rejectionRate < 0.05)
+            throttle.refillRate = Math.min(60, throttle.refillRate + 2);
+          peakRate = Math.max(peakRate, throttle.refillRate);
+        }
+        windowAdmitted = 0;
+        windowRejected = 0;
+        nextWindow += WINDOW_MS;
+      }
+    }
+    return {
+      admitted,
+      rejected,
+      rejectionRate: rejected / (admitted + rejected),
+      peakRate,
+      burstCount,
+    };
+  };
+
+  const median = (values) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const arms = [
+    ...FIXED_RATES.map((rate) => ({ label: `fixed:${rate}`, kind: 'fixed', rate })),
+    { label: 'adaptive:aimd', kind: 'adaptive', rate: 15 },
+  ];
+  const results = arms.map((arm) => {
+    const runs = Array.from({ length: REPEATS }, () => run(arm.kind, arm.rate));
+    return {
+      label: arm.label,
+      admitted: median(runs.map((x) => x.admitted)),
+      rejected: median(runs.map((x) => x.rejected)),
+      rejectionRate: median(runs.map((x) => x.rejectionRate)),
+      peakRate: median(runs.map((x) => x.peakRate)),
+    };
+  });
+
+  console.log('BENCH-002k — static versus adaptive refill under burst + steady load\n');
+  console.log(`  duration ${DURATION_MS} ms, capacity ${CAPACITY}, repeats ${REPEATS}`);
+  console.log(
+    `  burst ${BURST_SIZE} every ${BURST_EVERY_MS} ms, steady request every ${STEADY_EVERY_MS} ms`
+  );
+  console.log(
+    `  ${'arm'.padEnd(18)}${'admitted'.padStart(10)}${'rejected'.padStart(10)}${'reject %'.padStart(10)}${'peak rate'.padStart(11)}`
+  );
+  console.log(`  ${'-'.repeat(59)}`);
+  for (const result of results) {
+    console.log(
+      `  ${result.label.padEnd(18)}${String(result.admitted).padStart(10)}` +
+        `${String(result.rejected).padStart(10)}${(result.rejectionRate * 100).toFixed(1).padStart(9)}%` +
+        `${result.peakRate.toFixed(1).padStart(11)}`
+    );
+  }
+  console.log('\n  This mode measures whether an adaptive refill candidate earns a public API.');
+  console.log('  It does not establish a production controller or default refill policy.');
+  return { results, config: { durationMs: DURATION_MS, capacity: CAPACITY, repeats: REPEATS } };
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -4155,6 +4278,7 @@ const MODES = {
   codec: runCodecWorkload,
   sabring: runSabRingWorkload,
   keyshape: runKeyShapeWorkload,
+  ratelimit: runRateLimitWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';

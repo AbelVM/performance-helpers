@@ -4,7 +4,14 @@
 
 ![logo](assets/logo.png)
 
-Highly tuned lightweight toolbox for high-performance Node/browser code: zero-copy buffer helpers for worker messaging, an environment-agnostic worker abstraction (`WorkerAgnostic`), an LRU TTL cache with a memoizer, a fully-featured worker pool wrapper, a tiny runtime debug logger, and much more:
+Small, dependency-free helpers for bounding work, moving data, and observing
+runtime pressure in Node.js and browser applications. Start with the
+[Quick Guide](guides/metaGuide.md) when you are choosing a primitive; use the
+dedicated guides below when you already know the boundary you need to control.
+
+The library is organized by the boundary you need to control: cached data,
+parallel work, rate and concurrency limits, realtime transports, and runtime
+observability.
 
 > ## ⚠️ Upgrading to 2.0 — the worker wire format changed
 >
@@ -40,7 +47,10 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 
 ## Parallelizing
 
-- [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling scales the worker count from a latency-threshold heuristic; `autoScale.policy` (`'aimd' | 'vegas' | 'gradient2'`) additionally computes an adaptive concurrency limit, but that limit is **reported and not enforced** — nothing on the dispatch path reads it.
+- [PowerAdaptiveProposal: Bounded adaptation controller](guides/powerAdaptiveProposal.md). Turn feedback into bounded, explainable proposals with hysteresis, cooldown, and rollback without applying hidden policy.
+- [PowerBrownout: Optional-work shedding](guides/powerBrownout.md). Shed caller-declared optional work when normalized resource pressure crosses a threshold.
+- [PowerOperationContext: Explicit operation coordination](guides/powerOperationContext.md). Pass deadlines, cancellation, retry budgets, correlation ids, and priority without hidden global state.
+- [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling scales the worker count from a latency-threshold heuristic; `autoScale.policy` (`'aimd' | 'vegas' | 'gradient2'`) also enforces an adaptive admission limit, queueing excess work when `taskQueue` is enabled.
 - [WorkerAgnostic: One worker abstraction for Node, browser and web worker](guides/WorkerAgnostic.md). Resolves the environment and returns a worker-like object either way, from a factory function or a path/code string. Handles the pure-ESM `node:worker_threads` caveat. Used directly by `PowerPool` and `PowerChunker`.
 - [PowerChunker: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerBulkhead: Partitioned executor](guides/powerBulkhead.md). Isolate noisy workloads into separate lanes so one hot partition cannot starve the rest.
@@ -52,7 +62,7 @@ Highly tuned lightweight toolbox for high-performance Node/browser code: zero-co
 - [PowerBackpressure: Producer-facing backpressure controller](guides/powerBackpressure.md). Gate producers with bounded waiting and an adaptive refill that self-tunes to unknown downstream capacity (`{ adaptive: true }` enables AIMD; off by default).
 - [PowerBatch: Microtask coalescing dispatcher](guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
-- [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. New: supports `reserve()`/`release()` for reservation-style workflows.
+- [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. Supports `reserve()`/`release()` for reservation-style workflows.
 - [PowerRateLimit: Compose multiple limiters](guides/powerRateLimit.md). Combine `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` and others; supports an `atomic` option to attempt atomic consumes across composed limiters, and a **`keyFn`** for per-key limiting (Bottleneck `Group`-shaped) that hashes keys into a bounded slot array — bounded memory with **no eviction path**, so no key's budget can be silently reset.
 - [PowerSlidingWindow: Sliding-window limiter](guides/powerSlidingWindow.md). A simple rolling-window limiter for quota-style rate limiting.
 - [PowerGCRA: Cell-based rate limiter](guides/powerGCRA.md). GCRA — the ATM Forum algorithm behind `redis-cell` and Go's `x/time/rate`. O(1) with a single number of state, and an **exact** `retryAfter()` rather than an estimate. Composes in `PowerRateLimit` alongside the other limiters.
@@ -68,7 +78,7 @@ Transport framing and real-time fan-out. These compose: the hub delivers over wh
 
 The transport helpers split into two roles: **client-side** helpers dial out and own the connection lifecycle; **server-side** helpers wrap an existing transport that another library accepted.
 
-- [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` envelope so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNative` for the platform structured clone on a `MessagePort`/`Worker`. This is the protocol `PowerPool` speaks by default since 2.0.
+- [PowerMessageCodec: Versioned binary message framing](guides/powerMessageCodec.md). Explicit `[version][codec][length][payload]` envelope so a transport never has to _guess_ what it received, replacing `PowerPool`'s ArrayBuffer sniffing. Framed `json`/`raw` codecs for byte streams, plus `encodeNativeEnvelope` for the platform structured clone on a `MessagePort`/`Worker`. This is the protocol `PowerPool` speaks by default since 2.0; `decodeInbound` reads either carrier.
 
   **Protocol negotiation.** The frame is portable and it is lossy: a `Map` arrives as `{}`, a `Date` as an ISO _string_, `Infinity` as `null`, and a `BigInt` makes the whole message undecodable. So a worker can advertise the native structured-clone carrier and get that instead, while every worker that does not advertise keeps getting the frame — one pool, a mixed fleet, and a rollout that can start before any worker is ready:
 
@@ -147,7 +157,9 @@ To plot what the helpers report, use [Metrics](guides/metrics.md) rather than
 each helper's own `stats()`: those shapes are different kinds of thing — a
 `PowerCache` reports counters, a `PowerGCRA` mostly configuration, a
 `PowerPool` a nested array per worker — and the snapshot gives them stable,
-versioned names.
+versioned names. Use `createObservation()` and `diffObservation()` when a
+controller needs sample count, window duration, freshness, and numeric deltas
+without treating missing values as zero.
 
 ## Quick start
 

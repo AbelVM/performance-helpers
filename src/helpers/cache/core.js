@@ -480,6 +480,8 @@ export class PowerCache {
     // that is not refreshing — the same reasoning as `_rejected` and
     // `_rejectedAdmission` beside it.
     this._refreshesSkipped = 0;
+    this._refreshesFailed = 0;
+    this._refreshesAborted = 0;
     this._rejected = 0; // rejected oversized insert attempts
     // Public since CACHE-011 as `stats().rejectedAdmission`. Note that `clear()`
     // zeroes it along with the sketch: the refusals counted so far were decisions
@@ -1030,6 +1032,7 @@ export class PowerCache {
     // instead of pretending to handle it. The caller's own listener is the
     // caller's own risk, exactly as with any `abort()`.
     controller.abort(new Error(`PowerCache: in-flight fetch for a ${reason} key was aborted`));
+    this._refreshesAborted += 1;
     return true;
   }
 
@@ -1064,13 +1067,8 @@ export class PowerCache {
     // The signal is the factory's first argument, as in `fetch` and
     // `lru-cache`, so a factory written for either works here unchanged.
     const controller = new AbortController();
-    let p;
-    try {
-      p = Promise.resolve().then(() => factory(controller.signal));
-    } catch (err) {
-      return;
-    }
-    const tracked = p
+    const tracked = Promise.resolve()
+      .then(() => factory(controller.signal))
       .then((value) => {
         try {
           this.set(key, value, { ttl, weight });
@@ -1079,7 +1077,10 @@ export class PowerCache {
         }
         return value;
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (!controller.signal.aborted) this._refreshesFailed += 1;
+        return undefined;
+      })
       .finally(() => {
         this._inflightControllers.delete(key);
         this._inflightPromises.delete(key);
@@ -2948,7 +2949,8 @@ export class PowerCache {
    *
    * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
    *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
-   *   weightErrors:number, refreshesSkipped:number, poolSize:number}}
+   *   weightErrors:number, refreshesSkipped:number, refreshesFailed:number,
+   *   refreshesAborted:number, poolSize:number}}
    */
   stats() {
     return {
@@ -2973,6 +2975,8 @@ export class PowerCache {
       // cache whose stale values are never being refreshed looks healthy on every
       // other counter.
       refreshesSkipped: this._refreshesSkipped,
+      refreshesFailed: this._refreshesFailed,
+      refreshesAborted: this._refreshesAborted,
       poolSize: this._pool.length,
     };
   }

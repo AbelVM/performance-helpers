@@ -26,7 +26,7 @@ Options:
 - `tryConsume(n?)` — returns `true` only when every underlying limiter permits consuming `n` tokens.
 - `reset()` — calls `reset()` on underlying limiters where present.
 - `dispose()` — releases what the composer built, and supports `using`. See [Disposal](#disposal).
-- `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available }`. See [Metrics](#metrics).
+- `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available, rejectionRate }`. `rejectionRate` is the fraction of composed consume calls refused so far. See [Metrics](#metrics).
 - `getStats()` — Alias for `stats()`.
 - `limitersFor(key)` — with `keyFn`, the limiter set for one key, so you can inspect or drive that key directly (for a `Retry-After` header, say). Returns `null` without `keyFn`.
 
@@ -161,6 +161,36 @@ const ok = await limiter.tryConsume(1, { context: { tenant: 'acme' } });
 The local legs are only consulted after the shared store admits, so an async
 adapter does not change the admission order — it only makes the round-trip
 visible to the caller.
+
+## External feedback and adaptive refill
+
+The shipped limiters keep `refillRate`, `rate`, and window capacity
+deterministic. A local rejection is not evidence that an upstream dependency is
+overloaded: it may only mean that this limiter correctly refused work. Do not
+auto-tune refill from local rejection without a workload-specific benchmark.
+
+When an upstream supplies a trustworthy signal such as `429`, `Retry-After`, or
+an error-budget event, keep the policy in the caller. `PowerAdaptiveProposal`
+can produce a bounded, explainable refill proposal, but it does not mutate a
+limiter for you:
+
+```javascript
+import { PowerAdaptiveProposal, PowerThrottle } from 'performance-helpers';
+
+const throttle = new PowerThrottle({ capacity: 100, refillRate: 20 });
+const refill = new PowerAdaptiveProposal({ initial: 20, min: 1, max: 20, maxStep: 2 });
+
+function observeUpstream({ throttled }) {
+  const proposal = refill.propose(throttled ? 1 : -0.1);
+  if (proposal.changed) throttle.refillRate = proposal.value;
+  return proposal;
+}
+```
+
+The caller must define signal freshness, idempotency, and precedence between
+upstream feedback and local pressure. The current benchmark found that a
+rejection-driven AIMD candidate admitted less work than fixed refill, so no
+adaptive refill mode is enabled by default.
 
 ## Request counts
 

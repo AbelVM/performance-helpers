@@ -14,9 +14,12 @@
 
 - [defaultMetrics](variables/defaultMetrics.md)
 - [METRICS\_VERSION](variables/METRICS_VERSION.md)
+- [OBSERVATION\_VERSION](variables/OBSERVATION_VERSION.md)
 
 ## Functions
 
 - [attach](functions/attach.md)
+- [createObservation](functions/createObservation.md)
 - [detach](functions/detach.md)
+- [diffObservation](functions/diffObservation.md)
 - [toSeries](functions/toSeries.md)

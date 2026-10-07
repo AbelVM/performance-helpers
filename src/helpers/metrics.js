@@ -46,6 +46,13 @@ import { assertKnownOptions } from '../utils/options.js';
 import { isError } from '../utils/errors.js';
 
 export const METRICS_VERSION = 1;
+/**
+ * Version of the optional observation envelope returned by
+ * {@link createObservation}.
+ *
+ * @type {number}
+ */
+export const OBSERVATION_VERSION = 1;
 
 /** Separator between a helper name and a series key. */
 const SEP = '.';
@@ -106,6 +113,88 @@ export function toSeries(helper, stats) {
   };
   walk(stats, helper);
   return out;
+}
+/**
+ * Add explicit sampling metadata to a flat series.
+ *
+ * The collector remains pull-based; this envelope records the evidence a
+ * controller needs before it changes a value. Missing fields are intentional:
+ * an unavailable signal must not become a zero.
+ *
+ * @param {Record<string, number|boolean|null|string>} series
+ * @param {Object} [options]
+ * @param {number} [options.observedAt=Date.now()]
+ * @param {number} [options.samples=0]
+ * @param {number} [options.windowMs=0]
+ * @param {boolean} [options.fresh=true]
+ * @param {number} [options.confidence=1] Evidence confidence in `[0, 1]`.
+ * @returns {{version: number, observedAt: number, samples: number, windowMs: number, fresh: boolean, confidence: number, series: Record<string, number|boolean|null|string>}}
+ */
+export function createObservation(series, options = {}) {
+  assertKnownOptions(
+    options,
+    ['observedAt', 'samples', 'windowMs', 'fresh', 'confidence'],
+    'createObservation'
+  );
+  if (series == null || typeof series !== 'object' || Array.isArray(series)) {
+    throw new TypeError('createObservation: `series` must be an object');
+  }
+  const observedAt = options.observedAt ?? Date.now();
+  const samples = options.samples ?? 0;
+  const windowMs = options.windowMs ?? 0;
+  const confidence = options.confidence ?? 1;
+  if (!Number.isFinite(observedAt) || !Number.isFinite(samples) || samples < 0) {
+    throw new TypeError(
+      'createObservation: `observedAt` and `samples` must be finite, with samples >= 0'
+    );
+  }
+  if (!Number.isFinite(windowMs) || windowMs < 0) {
+    throw new TypeError('createObservation: `windowMs` must be finite and >= 0');
+  }
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    throw new TypeError('createObservation: `confidence` must be finite in [0, 1]');
+  }
+  return {
+    version: OBSERVATION_VERSION,
+    observedAt,
+    samples,
+    windowMs,
+    fresh: options.fresh ?? true,
+    confidence,
+    series: { ...series },
+  };
+}
+
+/**
+ * Calculate numeric changes between two observations.
+ *
+ * A missing or non-numeric pair is reported as `null`, rather than coerced to
+ * zero. That keeps a controller from treating a newly-added or unavailable
+ * signal as evidence of a drop.
+ *
+ * @param {{series: Record<string, number|boolean|null|string>}} current
+ * @param {{series: Record<string, number|boolean|null|string>}} [previous]
+ * @returns {Record<string, number|null>}
+ */
+export function diffObservation(current, previous) {
+  if (!current || typeof current !== 'object' || !current.series) {
+    throw new TypeError('diffObservation: `current` must be an observation');
+  }
+  const before = previous?.series;
+  /** @type {Record<string, number|null>} */
+  const delta = {};
+  for (const key of new Set([...Object.keys(current.series), ...Object.keys(before ?? {})])) {
+    const value = current.series[key];
+    const prior = before?.[key];
+    delta[key] =
+      typeof value === 'number' &&
+      Number.isFinite(value) &&
+      typeof prior === 'number' &&
+      Number.isFinite(prior)
+        ? value - prior
+        : null;
+  }
+  return delta;
 }
 
 /**

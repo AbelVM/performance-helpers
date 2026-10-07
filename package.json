@@ -56,6 +56,11 @@
       "require": "./dist/performance-helpers.cjs",
       "default": "./src/index.js"
     },
+    "./powerAdaptiveProposal": {
+      "types": "./types/helpers/powerAdaptiveProposal.d.ts",
+      "import": "./src/helpers/powerAdaptiveProposal.js",
+      "default": "./src/helpers/powerAdaptiveProposal.js"
+    },
     "./powerBackpressure": {
       "types": "./types/helpers/powerBackpressure.d.ts",
       "import": "./src/helpers/powerBackpressure.js",
@@ -70,6 +75,11 @@
       "types": "./types/helpers/powerBatch.d.ts",
       "import": "./src/helpers/powerBatch.js",
       "default": "./src/helpers/powerBatch.js"
+    },
+    "./powerBrownout": {
+      "types": "./types/helpers/powerBrownout.d.ts",
+      "import": "./src/helpers/powerBrownout.js",
+      "default": "./src/helpers/powerBrownout.js"
     },
     "./powerBuffer": {
       "types": "./types/helpers/powerBuffer.d.ts",
@@ -190,6 +200,11 @@
       "types": "./types/helpers/powerObserver.d.ts",
       "import": "./src/helpers/powerObserver.js",
       "default": "./src/helpers/powerObserver.js"
+    },
+    "./powerOperationContext": {
+      "types": "./types/helpers/powerOperationContext.d.ts",
+      "import": "./src/helpers/powerOperationContext.js",
+      "default": "./src/helpers/powerOperationContext.js"
     },
     "./powerPermitGate": {
       "types": "./types/helpers/powerPermitGate.d.ts",

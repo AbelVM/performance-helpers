@@ -56,8 +56,9 @@ export const READY_STATE = Object.freeze({
  *   module.
  * @property {number} [connectTimeoutMs=10000] - Abort the connect attempt after
  *   this long. `0` disables the timeout.
- * @property {number} [maxPayloadSizeBytes=Infinity] - Frames larger than this are
- *   **reported, not prevented**. Counts `oversizeFrames` and emits `error`.
+ * @property {number} [maxPayloadSizeBytes=Infinity] - Maximum accepted size for
+ *   incoming framed data. Oversized frames are rejected by the decoder and are
+ *   not delivered.
  * @property {number} [heartbeatIntervalMs=30000] - Send a heartbeat at this
  *   interval. `0` disables heartbeats.
  * @property {number} [heartbeatTimeoutMs=10000] - Declare the transport dead if

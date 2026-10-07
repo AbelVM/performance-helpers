@@ -101,6 +101,7 @@ describe('the factory is handed an AbortSignal', () => {
     await flush();
     await vi.advanceTimersByTimeAsync(60);
     expect(record.signal.aborted).toBe(true);
+    expect(c.stats().refreshesAborted).toBe(1);
     expect(c._inflightPromises.has('k')).toBe(false);
     // And the controller map is released with it, or it grows per fetch.
     expect(c._inflightControllers.has('k')).toBe(false);

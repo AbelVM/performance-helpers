@@ -73,6 +73,20 @@ describe('PowerGCRA.onError reports clock faults, not refusals', () => {
     expect(errors[0], 'the offending reading, not an Error').toBe(90_000);
   });
 
+  it('recovers after a forward step and reports a later backward step', () => {
+    const errors = [];
+    let t = 1000;
+    const g = new PowerGCRA({ rate: 1, burst: 1, now: () => t, onError: (e) => errors.push(e) });
+
+    g.tryConsume(1);
+    t += 10_000;
+    g.tryConsume(1);
+    t -= 5000;
+    g.tryConsume(1);
+
+    expect(errors).toEqual([6000]);
+  });
+
   it('does not report on the very first reading', () => {
     // The `_lastNow === null` guard. Without it a freshly constructed limiter
     // reports once against a clock that has not moved at all, which is the same

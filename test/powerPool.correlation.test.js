@@ -20,6 +20,14 @@ function idlePool(options = {}) {
 }
 
 describe('correlation id generation', () => {
+  it('rejects an operation whose deadline has already elapsed', async () => {
+    const pool = idlePool();
+    await expect(
+      pool.postMessage({ work: true }, [], { awaitResponse: true, deadlineAt: Date.now() - 1 })
+    ).rejects.toMatchObject({ code: 'EDEADLINE' });
+    pool.dispose();
+  });
+
   it('returns a short, non-empty string', () => {
     const pool = idlePool();
     const id = pool._generateCorrelationId();

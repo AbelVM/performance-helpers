@@ -241,6 +241,10 @@ method is written out per class.
 
 > **droppedSamples**: `number`
 
+##### eventLoopPressure
+
+> **eventLoopPressure**: `number`
+
 ##### intervalMs
 
 > **intervalMs**: `number`
@@ -359,6 +363,10 @@ They are *estimates* - `PowerHistogram` is a DDSketch with a
 ##### droppedSamples
 
 > **droppedSamples**: `number`
+
+##### eventLoopPressure
+
+> **eventLoopPressure**: `number`
 
 ##### intervalMs
 

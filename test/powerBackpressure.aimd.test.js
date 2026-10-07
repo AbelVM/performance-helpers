@@ -45,6 +45,12 @@ function make(options = {}) {
 }
 
 describe('PowerBackpressure adaptive refill (AIMD)', () => {
+  it('reports normalized permit pressure for composition', () => {
+    const bp = make({ initialTokens: 1 });
+    expect(bp.stats().pressure).toBeCloseTo(0.75);
+    bp.dispose();
+  });
+
   it('is off by default and leaves refillAmount exactly where it was configured', () => {
     const bp = new PowerBackpressure({ capacity: 8, refillAmount: 3, refillInterval: 5 });
     expect(bp.refillAmount).toBe(3);
@@ -331,5 +337,20 @@ describe('PowerBackpressure adaptive refill (AIMD)', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('exposes congestion and recovery rounds', () => {
+    const bp = new PowerBackpressure({
+      capacity: 4,
+      refillAmount: 2,
+      adaptive: { enabled: true },
+    });
+    expect(bp.stats()).toMatchObject({
+      adaptive: true,
+      congestionSteps: 0,
+      recoverySteps: 0,
+    });
+    bp._aimdStep();
+    expect(bp.stats().recoverySteps).toBe(1);
   });
 });

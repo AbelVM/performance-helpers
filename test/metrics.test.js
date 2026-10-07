@@ -10,8 +10,11 @@ import {
   MetricsCollector,
   toSeries,
   METRICS_VERSION,
+  OBSERVATION_VERSION,
   defaultMetrics,
   attach,
+  createObservation,
+  diffObservation,
 } from '../src/helpers/metrics.js';
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { PowerGCRA } from '../src/helpers/powerGCRA.js';
@@ -91,6 +94,40 @@ describe('toSeries', () => {
 });
 
 describe('MetricsCollector', () => {
+  describe('observations', () => {
+    it('records sampling metadata without changing the series values', () => {
+      const observation = createObservation(
+        { 'pool.queue': 4 },
+        {
+          observedAt: 100,
+          samples: 8,
+          windowMs: 500,
+          fresh: false,
+          confidence: 0.75,
+        }
+      );
+      expect(observation).toEqual({
+        version: OBSERVATION_VERSION,
+        observedAt: 100,
+        samples: 8,
+        windowMs: 500,
+        fresh: false,
+        confidence: 0.75,
+        series: { 'pool.queue': 4 },
+      });
+    });
+
+    it('rejects confidence outside the evidence range', () => {
+      expect(() => createObservation({}, { confidence: 1.1 })).toThrow(TypeError);
+      expect(() => createObservation({}, { confidence: -0.1 })).toThrow(TypeError);
+    });
+
+    it('returns deltas only when both observations contain finite numbers', () => {
+      const previous = createObservation({ a: 2, b: null, c: 'old' });
+      const current = createObservation({ a: 7, b: 3, c: 'new', d: 1 });
+      expect(diffObservation(current, previous)).toEqual({ a: 5, b: null, c: null, d: null });
+    });
+  });
   it('stamps every snapshot with the version and a collection time', () => {
     const c = new MetricsCollector();
     c.register('cache', () => ({ size: 1 }));

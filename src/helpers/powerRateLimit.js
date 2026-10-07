@@ -101,6 +101,8 @@ export class PowerRateLimit {
     /** @type {RateLimiterLike[]} */
     this.limiters = limiters.slice();
     this.atomicDefault = Boolean(options.atomic);
+    this._requests = 0;
+    this._rejected = 0;
 
     // ── Distributed rate limiting (GAP-015) ─────────────────────────────────
     //
@@ -286,6 +288,19 @@ export class PowerRateLimit {
    *   adapter is async.
    */
   tryConsume(n = 1, options = {}) {
+    this._requests += 1;
+    const result = this._tryConsume(n, options);
+    if (isPromise(result)) {
+      return result.then((ok) => {
+        if (!ok) this._rejected += 1;
+        return ok;
+      });
+    }
+    if (!result) this._rejected += 1;
+    return result;
+  }
+
+  _tryConsume(n = 1, options = {}) {
     // ── Distributed pre-check (GAP-015) ────────────────────────────────────
     //
     // When `sharedState` is configured, the external store is the source of
@@ -739,7 +754,7 @@ export class PowerRateLimit {
    * `path` is the most recent `tryConsume` path when `sharedState` is configured,
    * or `null` otherwise.
    *
-   * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null, path:string|null}}
+   * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null, rejectionRate:number, path:string|null}}
    */
   stats() {
     const keyed = this.keyFn !== null;
@@ -754,6 +769,7 @@ export class PowerRateLimit {
       buckets: keyed ? this.buckets : 0,
       builtSlots,
       available: keyed ? null : this.available(),
+      rejectionRate: this._requests > 0 ? this._rejected / this._requests : 0,
       path: this._lastPath,
     };
   }

@@ -56,6 +56,12 @@ await PowerRetry.run(call, { budget, maxAttempts: 5 });
 
 ***
 
+### \_executions
+
+> **\_executions**: `number`
+
+***
+
 ### \_funded
 
 > **\_funded**: `number`
@@ -65,6 +71,12 @@ await PowerRetry.run(call, { budget, maxAttempts: 5 });
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
+
+***
+
+### \_outcomes
+
+> **\_outcomes**: `any`
 
 ***
 
@@ -162,6 +174,28 @@ forever, and its `stats()` still answers, so nothing fails visibly.
 
 ***
 
+### execute()
+
+> **execute**(`fn`, `options?`): `Promise`\<`any`\>
+
+Run one operation against this shared request budget.
+
+#### Parameters
+
+##### fn
+
+`Function`
+
+##### options?
+
+`PowerRetryOptions` = `{}`
+
+#### Returns
+
+`Promise`\<`any`\>
+
+***
+
 ### getStats()
 
 > **getStats**(): `PowerRetryBudgetStats`
@@ -174,6 +208,33 @@ method is written out per class.
 #### Returns
 
 `PowerRetryBudgetStats`
+
+***
+
+### recordOutcome()
+
+> **recordOutcome**(`outcome?`): `number`
+
+Record an external outcome so upstream throttling can tighten this budget.
+`penalty` is measured in retry tokens and defaults by outcome kind.
+
+#### Parameters
+
+##### outcome?
+
+###### kind?
+
+`string`
+
+###### penalty?
+
+`number`
+
+#### Returns
+
+`number`
+
+Tokens remaining after the adjustment.
 
 ***
 

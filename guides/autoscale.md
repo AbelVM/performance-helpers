@@ -1,10 +1,9 @@
 # PowerPool Autoscaling
 
-> ⚠️ **`autoScale.policy` is computed and published, but not enforced.**
+> **`autoScale.policy` is enforced at admission.**
 > The `aimd`, `vegas`, and `gradient2` policies compute a concurrency limit and
-> expose it via `getStats().performance.concurrencyLimit`, but **nothing on the
-> dispatch path reads that limit**. Worker count is the only admission gate.
-> Treat `policy` as a reported diagnostic, not as a concurrency controller.
+> stop new dispatches at that limit. Excess work is queued when `taskQueue` is
+> enabled; use `maxQueueLength` and `queuePolicy` when you need bounded refusal.
 > PowerPool supports an optional autoscaling mode to grow or shrink the worker pool based on recent observed task latency (EWMA) and queue pressure.
 
 ## Enabling
@@ -64,8 +63,7 @@ decide one.
 ### Concurrency policies (`policy`)
 
 `autoScale.policy` is a separate and different mechanism: it swaps in a
-concurrency-window controller whose limit is **reported and not enforced** (see
-below).
+concurrency-window controller whose limit gates new dispatches across the pool.
 
 | policy        | signal it steers on                                                                     |
 | ------------- | --------------------------------------------------------------------------------------- |
@@ -74,11 +72,18 @@ below).
 | `'vegas'`     | `limit * (1 - minRtt / currentRtt)` — an estimate of the bottleneck queue.              |
 | `'gradient2'` | Ratio of long-window to short-window RTT, held between `0.5` and `1`, plus queue depth. |
 
-**None of these is enforced.** The limit they compute is published as `getStats().performance.concurrencyLimit` and read by nothing on the dispatch path, so they change what that field _says_ and nothing else.
+The limit they compute is published as `getStats().performance.concurrencyLimit`
+and gates new dispatches. When the limit is reached, `taskQueue` controls whether
+work waits or is refused.
 
 ```js
 autoScale: { policy: 'gradient2', limitMin: 1, limitMax: 16, longWindowAlpha: 0.05 }
 ```
+
+`getStats().performance.lastScaleReason` reports the latest scaling trigger
+(`latency`, `queue`, or `latency+queue`), while `lastScaleOutcome` reports what
+the pool actuator did (`added`, `removed`, `blocked`, `no-op`, or `failed`).
+Cooldown and backoff advance only after workers are actually added or removed.
 
 Two things to know before choosing one:
 
@@ -86,13 +91,10 @@ Two things to know before choosing one:
   `concurrencyLimit` in `getStats().performance` is `null` for exactly that
   reason. Leaving the option alone gets you worker-count scaling and no
   concurrency control.
-- **None of the four is enforced, including the other three.** The limit they
-  compute is written and then read by `getStats()` — nothing on the dispatch path
-  reads it, so they change what `concurrencyLimit` _reports_ and nothing else.
-  Measured: indistinguishable throughput across the four policies, and applying
-  the limit to a real gate measured **−3.7 %** against the best hand-picked
-  constant cap. Treat `policy` as a reported diagnostic for now, not as a
-  concurrency limit.
+- **The adaptive policies are feedback controllers, not throughput guarantees.**
+  End-to-end task latency can still conflate task cost with queueing delay. Use a
+  constant cap when the workload is highly heterogeneous or when a deterministic
+  ceiling matters more than adaptation.
 - **The signal is end-to-end task latency, while Netflix's controllers track
   queueing delay.** The two are the same only for a uniform workload. On a pool
   whose tasks vary in cost, a heavier task looks to `vegas` and `aimd` like

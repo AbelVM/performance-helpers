@@ -98,6 +98,8 @@ export class PowerRetryBudget {
     this._retries = 0;
     this._refused = 0;
     this._funded = 0;
+    this._executions = 0;
+    this._outcomes = Object.create(null);
     // FEAT-007: opt-in metrics. The *budget* is observable, not the
     // `PowerRetry` around it: `PowerRetry` has no counters of its own,
     // so registering it would produce a series that always reads zero.
@@ -151,6 +153,36 @@ export class PowerRetryBudget {
   }
 
   /**
+   * Record an external outcome so upstream throttling can tighten this budget.
+   * `penalty` is measured in retry tokens and defaults by outcome kind.
+   * @param {{kind?:string, penalty?:number}} [outcome]
+   * @returns {number} Tokens remaining after the adjustment.
+   */
+  recordOutcome(outcome = {}) {
+    const kind = typeof outcome.kind === 'string' ? outcome.kind : 'failure';
+    const defaults = { success: 0, cancellation: 0, timeout: 0.5, throttled: 1, failure: 0.25 };
+    const penalty =
+      outcome.penalty === undefined ? (defaults[kind] ?? defaults.failure) : outcome.penalty;
+    if (!Number.isFinite(penalty) || penalty < 0) {
+      throw new TypeError('outcome penalty must be a finite number >= 0');
+    }
+    this._tokens = Math.max(0, this._tokens - penalty);
+    this._outcomes[kind] = (this._outcomes[kind] || 0) + 1;
+    return this._tokens;
+  }
+
+  /**
+   * Run one operation against this shared request budget.
+   * @param {Function} fn
+   * @param {PowerRetryOptions} [options]
+   * @returns {Promise<any>}
+   */
+  execute(fn, options = {}) {
+    this._executions += 1;
+    return PowerRetry.run(fn, { ...options, budget: this });
+  }
+
+  /**
    * Current retry tokens available.
    * @returns {number}
    */
@@ -167,6 +199,7 @@ export class PowerRetryBudget {
     this._retries = 0;
     this._refused = 0;
     this._funded = 0;
+    this._outcomes = Object.create(null);
   }
 
   /**
@@ -203,6 +236,10 @@ export class PowerRetryBudget {
       requests: this._funded,
       retries: this._retries,
       refused: this._refused,
+      executions: this._executions,
+      retryRate: this._executions > 0 ? this._retries / this._executions : 0,
+      refusalRate: this._funded > 0 ? this._refused / this._funded : 0,
+      outcomes: { ...this._outcomes },
     };
   }
 
@@ -371,6 +408,7 @@ function resolveRunOptions(options) {
     jitter = true,
     attemptTimeout,
     hedgeDelay = 0,
+    retryAfter,
     signal,
   } = options || {};
 
@@ -430,7 +468,7 @@ function resolveRunOptions(options) {
     );
   }
 
-  return { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter, signal };
+  return { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter, retryAfter, signal };
 }
 
 /**
@@ -466,10 +504,14 @@ export class PowerRetry {
         'maxDelay',
         'jitter',
         'retryIf',
+        'classifyError',
         'onRetry',
         'attemptTimeout',
         'budget',
         'hedgeDelay',
+        'hedgeIf',
+        'circuit',
+        'retryAfter',
         'signal',
       ],
       'PowerRetry'
@@ -543,13 +585,34 @@ export class PowerRetry {
    */
   static async run(fn, options = {}) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
-    const { retryIf = () => true, onRetry, budget = null } = options || {};
+    const {
+      retryIf = () => true,
+      classifyError,
+      onRetry,
+      budget = null,
+      circuit = null,
+      hedgeIf,
+    } = options || {};
     const cfg = resolveRunOptions(options);
+
+    if (circuit != null && typeof circuit.call !== 'function') {
+      throw new TypeError('PowerRetry: `circuit` must expose call(fn)');
+    }
 
     const bucket = resolveBudget(budget, 'PowerRetry.run');
     if (bucket) bucket.recordRequest();
 
-    const { attempts, strategy, base, cap, timeoutMs, hedgeMs, jitter, signal } = cfg;
+    const {
+      attempts,
+      strategy,
+      base,
+      cap,
+      timeoutMs,
+      hedgeMs,
+      jitter,
+      retryAfter: getRetryAfter,
+      signal,
+    } = cfg;
     let decorrelated = base;
 
     /**
@@ -582,7 +645,14 @@ export class PowerRetry {
      * @returns {Promise<any>}
      */
     const runAttempt = (attempt) => {
-      const hedging = hedgeMs > 0 && attempt === 1;
+      let hedging = hedgeMs > 0 && attempt === 1;
+      if (hedging && typeof hedgeIf === 'function') {
+        try {
+          hedging = hedgeIf({ attempt, budget: bucket, circuit }) !== false;
+        } catch {
+          hedging = false;
+        }
+      }
       // A hedge needs a signal even without a timeout: cancelling the losing
       // copy is the only reason to have one. Without a timeout *and* without a
       // hedge there is nothing to cancel, so `fn` is handed `undefined` - the
@@ -707,9 +777,18 @@ export class PowerRetry {
       // sleep to interrupt.
       if (signal && signal.aborted) throw abortError(signal.reason);
       try {
-        return await runAttempt(attempt);
+        return await (circuit ? circuit.call(() => runAttempt(attempt)) : runAttempt(attempt));
       } catch (err) {
         lastErr = err;
+        if (err?.code === 'ECIRCUITOPEN') throw err;
+        if (bucket && typeof classifyError === 'function') {
+          try {
+            const outcome = classifyError(err, attempt);
+            if (outcome && typeof outcome === 'object') bucket.recordOutcome(outcome);
+          } catch (e) {
+            /* a classifier must not replace the operation's failure */
+          }
+        }
         // A timed-out attempt is a *failed attempt*, not a terminal error: the
         // documented contract is that it is "rejected and counted as a failed
         // attempt". Early-throwing on `ETIMEOUT` here would silently turn
@@ -755,7 +834,15 @@ export class PowerRetry {
         if (!should || attempt === attempts) break;
         // The budget is the last gate before more traffic is put on the wire.
         if (bucket && !bucket.tryConsumeRetry()) break;
-        const delay = calcDelay(attempt);
+        let delay = calcDelay(attempt);
+        if (typeof getRetryAfter === 'function') {
+          try {
+            const suggested = getRetryAfter(err, attempt);
+            if (Number.isFinite(suggested) && suggested >= 0) delay = Math.min(cap, suggested);
+          } catch (e) {
+            /* a throwing hint must not replace the failed attempt */
+          }
+        }
         if (typeof onRetry === 'function') {
           try {
             onRetry(attempt, err, delay);

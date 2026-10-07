@@ -22,19 +22,30 @@ export { PowerTTLMap } from './helpers/powerTTLMap.js';
 // either one produced a ReferenceError. It is allocated at module load, so
 // exporting it costs a collector and a closure in every consumer - which is why
 // `observability` stays off by default everywhere.
-export { MetricsCollector, defaultMetrics, toSeries, METRICS_VERSION } from './helpers/metrics.js';
+export {
+  MetricsCollector,
+  defaultMetrics,
+  toSeries,
+  createObservation,
+  diffObservation,
+  METRICS_VERSION,
+  OBSERVATION_VERSION,
+} from './helpers/metrics.js';
 export { normalizeError, formatErrorObj } from './utils/errors.js';
 export { nowMs, monoMs, measureSync, measureAsync } from './utils/now.js';
 export { detectWebTransportSupport } from './utils/webtransport.js';
 export { PowerCircuit } from './helpers/powerCircuit.js';
 export { PowerCron } from './helpers/powerCron.js';
 export { PowerRetry, PowerRetryBudget } from './helpers/powerRetry.js';
+export { createOperationContext } from './helpers/powerOperationContext.js';
 export { PowerDeadline } from './helpers/powerDeadline.js';
 export { PowerHistogram } from './helpers/powerHistogram.js';
 export { PowerBackpressure } from './helpers/powerBackpressure.js';
 export { PowerBulkhead } from './helpers/powerBulkhead.js';
 export { PowerBatch } from './helpers/powerBatch.js';
 export { PowerServo } from './helpers/powerServo.js';
+export { PowerAdaptiveProposal } from './helpers/powerAdaptiveProposal.js';
+export { PowerBrownout, getResourcePressure } from './helpers/powerBrownout.js';
 export { PowerLatch } from './helpers/powerLatch.js';
 export { PowerObserver } from './helpers/powerObserver.js';
 export { PowerEventBus } from './helpers/powerEventBus.js';

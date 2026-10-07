@@ -100,6 +100,11 @@ export type PowerPoolOptions = {
      */
     maxQueueLength?: number | undefined;
     /**
+     * - Waiting milliseconds required to
+     * gain one effective priority point, preventing low-priority starvation.
+     */
+    priorityAgingMs?: number | undefined;
+    /**
      * - Opt in to
      * metrics: `true` registers this helper in the shared collector, or pass a
      * collector of your own. Off by default, so the common case allocates nothing.
@@ -190,16 +195,11 @@ export type PowerPoolOptions = {
 export type AutoScaleOptions = {
     /**
      * - Which
-     * concurrency controller computes the adaptive limit. **The computed limit is
-     * reported, not enforced**: nothing on the dispatch path reads it, so this
-     * changes `getStats().performance.concurrencyLimit` and nothing else.
-     * **`'ewma'` — the default — runs no concurrency control at all**: it compares
-     * one EWMA against `targetMs` and adds or removes a worker, and
-     * `_adaptiveLimit` stays at its seed value, which is why `concurrencyLimit`
-     * reports `null` for it. The other three are real feedback loops over a latency
-     * signal, but a measured one that caps concurrency lost by 3.7% to the best
-     * hand-picked constant, so treat this as a diagnostic. See the pool guide's
-     * "Adaptive concurrency policies".
+     * concurrency controller computes the adaptive limit. The `aimd`, `vegas`,
+     * and `gradient2` limits gate new admissions (or queue them when
+     * `taskQueue` is enabled); `'ewma'` remains worker-count scaling only and
+     * reports no adaptive limit. See the pool guide's "Adaptive concurrency
+     * policies".
      */
     policy?: "ewma" | "aimd" | "vegas" | "gradient2" | undefined;
     intervalMs?: number | undefined;
@@ -400,7 +400,21 @@ export type PowerRetryOptions = {
      * is treated exactly as one that throws: `false`, and the original error.
      */
     retryIf?: ((err: any) => boolean) | undefined;
+    /**
+     * Optional failure classifier for a shared budget. Its result is passed to
+     * `budget.recordOutcome()`; throws and invalid results are ignored.
+     */
+    classifyError?: ((err: any, attempt: number) => {
+        kind?: string;
+        penalty?: number;
+    } | undefined) | undefined;
     onRetry?: ((attempt: number, err: any, delay: number) => void) | undefined;
+    /**
+     * - Optional
+     * upstream delay hint, in milliseconds. A finite non-negative value overrides
+     * the local backoff and is capped by `maxDelay`; invalid hints are ignored.
+     */
+    retryAfter?: ((err: any, attempt: number) => number | undefined) | undefined;
     /**
      * - Per-attempt timeout in ms. When set,
      * `fn` receives the attempt's `AbortSignal` and it is aborted when the attempt
@@ -428,6 +442,20 @@ export type PowerRetryOptions = {
      */
     hedgeDelay?: number | undefined;
     /**
+     * - Optional synchronous gate for adaptive hedging. Returning `false` skips the hedge without spending budget.
+     */
+    hedgeIf?: ((context: {
+        attempt: number;
+        budget: Object | null;
+        circuit: Object | null;
+    }) => boolean) | undefined;
+    /**
+     * - Optional circuit breaker consulted for every attempt. An open circuit stops the retry loop without spending another retry token.
+     */
+    circuit?: {
+        call: (fn: Function) => Promise<any>;
+    } | undefined;
+    /**
      * - Cancels the whole call, including the
      * wait between attempts. Without it `PowerRetry.run` cannot be cancelled at
      * all, and the wait is the larger half of the problem: the backoff sleep was
@@ -440,6 +468,31 @@ export type PowerRetryOptions = {
      * same shape `PowerDeadline` uses.
      */
     signal?: AbortSignal | undefined;
+};
+/**
+ * Options for `PowerAdaptiveProposal`.
+ */
+export type PowerAdaptiveProposalOptions = {
+    initial?: number | undefined;
+    min?: number | undefined;
+    max?: number | undefined;
+    maxStep?: number | undefined;
+    hysteresis?: number | undefined;
+    /**
+     * Proposal rounds to hold after a change.
+     */
+    cooldown?: number | undefined;
+};
+/**
+ * Explainable result returned by `PowerAdaptiveProposal.propose()`.
+ */
+export type PowerAdaptiveProposalResult = {
+    value: number;
+    changed: boolean;
+    signal: number;
+    reason: string;
+    confidence: number;
+    cooldownRemaining: number;
 };
 /**
  * Options for `PowerRetryBudget`.
@@ -488,6 +541,22 @@ export type PowerRetryBudgetStats = {
      * - Retries and hedges the budget denied.
      */
     refused: number;
+    /**
+     * - Operations run through `execute()`.
+     */
+    executions: number;
+    /**
+     * - Retries divided by executions, or `0` when none ran.
+     */
+    retryRate: number;
+    /**
+     * - Refused attempts divided by funded requests, or `0` when none were funded.
+     */
+    refusalRate: number;
+    /**
+     * - External outcome counts.
+     */
+    outcomes: Record<string, number>;
 };
 /**
  * The rejection `PowerRetry.run` produces when a single attempt exceeds
@@ -1240,6 +1309,14 @@ export type PowerBulkheadOptions = {
      * silently discarded, because the field was read but never assigned.
      */
     onError?: ((err: any) => void) | undefined;
+    /**
+     * Invoked when a task is refused because its partition queue is full.
+     */
+    onShed?: ((event: {
+        partition: number;
+        pending: number;
+        queueCapacity: number;
+    }) => void) | undefined;
 };
 /**
  * AIMD settings for `PowerBackpressure` (`adaptive`).

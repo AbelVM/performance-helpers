@@ -83,6 +83,62 @@ describe('PowerPool adaptive concurrency policies (ALG-004)', () => {
     p.shutdown();
   });
 
+  it('queues work once the adaptive concurrency limit is reached', () => {
+    const p = mkPool({
+      policy: 'aimd',
+      intervalMs: 100000,
+      cooldownMs: 0,
+    });
+    p._adaptiveLimit = 1;
+
+    expect(p.postMessage({ first: true })).toBe(true);
+    expect(p.postMessage({ second: true })).toBe(true);
+    expect(p.queue.length).toBe(1);
+    expect(p._activeTasks).toBe(1);
+    p.shutdown();
+  });
+
+  it('does not drain queued work past the adaptive limit', () => {
+    const p = mkPool({ policy: 'aimd', intervalMs: 100000, cooldownMs: 0 });
+    p._adaptiveLimit = 1;
+    p._maxTasksPerWorker = 4;
+
+    p.postMessage({ first: true });
+    p.postMessage({ second: true });
+    p._dispatchQueuedTasks();
+
+    expect(p.queue.length).toBe(1);
+    expect(p._activeTasks).toBe(1);
+    expect(p.workers[0].tasks).toBe(1);
+    p.shutdown();
+  });
+
+  it('applies the adaptive limit to fire-and-forget batches', () => {
+    const p = mkPool({ policy: 'aimd', intervalMs: 100000, cooldownMs: 0 });
+    p._adaptiveLimit = 1;
+    p._maxTasksPerWorker = 4;
+
+    expect(
+      p.postMessageBatch([{ message: { first: true } }, { message: { second: true } }])
+    ).toEqual([true, true]);
+    expect(p._activeTasks).toBe(1);
+    expect(p.queue.length).toBe(1);
+    p.shutdown();
+  });
+
+  it('separates queue wait from worker service time', () => {
+    const p = mkPool({ policy: 'aimd', intervalMs: 100000, cooldownMs: 0 });
+    p._recordQueueWait(2);
+    p._recordQueueWait(6);
+    expect(p.getStats().performance.queueWait).toMatchObject({
+      count: 2,
+      min: 2,
+      max: 6,
+      average: 4,
+    });
+    p.shutdown();
+  });
+
   it('clamps the limit to [limitMin, limitMax]', () => {
     const p = mkPool({
       policy: 'aimd',

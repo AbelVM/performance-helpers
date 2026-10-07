@@ -38,6 +38,10 @@
 
 > **gate**: [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md)
 
+#### shed
+
+> **shed**: `number` = `0`
+
 ***
 
 ### \_drainWaiters
@@ -70,6 +74,12 @@
 
 ***
 
+### \_onShed
+
+> **\_onShed**: ((`event`) => `void`) \| `null`
+
+***
+
 ### \_outstanding
 
 > **\_outstanding**: `number`
@@ -91,6 +101,12 @@
 ### \_queueCapacity
 
 > **\_queueCapacity**: `number`
+
+***
+
+### \_shed
+
+> **\_shed**: `number`
 
 ## Accessors
 
@@ -320,9 +336,17 @@ method is written out per class.
 
 > **partitions**: `number`
 
+##### partitionStates
+
+> **partitionStates**: `object`[]
+
 ##### pending
 
 > **pending**: `number`
+
+##### pressure
+
+> **pressure**: `number`
 
 ##### queueCapacity
 
@@ -331,6 +355,10 @@ method is written out per class.
 ##### saturated
 
 > **saturated**: `boolean`
+
+##### shed
+
+> **shed**: `number`
 
 ***
 
@@ -434,9 +462,17 @@ Snapshot of the bulkhead's counters.
 
 > **partitions**: `number`
 
+##### partitionStates
+
+> **partitionStates**: `object`[]
+
 ##### pending
 
 > **pending**: `number`
+
+##### pressure
+
+> **pressure**: `number`
 
 ##### queueCapacity
 
@@ -445,6 +481,10 @@ Snapshot of the bulkhead's counters.
 ##### saturated
 
 > **saturated**: `boolean`
+
+##### shed
+
+> **shed**: `number`
 
 ***
 

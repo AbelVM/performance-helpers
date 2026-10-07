@@ -72,6 +72,8 @@
  * @property {boolean} [weakListeners]
  * @property {number} [queueHighThreshold]
  * @property {number} [maxQueueLength] - Hard cap on queued tasks. `Infinity`
+ * @property {number} [priorityAgingMs=0] - Waiting milliseconds required to
+ *   gain one effective priority point, preventing low-priority starvation.
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
  *   metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Off by default, so the common case allocates nothing.
@@ -133,16 +135,11 @@
  *
  * @typedef {Object} AutoScaleOptions
  * @property {'ewma'|'aimd'|'vegas'|'gradient2'} [policy='ewma'] - Which
- *   concurrency controller computes the adaptive limit. **The computed limit is
- *   reported, not enforced**: nothing on the dispatch path reads it, so this
- *   changes `getStats().performance.concurrencyLimit` and nothing else.
- *   **`'ewma'` — the default — runs no concurrency control at all**: it compares
- *   one EWMA against `targetMs` and adds or removes a worker, and
- *   `_adaptiveLimit` stays at its seed value, which is why `concurrencyLimit`
- *   reports `null` for it. The other three are real feedback loops over a latency
- *   signal, but a measured one that caps concurrency lost by 3.7% to the best
- *   hand-picked constant, so treat this as a diagnostic. See the pool guide's
- *   "Adaptive concurrency policies".
+ *   concurrency controller computes the adaptive limit. The `aimd`, `vegas`,
+ *   and `gradient2` limits gate new admissions (or queue them when
+ *   `taskQueue` is enabled); `'ewma'` remains worker-count scaling only and
+ *   reports no adaptive limit. See the pool guide's "Adaptive concurrency
+ *   policies".
  * @property {number} [intervalMs]
  * @property {number} [targetMs]
  * @property {number} [alpha]
@@ -293,7 +290,13 @@ export {};
  *   that already waits out a backoff between them. A predicate that **rejects**
  *   is treated exactly as one that throws: `false`, and the original error.
  *
+ * @property {(err:any, attempt:number)=>{kind?:string, penalty?:number}|undefined} [classifyError]
+ *   Optional failure classifier for a shared budget. Its result is passed to
+ *   `budget.recordOutcome()`; throws and invalid results are ignored.
  * @property {(attempt:number, err:any, delay:number)=>void} [onRetry]
+ * @property {(err:any, attempt:number)=>number|undefined} [retryAfter] - Optional
+ *   upstream delay hint, in milliseconds. A finite non-negative value overrides
+ *   the local backoff and is capped by `maxDelay`; invalid hints are ignored.
  * @property {number} [attemptTimeout] - Per-attempt timeout in ms. When set,
  *   `fn` receives the attempt's `AbortSignal` and it is aborted when the attempt
  *   runs long. **A timed-out attempt is retried like any other failure**, so this
@@ -311,6 +314,8 @@ export {};
  *   attempt before sending a duplicate. The first to succeed wins and the
  *   loser is aborted. `0` disables hedging. Only a hedge draws the budget a
  *   token; a refused budget means no hedge rather than a failed attempt.
+ * @property {(context:{attempt:number,budget:Object|null,circuit:Object|null})=>boolean} [hedgeIf] - Optional synchronous gate for adaptive hedging. Returning `false` skips the hedge without spending budget.
+ * @property {{call:(fn:Function)=>Promise<any>}} [circuit] - Optional circuit breaker consulted for every attempt. An open circuit stops the retry loop without spending another retry token.
  * @property {AbortSignal} [signal] - Cancels the whole call, including the
  *   wait between attempts. Without it `PowerRetry.run` cannot be cancelled at
  *   all, and the wait is the larger half of the problem: the backoff sleep was
@@ -321,6 +326,28 @@ export {};
  *   without running an attempt, and an abort during the wait rejects at once
  *   rather than after the remaining delay. Rejects with `code: 'EABORT'`, the
  *   same shape `PowerDeadline` uses.
+ */
+
+/**
+ * Options for `PowerAdaptiveProposal`.
+ * @typedef {Object} PowerAdaptiveProposalOptions
+ * @property {number} [initial=1]
+ * @property {number} [min=1]
+ * @property {number} [max=100]
+ * @property {number} [maxStep]
+ * @property {number} [hysteresis=0]
+ * @property {number} [cooldown=0] Proposal rounds to hold after a change.
+ */
+
+/**
+ * Explainable result returned by `PowerAdaptiveProposal.propose()`.
+ * @typedef {Object} PowerAdaptiveProposalResult
+ * @property {number} value
+ * @property {boolean} changed
+ * @property {number} signal
+ * @property {string} reason
+ * @property {number} confidence
+ * @property {number} cooldownRemaining
  */
 
 /**
@@ -350,6 +377,10 @@ export {};
  * @property {number} requests - Requests recorded via `recordRequest()`.
  * @property {number} retries - Tokens actually spent on retries and hedges.
  * @property {number} refused - Retries and hedges the budget denied.
+ * @property {number} executions - Operations run through `execute()`.
+ * @property {number} retryRate - Retries divided by executions, or `0` when none ran.
+ * @property {number} refusalRate - Refused attempts divided by funded requests, or `0` when none were funded.
+ * @property {Record<string,number>} outcomes - External outcome counts.
  */
 
 /**
@@ -884,6 +915,8 @@ export {};
  * @property {(err:any)=>void} [onError] Invoked whenever a user-supplied
  *   `release()` or task hook throws. Added in 2.0; without it those failures were
  *   silently discarded, because the field was read but never assigned.
+ * @property {(event:{partition:number,pending:number,queueCapacity:number})=>void} [onShed]
+ *   Invoked when a task is refused because its partition queue is full.
  */
 
 /**

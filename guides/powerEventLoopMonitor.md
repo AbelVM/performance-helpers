@@ -60,12 +60,13 @@ Two consequences worth internalising:
   p99_9: 61.0,           // ms, estimated
   blockedOver10ms: 3,    // count, not a rate
   blockedMs: 1432.0,     // ms — the same ticks, weighed
+  eventLoopPressure: 0.012, // fraction of observed probes over 10 ms
   droppedSamples: 0,     // readings refused: the clock moved backwards
   coverage: 0.041,       // fraction of wall-clock time this schedule accounts for
 }
 ```
 
-`mean`, `p50`, `p99` and `p99_9` are **`null` before the first sample**, not `0`, so a consumer cannot mistake "not measured yet" for "no delay". `blockedOver10ms` is a count rather than a verdict because the threshold that matters is workload-specific.
+`mean`, `p50`, `p99` and `p99_9` are **`null` before the first sample**, not `0`, so a consumer cannot mistake "not measured yet" for "no delay". `blockedOver10ms` is a count rather than a verdict because the threshold that matters is workload-specific. `eventLoopPressure` is a bounded fraction from `0` to `1`; it is `0` before the first sample and counts only probes delayed beyond 10 ms.
 
 ### The three fields that describe what the monitor did _not_ see
 

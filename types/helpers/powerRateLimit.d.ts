@@ -81,6 +81,7 @@ export class PowerRateLimit {
      *   adapter is async.
      */
     tryConsume(n?: number, options?: PowerRateLimitCallOptions): boolean | Promise<boolean>;
+    _tryConsume(n?: number, options?: {}): boolean | Promise<boolean>;
     /**
      * The consume path, parameterised on the leg set.
      *
@@ -237,7 +238,7 @@ export class PowerRateLimit {
      * `path` is the most recent `tryConsume` path when `sharedState` is configured,
      * or `null` otherwise.
      *
-     * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null, path:string|null}}
+     * @returns {{legs:number, atomic:boolean, keyed:boolean, buckets:number, builtSlots:number, available:number|null, rejectionRate:number, path:string|null}}
      */
     stats(): {
         legs: number;
@@ -246,6 +247,7 @@ export class PowerRateLimit {
         buckets: number;
         builtSlots: number;
         available: number | null;
+        rejectionRate: number;
         path: string | null;
     };
     /**
@@ -261,6 +263,7 @@ export class PowerRateLimit {
         buckets: number;
         builtSlots: number;
         available: number | null;
+        rejectionRate: number;
         path: string | null;
     };
     /**

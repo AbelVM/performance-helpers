@@ -11,6 +11,25 @@ Use it to answer four questions quickly:
 
 If you already know the exact helper you want, go straight to its dedicated guide. If you are deciding between helpers, start here.
 
+## The 60-second diagnostic
+
+Answer these questions before choosing a helper:
+
+1. **Where is the pressure?** Memory, CPU, concurrency, time, a dependency,
+   a transport, or coordination?
+2. **What must be bounded?** Entries, bytes, queued work, active work, request
+   rate, retries, latency, or subscriber backlog?
+3. **Where is the boundary?** One call, one process, one worker, several
+   workers, or several service instances?
+4. **What may be lost?** Nothing, the newest item, the oldest item, stale data,
+   or a slow subscriber?
+5. **What measurement will prove the choice worked?** Queue depth, rejection
+   rate, hit rate, event-loop delay, latency percentiles, or downstream errors?
+
+Choose the smallest helper that owns that control point. A queue stores
+pressure, a semaphore bounds simultaneous work, and a rate limiter bounds
+admission over time. They are not interchangeable.
+
 ---
 
 ## How to use this guide
@@ -49,6 +68,7 @@ If you already know the exact helper you want, go straight to its dedicated guid
 | Limit concurrent async work globally                                   | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block                      |
 | Isolate noisy workloads from critical ones                             | `PowerBulkhead`                                    | `PowerCircuit`, `PowerHistogram`, `PowerLogger`            | `PowerSemaphore` if isolation matters                                   |
 | Enforce burst and sustained API quotas                                 | `PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` | `PowerRateLimit`, `PowerDeadline`, `PowerCircuit`          | `PowerRetry` alone                                                      |
+| Enforce a quota across service instances                               | `PowerRateLimit` with `sharedState`                | Local limiter legs, `PowerDeadline`                        | Assuming one in-memory limiter is global                                |
 | Retry flaky work safely                                                | `PowerRetry`                                       | `PowerDeadline`, `PowerCircuit`, `PowerLogger`             | infinite custom retry loops                                             |
 | Stop retries amplifying an outage                                      | `PowerRetry` with a shared `PowerRetryBudget`      | `PowerCircuit`, `PowerDeadline`                            | `maxAttempts` alone, which caps nothing across traffic                  |
 | Cut a p99 far above your p50                                           | `PowerRetry` with `hedgeDelay`                     | `PowerDeadline`                                            | raising `maxAttempts`, which costs retries, not tail latency            |
@@ -97,6 +117,9 @@ Use `PowerQueue` when the real issue is burst smoothing between producers and co
 
 Use `PowerBackpressure` when producers must slow down before queues or memory grow unbounded.
 
+Use `PowerAdaptiveProposal` when a helper needs bounded, explainable feedback
+without coupling the controller to a particular queue, pool, or limiter.
+
 Use `PowerBatch` when many small operations can be coalesced into a single flush.
 
 ### Concurrency control and protection
@@ -119,6 +142,66 @@ respected, a pool sized against a latency target. It is a closed-loop
 stabiliser, and the helpers above are not: they observe a signal and correct
 against a limit. Reach for `PowerServo` when you have a **setpoint**; do not
 reach for it to replace a concurrency gate.
+
+### Composition recipes
+
+Keep resilience ordering explicit. These recipes are the default starting
+point, not a hidden composition API:
+
+```js
+const context = createOperationContext({ signal, deadlineMs: 1_000, retryBudget });
+
+await circuit.call(() =>
+  bulkhead.run(
+    () =>
+      retry.run(
+        (attemptSignal) => operation({ signal: attemptSignal, deadlineAt: context.deadlineAt }),
+        { signal: context.signal, budget: context.retryBudget }
+      ),
+    { signal: context.signal }
+  )
+);
+```
+
+- Put one total deadline around retries so backoff and attempts share the same budget.
+- Put the circuit outside retry so an open circuit consumes no retry attempt.
+- Put bulkheads and rate limits before expensive work; map refusal to load shedding.
+- Retry only idempotent work and never retry caller cancellation.
+
+Do not introduce a generic composition wrapper until real consumers repeat the
+same adapter shape. The ordering carries policy that a fluent abstraction would
+hide.
+
+### Cancellation contract
+
+Pass one operation signal explicitly through every helper that participates in
+the call. Cancellation has different effects at different boundaries:
+
+| Boundary                                                       | Cancellation effect                                                                       | Caller responsibility                                                                      |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Waiting for pool, bulkhead, semaphore, or rate-limit admission | Remove or refuse the waiting operation; no user work has started.                         | Treat the cancellation error as terminal and do not retry it.                              |
+| Retry backoff or deadline wait                                 | Stop the wait and prevent another attempt.                                                | Preserve the original cancellation reason when the adapter supports it.                    |
+| Running user or worker work                                    | Request cancellation; the underlying operation must honor its signal.                     | Make the operation abortable and release owned resources in its cleanup path.              |
+| Transport send or stream delivery                              | Stop the caller-side operation; delivery already accepted by the transport is not undone. | Use idempotency, acknowledgements, or replay policy when delivery guarantees require them. |
+
+Helpers do not discover a process-wide signal, convert cancellation into a
+retryable failure, or promise to interrupt work that the underlying runtime
+cannot abort.
+
+### Runtime capability matrix
+
+| Surface                                           | Node              | Browser main      | Browser worker    | Notes                                             |
+| ------------------------------------------------- | ----------------- | ----------------- | ----------------- | ------------------------------------------------- |
+| Core queues, cache, retry, deadline, limits       | Supported         | Supported         | Supported         | Uses standard language and timer APIs.            |
+| `WorkerAgnostic` and `PowerPool`                  | Supported         | Supported         | Supported         | Worker constructor/source must match the runtime. |
+| `PowerWebSocket*`                                 | Capability-probed | Capability-probed | Capability-probed | Requires a WebSocket implementation.              |
+| `PowerWebTransport*`                              | Capability-probed | Capability-probed | Capability-probed | Check `detectWebTransportSupport()` first.        |
+| `PowerRTCChannel`                                 | Capability-probed | Capability-probed | Capability-probed | Requires `RTCDataChannel`-compatible input.       |
+| Node resource pressure and profiling adapters     | Supported         | Unavailable       | Unavailable       | Do not emulate unavailable fields.                |
+| `crossOriginIsolated` / `SharedArrayBuffer` paths | Not required      | Capability-probed | Capability-probed | Browser isolation headers are application-owned.  |
+
+Capability-probed means the helper can be imported, but the platform feature
+must be detected before construction or use.
 
 ### If you need `SharedArrayBuffer` in a worker
 
@@ -178,27 +261,33 @@ Use `PowerRateLimit` when you need both burst and sustained rules to pass at onc
 limiters share the `tryConsume()` / `available()` shape and compose in it; the combined limit
 is the strictest component.
 
-### Every limiter here is per-process, and nothing in the option list says so
+### Local versus distributed limits
 
-`PowerThrottle`, `PowerSlidingWindow`, `PowerGCRA` and `PowerRateLimit` all hold their
-state in **this process's heap**. There is no shared store, and there will not be one:
-`REJ-008` records the rejection of a runtime dependency, and a shared limiter needs
-one (Redis, or a rate-limit service).
+`PowerThrottle`, `PowerSlidingWindow`, and `PowerGCRA` hold state in this
+process's heap. With N service instances, a local limit is approximately N
+times the configured service-wide allowance. That is correct only when the
+limit is intentionally per instance.
 
-So **N processes behind a load balancer enforce N × the limit you configured.** Three
-processes with `new PowerGCRA({ rate: 100 })` admit 300 requests per second across the
-service, not 100. Nothing fails, no warning is logged, and each process is individually
-correct — which is what makes it a trap rather than a bug. The moment two instances of
-your service disagree about how much traffic has happened, the ceiling you believe in
-is not the ceiling in force.
+For a global or per-tenant limit across instances, use `PowerRateLimit` with a
+user-supplied `sharedState` adapter such as Redis or a rate-limit service. The
+library does not ship that client, preserving its zero-runtime-dependency
+boundary. Local limiter legs can still protect each process before expensive
+work.
 
-If your limit has to be global, you need the state somewhere shared — Redis, a
-rate-limit service, or your gateway — and this library is the wrong tool for that
-half. It is the right tool for the _per-process_ share: size `rate` as the per-instance
-allowance, and put the global ceiling in front of it. Use
-[`PowerPermitGate`](powerPermitGate.md) or [`PowerBulkhead`](powerBulkhead.md) for the
-in-process half, where the same caution does not apply, because a permit gate that
-each process counts separately bounds _its own_ concurrency rather than a global rate.
+Choose the failure policy deliberately:
+
+- `degrade: 'local'` keeps the service available when shared state fails, but
+  the limit becomes approximate and per process.
+- `degrade: 'fail-closed'` refuses traffic while shared state is unavailable,
+  which protects the global limit at the cost of turning a backend outage into
+  an application outage.
+
+For per-key limiting, `keyFn` uses fixed hashed slots rather than an evicting
+cache. Memory stays bounded and a key's budget is never reset by eviction,
+but colliding keys share a budget; size `buckets` for the expected key space.
+A missing `context` becomes one shared limit, not an unlimited request. See
+[`PowerRateLimit`](powerRateLimit.md) for the adapter contract and atomic
+semantics.
 
 **Per-key limiting is a `keyFn` on `PowerRateLimit`, and the design choice is
 load-bearing.** One limiter is one limit, so limiting per tenant, per IP or per user
@@ -683,6 +772,57 @@ Reach for the framed codec when the transport carries bytes (WebSocket, file, HT
 `encodeNativeEnvelope` when it is an in-process message port. Reach for the hub before writing
 `for (ws of clients) ws.send(...)`: that pattern has no back-pressure and no signal when a client
 falls behind.
+
+## When this library is the wrong half
+
+- A queue must survive process failure, but the only storage is in-memory.
+- A lock must coordinate independent services, but the chosen primitive is
+  process- or origin-scoped.
+- A retry may duplicate a non-idempotent side effect and there is no
+  idempotency key or transactional boundary.
+- A transport promises delivery guarantees that its protocol does not provide;
+  a bounded queue makes loss visible, not impossible.
+- A global limit has no shared state, gateway, or rate-limit service.
+- A performance claim has not been measured on the real call path.
+
+## Proposed interactive selector
+
+The useful interactive tool is a **problem-signature selector**, not a helper
+name search box. It should be a zero-dependency single HTML file backed by the
+same structured data as this guide. This guide remains the canonical offline
+path, so the tool must not become a second undocumented decision system.
+
+Ask, in order:
+
+1. What is going wrong: memory growth, slow work, overload, dependency
+   failure, realtime delivery, or unclear measurement?
+2. Where does it cross: same process, worker, transport, or service instance?
+3. What must be bounded: queue, concurrency, rate, retries, bytes, cache
+   entries, or subscriber backlog?
+4. What may be lost: nothing, stale data, old work, new work, or a subscriber?
+
+Return one primary helper, optional companions, a disqualifier warning, the
+dedicated guide, a minimal starter snippet, and a measurement checklist. Show
+the answer path and explain competing choices; never guess capacity or worker
+size from these answers.
+
+Use records shaped like this:
+
+```json
+{
+  "helper": "PowerBackpressure",
+  "when": ["producer-faster-than-consumer", "bounded-waiting"],
+  "pairsWith": ["PowerQueue", "PowerBatch", "PowerPool"],
+  "avoidWhen": ["strict-concurrent-holder-ceiling"],
+  "warning": "adaptive refill is not a strict semaphore ceiling",
+  "guide": "guides/powerBackpressure.md"
+}
+```
+
+The selector should support back navigation, keyboard access, mobile layouts,
+versioned recommendation data, and copyable snippets. Generate or validate its
+records from public exports and dedicated guides so a renamed helper cannot
+silently remain selectable.
 
 ---
 

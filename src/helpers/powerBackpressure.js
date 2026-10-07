@@ -157,6 +157,8 @@ export class PowerBackpressure extends PowerPermitGate {
     this._baseRefillAmount = normalizedRefillAmount;
     this._adaptive = normalizeAdaptive(adaptive, normalizedRefillAmount);
     this._adaptiveHeartbeat = false;
+    this._congestionSteps = 0;
+    this._recoverySteps = 0;
   }
 
   /**
@@ -191,6 +193,25 @@ export class PowerBackpressure extends PowerPermitGate {
   /** Maximum number of waiting producers. */
   get queueCapacity() {
     return super.queueCapacity;
+  }
+
+  /**
+   * Current pressure and recovery signals.
+   * @returns {{capacity:number, available:number, active:number, pending:number, pressure:number, refillAmount:number, adaptive:boolean, congestionSteps:number, recoverySteps:number}}
+   */
+  stats() {
+    return {
+      capacity: this.capacity,
+      available: this.available,
+      active: this.active,
+      pending: this.pending,
+      // A normalized signal for composing this helper with local policies.
+      pressure: this.capacity > 0 ? 1 - this.available / this.capacity : 0,
+      refillAmount: this._refillAmount,
+      adaptive: this._adaptive.enabled,
+      congestionSteps: this._congestionSteps,
+      recoverySteps: this._recoverySteps,
+    };
   }
 
   /** True when the waiting queue is full. */
@@ -271,6 +292,8 @@ export class PowerBackpressure extends PowerPermitGate {
     // refuses to hand their permits to anyone else until they return.
     this._adaptiveHeartbeat = false;
     this._refillAmount = this._baseRefillAmount;
+    this._congestionSteps = 0;
+    this._recoverySteps = 0;
     if (this._refillTimer) {
       clearTimeout(this._refillTimer);
       this._refillTimer = null;
@@ -440,8 +463,10 @@ export class PowerBackpressure extends PowerPermitGate {
     if (!this._adaptive.enabled) return;
     const { additiveIncrease, beta, min, max } = this._adaptive;
     if (this._inFlight >= this._capacity) {
+      this._congestionSteps += 1;
       this._refillAmount = Math.max(min, Math.floor(this._refillAmount * beta));
     } else {
+      this._recoverySteps += 1;
       this._refillAmount = Math.min(max, this._refillAmount + additiveIncrease);
     }
   }

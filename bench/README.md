@@ -90,6 +90,7 @@ node bench/claims.js correlation # what awaiting a correlated reply costs
 node bench/claims.js batchservo   # does a closed loop beat a fixed flush size
 node bench/claims.js concurrency  # is `autoScale.policy` wired to anything
 node bench/claims.js stepsize     # does the autoscale step controller beat a fixed step
+node bench/claims.js ratelimit    # static versus adaptive refill under burst + steady load
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only
@@ -141,9 +142,12 @@ benchmark whose control prints `NaNx` is a broken benchmark, and that is how the
 zero-denominator case surfaced; the ratio column now distinguishes `exact` from
 `worse`.
 
-**`concurrency` reports that `autoScale.policy` is not wired, and that enforcing it
-would lose.** Two questions, in that order, because the first makes the second
-answerable.
+**Historical pre-wiring result:** the `concurrency` run reported that
+`autoScale.policy` was not wired, and that enforcing it would lose. Two
+questions, in that order, because the first made the second answerable. The
+pool now enforces admission for `aimd`, `vegas`, and `gradient2`; these numbers
+describe the implementation before that wiring and should not be read as a
+current runtime claim.
 
 _Is the controller consulted?_ Four policies, identical workload, the pool exactly
 as it ships, 2000 ms per arm, 5 repeats, medians: `ewma:a=1720, ewma:b=1616,

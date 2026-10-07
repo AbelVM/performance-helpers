@@ -69,6 +69,18 @@ Limiter instances to compose. Each
 
 ***
 
+### \_rejected
+
+> **\_rejected**: `number`
+
+***
+
+### \_requests
+
+> **\_requests**: `number`
+
+***
+
 ### \_sharedState
 
 > **\_sharedState**: `PowerSharedStateAdapter` \| `null`
@@ -120,6 +132,24 @@ without `sharedState`.
 `"local"` \| `"fail-closed"` \| `"shared"` \| `"shared-denied"` \| `null`
 
 ## Methods
+
+### \_tryConsume()
+
+> **\_tryConsume**(`n?`, `options?`): `boolean` \| `Promise`\<`boolean`\>
+
+#### Parameters
+
+##### n?
+
+`number` = `1`
+
+##### options?
+
+#### Returns
+
+`boolean` \| `Promise`\<`boolean`\>
+
+***
 
 ### \_undoCommit()
 
@@ -272,6 +302,10 @@ method is written out per class.
 ##### path
 
 > **path**: `string` \| `null`
+
+##### rejectionRate
+
+> **rejectionRate**: `number`
 
 ***
 
@@ -487,6 +521,10 @@ or `null` otherwise.
 ##### path
 
 > **path**: `string` \| `null`
+
+##### rejectionRate
+
+> **rejectionRate**: `number`
 
 ***
 

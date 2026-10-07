@@ -275,6 +275,7 @@ export class PowerPool {
      *   and wants every record in a batch or a broadcast to share it.
      * @returns {number} The `startTime` used, for a caller that has not taken one.
      */
+    _recordQueueWait(wait: any): void;
     /**
      * Report a batched post that could not be dispatched.
      *
@@ -1004,7 +1005,7 @@ export class PowerPool {
     dispose(): void;
     /**
      * Return stats for debugging and telemetry.
-     * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
+     * @returns {{status:{id:number,tasks:number,lastActive:number}[],performance:Object,queueLength:number,queueDepth:number,queuePressure:number,activeTasks:number,workerCount:number,minSize:number,maxSize:number,isIdle:boolean}}
      */
     getStats(): {
         status: {
@@ -1014,6 +1015,8 @@ export class PowerPool {
         }[];
         performance: Object;
         queueLength: number;
+        queueDepth: number;
+        queuePressure: number;
         activeTasks: number;
         workerCount: number;
         minSize: number;

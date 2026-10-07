@@ -154,6 +154,21 @@ describe('stale-while-revalidate: the stale window is bounded', () => {
       });
   });
 
+  it('counts a failed background refresh separately from stale serves', async () => {
+    const c = cache({ allowStale: true, staleTtl: 10_000, defaultTTL: 100 });
+    c.set('k', 'old', { ttl: 100 });
+    clock += 500;
+
+    expect(
+      await c.getOrSetAsync('k', async () => {
+        throw new Error('upstream unavailable');
+      })
+    ).toBe('old');
+    await c._inflightPromises.get('k');
+
+    expect(c.stats()).toMatchObject({ staleServes: 1, refreshesFailed: 1, refreshesAborted: 0 });
+  });
+
   it('dedupes concurrent callers on one expired key', () => {
     // Not a new behaviour, and the row implied it was at risk. Pinned because a
     // future change to the stale path could break it silently, and it is the

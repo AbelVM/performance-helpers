@@ -43,6 +43,7 @@ describe('OBS-007: blockedMs, droppedSamples and coverage', () => {
     const s = m.stats();
     expect(s.blockedOver10ms, 'three ticks over 10ms').toBe(3);
     expect(s.blockedMs, 'and their total').toBe(50 + 12 + 30000);
+    expect(s.eventLoopPressure).toBeCloseTo(0.75);
     // The control: a tick *under* the threshold contributes to neither. If
     // `blockedMs` summed all drift this would be 5 higher, which is the mutant
     // that most looks right.

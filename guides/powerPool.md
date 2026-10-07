@@ -18,6 +18,7 @@ A small, dependency-free worker pool that wraps underlying Worker instances. It 
 | `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                                                                                                                       |
 | `options.maxQueueLength`                                |                                            `number` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                                                                                                                        |
 | `options.priority`                                      |                                            `number` |                                            `0` | Default task priority for queued messages. Higher values are dispatched before lower values when the pool is saturated. Tasks with the same priority maintain FIFO order. Can be overridden per-message via `postMessage(msg, transfer, { priority })`. See [Task priority](#task-priority).                                                                                                                                             |
+| `options.priorityAgingMs`                               |                                            `number` |                                            `0` | Waiting milliseconds required to gain one effective priority point. Set above `0` to prevent low-priority queued work from starving during sustained high-priority traffic.                                                                                                                                                                                                                                                              |
 | `options.maxDrainWaiters`                               |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be _waiting_ at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners.                                                                                                                                                                                                                                    |
 | `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                                                                                                                            |
 | `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                                                                                                                                     |
@@ -142,7 +143,7 @@ ignored.
 
 - Disposal hooks: `[Symbol.dispose]()` calls `terminate()` synchronously; `[Symbol.asyncDispose]()` awaits `drain()` then terminates.
 
-- `getStats()` — Return a snapshot `{ status: Array<{id,tasks,lastActive}>, performance: Object }` with per-worker status and aggregated performance metrics (EWMA/time-per-task stats). This is useful for logging and autoscale decisions.
+- `getStats()` — Return a snapshot `{ status: Array<{id,tasks,lastActive}>, performance: Object, queueDepth, queuePressure }` with per-worker status and aggregated performance metrics (EWMA/time-per-task stats). `queuePressure` is normalized to `0..1` when `maxQueueLength` is finite. This is useful for logging and autoscale decisions.
 - `drain({ signal, timeout })` — Resolves with the pool's stats once the queue is empty and no task is in flight. The wait is bounded three ways, and **every one of them abandons the wait, never the work**: the pool keeps dispatching and keeps serving every other caller, because someone who stopped watching a drain does not get to stop the work.
 
   - `signal` — an `AbortSignal` rejects with its reason. An `AbortError` unless you aborted with your own `Error`. An already-aborted signal rejects without waiting.
@@ -294,6 +295,7 @@ Observability — `getStats().performance` gains:
 - `autoScalePolicy` — the policy name **while its interval is ticking**, or `null` when no controller is running.
 - `congestion` — whether the controller currently believes it is over-provisioned.
 - `idleReapingActive` — whether the idle-worker reaper's interval is running.
+- `queueWait` — count and Welford statistics for time spent queued before dispatch; `timePerTask` remains worker service time.
 
 Notes:
 
@@ -304,10 +306,9 @@ recreateWorkers: false })` clears the interval without clearing the policy —
   So a pool could report `autoScalePolicy: 'aimd'` with an interval that would
   never fire again, and an operator reading it would conclude adaptation was
   running. It now answers the only question it can answer honestly.
-- **`concurrencyLimit` is deliberately _not_ gated the same way**, and the
-  asymmetry is the point: it reports a _retained_ number. `_adaptiveLimit` keeps
-  its value when the controller stops, so the field stays true. Only
-  `autoScalePolicy` was making a claim about the present.
+- **`concurrencyLimit` is deliberately retained when the controller stops.**
+  `_adaptiveLimit` keeps its value, so the field remains observable even though
+  `autoScalePolicy` becomes `null` and no further controller ticks run.
 - **`idleReapingActive` exists because nothing reported it at all.** The reaper's
   interval is cleared by the same two calls, and neither is restorable, so a pool
   can accumulate idle workers past `idleTimeout` for the rest of its life with no
@@ -317,11 +318,11 @@ recreateWorkers: false })` clears the interval without clearing the policy —
 - Vegas's `alpha`/`beta` scale with `log10(limit)`, so at small limits the queue estimate lands in a neutral band and the limit holds steady. It needs a limit above roughly 3 before it will step down. That is the algorithm's behaviour, not a stall.
 - `'gradient2'` has no queue-pressure term to grow from, so an idle pool with an empty queue correctly holds its limit steady. Depth is what drives it up.
 - The limit is a **float**, smoothed by 0.2 each tick so a single noisy sample cannot swing the fleet. `getStats()` rounds it to two decimals.
-- This is a separate signal from the worker add/remove step, which still runs the existing `cooldown`/`backoff` logic. Note that the worker add/remove step acts on **EWMA latency** and _not_ on the adaptive limit below — the limit is reported, not enforced, as the next-but-one bullet says.
+- This is a separate signal from the worker add/remove step, which still runs the existing `cooldown`/`backoff` logic. The worker add/remove step acts on **EWMA latency**; the adaptive policies separately gate new admissions.
 - **The signal is end-to-end task latency; Netflix's controllers track queueing delay.** The two are the same quantity only for a uniform workload. On a pool whose tasks vary in cost, `vegas`' `minRtt / currentRtt` and `aimd`'s short/long RTT test cannot tell "queueing appeared" from "a heavier task ran", so the controller cuts concurrency for work that was merely expensive. Uniform-cost workloads are the case these port well to.
 - **`'aimd'` here is delay-shaped despite the name.** Netflix's `AIMDLimit` is loss-based; this branches on RTT divergence, the same shape as `'gradient2'`. The loss-based AIMD in this library is `PowerBackpressure`'s adaptive refill, and it is not interchangeable with this one — a permit gate has no round trip to measure.
-- **The limit is reported, not enforced.** `concurrencyLimit` is written by the controller and read by `getStats()`; **nothing on the dispatch path reads it.** All three policies therefore change what `getStats().performance.concurrencyLimit` says and nothing else — they do not cap, raise, or gate concurrency, and no worker count derives from them. Across policies and workloads, the throughput spread is within the noise floor of repeated identical runs, so the reported limits differ (`null`, then 7.16–7.93) while actual throughput does not. Applying the limit to a gate instead — the missing wiring — is slower than the best hand-picked constant cap, so it is not merely absent but not worth adding on that evidence.
-- Two consequences worth stating plainly. Autoscaling this pool is **worker-count scaling**; the limit is a diagnostic. And the honest fix is not to keep tuning the controller until it wins: `POOL-004` found there is no public `resize()`, so enforcing it would be a change to how work is admitted, plus a migration for anyone reading `concurrencyLimit`.
+- **The limit is enforced for `'aimd'`, `'vegas'`, and `'gradient2'`.** `concurrencyLimit` is written by the controller and read by both `getStats()` and the dispatch paths. When the limit is reached, new work is queued if `taskQueue` is enabled; otherwise it is refused. In-flight work is allowed to complete when the controller lowers the limit.
+- Two consequences are worth stating plainly. Autoscaling this pool still controls **worker count** independently; the adaptive policies control **in-flight admissions**. `maxQueueLength` and `queuePolicy` remain the controls for bounding or refusing queued overflow.
 
 ## Events and handlers
 

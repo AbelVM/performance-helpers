@@ -318,6 +318,7 @@ export class PowerEventLoopMonitor {
    *   p99_9: number|null,
    *   blockedOver10ms: number,
    *   blockedMs: number,
+   *   eventLoopPressure: number,
    *   droppedSamples: number,
    *   coverage: number|null
    * }}
@@ -381,6 +382,9 @@ export class PowerEventLoopMonitor {
       // The same population as `blockedOver10ms`, in milliseconds. The pair is the
       // point: one is how *often*, the other is how *badly*.
       blockedMs: this._blockedMs,
+      // Fraction of observed ticks delayed beyond the 10 ms blocking threshold.
+      // This is intentionally local and bounded; callers decide how to react.
+      eventLoopPressure: hasSamples ? Math.min(1, this._blocked / this._samples) : 0,
       // Ticks refused because the clock moved backwards. Non-zero means the drift
       // figures on this monitor are from a clock that was adjusted under them,
       // which is worth knowing before you trust a percentile.

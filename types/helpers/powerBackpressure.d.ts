@@ -16,6 +16,21 @@ export class PowerBackpressure extends PowerPermitGate {
      */
     get refillAmount(): number;
     /**
+     * Current pressure and recovery signals.
+     * @returns {{capacity:number, available:number, active:number, pending:number, pressure:number, refillAmount:number, adaptive:boolean, congestionSteps:number, recoverySteps:number}}
+     */
+    stats(): {
+        capacity: number;
+        available: number;
+        active: number;
+        pending: number;
+        pressure: number;
+        refillAmount: number;
+        adaptive: boolean;
+        congestionSteps: number;
+        recoverySteps: number;
+    };
+    /**
      * Acquire a permit asynchronously.
      * Resolves immediately when a permit is available.
      * Otherwise queues the producer until capacity frees.

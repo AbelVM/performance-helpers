@@ -128,6 +128,24 @@ describe('the queue budget is per-partition, not global', () => {
     );
   });
 
+  it('reports load shedding without letting observer errors replace refusal', async () => {
+    const shed = [];
+    const bulkhead = new PowerBulkhead({
+      maxConcurrency: 1,
+      queueCapacity: 0,
+      onShed(event) {
+        shed.push(event);
+        throw new Error('observer failed');
+      },
+    });
+    bulkhead.run(() => new Promise(() => {}), { partitionKey: 0 });
+    await expect(bulkhead.run(() => {}, { partitionKey: 0 })).rejects.toThrow(
+      'PowerBulkhead queue is full'
+    );
+    expect(shed).toHaveLength(1);
+    expect(bulkhead.stats().shed).toBe(1);
+  });
+
   it('reports the total that can wait as queueCapacity * partitions', () => {
     // The observable admission change, stated rather than implied. Before the
     // fix this configuration admitted `queueCapacity` waiting tasks overall; now
