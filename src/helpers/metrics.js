@@ -197,6 +197,102 @@ export function diffObservation(current, previous) {
   return delta;
 }
 
+const PROMETHEUS_NAME = /^[a-zA-Z_:][a-zA-Z0-9_:]*$/;
+const PROMETHEUS_LABEL = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/** @typedef {{le: number, value: number}} PrometheusBucket */
+/** @typedef {{buckets: PrometheusBucket[], count: number, sum: number}} PrometheusHistogram */
+/**
+ * @typedef {Object} PrometheusDescriptor
+ * @property {string} name
+ * @property {'counter'|'gauge'|'histogram'} type
+ * @property {string} help
+ * @property {Record<string, string|number>} [labels]
+ * @property {number|PrometheusHistogram} value
+ */
+
+/**
+ * Format explicit metric descriptors using the Prometheus text exposition
+ * format. Values are supplied by the caller so this function remains pure and
+ * cannot accidentally sample helpers or infer histogram semantics.
+ *
+ * @param {PrometheusDescriptor[]} descriptors
+ * @returns {string}
+ */
+export function formatPrometheus(descriptors) {
+  if (!Array.isArray(descriptors)) {
+    throw new TypeError('formatPrometheus: `descriptors` must be an array');
+  }
+  const lines = [];
+  for (const descriptor of descriptors) {
+    if (!descriptor || !PROMETHEUS_NAME.test(descriptor.name)) {
+      throw new TypeError('formatPrometheus: `name` must be a valid metric name');
+    }
+    if (!['counter', 'gauge', 'histogram'].includes(descriptor.type)) {
+      throw new TypeError('formatPrometheus: `type` must be counter, gauge, or histogram');
+    }
+    if (typeof descriptor.help !== 'string' || /[\r\n]/.test(descriptor.help)) {
+      throw new TypeError('formatPrometheus: `help` must be a single-line string');
+    }
+    const labels = descriptor.labels ?? {};
+    if (!labels || typeof labels !== 'object' || Array.isArray(labels)) {
+      throw new TypeError('formatPrometheus: `labels` must be an object');
+    }
+    const labelText = Object.entries(labels)
+      .map(([key, value]) => {
+        if (!PROMETHEUS_LABEL.test(key) || /[\r\n]/.test(String(value))) {
+          throw new TypeError('formatPrometheus: invalid label name or value');
+        }
+        return `${key}="${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}` + '"';
+      })
+      .join(',');
+    const suffix = labelText ? `{${labelText}}` : '';
+    lines.push(
+      `# HELP ${descriptor.name} ${descriptor.help}`,
+      `# TYPE ${descriptor.name} ${descriptor.type}`
+    );
+
+    if (descriptor.type !== 'histogram') {
+      if (!Number.isFinite(descriptor.value)) {
+        throw new TypeError('formatPrometheus: scalar `value` must be finite');
+      }
+      lines.push(`${descriptor.name}${suffix} ${descriptor.value}`);
+      continue;
+    }
+
+    const histogram = descriptor.value;
+    if (
+      !histogram ||
+      typeof histogram !== 'object' ||
+      !Array.isArray(histogram.buckets) ||
+      !Number.isFinite(histogram.count) ||
+      !Number.isFinite(histogram.sum)
+    ) {
+      throw new TypeError('formatPrometheus: histogram value needs buckets, count, and sum');
+    }
+    let previous = 0;
+    for (const bucket of histogram.buckets) {
+      if (
+        !Number.isFinite(bucket.le) ||
+        !Number.isFinite(bucket.value) ||
+        bucket.value < previous
+      ) {
+        throw new TypeError('formatPrometheus: histogram buckets must be finite and cumulative');
+      }
+      previous = bucket.value;
+      lines.push(
+        `${descriptor.name}_bucket${labelText ? `{${labelText},le="${bucket.le}"}` : `{le="${bucket.le}"}`} ${bucket.value}`
+      );
+    }
+    lines.push(
+      `${descriptor.name}_bucket${labelText ? `{${labelText},le="+Inf"}` : '{le="+Inf"}'} ${histogram.count}`,
+      `${descriptor.name}_count${suffix} ${histogram.count}`,
+      `${descriptor.name}_sum${suffix} ${histogram.sum}`
+    );
+  }
+  return lines.join('\n') + (lines.length ? '\n' : '');
+}
+
 /**
  * Collects point-in-time snapshots from one or more helpers.
  *

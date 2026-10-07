@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PowerBrownout, getResourcePressure } from '../src/index.js';
 
 describe('PowerBrownout', () => {
@@ -17,7 +17,22 @@ describe('PowerBrownout', () => {
     expect(() => brownout.allows(1)).toThrow(TypeError);
   });
 
+  it('validates options and supports explicit disable toggles', () => {
+    expect(() => new PowerBrownout({ threshold: 2 })).toThrow(RangeError);
+    expect(() => new PowerBrownout({ disabledKinds: ['prefetch', 1] })).toThrow(TypeError);
+
+    const brownout = new PowerBrownout({ disabledKinds: ['prefetch'] });
+    expect(brownout.allows('prefetch')).toBe(false);
+    brownout.disable('prefetch', false);
+    expect(brownout.allows('prefetch')).toBe(true);
+    expect(brownout.getStats()).toMatchObject({ disabledKinds: [], decisions: 2, shed: 1 });
+  });
+
   it('combines caller pressure with available Node pressure', () => {
     expect(getResourcePressure({ eventLoopPressure: 0.9 })).toBeGreaterThanOrEqual(0.9);
+    expect(getResourcePressure({})).toBeGreaterThanOrEqual(0);
+    vi.stubGlobal('process', undefined);
+    expect(getResourcePressure({})).toBeNull();
+    vi.unstubAllGlobals();
   });
 });

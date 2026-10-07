@@ -95,4 +95,45 @@ describe('PowerLogger branch coverage', () => {
     logger.incrementCounter(null);
     expect(logger.getDebugCounters()).toEqual({});
   });
+
+  it('falls back when JSON and string coercion both fail', () => {
+    const Ctor = getCtor(PowerLoggerModule);
+    const logger = new Ctor(3, { format: 'json' });
+    const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const stringify = vi.spyOn(JSON, 'stringify').mockImplementation(() => {
+      throw new Error('cannot serialize');
+    });
+    const toString = vi.spyOn(Object.prototype, 'toString').mockImplementation(() => {
+      throw new Error('cannot stringify');
+    });
+
+    let thrown;
+    let calls;
+    try {
+      logger.info('message');
+      calls = spy.mock.calls.slice();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      calls ??= spy.mock.calls.slice();
+      stringify.mockRestore();
+      toString.mockRestore();
+      spy.mockRestore();
+    }
+
+    expect(thrown).toBeUndefined();
+    expect(calls).toContainEqual(['[Unserializable]']);
+  });
+
+  it('swallows console failures after attempting the plain-argument fallback', () => {
+    const Ctor = getCtor(PowerLoggerModule);
+    const logger = new Ctor(3, { format: 'json' });
+    const spy = vi.spyOn(console, 'info').mockImplementation(() => {
+      throw new Error('console unavailable');
+    });
+
+    expect(() => logger.info('message')).not.toThrow();
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+  });
 });

@@ -50,6 +50,7 @@ function lazyChain(out, attach, detach) {
   /** @type {any} */
   const target = out;
   const innerAdd = target.subscribe.bind(target);
+  const baseDispose = target.dispose.bind(target);
   target.subscribe = (/** @type {(next:any, prev:any)=>void} */ fn) => {
     attach();
     const off = innerAdd(fn);
@@ -63,7 +64,7 @@ function lazyChain(out, attach, detach) {
   };
   target.dispose = () => {
     detach();
-    target.clear();
+    baseDispose();
   };
   return target;
 }
@@ -123,17 +124,22 @@ export class PowerObserver {
       initial &&
       typeof initial === 'object' &&
       !Array.isArray(initial) &&
-      ['value', 'initial', 'map', 'distinct', 'async'].some((k) => k in initial)
+      ['value', 'initial', 'map', 'distinct', 'async', 'onError'].some((k) => k in initial)
     ) {
       const carried = /** @type {*} */ (initial);
       options = /** @type {PowerObserverOptions} */ (carried);
       initial = undefined;
     }
-    assertKnownOptions(options, ['value', 'initial', 'map', 'distinct', 'async'], 'PowerObserver');
+    assertKnownOptions(
+      options,
+      ['value', 'initial', 'map', 'distinct', 'async', 'onError'],
+      'PowerObserver'
+    );
     this._value = 'value' in options ? options.value : initial;
     this._subs = new PowerSubscriberSet();
     this._map = typeof options.map === 'function' ? options.map : null;
     this._distinct = !!options.distinct;
+    this._onError = typeof options.onError === 'function' ? options.onError : null;
 
     // Cached `map(this._value)`, so a `map` on the hot path runs once per set
     // rather than twice. A dedicated `_mappedValid` flag rather than a sentinel
@@ -160,6 +166,7 @@ export class PowerObserver {
     this._scheduler = new PowerScheduler(() => this._flushPending(), {
       scheduling: this._scheduleMode === 'macrotask' ? 'macrotask' : 'microtask',
     });
+    this._disposed = false;
   }
 
   /** Current value */
@@ -167,8 +174,19 @@ export class PowerObserver {
     return this._value;
   }
 
+  /** Stable current value for external-store consumers. */
+  getSnapshot() {
+    return this._value;
+  }
+
+  /** Current value used when rendering on the server. */
+  getServerSnapshot() {
+    return this._value;
+  }
+
   /** Set value and schedule notification according to `async` option */
   set value(v) {
+    if (this._disposed) return;
     const prev = this._value;
     this._value = v;
 
@@ -194,7 +212,7 @@ export class PowerObserver {
         try {
           s(mappedNext, mappedPrev);
         } catch (e) {
-          // swallow subscriber errors
+          this._notifyError(e);
         }
       }
       return;
@@ -218,6 +236,7 @@ export class PowerObserver {
    * @param {(next:any, prev:any)=>void} fn
    */
   subscribe(fn) {
+    if (this._disposed) return () => {};
     return this._subs.add(fn);
   }
 
@@ -429,6 +448,22 @@ export class PowerObserver {
     this.flush();
   }
 
+  /** Cancel pending delivery and release the owned scheduler. */
+  dispose() {
+    if (this._disposed) return;
+    this._disposed = true;
+    this._pending = false;
+    this._pendingPrev = undefined;
+    this._pendingNext = undefined;
+    this._subs.clear();
+    this._scheduler.dispose();
+  }
+
+  /** Alias for {@link dispose}. */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
+
   /** Internal flush implementation */
   _flushPending() {
     if (!this._pending) return;
@@ -442,8 +477,18 @@ export class PowerObserver {
       try {
         s(next, prev);
       } catch (e) {
-        // swallow
+        this._notifyError(e);
       }
+    }
+  }
+
+  /** Route a subscriber error without allowing the error handler to escape. */
+  _notifyError(err) {
+    if (!this._onError) return;
+    try {
+      this._onError(err);
+    } catch {
+      // Error reporting must not replace the subscriber failure.
     }
   }
 }

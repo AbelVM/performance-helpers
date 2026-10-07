@@ -13,11 +13,11 @@
  *   a user is most likely to read was the one surface that was wrong, and a
  *   caller who set it got silence in return and a limiter that happened to
  *   behave correctly by accident.
- * - `llm.txt` claims to be derived from the guides' own opening sentences "so
+ * - `llms.txt` claims to be derived from the guides' own opening sentences "so
  *   the two can only disagree if the guide changes", and had already disagreed:
  *   both it and `guides/metrics.md` asserted that *every* helper reports through
  *   its own `stats()`, which was false about `PowerPool`, and `metrics.md`
- *   contradicted itself seven lines later. Nothing read `llm.txt` at all —
+ *   contradicted itself seven lines later. Nothing read `llms.txt` at all —
  *   no test, no script, no workflow — so it drifted silently for as long as it
  *   existed.
  *
@@ -32,7 +32,7 @@
  *    hand-rolled parse of a `constructor(...)` signature misses defaults,
  *    destructuring and positional classes — and because `types/` is already the
  *    thing that is guaranteed regenerated.
- * 2. **Every guide linked from `llm.txt` exists**, and its summary is still the
+ * 2. **Every guide linked from `llms.txt` exists**, and its summary is still the
  *    guide's own opening sentence.
  *
  * ## What it deliberately does not check
@@ -258,9 +258,9 @@ for (const guide of GUIDES_WITH_OPTION_TABLES) {
   }
 }
 
-// ── 2. llm.txt must not contain truncated or corrupted guide summaries ──────
+// ── 2. llms.txt must not contain truncated or corrupted guide summaries ──────
 //
-// The header of `llm.txt` claims every line is "a title and that guide's own
+// The header of `llms.txt` claims every line is "a title and that guide's own
 // opening sentence … so the two can only disagree if the guide changes". That
 // claim is **not** what the file does, and the mismatch was invisible because
 // nothing read it. Ten of its 49 entries are genuine paraphrases — deliberate,
@@ -278,13 +278,13 @@ for (const guide of GUIDES_WITH_OPTION_TABLES) {
 // generation bug — and it was shipped, in a file whose entire purpose is to be
 // read by a machine.
 
-const llmPath = path.join(ROOT, 'llm.txt');
-if (existsSync(llmPath)) {
-  const llm = readFileSync(llmPath, 'utf8');
+const llmsPath = path.join(ROOT, 'llms.txt');
+if (existsSync(llmsPath)) {
+  const llms = readFileSync(llmsPath, 'utf8');
   let checkedEntries = 0;
   const broken = [];
 
-  for (const entry of llm.matchAll(/^- \[([^\]]+)\]\([^)]*\/guides\/([^)]+)\):\s*(.+)$/gm)) {
+  for (const entry of llms.matchAll(/^- \[([^\]]+)\]\([^)]*\/guides\/([^)]+)\):\s*(.+)$/gm)) {
     const [, name, file, summary] = entry;
     checkedEntries += 1;
     if (!existsSync(path.join(GUIDES_DIR, file))) {
@@ -316,21 +316,21 @@ if (existsSync(llmPath)) {
   }
 
   if (checkedEntries === 0) {
-    problems.push('llm.txt: no guide entries parsed — the check is not looking at anything.');
+    problems.push('llms.txt: no guide entries parsed — the check is not looking at anything.');
   }
   if (broken.length > 0) {
     problems.push(
-      `llm.txt: ${broken.length} of ${checkedEntries} entries are corrupted.\n` +
+      `llms.txt: ${broken.length} of ${checkedEntries} entries are corrupted.\n` +
         broken.map((b) => `    - ${b}`).join('\n')
     );
   } else {
     notes.push(
-      `llm.txt: ${checkedEntries} entries link to a real guide and none carry a ` +
+      `llms.txt: ${checkedEntries} entries link to a real guide and none carry a ` +
         'truncated summary or spliced code fragment'
     );
   }
 } else {
-  problems.push('llm.txt: file is missing.');
+  problems.push('llms.txt: file is missing.');
 }
 
 for (const note of notes) console.log(`  ok  ${note}`);

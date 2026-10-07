@@ -63,6 +63,12 @@ client.connect();
 
 ***
 
+### \_connectionGeneration
+
+> **\_connectionGeneration**: `number`
+
+***
+
 ### \_connectTimeoutMs
 
 > **\_connectTimeoutMs**: `number`
@@ -125,6 +131,12 @@ client.connect();
 
 ***
 
+### \_heartbeatSentAt
+
+> **\_heartbeatSentAt**: `number`
+
+***
+
 ### \_heartbeatTimeoutMs
 
 > **\_heartbeatTimeoutMs**: `number`
@@ -140,12 +152,6 @@ client.connect();
 ### \_inboundTransform
 
 > **\_inboundTransform**: `TransformStream`\<`any`, `any`\> \| `undefined`
-
-***
-
-### \_lastPollInterval
-
-> **\_lastPollInterval**: `any`
 
 ***
 
@@ -320,6 +326,22 @@ client.connect();
 `0` \| `1` \| `2` \| `3`
 
 ## Methods
+
+### \_startStreamPump()
+
+> **\_startStreamPump**(`generation`): `Promise`\<`void`\>
+
+#### Parameters
+
+##### generation
+
+`number`
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
 
 ### \[asyncDispose\]()
 

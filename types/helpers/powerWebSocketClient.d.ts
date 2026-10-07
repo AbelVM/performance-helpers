@@ -173,14 +173,10 @@ export class PowerWebSocketClient {
      *   A pending `read()` keeps the stream locked; dropping the handle would leak
      *   the lock on every reconnect, and the replacement stream would then fail to
      *   hand out a reader at all.
-     * - **A read failure is reported, not thrown, and deliberately does not open a
-     *   reconnect.** `error` is what the caller already handles, and synthesising a
-     *   close would invent a `close` event and a close code the peer never sent.
-     *   The trade-off is that a stream that fails *after* opening leaves a deaf
-     *   open socket, which is the shape this method exists to remove — so it is a
-     *   real limitation rather than a settled design, and it needs a decision about
-     *   what a fabricated close should look like before it can be changed. Recorded
-     *   in the audit that found it rather than settled here.
+     * - **A read failure is reported and closes the active connection.** The
+     *   synthetic abnormal close lets the existing lifecycle schedule reconnects,
+     *   while the active-reader and user-close guards prevent stale or deliberate
+     *   cancellation from reopening the connection.
      *
      * @private
      * @returns {void}

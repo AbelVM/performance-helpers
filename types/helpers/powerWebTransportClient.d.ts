@@ -156,9 +156,18 @@ export class PowerWebTransportClient {
      */
     /**
      * @param {(err?: any) => void} done
+     * @param {number} generation
      * @private
      */
     /**
+     * @private
+     */
+    /** @param {number} generation */
+    _startStreamPump(generation: number): Promise<void>;
+    /**
+     * @param {any} error
+     * @param {number} generation
+     * @param {any} transport
      * @private
      */
     /**
@@ -181,6 +190,10 @@ export class PowerWebTransportClient {
      * @private
      */
     /**
+     * @private
+     */
+    /**
+     * @param {'ping'|'pong'} kind
      * @private
      */
     /**

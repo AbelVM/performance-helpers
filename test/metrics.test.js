@@ -15,6 +15,7 @@ import {
   attach,
   createObservation,
   diffObservation,
+  formatPrometheus,
 } from '../src/helpers/metrics.js';
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { PowerGCRA } from '../src/helpers/powerGCRA.js';
@@ -201,6 +202,50 @@ describe('MetricsCollector', () => {
     // Draining is explicit, not push-based. A sink that fires on every
     // operation becomes a performance problem; a timer that does it for you is
     // one you cannot turn off.
+  });
+});
+
+describe('formatPrometheus', () => {
+  it('formats scalar metrics with escaped labels', () => {
+    expect(
+      formatPrometheus([
+        {
+          name: 'jobs_completed_total',
+          type: 'counter',
+          help: 'Completed jobs',
+          value: 3,
+          labels: { app: 'a"b' },
+        },
+      ])
+    ).toBe(
+      '# HELP jobs_completed_total Completed jobs\n# TYPE jobs_completed_total counter\njobs_completed_total{app="a\\"b"} 3\n'
+    );
+  });
+
+  it('formats explicit cumulative histogram buckets and rejects ambiguous values', () => {
+    expect(
+      formatPrometheus([
+        {
+          name: 'job_duration_seconds',
+          type: 'histogram',
+          help: 'Job duration',
+          value: {
+            buckets: [
+              { le: 1, value: 2 },
+              { le: 5, value: 3 },
+            ],
+            count: 3,
+            sum: 4,
+          },
+        },
+      ])
+    ).toContain('job_duration_seconds_bucket{le="+Inf"} 3');
+    expect(() =>
+      formatPrometheus([{ name: 'bad-name', type: 'gauge', help: 'bad', value: 1 }])
+    ).toThrow(/valid metric name/);
+    expect(() => formatPrometheus([{ name: 'h', type: 'histogram', help: 'h', value: 1 }])).toThrow(
+      /histogram value/
+    );
   });
 });
 

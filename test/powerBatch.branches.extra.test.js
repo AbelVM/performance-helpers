@@ -14,6 +14,16 @@ describe('PowerBatch branches extra', () => {
     expect(res).toBeUndefined();
   });
 
+  it('rejects an empty flush when its wait signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const b = new PowerBatch(async () => {});
+
+    await expect(b.flush({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
+
   it('add schedules handler and resolves regular add promise', async () => {
     let called = false;
     const b = new PowerBatch(async (items) => {
@@ -124,6 +134,17 @@ describe('PowerBatch branches extra', () => {
   it('accepts Infinity as an explicit "never auto-flush" maxSize', () => {
     const b = new PowerBatch(() => {}, { maxSize: Number.POSITIVE_INFINITY });
     expect(b._maxSize).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('resets and disposes the batch lifecycle', async () => {
+    const b = new PowerBatch(() => {});
+    const pending = b.add('x');
+    b.reset();
+
+    await expect(pending).rejects.toThrow('PowerBatch cleared before flush');
+    expect(b.size).toBe(0);
+    b[Symbol.dispose]();
+    b.dispose();
   });
 
   it('flush re-schedules queued work if a pending batch exists but the scheduler was canceled', async () => {

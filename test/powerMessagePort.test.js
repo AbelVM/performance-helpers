@@ -87,6 +87,20 @@ describe('PowerMessagePort', () => {
     expect(port.sent).toHaveLength(0);
   });
 
+  it('reports a postMessage failure and returns false', () => {
+    const port = new FakePort();
+    const errors = [];
+    port.postMessage = () => {
+      throw new Error('post failed');
+    };
+    const adapter = new PowerMessagePort(port, {
+      onError: (error) => errors.push(error),
+    });
+
+    expect(adapter.send({}, new Uint8Array([1]))).toBe(false);
+    expect(errors[0].message).toBe('post failed');
+  });
+
   it('closes the port', () => {
     const port = new FakePort();
     const adapter = new PowerMessagePort(port);
@@ -222,6 +236,22 @@ describe('PowerMessagePort', () => {
     port.fire('close', {});
 
     expect(closes).toHaveLength(0);
+  });
+
+  it('reports supplied and fallback message errors', () => {
+    const port = new FakePort();
+    const errors = [];
+    new PowerMessagePort(port, {
+      onError: (error) => errors.push(error),
+    });
+    const supplied = new Error('decode failed');
+
+    port.fire('messageerror', { error: supplied });
+    port.fire('messageerror', {});
+
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toBe(supplied);
+    expect(errors[1].message).toBe('MessagePort message error');
   });
 
   it('decodes Date, Set and BigInt from a native envelope', () => {

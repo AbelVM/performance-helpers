@@ -23,10 +23,11 @@
  * @module powerWebTransportClient
  * @public
  */
-import { decodeMessage, encodeMessage, createFrameDecoder } from './powerMessageCodec.js';
+import { encodeMessage, createFrameDecoder } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { nowMs } from '../utils/now.js';
+import { settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 
@@ -254,8 +255,10 @@ export class PowerWebTransportClient {
     this._connectTimer = null;
     this._heartbeatTimer = null;
     this._heartbeatDeadline = null;
+    this._heartbeatSentAt = 0;
     this._reconnectTimer = null;
     this._reconnectDelay = null;
+    this._connectionGeneration = 0;
 
     this.rtt = rtt instanceof PowerHistogram ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
     this._counters = {
@@ -306,10 +309,11 @@ export class PowerWebTransportClient {
    */
   close(code = 1000, reason = '') {
     this._closedByUser = true;
+    this._connectionGeneration += 1;
     this._clearTimers();
     if (this._reader) {
       try {
-        this._reader.cancel();
+        this._reader.cancel().catch(() => {});
       } catch {
         // ignore; reader is already closed or closing
       }
@@ -317,7 +321,7 @@ export class PowerWebTransportClient {
     }
     if (this._writer) {
       try {
-        this._writer.close();
+        this._writer.close().catch(() => {});
       } catch {
         // ignore; writer is already closed or closing
       }
@@ -464,15 +468,18 @@ export class PowerWebTransportClient {
 
       try {
         this._state = READY_STATE.CONNECTING;
+        const generation = ++this._connectionGeneration;
         const transport = new this._WT(this.url);
         this._transport = transport;
 
         transport.closed
           ?.then(() => {
+            if (generation !== this._connectionGeneration) return;
             this._handleClose({ code: transport.closeCode, reason: transport.closeReason });
             done();
           })
           .catch((/** @type {any} */ e) => {
+            if (generation !== this._connectionGeneration) return;
             this._handleError(e);
             done(e);
           });
@@ -487,7 +494,7 @@ export class PowerWebTransportClient {
 
         readyPromise
           .then(() => {
-            this._handleOpen(done);
+            return this._handleOpen(done, generation);
           })
           .catch((/** @type {any} */ e) => {
             this._handleError(e);
@@ -522,20 +529,24 @@ export class PowerWebTransportClient {
 
   /**
    * @param {(err?: any) => void} done
+   * @param {number} generation
    * @private
    */
-  _handleOpen(done) {
+  async _handleOpen(done, generation) {
+    if (generation !== this._connectionGeneration || this._state !== READY_STATE.CONNECTING) {
+      return;
+    }
     if (this._state === READY_STATE.OPEN) {
       done();
       return;
     }
-    this._state = READY_STATE.OPEN;
     this._reconnectAttempts = 0;
     this._reconnectDelay = null;
     this._reconnectStartedAt = null;
-    this._lastPollInterval = this._pollBase;
+    await this._startStreamPump(generation);
+    if (generation !== this._connectionGeneration) return;
+    this._state = READY_STATE.OPEN;
     this._scheduleHeartbeat();
-    this._startStreamPump();
     this._emit('open', this);
     done();
   }
@@ -543,12 +554,14 @@ export class PowerWebTransportClient {
   /**
    * @private
    */
-  _startStreamPump() {
+  /** @param {number} generation */
+  async _startStreamPump(generation) {
     if (!this._transport) return;
     const transport = this._transport;
 
     // Create a bidirectional stream for the data path.
-    const stream = transport.createBidirectionalStream?.();
+    const stream = await transport.createBidirectionalStream?.();
+    if (generation !== this._connectionGeneration || transport !== this._transport) return;
     if (!stream) {
       this._handleError(
         new Error('PowerWebTransportClient: transport has no bidirectional streams')
@@ -565,7 +578,7 @@ export class PowerWebTransportClient {
         }
       },
       flush(controller) {
-        const remaining = decoder.flush();
+        const remaining = decoder.flush({ strict: true });
         if (remaining.length > 0) {
           controller.enqueue(remaining);
         }
@@ -587,13 +600,13 @@ export class PowerWebTransportClient {
           await writer.write(value);
         }
       } catch (e) {
-        // Stream closed or aborted.
+        this._handleStreamFailure(e, generation, transport);
       } finally {
         reader.releaseLock();
         try {
           await writer.close();
-        } catch {
-          // ignore; writer is already closed or closing
+        } catch (error) {
+          this._handleStreamFailure(error, generation, transport);
         }
       }
     };
@@ -611,8 +624,8 @@ export class PowerWebTransportClient {
           if (done) break;
           this._deliverFrame(value);
         }
-      } catch {
-        // ignore; stream is closed or aborted
+      } catch (error) {
+        this._handleStreamFailure(error, generation, transport);
       }
     };
     readFrames().catch(() => {});
@@ -622,20 +635,54 @@ export class PowerWebTransportClient {
   }
 
   /**
+   * @param {any} error
+   * @param {number} generation
+   * @param {any} transport
+   * @private
+   */
+  _handleStreamFailure(error, generation, transport) {
+    if (
+      generation !== this._connectionGeneration ||
+      transport !== this._transport ||
+      this._state !== READY_STATE.OPEN ||
+      this._closedByUser
+    ) {
+      return;
+    }
+    this._handleError(error);
+    this._connectionGeneration += 1;
+    this._handleClose({ code: 1006, reason: 'WebTransport stream failure' });
+  }
+
+  /**
    * @param {*} data
    * @private
    */
   _deliverFrame(data) {
-    let message;
-    try {
-      message = decodeMessage(data).value;
-    } catch (e) {
-      this._counters.decodeErrors += 1;
-      this._emit('error', e);
+    if (data && typeof data === 'object' && data.__heartbeat) {
+      if (data.__heartbeat === 'ping') {
+        this._sendHeartbeatFrame('pong');
+      } else if (data.__heartbeat === 'pong' || data.__heartbeat === true) {
+        settleHeartbeatProbe({
+          pingSentAt: this._heartbeatSentAt,
+          now: nowMs(),
+          clearDeadline: () => {
+            if (this._heartbeatDeadline) {
+              clearTimeout(this._heartbeatDeadline);
+              this._heartbeatDeadline = null;
+            }
+            this._heartbeatSentAt = 0;
+          },
+          onHeartbeat: () => {
+            this._counters.heartbeats += 1;
+          },
+          record: (rtt) => this.rtt.record(rtt),
+        });
+      }
       return;
     }
     this._counters.received += 1;
-    this._emit('message', message, this);
+    this._emit('message', data, this);
   }
 
   /**
@@ -687,19 +734,26 @@ export class PowerWebTransportClient {
    * @private
    */
   _tickHeartbeat() {
-    if (!this._writer) return;
-    // Send a small heartbeat frame.
-    const heartbeat = encodeMessage({ __heartbeat: true }, { codec: this._codec });
-    this._writer.write(heartbeat).catch(() => {
-      /* ignore */
-    });
-    this._counters.sent += 1;
+    if (!this._writer || this._heartbeatDeadline) return;
+    this._heartbeatSentAt = nowMs();
+    this._sendHeartbeatFrame('ping');
 
     // Arm a deadline for the reply.
     this._heartbeatDeadline = setSafeTimeout(() => {
       this._heartbeatDeadline = null;
       this._onHeartbeatTimeout();
     }, this._heartbeatTimeoutMs);
+  }
+
+  /**
+   * @param {'ping'|'pong'} kind
+   * @private
+   */
+  _sendHeartbeatFrame(kind) {
+    if (!this._writer) return;
+    const heartbeat = encodeMessage({ __heartbeat: kind }, { codec: this._codec });
+    this._writer.write(heartbeat).catch(() => {});
+    this._counters.sent += 1;
   }
 
   /**
@@ -729,6 +783,7 @@ export class PowerWebTransportClient {
       clearTimeout(this._heartbeatDeadline);
       this._heartbeatDeadline = null;
     }
+    this._heartbeatSentAt = 0;
   }
 
   /**

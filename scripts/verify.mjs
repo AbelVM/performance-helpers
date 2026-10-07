@@ -66,7 +66,7 @@ import { spawnSync } from 'node:child_process';
  *   **generated** declarations: it compares the option names a guide documents
  *   against `types/helpers/*.d.ts`. Before `types:generate` it would compare
  *   against a stale tree and report drift that has already been fixed. It also
- *   checks `llm.txt`, which nothing else reads at all. See the script's docblock
+ *   checks `llms.txt`, which nothing else reads at all. See the script's docblock
  *   for the two shipped defects it was written for; both had passed every other
  *   gate.
  *   It is last rather than earlier for a second reason: it is the slowest step

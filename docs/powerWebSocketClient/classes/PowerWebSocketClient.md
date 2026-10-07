@@ -54,6 +54,12 @@
 
 ***
 
+### \_connectionGeneration
+
+> **\_connectionGeneration**: `number`
+
+***
+
 ### \_connectTimeoutMs
 
 > **\_connectTimeoutMs**: `number`

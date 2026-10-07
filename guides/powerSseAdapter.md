@@ -40,3 +40,5 @@ const hub = new PowerRealtimeHub({
 ## Subscriber lifecycle
 
 `register(sub)` is called when a subscriber is added. It creates the writer from `createResponse` or falls back to `sub.transport.write`/`sub.transport.end` in Node. `close(sub)` marks the subscriber closed and closes the writer or transport end.
+
+If `createResponse` throws, `register(sub)` reports the error through `onError` and does not retain a dead subscriber.

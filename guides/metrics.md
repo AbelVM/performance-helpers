@@ -109,6 +109,44 @@ knowing before you rely on it:
 - **`Infinity` and `NaN` become strings.** `Infinity` is how a rate limit says
   "unlimited"; coercing it to 0 would read as a measurement.
 
+## Prometheus text output
+
+`formatPrometheus()` is a pure, optional formatter. Supply explicit descriptors
+at the application boundary; it does not scrape helpers, start an HTTP server,
+or infer types from flattened series:
+
+```js
+import { formatPrometheus } from 'performance-helpers';
+
+const text = formatPrometheus([
+  {
+    name: 'jobs_completed_total',
+    type: 'counter',
+    help: 'Completed jobs',
+    value: metrics.snapshot().series['pool.completedTasks'],
+    labels: { service: 'api' },
+  },
+  {
+    name: 'job_duration_seconds',
+    type: 'histogram',
+    help: 'Job duration in seconds',
+    value: {
+      buckets: [
+        { le: 0.1, value: 42 },
+        { le: 1, value: 99 },
+      ],
+      count: 100,
+      sum: 12.4,
+    },
+  },
+]);
+```
+
+Metric names, types, help text, labels, and histogram buckets are validated.
+Histogram buckets must already be cumulative; the formatter will not interpret
+arbitrary `snapshot().series` keys as histogram data. Keep label values bounded
+by using a fixed application-owned vocabulary, never request IDs or URLs.
+
 ## Errors do not blank the sink
 
 A source that throws is recorded under `errors` and the rest is still

@@ -12,7 +12,11 @@ Lightweight reactive value container. Useful for exposing small pieces of state 
 
 ## API
 
-- `subscribe(fn)` — Subscribe to mapped value changes. `fn(next, prev)` is invoked with the mapped current and previous values. Returns an unsubscribe function. Subscriber errors are swallowed to avoid breaking the publisher.
+The optional `onError` constructor option receives subscriber failures.
+Errors remain swallowed when it is omitted, and errors thrown by the handler are
+also swallowed.
+
+- `subscribe(fn)` — Subscribe to mapped value changes. `fn(next, prev)` is invoked with the mapped current and previous values. Returns an unsubscribe function. Subscriber errors are swallowed to avoid breaking the publisher, or passed to the optional `onError` callback.
 
 - `clear()` — Remove all subscribers.
 
@@ -23,6 +27,10 @@ Lightweight reactive value container. Useful for exposing small pieces of state 
 - `size` (getter) — Number of current subscribers.
 
 - `value` (getter/setter) — Read or update the current raw value. Setting `value` schedules or delivers notifications according to the `async` option and mapped output.
+
+- `getSnapshot()` / `getServerSnapshot()` — Stable current-value readers for a React `useSyncExternalStore` adapter. The server reader must return the same initial value the client will hydrate with.
+
+- `dispose()` / `[Symbol.dispose]()` — Cancel pending delivery, remove subscribers, and release the owned scheduler. Disposed observers ignore later writes.
 
 ## Example
 
@@ -63,6 +71,77 @@ concurrentRequests.flush();
 - Subscriber errors are swallowed to avoid breaking the publisher.
 - `subscribe` returns an unsubscribe function.
 - `flush()` is useful in tests or during shutdown to ensure all pending notifications are delivered synchronously.
+
+## Framework-neutral integration
+
+`PowerObserver` does not import a UI framework. The integration boundary is
+three small functions: subscribe, read the current snapshot, and dispose the
+subscription when the owner unmounts.
+
+### React external stores
+
+Use `useSyncExternalStore` for concurrent rendering and SSR. Keep the observer
+instance stable; do not create it during render.
+
+```js
+import { useSyncExternalStore } from 'react';
+
+export function usePowerObserver(observer) {
+  return useSyncExternalStore(
+    observer.subscribe.bind(observer),
+    observer.getSnapshot.bind(observer),
+    observer.getServerSnapshot.bind(observer)
+  );
+}
+```
+
+The server snapshot must represent the same value used for hydration. Use
+`async: 'microtask'` for ordinary state updates, or `async: 'macrotask'` when
+updates should yield to the browser between bursts. Route subscriber failures
+with `onError` rather than throwing from a render callback.
+
+### Vue effect scopes
+
+Subscribe inside an effect scope and register the returned disposer with the
+scope. The observer remains framework-neutral and can be shared by several
+scopes.
+
+```js
+import { onScopeDispose, ref } from 'vue';
+
+export function usePowerObserver(observer) {
+  const value = ref(observer.value);
+  const off = observer.subscribe((next) => {
+    value.value = next;
+  });
+  onScopeDispose(off);
+  return value;
+}
+```
+
+For a component that owns the observer, also call `observer.dispose()` when the
+component owns its lifetime rather than merely subscribing to shared state.
+
+### Angular teardown
+
+Inject `DestroyRef`, subscribe once, and register the unsubscribe function with
+`onDestroy`. This works for synchronous and scheduled observers alike.
+
+```ts
+import { DestroyRef, inject } from '@angular/core';
+import { signal } from '@angular/core';
+
+export function observePowerValue(observer: PowerObserver) {
+  const destroyRef = inject(DestroyRef);
+  const value = signal(observer.value);
+  const off = observer.subscribe((next) => value.set(next));
+  destroyRef.onDestroy(off);
+  return value.asReadonly();
+}
+```
+
+Do not dispose a shared observer from a consumer teardown. Dispose it only at
+the owner boundary, after all framework subscribers have gone away.
 
 ## Derived observers
 

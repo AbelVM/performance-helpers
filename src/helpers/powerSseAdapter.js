@@ -89,7 +89,7 @@ export function createSseAdapter(options = {}) {
       } else if (typeof sub.transport?.write === 'function') {
         sub.transport.write(line);
       }
-    } catch (err) {
+    } catch (/** @type {any} */ err) {
       if (onError) onError(err, sub);
       throw err;
     }
@@ -131,8 +131,9 @@ export function createSseAdapter(options = {}) {
           writer = response.body.getWriter();
           abort = new AbortController();
         }
-      } catch {
-        // a bad `createResponse` is reported through `onError` below
+      } catch (/** @type {any} */ error) {
+        if (onError) onError(error, sub);
+        return;
       }
     } else if (sub.transport) {
       writer = /** @type {WritableStreamDefaultWriter} */ (null);

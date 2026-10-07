@@ -7,7 +7,7 @@
  * caller, and a `PowerBatch` flush must still deliver the items its `add()`
  * callers are waiting on.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PowerBatch, PowerPool } from '../src/index.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,6 +32,15 @@ function controllablePool() {
 }
 
 describe('cancellable wait (utils/abort.js)', () => {
+  it('falls back to a named Error when DOMException is unavailable', async () => {
+    const { abortReason } = await import('../src/utils/abort.js');
+    vi.stubGlobal('DOMException', undefined);
+    const reason = abortReason(new AbortController().signal);
+    vi.unstubAllGlobals();
+
+    expect(reason).toMatchObject({ name: 'AbortError', message: 'The operation was aborted' });
+  });
+
   it('passes the signal straight through when there is none', async () => {
     const { raceWithAbort } = await import('../src/utils/abort.js');
     await expect(raceWithAbort(Promise.resolve(7), null)).resolves.toBe(7);

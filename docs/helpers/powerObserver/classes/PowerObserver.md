@@ -32,6 +32,12 @@ Initial value
 
 ## Properties
 
+### \_disposed
+
+> **\_disposed**: `boolean`
+
+***
+
 ### \_distinct
 
 > **\_distinct**: `boolean`
@@ -53,6 +59,12 @@ Initial value
 ### \_mappedValid
 
 > **\_mappedValid**: `boolean`
+
+***
+
+### \_onError
+
+> **\_onError**: ((`err`) => `void`) \| `null`
 
 ***
 
@@ -154,6 +166,36 @@ Internal flush implementation
 
 ***
 
+### \_notifyError()
+
+> **\_notifyError**(`err`): `void`
+
+Route a subscriber error without allowing the error handler to escape.
+
+#### Parameters
+
+##### err
+
+`any`
+
+#### Returns
+
+`void`
+
+***
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+Alias for [dispose](#dispose-1).
+
+#### Returns
+
+`void`
+
+***
+
 ### clear()
 
 > **clear**(): `void`
@@ -233,6 +275,18 @@ Derive the next value.
 `PowerObserver`
 
 A new observer, already holding `fn(this.value)`.
+
+***
+
+### dispose()
+
+> **dispose**(): `void`
+
+Cancel pending delivery and release the owned scheduler.
+
+#### Returns
+
+`void`
 
 ***
 
@@ -322,6 +376,30 @@ Flush any pending notification immediately. Useful for tests or shutdown.
 
 ***
 
+### getServerSnapshot()
+
+> **getServerSnapshot**(): `any`
+
+Current value used when rendering on the server.
+
+#### Returns
+
+`any`
+
+***
+
+### getSnapshot()
+
+> **getSnapshot**(): `any`
+
+Stable current value for external-store consumers.
+
+#### Returns
+
+`any`
+
+***
+
 ### map()
 
 > **map**(`fn`): `void`
@@ -346,7 +424,7 @@ Set or replace the mapping function used for notifications.
 
 ### subscribe()
 
-> **subscribe**(`fn`): () => `boolean`
+> **subscribe**(`fn`): () => `void`
 
 Subscribe to changes. Returns an unsubscribe function.
 
@@ -358,7 +436,7 @@ Subscribe to changes. Returns an unsubscribe function.
 
 #### Returns
 
-() => `boolean`
+() => `void`
 
 ***
 

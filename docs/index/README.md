@@ -138,6 +138,12 @@ Re-exports [formatErrorObj](../utils/errors/functions/formatErrorObj.md)
 
 ***
 
+### formatPrometheus
+
+Re-exports [formatPrometheus](../helpers/metrics/functions/formatPrometheus.md)
+
+***
+
 ### frameEncodedJson
 
 Re-exports [frameEncodedJson](../powerMessageCodec/functions/frameEncodedJson.md)

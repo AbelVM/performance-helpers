@@ -92,7 +92,11 @@ Inbound works the other way round, and it is worth knowing that it is a **reader
 - A `WebSocketStream` has no `message` event, so nothing arrives unless someone takes that reader. The client does, on every connection — including reconnects — and holds the handle so `close()` can `cancel()` it. A pending `read()` keeps the stream locked, so dropping the handle would leak the lock and leave the _next_ connection unable to supply a reader at all.
 - `close()` cancels the reader before aborting the writer, because aborting the write side does not release a read lock.
 
-A `read()` that rejects is reported as an `error` event rather than thrown, and deliberately does **not** trigger a reconnect: synthesising a close would invent a `close` event and a close code the peer never sent. The trade-off is that a stream failing _after_ it opened leaves a deaf open socket — a real limitation, not a settled design.
+A `read()` that rejects is reported as an `error` event and treated as an abnormal close (`1006`), so the existing reconnect policy handles it. User-initiated cancellation and stale readers are ignored; normal stream EOF does not invent a close event.
+
+Each socket and stream reader is owned by a connection generation. After a close
+or reconnect, delayed events and frames from the previous generation are
+ignored, so an old stream cannot deliver into the replacement connection.
 
 ## What back-pressure you actually get
 

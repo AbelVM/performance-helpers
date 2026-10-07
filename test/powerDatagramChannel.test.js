@@ -133,6 +133,20 @@ describe('PowerDatagramChannel', () => {
     expect(channel.stats().queued).toBe(0);
   });
 
+  it('flushes queued datagrams during close after the transport opens', () => {
+    const transport = new FakeTransport();
+    transport.readyState = 'connecting';
+    const channel = new PowerDatagramChannel(transport, { maxQueue: 2 });
+
+    channel.send(new Uint8Array([1]));
+    transport.readyState = 'open';
+    channel.close();
+
+    expect(transport.sent).toHaveLength(1);
+    expect(channel.stats().queued).toBe(0);
+    expect(channel.stats().disposed).toBe(true);
+  });
+
   it('reports oversize datagrams sent to an open transport', () => {
     const transport = new FakeTransport();
     const channel = new PowerDatagramChannel(transport, {

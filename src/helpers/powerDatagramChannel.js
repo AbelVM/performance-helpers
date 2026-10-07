@@ -272,10 +272,10 @@ export class PowerDatagramChannel {
    */
   close() {
     if (this._disposed) return;
-    this._disposed = true;
     // Final flush attempt: the transport may have become ready since the last
     // queued send.
     this.flush();
+    this._disposed = true;
   }
 
   /**

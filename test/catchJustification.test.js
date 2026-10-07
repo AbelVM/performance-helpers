@@ -117,10 +117,6 @@ const ALLOWED = new Map([
     '// ignore; transport is already closed or closing',
     [1, 'Transport teardown is best-effort; the close path handles the real error.'],
   ],
-  [
-    '// ignore; stream is closed or aborted',
-    [1, 'Stream read errors are reported through the close path.'],
-  ],
 ]);
 
 /**

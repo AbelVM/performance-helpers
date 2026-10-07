@@ -254,6 +254,8 @@ export {};
  * @property {function} [map]
  * @property {boolean} [distinct]
  * @property {boolean|'microtask'|'macrotask'} [async]
+ * @property {(err:any)=>void} [onError] Called when a subscriber throws. A
+ *   throwing error handler is swallowed.
  */
 
 /**

@@ -25,11 +25,15 @@ export class PowerObserver {
     set value(v: any);
     /** Current value */
     get value(): any;
+    /** Stable current value for external-store consumers. */
+    getSnapshot(): any;
+    /** Current value used when rendering on the server. */
+    getServerSnapshot(): any;
     /**
      * Subscribe to changes. Returns an unsubscribe function.
      * @param {(next:any, prev:any)=>void} fn
      */
-    subscribe(fn: (next: any, prev: any) => void): () => boolean;
+    subscribe(fn: (next: any, prev: any) => void): () => void;
     /** Remove all subscribers */
     clear(): void;
     /** Number of subscribers */
@@ -119,8 +123,14 @@ export class PowerObserver {
     flush(): void;
     /** Alias for flush() */
     drain(): void;
+    /** Cancel pending delivery and release the owned scheduler. */
+    dispose(): void;
     /** Internal flush implementation */
     _flushPending(): void;
+    /** Route a subscriber error without allowing the error handler to escape. */
+    _notifyError(err: any): void;
+    /** Alias for {@link dispose}. */
+    [Symbol.dispose](): void;
 }
 export default PowerObserver;
 export type PowerObserverOptions = import("./jsdoc-types.js").PowerObserverOptions;

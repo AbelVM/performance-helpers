@@ -125,6 +125,7 @@ describe('API surface', () => {
         'encodeNativeEnvelope',
         'announceCapabilities',
         'formatErrorObj',
+        'formatPrometheus',
         'frameEncodedJson',
         'frameTransferList',
         'isCapabilityAnnouncement',

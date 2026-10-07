@@ -47,9 +47,17 @@ const client = new PowerWebTransportClient({
 
 `send()` and `sendFrame()` both await `writer.ready` before writing, so a slow network naturally slows the producer.
 
+`connect()` also waits for the platform's promise-returning `createBidirectionalStream()` before resolving or emitting `open`. A delayed or rejected stream creation therefore cannot expose a half-open client.
+
+Inbound stream frames are decoded exactly once by the incremental frame decoder, including split and multi-frame chunks. `close()` observes asynchronous reader cancellation and writer shutdown failures so an already-completed stream does not create unhandled rejections.
+
+If the active readable or transform reader fails, the client reports the error and treats it as an abnormal close (`1006`), allowing the configured reconnect policy to run. Failures from an older connection and user-initiated cancellation are ignored.
+
+If the stream ends with a partial frame header or payload, strict decoder flushing reports the truncation through `onError`; partial data is not delivered.
+
 ## Heartbeats
 
-Heartbeats are application-level: a small frame is sent on the writable stream at `heartbeatIntervalMs`, and a deadline is armed for the reply. If the deadline fires, the client counts a `heartbeatTimeout` and, if `reconnectOnHeartbeatTimeout` is set, closes the transport and reconnects.
+Heartbeats are application-level because WebTransport has no native ping/pong. The client sends `{ __heartbeat: 'ping' }` in a framed JSON message at `heartbeatIntervalMs`; the peer replies with `{ __heartbeat: 'pong' }`. Control frames are consumed internally, matching replies clear only their own deadline and record RTT in `rtt`, and they are never passed to `onMessage`. If the deadline fires, the client counts a `heartbeatTimeout` and, if `reconnectOnHeartbeatTimeout` is set, closes the transport and reconnects.
 
 ## Reconnection
 

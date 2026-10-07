@@ -77,6 +77,48 @@ describe('PowerObserver', () => {
     expect(seen).toEqual([[1, 2]]);
   });
 
+  it('routes subscriber errors to the optional error handler', () => {
+    const errors = [];
+    const obs = new PowerObserver(1, { async: false, onError: (err) => errors.push(err) });
+    const failure = new Error('listener failed');
+    const seen = [];
+    obs.subscribe(() => {
+      throw failure;
+    });
+    obs.subscribe((next, prev) => seen.push([prev, next]));
+
+    obs.value = 2;
+
+    expect(errors).toEqual([failure]);
+    expect(seen).toEqual([[1, 2]]);
+  });
+
+  it('routes scheduled subscriber errors and swallows handler errors', async () => {
+    const errors = [];
+    const failure = new Error('scheduled listener failed');
+    const obs = new PowerObserver(1, { onError: (err) => errors.push(err) });
+    obs.subscribe(() => {
+      throw failure;
+    });
+
+    obs.value = 2;
+    await Promise.resolve();
+
+    expect(errors).toEqual([failure]);
+    const noisy = new PowerObserver(1, {
+      onError: () => {
+        throw new Error('logger failed');
+      },
+    });
+    noisy.subscribe(() => {
+      throw failure;
+    });
+    expect(() => {
+      noisy.value = 2;
+      noisy.flush();
+    }).not.toThrow();
+  });
+
   it('coalesces multiple async writes into the latest next value while preserving the first prev', async () => {
     const obs = new PowerObserver(1);
     const seen = [];
@@ -125,6 +167,33 @@ describe('PowerObserver', () => {
     // flush synchronously
     obs.flush();
     expect(called).toBe(1);
+  });
+
+  it('exposes stable snapshots and cancels pending delivery on dispose', async () => {
+    const obs = new PowerObserver({ value: 1, async: 'macrotask' });
+    const seen = [];
+    obs.subscribe((value) => seen.push(value));
+    expect(obs.getSnapshot()).toBe(1);
+    expect(obs.getServerSnapshot()).toBe(1);
+
+    obs.value = 2;
+    obs.dispose();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(seen).toEqual([]);
+    expect(obs.getSnapshot()).toBe(2);
+    expect(() => obs[Symbol.dispose]()).not.toThrow();
+  });
+
+  it('composes disposal for derived observers', () => {
+    const source = new PowerObserver(1, { async: 'macrotask' });
+    const derived = source.derive((value) => value * 2);
+    derived.subscribe(() => {});
+
+    derived.dispose();
+
+    expect(source.size).toBe(0);
+    expect(() => derived.dispose()).not.toThrow();
   });
 });
 

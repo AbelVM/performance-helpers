@@ -44,6 +44,7 @@
  *   node bench/claims.js codec     # JSON.stringify cost vs a minimal binary encoding
  *   node bench/claims.js sabring   # SharedArrayBuffer ring vs structured clone
  *   node bench/claims.js keyshape # cache key-shape performance (int/string/object)
+ *   node bench/claims.js datagram # bounded datagram queue saturation and flush
  *
  * That list is a convenience, not the authority: `MODES` below is, and running
  * this file with an unrecognised mode prints every mode that exists.
@@ -72,6 +73,7 @@ import {
 } from '../src/helpers/powerMessageCodec.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
+import { PowerDatagramChannel } from '../src/helpers/powerDatagramChannel.js';
 
 // ─── Reproducibility (same approach as BENCH-001) ───────────────────────────
 
@@ -143,6 +145,71 @@ function zipfDraw(cum, n, rng) {
     else hi = mid;
   }
   return lo;
+}
+
+// ─── Workload: bounded datagram queue saturation ────────────────────────────
+
+/**
+ * Measure observable queue saturation with a deterministic fake transport.
+ *
+ * @returns {object}
+ */
+function runDatagramWorkload() {
+  const attempts = Math.max(1, Number(process.env.DATAGRAM_ATTEMPTS) || 100_000);
+  const maxQueue = Math.max(0, Number(process.env.DATAGRAM_QUEUE) || 64);
+  const payloadBytes = Math.max(1, Number(process.env.DATAGRAM_BYTES) || 256);
+  const payload = new Uint8Array(payloadBytes);
+  const transport = {
+    readyState: 'connecting',
+    sent: 0,
+    send() {
+      this.sent += 1;
+    },
+  };
+  const channel = new PowerDatagramChannel(transport, {
+    maxQueue,
+    maxDatagramSizeBytes: payloadBytes,
+  });
+
+  const start = process.hrtime.bigint();
+  let accepted = 0;
+  for (let i = 0; i < attempts; i++) accepted += channel.send(payload) ? 1 : 0;
+  const admissionNs = Number(process.hrtime.bigint() - start);
+  const queuedAtPeak = channel.stats().queued;
+
+  transport.readyState = 'open';
+  const flushStart = process.hrtime.bigint();
+  const flushed = channel.flush();
+  const flushNs = Number(process.hrtime.bigint() - flushStart);
+  const stats = channel.stats();
+  const result = {
+    attempts,
+    payloadBytes,
+    maxQueue,
+    accepted,
+    dropped: stats.droppedCount,
+    sent: stats.sentCount,
+    flushed,
+    queuedAtPeak,
+    queueAfterFlush: stats.queued,
+    admissionNs,
+    flushNs,
+    admissionNsPerAttempt: admissionNs / attempts,
+    flushNsPerDatagram: flushed ? flushNs / flushed : 0,
+  };
+
+  console.log('BENCH-002l — bounded datagram queue saturation\n');
+  console.log(`  attempts ${attempts}, payload ${payloadBytes} bytes, queue ${maxQueue}`);
+  console.log(
+    `  accepted ${accepted}, dropped ${result.dropped}, sent ${result.sent}, ` +
+      `peak queue ${queuedAtPeak}`
+  );
+  console.log(
+    `  admission ${admissionNs / 1e6} ms (${result.admissionNsPerAttempt} ns/attempt), ` +
+      `flush ${flushNs / 1e6} ms (${result.flushNsPerDatagram} ns/datagram)`
+  );
+  console.log('  Counts and queue depth are the contract; timings are directional only.');
+  return result;
 }
 
 // ─── Workload 1: admission policies under Zipf + scan ───────────────────────
@@ -4279,6 +4346,7 @@ const MODES = {
   sabring: runSabRingWorkload,
   keyshape: runKeyShapeWorkload,
   ratelimit: runRateLimitWorkload,
+  datagram: runDatagramWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';

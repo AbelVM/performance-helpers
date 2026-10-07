@@ -127,6 +127,11 @@ pipeline.
   framing while you migrate. **A worker must reply in the shape it received** -
   a `legacy` pool sniffs replies, and a framed reply leaves its `awaitResponse`
   promise pending forever. Migration steps are in `guides/powerPool.md`.
+- **`PowerPool.postMessageBatch()` avoids repeated orchestration work.**
+  Fire-and-forget batches prepare transferable payloads once, reuse worker
+  selection while capacity allows, stamp the batch with one clock read, enqueue
+  overflow in one operation, and update idle state once. The batch contract is
+  unchanged; focused dispatch, framing, queue, and clock tests cover the paths.
 - **`PowerHistogram` is now a DDSketch.** The fixed dense log buckets over
   `[boundaryMin, maxValue]` clamped every value above `maxValue` into the last
   bucket, so a single 100 ms spike in a 10 ms dataset reported `p99.9` as
@@ -149,10 +154,53 @@ pipeline.
 
 **New**
 
+- **`PowerWebTransportClient` stream setup** - Await promise-returning
+  `createBidirectionalStream()` calls and reject stale connection generations
+  from installing a reader or writer after a close/reconnect. Deliver decoded
+  inbound values once, observe asynchronous stream shutdown failures, answer
+  application-level heartbeat ping frames with pong frames, record matching
+  heartbeat RTT, and reject truncated frames at stream EOF.
+
+- **Transport lifecycle conformance** - WebSocket and WebTransport clients now
+  share pinned connect, send, receive, and close behavior across both adapters.
+
+- **`PowerSseAdapter` registration failures** - Report exceptions from
+  `createResponse` through `onError` and avoid retaining an unusable subscriber.
+
+- **`PowerWebSocketClient` stream failures** - Treat unexpected
+  `WebSocketStream` reader errors as abnormal closes so the configured
+  reconnect lifecycle runs, while ignoring user cancellation and stale readers.
+
+- **`PowerWebTransportClient` stream failures** - Route active readable and
+  transform-reader errors through abnormal close and reconnect handling, while
+  ignoring stale generations and user cancellation.
+
+- **`PowerWebSocketClient` connection ownership** - Bind socket events and
+  stream readers to connection generations so delayed frames and failures from
+  an older connection cannot affect a replacement.
+
+- **`PowerObserver` lifecycle and React interop** - `getSnapshot()` and
+  `getServerSnapshot()` provide stable external-store readers, while
+  `dispose()` / `[Symbol.dispose]()` cancel pending notifications and release
+  the owned scheduler. Derived observers compose the same teardown contract.
+
+- **`PowerObserver` error routing** - Subscriber failures remain swallowed by
+  default, with an opt-in `onError` callback for application logging and
+  framework adapters.
+
+- **`PowerObserver` integration recipes** - Added framework-neutral React,
+  Vue, and Angular subscription, snapshot, SSR, scheduling, error-routing, and
+  teardown guidance without adding framework dependencies.
+
 - **Metrics observations** - `createObservation()` records sample count, window
   duration, freshness, and observation time around an existing flat metrics
   series; `diffObservation()` computes numeric deltas without coercing missing,
   stale, or non-finite values to zero.
+
+- **Prometheus text formatting** - Added pure, dependency-free
+  `formatPrometheus()` descriptors for validated gauges, counters, labels, and
+  explicit cumulative histograms. It does not add serving, push, or type
+  inference to the core package.
 
 - **`PowerPool` adaptive concurrency policies now enforce their computed limit.** `aimd`, `vegas` and `gradient2` hold new tasks in the configured queue once active work reaches the published limit; with `taskQueue: false`, the post is rejected instead of silently exceeding the controller.
 
@@ -2298,7 +2346,8 @@ on `PowerSocketAdapter`** — it is a getter on `PowerWebSocketClient` — and t
 adapter's equivalents are `stats().kind` and a `bufferedAmount` of `0`.
 
 This completes RT-004; the `releaseLock()` half shipped in the socket-adapter
-commit above.
+commit above. A shared lifecycle contract now also covers connect, send,
+receive, and close behavior for the WebSocket and WebTransport clients.
 
 Closes RT-004.
 
@@ -6485,8 +6534,15 @@ accurate.
 Wired into the public surface: `src/index.js`, `test/apiSurface.test.js`,
 `guides/metaGuide.md`, `assets/5_Realtime.md`, `README.md`.
 
-17 tests in `test/powerDatagramChannel.test.js`, covering send/receive, queue
-overflow, drop-oldest behaviour, error callback, and close/drain semantics.
+18 tests in `test/powerDatagramChannel.test.js`, covering send/receive, queue
+overflow, drop-oldest behaviour, error callback, and close/final-flush semantics.
+
+`bench/claims.js datagram` adds a deterministic saturation workload that reports
+accepted, dropped, sent, peak queue depth, flush delivery, and directional
+admission/flush latency without making an unstable heap or network-timing claim.
+
+RT-003 also fixes `close()` ordering so queued datagrams get their documented
+final flush attempt after the transport becomes open.
 
 No breaking changes to existing helpers.
 

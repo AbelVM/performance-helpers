@@ -353,6 +353,11 @@ export type PowerObserverOptions = {
     map?: Function | undefined;
     distinct?: boolean | undefined;
     async?: boolean | "microtask" | "macrotask" | undefined;
+    /**
+     * Called when a subscriber throws. A
+     * throwing error handler is swallowed.
+     */
+    onError?: ((err: any) => void) | undefined;
 };
 /**
  * Retry helper options used by `PowerRetry`.

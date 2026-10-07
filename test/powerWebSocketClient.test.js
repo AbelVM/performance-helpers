@@ -487,6 +487,29 @@ describe('PowerWebSocketClient backpressure: Streams tier', () => {
     client.close();
   });
 
+  it('closes and reconnects after an unexpected stream read failure', async () => {
+    vi.useFakeTimers();
+    const { client, created } = mkClient({
+      WebSocketStreamImpl: FakeStream,
+      reconnectBaseMs: 10,
+      reconnectMaxMs: 10,
+    });
+    const closes = [];
+    client.on('close', (event) => closes.push(event));
+    await client.connect();
+
+    created[0].failStream(new Error('stream-dead'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(closes).toHaveLength(1);
+    expect(client.readyState).toBe(3);
+
+    await vi.advanceTimersByTimeAsync(10);
+    expect(created).toHaveLength(2);
+    expect(client.readyState).toBe(1);
+    client.close();
+  });
+
   it('stops reading a stream that ends', async () => {
     // Otherwise a completed stream leaves a pump parked on a reader forever.
     const { client, created } = mkClient({ WebSocketStreamImpl: FakeStream });
@@ -526,6 +549,9 @@ describe('PowerWebSocketClient backpressure: Streams tier', () => {
     const second = created[created.length - 1];
     second.deliver(encodeMessage({ n: 'second' }));
     await vi.waitFor(() => expect(messages).toHaveLength(2));
+
+    created[0].deliver(encodeMessage({ n: 'stale' }));
+    await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(messages.map((m) => m.n)).toEqual(['first', 'second']);
     expect(second.getReaderCalls).toBe(1);

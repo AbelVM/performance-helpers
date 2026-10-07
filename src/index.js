@@ -28,6 +28,7 @@ export {
   toSeries,
   createObservation,
   diffObservation,
+  formatPrometheus,
   METRICS_VERSION,
   OBSERVATION_VERSION,
 } from './helpers/metrics.js';

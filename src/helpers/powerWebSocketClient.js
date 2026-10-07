@@ -612,6 +612,7 @@ export class PowerWebSocketClient {
     };
 
     this._socket = null;
+    this._connectionGeneration = 0;
     /** @type {WritableStreamDefaultWriter|null} */
     this._writer = null;
     /** @type {ReadableStreamDefaultReader|null} */
@@ -765,6 +766,7 @@ export class PowerWebSocketClient {
    */
   close(code = 1000, reason = '') {
     this._closedByUser = true;
+    this._connectionGeneration += 1;
     this._clearTimers();
     if (this._streamReader) {
       // Cancel before the writer: a pending `read()` holds the stream lock, and
@@ -1051,13 +1053,16 @@ export class PowerWebSocketClient {
 
       try {
         this._state = READY_STATE.CONNECTING;
+        const generation = ++this._connectionGeneration;
         if (this._WSStream) {
           // Streams tier, when the platform provides it.
-          this._socket = new this._WSStream(this.url, this.protocols);
-          this._writer = this._socket.writable?.getWriter?.() || null;
-          this._socket.opened
+          const socket = new this._WSStream(this.url, this.protocols);
+          this._socket = socket;
+          this._writer = socket.writable?.getWriter?.() || null;
+          socket.opened
             ?.then(() => {
-              this._handleOpen(done);
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
+              this._handleOpen(done, generation, socket);
               // **The read side, which this tier did not have.** `writable` was
               // acquired two lines up and `message` is wired only in the
               // `WebSocket` branch below, so before this the streams tier
@@ -1074,9 +1079,10 @@ export class PowerWebSocketClient {
               // `readable: null` until the connection opens, and that object is
               // still a stream. Waiting is not optional: acquiring a reader
               // earlier throws.
-              this._startStreamPump();
+              this._startStreamPump(generation, socket);
             })
             .catch((/** @type {any} */ e) => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
               this._handleError(e);
               done(e);
             });
@@ -1085,7 +1091,8 @@ export class PowerWebSocketClient {
           // takes two and discards the rest, so passing it is safe everywhere, and
           // Node's `ws` reads it — which is how `headers`, `perMessageDeflate` and
           // `maxPayload` become reachable without injecting a socket class.
-          this._socket = new this._WS(this.url, this.protocols, this.socketOptions);
+          const socket = new this._WS(this.url, this.protocols, this.socketOptions);
+          this._socket = socket;
           // **A browser delivers every inbound frame as a `Blob` unless this is
           // set**, and this library only ever sends binary — so without it every
           // binary frame the client receives fails to decode, while the
@@ -1133,36 +1140,58 @@ export class PowerWebSocketClient {
           // 10 s by default, and **forever** with `connectTimeoutMs: 0`, where
           // `connect()` is documented to "reject on a failed connect".
           if (typeof this._socket.addEventListener === 'function') {
-            this._socket.addEventListener('open', () => this._handleOpen(done));
+            socket.addEventListener('open', () => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
+              this._handleOpen(done, generation, socket);
+            });
             this._socket.addEventListener('error', (/** @type {any} */ e) => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
               this._handleError(e);
               done(e);
             });
             this._socket.addEventListener('close', (/** @type {any} */ e) => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
               this._handleClose(e);
               done(e);
             });
-            this._socket.addEventListener('message', (/** @type {any} */ e) =>
-              this._handleMessage(e)
+            this._socket.addEventListener(
+              'message',
+              (/** @type {any} */ e) =>
+                generation === this._connectionGeneration &&
+                this._socket === socket &&
+                this._handleMessage(e)
             );
             // The heartbeat's reply. A browser socket has no `ping()`, so
             // `_pingSentAt` is never set and the deadline below can only ever
             // expire — on a browser the heartbeat is inert, and `stats().rtt` is
             // permanently empty.
             if (typeof this._socket.addEventListener === 'function') {
-              this._socket.addEventListener('pong', () => this._handlePong());
+              this._socket.addEventListener('pong', () => {
+                if (generation === this._connectionGeneration && this._socket === socket) {
+                  this._handlePong();
+                }
+              });
             }
           } else {
-            this._socket.onopen = () => this._handleOpen(done);
+            this._socket.onopen = () => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
+              this._handleOpen(done, generation, socket);
+            };
             this._socket.onerror = (/** @type {any} */ e) => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
               this._handleError(e);
               done(e);
             };
             this._socket.onclose = (/** @type {any} */ e) => {
+              if (generation !== this._connectionGeneration || this._socket !== socket) return;
               this._handleClose(e);
               done(e);
             };
-            this._socket.onmessage = (/** @type {any} */ e) => this._handleMessage(e);
+            this._socket.onmessage = (/** @type {any} */ e) => {
+              if (generation === this._connectionGeneration && this._socket === socket) {
+                this._handleMessage(e);
+              }
+            };
           }
         }
       } catch (e) {
@@ -1202,7 +1231,8 @@ export class PowerWebSocketClient {
    * @param {(err?: any) => void} done Settles the pending connect exactly once.
    * @private
    */
-  _handleOpen(done) {
+  _handleOpen(done, generation = this._connectionGeneration, socket = this._socket) {
+    if (generation !== this._connectionGeneration || socket !== this._socket) return;
     if (this._state === READY_STATE.OPEN) {
       done();
       return;
@@ -1248,20 +1278,17 @@ export class PowerWebSocketClient {
    *   A pending `read()` keeps the stream locked; dropping the handle would leak
    *   the lock on every reconnect, and the replacement stream would then fail to
    *   hand out a reader at all.
-   * - **A read failure is reported, not thrown, and deliberately does not open a
-   *   reconnect.** `error` is what the caller already handles, and synthesising a
-   *   close would invent a `close` event and a close code the peer never sent.
-   *   The trade-off is that a stream that fails *after* opening leaves a deaf
-   *   open socket, which is the shape this method exists to remove — so it is a
-   *   real limitation rather than a settled design, and it needs a decision about
-   *   what a fabricated close should look like before it can be changed. Recorded
-   *   in the audit that found it rather than settled here.
+   * - **A read failure is reported and closes the active connection.** The
+   *   synthetic abnormal close lets the existing lifecycle schedule reconnects,
+   *   while the active-reader and user-close guards prevent stale or deliberate
+   *   cancellation from reopening the connection.
    *
    * @private
    * @returns {void}
    */
-  _startStreamPump() {
-    const readable = this._socket?.readable;
+  _startStreamPump(generation = this._connectionGeneration, socket = this._socket) {
+    if (generation !== this._connectionGeneration || socket !== this._socket) return;
+    const readable = socket?.readable;
     if (!readable || typeof readable.getReader !== 'function') return;
     let reader;
     try {
@@ -1281,10 +1308,22 @@ export class PowerWebSocketClient {
           // `Uint8Array` straight through and unwraps a real `MessageEvent` on
           // the socket tier — the same call serves both, which is why the tier
           // does not need its own decode path.
+          if (generation !== this._connectionGeneration || this._socket !== socket) return;
           this._handleMessage(value);
         }
       } catch (e) {
+        if (
+          generation !== this._connectionGeneration ||
+          this._socket !== socket ||
+          this._streamReader !== reader ||
+          this._state !== READY_STATE.OPEN ||
+          this._closedByUser
+        ) {
+          return;
+        }
         this._handleError(e);
+        this._connectionGeneration += 1;
+        this._handleClose({ code: 1006, reason: 'WebSocketStream read failure' });
       }
     })();
   }
