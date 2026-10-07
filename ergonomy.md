@@ -366,20 +366,20 @@ become the only exercised path.
 
 ## Prioritized Plan
 
-| ID    | Work                                                                                | Priority | Effort       | Acceptance check                                                                    |
-| ----- | ----------------------------------------------------------------------------------- | -------- | ------------ | ----------------------------------------------------------------------------------- |
-| E-001 | Fix README/package documentation and asset distribution policy                      | P0       | Small        | Packed tarball contains every promised local target, or links are hosted and tested |
-| E-002 | Maintain the README/meta-guide task chooser                                         | P1       | Small        | New exports and examples remain represented without stale choices                   |
-| E-003 | Add `PowerPool.request(message, options)` or an equivalent unambiguous request path | P1       | Medium       | Response, timeout, transfer, refusal, and correlation tests pass                    |
-| E-004 | Decide and test CJS/ESM support for every public subpath                            | P1       | Small/medium | Resolution matrix matches package documentation                                     |
-| E-005 | Keep cancellation/lifecycle contracts aligned                                       | P1       | Small        | New async/lifecycle helpers document their boundary and cleanup semantics           |
-| E-006 | Add top-of-guide quick paths and generated/checked option summaries                 | P2       | Medium       | Large guides expose minimal safe usage before advanced options                      |
-| E-007 | Export and consumer-test option typedefs; incrementally enable `checkJs`            | P2       | Medium       | `test:types`, `types:drift`, and overload tests stay green                          |
-| E-008 | Execute-test the documented resilience recipes                                      | P2       | Small        | Composition examples run in the existing test harness                               |
-| E-009 | Maintain the runtime capability matrix                                              | P2       | Small        | Each environment-sensitive helper has one documented support status                 |
-| E-010 | Integrate or mark the newest policy primitives experimental                         | P2       | Medium       | Each public policy has one tested end-to-end composition recipe                     |
-| E-011 | Preserve adaptive-concurrency contract                                              | P1       | Small        | README, guides, implementation, and tests continue to agree                         |
-| E-012 | Publish compatibility/deprecation policy                                            | P2       | Small        | Canonical names and removal windows are explicit                                    |
+| ID    | Work                                                                                         | Priority | Effort       | Acceptance check                                                                     |
+| ----- | -------------------------------------------------------------------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------ |
+| E-001 | Done: include README-linked documentation and assets in the package                          | P0       | Small        | Packed tarball contains every promised local target, or links are hosted and tested  |
+| E-002 | Done: maintain the README/meta-guide task chooser                                            | P1       | Small        | New exports and examples remain represented without stale choices                    |
+| E-003 | Done: add `PowerPool.request(message, options)` as the named response path                   | P1       | Medium       | Response, timeout, transfer, refusal, and correlation tests pass                     |
+| E-004 | Done: document and test ESM-only deep subpaths; keep CJS at the root                         | P1       | Small/medium | Resolution matrix matches package documentation                                      |
+| E-005 | Done: keep cancellation/lifecycle contracts aligned                                          | P1       | Small        | New async/lifecycle helpers document their boundary and cleanup semantics            |
+| E-006 | Done: add top-of-guide quick paths to cache and pool guides                                  | P2       | Medium       | Large guides expose minimal safe usage before advanced options                       |
+| E-007 | Partial: consumer option typedef coverage and guards are in place; `checkJs` ratchet remains | P2       | Medium       | Consumer type and option-coverage tests pass; repository-wide `checkJs` debt remains |
+| E-008 | Done: execute-test the documented resilience recipes                                         | P2       | Small        | Composition examples run in the existing test harness                                |
+| E-009 | Done: maintain the runtime capability matrix                                                 | P2       | Small        | Each environment-sensitive helper has one documented support status                  |
+| E-010 | Done: integrate and test the newest policy primitives                                        | P2       | Medium       | Each public policy has one tested end-to-end composition recipe                      |
+| E-011 | Done: preserve adaptive-concurrency contract                                                 | P1       | Small        | README, guides, implementation, and tests continue to agree                          |
+| E-012 | Done: publish compatibility/deprecation policy                                               | P2       | Small        | Canonical names and removal windows are explicit                                     |
 
 ## Explicit Non-Recommendations
 
@@ -421,7 +421,8 @@ needs the package users receive to match the documentation they are shown, a
 shorter route from problem to helper, and a few high-frequency APIs whose
 semantics are currently encoded in long examples. The new metrics, admission,
 partition, retry, and policy work is valuable, but it also raises the cost of
-keeping the public contract coherent. Prioritize E-001, E-003, E-004, E-006,
-E-007, E-010, and E-012; keep E-002, E-005, E-008, E-009, and E-011 as release
-maintenance. That order improves adoption and reduces misuse without
-weakening the library's zero-dependency or high-performance character.
+keeping the public contract coherent. Prioritize E-007; all other plan items
+are complete. The remaining work is the repository-wide `checkJs` ratchet and
+its generated-declaration staging boundary, not another public API change. That
+order improves adoption and reduces misuse without weakening the library's
+zero-dependency or high-performance character.

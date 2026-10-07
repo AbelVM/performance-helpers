@@ -76,7 +76,7 @@ The fractional case is deliberately _not_ an error, unlike a fractional **limit*
 ## Example
 
 ```javascript
-import { PowerGCRA } from '../src/helpers/powerGCRA.js';
+import { PowerGCRA } from 'performance-helpers/powerGCRA';
 
 // 100 requests per second, tolerating a 20-request spike.
 const limiter = new PowerGCRA({ rate: 100, per: 1000, burst: 20 });
@@ -104,7 +104,7 @@ limiter.retryAfter(22); // throws RangeError: no wait could ever admit it
 GCRA implements the same `tryConsume()` / `available()` shape as `PowerThrottle` and `PowerSlidingWindow`, so it composes with `PowerRateLimit`:
 
 ```javascript
-import { PowerGCRA, PowerRateLimit, PowerThrottle } from '../src/index.js';
+import { PowerGCRA, PowerRateLimit, PowerThrottle } from 'performance-helpers';
 
 // A global 200/s ceiling plus a stricter 10/s per-tenant ceiling.
 const limiter = new PowerRateLimit([

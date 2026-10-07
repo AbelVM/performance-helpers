@@ -2,9 +2,7 @@ name: Release
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags: ['v*']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,58 +14,9 @@ permissions:
   contents: read
 
 jobs:
-  # A change that reaches users has to say so, in the changelog, in the PR that
-  # makes it. `changeset status` exits 1 when the package changed with no
-  # changeset. For a change that genuinely needs no release (docs, tests, an
-  # internal refactor), `npx changeset add --empty` is the escape hatch.
-  changeset:
-    name: changeset
-    if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.12'
-          cache: npm
-
-      - run: npm ci
-
-      - run: npx changeset status --since=origin/${{ github.base_ref }}
-
-  # Publishes whatever version is currently in `package.json`. The version cut is
-  # made by a maintainer pushing to `main` (running `changeset version` by hand
-  # or through `npm run release:version`), not by this workflow.
-  #
-  # **This workflow never cuts a version and never opens a pull request, and
-  # that is the fix.** The previous shape had a `version` job that ran
-  # `changesets/action` with `commit`/`title`, which pushes the version commit to
-  # a branch and then creates a "chore: version packages" pull request from it.
-  # This repository does not permit GitHub Actions to create or approve pull
-  # requests, so that job failed on every release: the version was cut in the
-  # working tree and then the job errored before it reached `publish`, which is
-  # the step that actually ships. A job-level `pull-requests: write` permission
-  # cannot fix it — that is a repository setting, not a workflow permission — so
-  # the PR-creating half of the flow is deleted rather than worked around.
-  #
-  # The version PR was never the thing that shipped a release. It was a review
-  # surface for a diff of `package.json` + `CHANGELOG.md` + `types/`; the diff
-  # still lands on `main` in the maintainer's own commit, and this job publishes
-  # from it. `changeset publish` no-ops when the version on npm already matches
-  # `package.json`, so a push to `main` that is not a version cut is a cheap
-  # no-op rather than a failed release.
   publish:
     name: publish
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      # Granted so npm provenance can be switched on, but not switched on yet -
-      # see the note at the bottom of the file.
-      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -83,25 +32,18 @@ jobs:
       # verify gate, which needs eslint, vitest, vite and typescript.
       - run: npm ci
 
-      # `release:publish` is only `changeset publish`. The real gate is
-      # `prepublishOnly` -> `npm run verify`, which npm runs as part of every
-      # publish: lint, the full test suite, the type-debt ratchet, the build, and
-      # a check that the committed `types/` still matches `src/`. Defining it
-      # once there means a maintainer running `npm publish` by hand is protected
-      # by exactly the same gate as this workflow.
-      - uses: changesets/action@v1
-        with:
-          publish: npm run release:publish
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "v$version"
+
+      - name: Verify package
+        run: npm run verify
+
+      - name: Publish package
+        # The explicit verify step above is the package lifecycle gate; avoid
+        # running it a second time through prepublishOnly.
+        run: npm publish --access public --ignore-scripts
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # `actions/setup-node` writes an .npmrc that interpolates
-          # NODE_AUTH_TOKEN, and that is the variable `npm publish` actually
-          # reads. NPM_TOKEN is what the changesets docs use; set both rather
-          # than guess.
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # Provenance: add `NPM_CONFIG_PROVENANCE: true` here to publish signed
-          # build attestations. The `id-token: write` permission above is
-          # already granted for it. Left off until it has been observed working
-          # on this repository, because it fails at the very last step of a
-          # release - after the version PR has already been merged.

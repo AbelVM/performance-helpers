@@ -2986,6 +2986,21 @@ export class PowerPool {
   }
 
   /**
+   * Post a message and wait for its worker response.
+   *
+   * @param {*} message - The message to post to a worker.
+   * @param {(PostMessageOptions & {transfer?: TransferList})=} options - Request options.
+   * @returns {Promise<any>} The response from the worker.
+   */
+  request(message, options) {
+    const { transfer, ...postOptions } = options ?? {};
+    return this.postMessage(message, transfer, {
+      ...postOptions,
+      awaitResponse: true,
+    });
+  }
+
+  /**
    * `postMessage` without the POOL-013 ledger wrapper.
    *
    * Split out so the ledger sees one return value per post rather than the eight

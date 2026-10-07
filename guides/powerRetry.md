@@ -53,7 +53,7 @@ const retryer = new PowerRetry({
 ## Example
 
 ```javascript
-import { PowerRetry, PowerRetryBudget } from '../src/helpers/powerRetry.js';
+import { PowerRetry, PowerRetryBudget } from 'performance-helpers/powerRetry';
 
 // Instance-based usage (preferred when reusing options)
 const retryer = new PowerRetry({

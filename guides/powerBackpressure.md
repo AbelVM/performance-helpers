@@ -126,8 +126,8 @@ model and the two rejected alternatives are in
 ## Example
 
 ```javascript
-import { PowerBackpressure } from '../src/helpers/powerBackpressure.js';
-import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerBackpressure } from 'performance-helpers/powerBackpressure';
+import { PowerPool } from 'performance-helpers/powerPool';
 
 const pool = new PowerPool('./worker.js', { size: 2, maxSize: 4 });
 const backpressure = new PowerBackpressure({
@@ -165,8 +165,8 @@ permits. Applications can use it as a local signal for coordinating another
 bounded helper without introducing a global controller.
 
 ```javascript
-import { PowerBackpressure } from '../src/helpers/powerBackpressure.js';
-import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerBackpressure } from 'performance-helpers/powerBackpressure';
+import { PowerPool } from 'performance-helpers/powerPool';
 
 const pool = new PowerPool(workerFactory, { maxSize: 4 });
 const backpressure = new PowerBackpressure({ capacity: 8, queueCapacity: 32 });

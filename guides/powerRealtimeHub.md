@@ -20,7 +20,7 @@ This hub gives every subscription its own bounded queue and a _declared_ policy 
 The hub knows nothing about WebSockets. You supply a `send(subscriber, frame)` adapter, so it works with a `WebSocket`, a Node `ws` socket, a `MessagePort`, a stream writer, or a test spy.
 
 ```javascript
-import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
+import { PowerRealtimeHub } from 'performance-helpers/powerRealtimeHub';
 
 const hub = new PowerRealtimeHub({
   send: (sub, frame) => sub.socket.send(frame),

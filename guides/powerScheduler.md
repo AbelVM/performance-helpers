@@ -25,7 +25,7 @@ Use `PowerScheduler` when you need a shared `schedule()`, `flush()`, and `cancel
 ## Example
 
 ```js
-import { PowerScheduler } from '../src/helpers/powerScheduler.js';
+import { PowerScheduler } from 'performance-helpers/powerScheduler';
 
 const scheduler = new PowerScheduler(
   () => {

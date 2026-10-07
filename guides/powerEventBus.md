@@ -54,8 +54,8 @@ string event name, which is the existing runtime behaviour.
 ## Example
 
 ```javascript
-import { PowerEventBus } from '../src/helpers/powerEventBus.js';
-import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerEventBus } from 'performance-helpers/powerEventBus';
+import { PowerPool } from 'performance-helpers/powerPool';
 
 // Use PowerEventBus to coordinate cross-cutting concerns (metrics, shutdown)
 const bus = new PowerEventBus();
@@ -155,7 +155,7 @@ for the two platform properties that make this counter-intuitive.
 ## Real-world: async listeners with bounded concurrency
 
 ```javascript
-import { PowerEventBus } from '../src/helpers/powerEventBus.js';
+import { PowerEventBus } from 'performance-helpers/powerEventBus';
 
 const bus = new PowerEventBus();
 

@@ -21,7 +21,7 @@ optional `weight` so one task can reserve more than one slot of its partition.
 ```javascript
 const bulkhead = new PowerBulkhead({ maxConcurrency: 10 });
 
-await bulkhead.run('tenant-7', heavyJob, { weight: 5 });
+await bulkhead.run(heavyJob, { partitionKey: 'tenant-7', weight: 5 });
 // five of that partition's ten slots are held while `heavyJob` runs
 ```
 
@@ -37,8 +37,7 @@ await bulkhead.run('tenant-7', heavyJob, { weight: 5 });
   touches nothing in the other three, which is the whole point of partitioning.
 - **`queueCapacity` still counts tasks, not slots.** A partition's queue is
   bounded the same way whether the waiting tasks weigh 1 or 5.
-- Defaults to `1`, so `run(key, fn)` and `run(key, fn, {})` behave exactly as
-  before.
+- Defaults to `1`, so `run(task, { partitionKey })` behaves exactly as before.
 
 ## API
 
@@ -57,7 +56,7 @@ await bulkhead.run('tenant-7', heavyJob, { weight: 5 });
 ## Example
 
 ```js
-import { PowerBulkhead } from '../src/helpers/powerBulkhead.js';
+import { PowerBulkhead } from 'performance-helpers/powerBulkhead';
 
 const bulkhead = new PowerBulkhead({
   partitions: 3,

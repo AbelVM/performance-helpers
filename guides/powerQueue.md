@@ -105,7 +105,7 @@ finished a burst is the one that knows when to pay.
 ## Example
 
 ```javascript
-import { PowerQueue } from '../src/helpers/powerQueue.js';
+import { PowerQueue } from 'performance-helpers/powerQueue';
 
 const q = new PowerQueue(16);
 
@@ -143,8 +143,8 @@ for (const item of q.drain()) {
 ## Real-world Example — buffering for worker dispatch
 
 ```javascript
-import { PowerQueue } from '../src/helpers/powerQueue.js';
-import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerQueue } from 'performance-helpers/powerQueue';
+import { PowerPool } from 'performance-helpers/powerPool';
 
 // Use PowerQueue as a lightweight buffer before dispatching to a worker pool
 const q = new PowerQueue(64);

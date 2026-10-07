@@ -138,7 +138,7 @@ after many cancellations does not carry the accounting forward.
 ## Example
 
 ```js
-import { PowerPermitGate } from '../src/helpers/powerPermitGate.js';
+import { PowerPermitGate } from 'performance-helpers/powerPermitGate';
 
 const gate = new PowerPermitGate({ capacity: 2, queueCapacity: 10 });
 

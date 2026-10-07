@@ -14,7 +14,7 @@ Use `PowerDeadline` when you want to wrap a promise-producing operation with:
 `PowerDeadline` exposes both a static convenience API and an instance-based API:
 
 ```javascript
-import { PowerDeadline } from '../src/helpers/powerDeadline.js';
+import { PowerDeadline } from 'performance-helpers/powerDeadline';
 
 const result = await PowerDeadline.run(
   async () => {
@@ -64,7 +64,7 @@ const data = await deadline.run(() => fetch('/api/data').then((r) => r.json()));
 ## Example
 
 ```javascript
-import { PowerDeadline } from '../src/helpers/powerDeadline.js';
+import { PowerDeadline } from 'performance-helpers/powerDeadline';
 
 const controller = new AbortController();
 const deadline = new PowerDeadline({

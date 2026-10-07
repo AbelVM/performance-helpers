@@ -65,8 +65,8 @@ A fractional count floors rather than throwing, unlike a fractional **option**: 
 ## Example
 
 ```javascript
-import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
-import { PowerPool } from '../src/index.js';
+import { PowerSlidingWindow } from 'performance-helpers/powerSlidingWindow';
+import { PowerPool } from 'performance-helpers';
 
 const limiter = new PowerSlidingWindow({ capacity: 5, windowMs: 1000 });
 if (limiter.tryConsume()) {

@@ -13,6 +13,9 @@ The library is organized by the boundary you need to control: cached data,
 parallel work, rate and concurrency limits, realtime transports, and runtime
 observability.
 
+The package root supports both ESM and CommonJS (`import` and `require`). Deep
+helper subpaths are ESM-only; use the root entry point when CommonJS is needed.
+
 > ## ⚠️ Upgrading to 2.0 — the worker wire format changed
 >
 > `PowerPool` now posts a versioned [`PowerMessageCodec`](guides/powerMessageCodec.md) frame
@@ -37,6 +40,20 @@ observability.
 > [Migrating to the framed protocol](guides/powerPool.md#migrating-to-the-framed-protocol).
 >
 > Nothing else in the public API breaks.
+
+## Compatibility policy
+
+- Names documented in the root API and helper guides are canonical. The
+  project does not add aliases merely to provide a second spelling.
+- A deprecation is announced in the changelog and guide where it applies, and
+  remains available until the next major release at minimum. Removal is listed
+  in the release notes before it happens.
+- `messageCodec: 'legacy'` is the explicit 1.x wire-format compatibility path
+  for the 2.0 migration. It remains supported throughout 2.x; new workers
+  should use the framed or negotiated protocol.
+- Compatibility branches stay out of disabled hot paths where possible. A
+  compatibility option that is off by default should not add per-call work to
+  the canonical path.
 
 ## Caching
 

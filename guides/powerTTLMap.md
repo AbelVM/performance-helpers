@@ -81,7 +81,7 @@ so the cost of the fix is one boolean field and a predictable branch.
 ## Example
 
 ```javascript
-import { PowerTTLMap } from '../src/helpers/powerTTLMap.js';
+import { PowerTTLMap } from 'performance-helpers/powerTTLMap';
 
 // Example — manage expirable object URLs for served images
 

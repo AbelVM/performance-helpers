@@ -46,7 +46,7 @@ semaphore for a while; use `dispose()` when you are finished with it.
 ## Example
 
 ```javascript
-import { PowerSemaphore } from '../src/helpers/powerSemaphore.js';
+import { PowerSemaphore } from 'performance-helpers/powerSemaphore';
 
 const semaphore = new PowerSemaphore(3);
 
@@ -66,7 +66,7 @@ await Promise.all(pending.map((fn) => fn()));
 Use `PowerSemaphore` when you are making many parallel I/O requests and need to avoid overwhelming a service or saturating local resources.
 
 ```javascript
-import { PowerSemaphore } from '../src/helpers/powerSemaphore.js';
+import { PowerSemaphore } from 'performance-helpers/powerSemaphore';
 
 const gate = new PowerSemaphore(5);
 

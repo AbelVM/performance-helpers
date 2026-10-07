@@ -54,7 +54,7 @@ So the two things are split by what they actually are:
 ## Example
 
 ```javascript
-import { encodeMessage, decodeMessage } from '../src/helpers/powerMessageCodec.js';
+import { encodeMessage, decodeMessage } from 'performance-helpers/powerMessageCodec';
 
 // Structured data over any byte-stream transport.
 const socket = new WebSocket(url);
@@ -73,7 +73,7 @@ socket.send(encodeMessage(bytes)); // codec: 'raw'
 On a `MessagePort` or `Worker`, skip the framing:
 
 ```javascript
-import { encodeNativeEnvelope } from '../src/helpers/powerMessageCodec.js';
+import { encodeNativeEnvelope } from 'performance-helpers/powerMessageCodec';
 
 port.postMessage(encodeNativeEnvelope({ map: new Map(), bin: new Uint8Array(1024) }));
 ```
@@ -138,7 +138,7 @@ switch.
 
 ```javascript
 // Only when you need the caller's buffer left intact:
-import { encodeNative } from '../src/helpers/powerMessageCodec.js';
+import { encodeNative } from 'performance-helpers/powerMessageCodec';
 const { message, transfer } = encodeNative(payload);
 port.postMessage(message, transfer); // transfers the *clone's* buffers
 ```

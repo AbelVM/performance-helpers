@@ -5,7 +5,7 @@ One worker abstraction that works the same in Node, the browser and a web worker
 `WorkerAgnostic` resolves the environment, then hands back a worker-like object no matter where you are. It exists so that code which needs a worker — [`PowerPool`](powerPool.md), [`PowerChunker`](powerChunking.md), your own — does not need a runtime branch.
 
 ```javascript
-import WorkerAgnostic, { detectEnv, preloadNode } from '../src/helpers/WorkerAgnostic.js';
+import WorkerAgnostic, { detectEnv, preloadNode } from 'performance-helpers/WorkerAgnostic';
 
 const worker = await WorkerAgnostic.create(() => new MyWorker());
 worker.postMessage({ hello: true });

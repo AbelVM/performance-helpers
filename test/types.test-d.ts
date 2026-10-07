@@ -53,6 +53,17 @@ import {
   normalizeError,
   formatErrorObj,
 } from '../types/index.js';
+import type { PostMessageOptions, PowerPoolOptions } from '../types/helpers/powerPool.js';
+
+const typedPoolOptions: PowerPoolOptions = {
+  size: 2,
+  messageCodec: 'framed',
+};
+const typedRequestOptions: PostMessageOptions & { transfer: ArrayBuffer[] } = {
+  timeout: 1000,
+  transfer: [new ArrayBuffer(8)],
+};
+void [typedPoolOptions, typedRequestOptions];
 
 // --- PowerCache: options, the new policy, and the onError channel ---------
 const cache = new PowerCache({
@@ -135,10 +146,11 @@ const pool = new PowerPool(() => new MessageChannel().port1, {
 });
 
 const dispatched: boolean | Promise<unknown> = pool.postMessage({ hello: 'world' });
+const requested: Promise<unknown> = pool.request({ hello: 'world' }, typedRequestOptions);
 pool.broadcast({ hello: 'world' });
 const poolStats: Record<string, unknown> = pool.getStats() as unknown as Record<string, unknown>;
 pool.shutdown();
-void [dispatched, poolStats];
+void [dispatched, requested, poolStats];
 
 // --- Limiters -------------------------------------------------------------
 const throttle = new PowerThrottle({ capacity: 10, refillRate: 10 });

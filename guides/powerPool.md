@@ -2,6 +2,19 @@
 
 A small, dependency-free worker pool that wraps underlying Worker instances. It encodes plain object messages to transferable `Uint8Array` for efficient transfer, decodes incoming binary messages back to objects, and provides queuing / grow / reaper behavior.
 
+## Quick paths
+
+```js
+const pool = new PowerPool(workerSource, { size: 2, maxSize: 4 });
+
+const result = await pool.request({ task: 'thumbnail', imageId: 42 }, { timeout: 5000 });
+```
+
+Use `request(message, options)` when a response is required. Use
+`postMessage(message, transfer, options)` for fire-and-forget work; its
+positional transfer argument is retained for compatibility. Call
+`await pool.drain()` before shutdown when queued work must finish.
+
 ## Constructor
 
 | option                                                  |                                                type |                                        default | description                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -98,6 +111,11 @@ that has not opted in, which is the first thing to check if a key appears to be
 ignored.
 
 ## API
+
+- `request(message, options)` — Send one message and await its worker response.
+  It accepts the `postMessage` options plus `transfer`, and always returns a
+  `Promise`. Use `postMessage` for fire-and-forget work or when the positional
+  transfer-list API is preferable.
 
 - `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool encodes them into a transferable `Uint8Array` automatically, wrapped in a [`PowerMessageCodec`](powerMessageCodec.md) envelope. **See [Migrating to the framed protocol](#migrating-to-the-framed-protocol) — this changed in 2.0 and requires a one-line edit in every worker.**
 
@@ -367,7 +385,7 @@ This example shows a common pattern: a pool of workers that produce thumbnail im
 
 ```javascript
 import ImageWorker from './image-worker.js?worker';
-import { PowerPool } from '../src/helpers/powerPool.js';
+import { PowerPool } from 'performance-helpers/powerPool';
 
 // Create a small pool tuned for CPU-bound thumbnailing
 const pool = new PowerPool(ImageWorker, { size: 2, maxSize: 4, idleTimeout: 30_000 });

@@ -5524,6 +5524,13 @@ Internal only: `utils/neutralise.js` is not exported, so the public surface is u
 Mutation-checked — reverting to plain assignment fails both the idempotence and the enumerability
 tests.
 
+### Ergonomics, package entry points, and release publishing
+
+- The package now includes the guides, examples, and assets linked from the README. Guide snippets use the published `performance-helpers` root and deep ESM entry points, so copied examples do not depend on the repository's `src/` layout.
+- `PowerPool.request(message, options)` is the named request path for response, timeout, transfer, refusal, and correlation options. Its consumer-facing option typedefs and generated declaration are covered by type tests and option-coverage checks.
+- The README and meta-guide now cover root ESM/CommonJS support, ESM-only deep helpers, lifecycle and cancellation boundaries, runtime capabilities, compatibility policy, and quick paths for high-frequency helpers. The ergonomics audit records the remaining repository-wide `checkJs` debt rather than claiming it is complete.
+- The release workflow now runs for version tags, verifies that the tag matches `package.json`, runs the full verification gate, and publishes the package directly.
+
 ## Folded in from the remaining individual changesets
 
 **Folded in from the remaining individual changesets.** `CHANGELOG.md` records

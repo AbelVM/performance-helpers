@@ -277,6 +277,11 @@ describe('API surface', () => {
         `subpath ${sub} points at a missing or empty types file`
       ).toBeGreaterThan(0);
     }
+
+    expect(p.exports['.'].require).toBe('./dist/performance-helpers.cjs');
+    for (const sub of subpaths.filter((name) => name !== '.')) {
+      expect(p.exports[sub].require, `deep subpath ${sub} is ESM-only`).toBeUndefined();
+    }
   });
 
   it('every non-root subpath points at a file that exists', () => {

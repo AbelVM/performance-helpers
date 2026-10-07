@@ -2,6 +2,20 @@
 
 An in-memory, memory-efficient LRU cache with TTL, weighted eviction and an optional reusable node pool. Includes a small `PowerMemoizer` wrapper built on top of `PowerCache` for memoizing synchronous or Promise-returning functions.
 
+## Quick paths
+
+```js
+const cache = new PowerCache({ maxEntries: 10_000, defaultTTL: 60_000 });
+
+cache.set(userId, user);
+const current = cache.get(userId);
+```
+
+Use `getOrSet(key, factory)` for local computation and `getOrSetAsync(key,
+factory)` for asynchronous work; concurrent callers for the same key share the
+in-flight Promise. Add `maxWeight` and `weightFn` when entry size matters more
+than entry count.
+
 ## PowerCache
 
 | option                 |                         type |                                         default | description                                                                                                                                                                                                                                                                                    |
@@ -294,7 +308,7 @@ was here rather than in the code: a reader who believed it would be surprised to
 find `onExpire` firing from a `has()`.
 
 ```javascript
-import { PowerCache } from '../src/helpers/powerCache.js';
+import { PowerCache } from 'performance-helpers/powerCache';
 
 const cache = new PowerCache({ defaultTTL: 1 });
 cache.set('a', 1, { ttl: 1 });
@@ -350,7 +364,7 @@ If you need LRU order, use `Array.from(c.entries('LRU'))` or the `entries('LRU')
 ### Example — caching API responses with async factory
 
 ```javascript
-import { PowerCache } from '../src/helpers/powerCache.js';
+import { PowerCache } from 'performance-helpers/powerCache';
 
 // Cache user profiles for 30s to avoid repeated HTTP calls
 const cache = new PowerCache({ maxEntries: 5000, defaultTTL: 30_000 });
@@ -883,7 +897,7 @@ For hot paths where most calls use simple scalar arguments (ids, numbers, short 
 use the built-in `simpleArgsKey` helper as a faster alternative to `JSON.stringify`:
 
 ```javascript
-import { PowerMemoizer, simpleArgsKey } from '../src/helpers/powerCache.js';
+import { PowerMemoizer, simpleArgsKey } from 'performance-helpers/powerCache';
 
 const fetchUserFn = async (id) => fetch(`/users/${id}`).then((r) => r.json());
 // use the fast resolver for simple scalar args
@@ -1017,7 +1031,7 @@ new PowerTimedCache(ttl, { maxEntries, interval, maxCleanupPerTick, cacheOptions
 ### Example
 
 ```javascript
-import { PowerTimedCache } from '../src/helpers/powerCache.js';
+import { PowerTimedCache } from 'performance-helpers/powerCache';
 
 // entries expire after 60s; cleanup runs on the default cadence
 const tc = new PowerTimedCache(60_000, { maxEntries: 1000 });

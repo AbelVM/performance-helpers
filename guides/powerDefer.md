@@ -4,9 +4,9 @@ A minimal deferred-promise primitive. Useful for coordination patterns where a p
 
 ## Constructor
 
-| option | type | default | description |
-|---|---:|---:|---|
-| `new PowerDefer()` | — | — | Returns an object with the properties `promise`, `resolve(value)`, `reject(err)`, and `settled` (boolean). |
+| option             | type | default | description                                                                                                |
+| ------------------ | ---: | ------: | ---------------------------------------------------------------------------------------------------------- |
+| `new PowerDefer()` |    — |       — | Returns an object with the properties `promise`, `resolve(value)`, `reject(err)`, and `settled` (boolean). |
 
 ## API
 
@@ -25,7 +25,7 @@ A minimal deferred-promise primitive. Useful for coordination patterns where a p
 ## Example
 
 ```javascript
-import { PowerDefer } from '../src/helpers/powerDefer.js';
+import { PowerDefer } from 'performance-helpers/powerDefer';
 
 // Example — wait for a worker/bootstrap handshake
 const ready = new PowerDefer();

@@ -27,7 +27,7 @@ Lightweight reactive value container. Useful for exposing small pieces of state 
 ## Example
 
 ```javascript
-import { PowerObserver } from '../src/helpers/powerObserver.js';
+import { PowerObserver } from 'performance-helpers/powerObserver';
 
 // Example — live concurrent-requests gauge for a metrics exporter
 

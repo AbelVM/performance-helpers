@@ -714,6 +714,16 @@ export class PowerPool {
      */
     postMessage(message: any, transfer?: Transferable[] | undefined, options?: PostMessageOptions | undefined): boolean | Promise<any>;
     /**
+     * Post a message and wait for its worker response.
+     *
+     * @param {*} message - The message to post to a worker.
+     * @param {(PostMessageOptions & {transfer?: TransferList})=} options - Request options.
+     * @returns {Promise<any>} The response from the worker.
+     */
+    request(message: any, options?: (PostMessageOptions & {
+        transfer?: TransferList;
+    }) | undefined): Promise<any>;
+    /**
      * `postMessage` without the POOL-013 ledger wrapper.
      *
      * Split out so the ledger sees one return value per post rather than the eight

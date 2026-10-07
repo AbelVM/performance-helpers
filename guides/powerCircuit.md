@@ -51,11 +51,11 @@ The draw is **equal jitter** — uniformly from `[delay / 2, delay]` — rather 
 ## Example
 
 ```javascript
-import { PowerCircuit } from '../src/helpers/powerCircuit.js';
+import { PowerCircuit } from 'performance-helpers/powerCircuit';
 
 // Real-world example: protect an HTTP fetch to a flaky external API.
 // Provide observability hooks: callback and an optional event bus.
-import { PowerEventBus } from '../src/helpers/powerEventBus.js';
+import { PowerEventBus } from 'performance-helpers/powerEventBus';
 const bus = new PowerEventBus();
 
 const cb = new PowerCircuit({

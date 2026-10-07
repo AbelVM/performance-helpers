@@ -37,7 +37,7 @@ A small token-bucket rate limiter useful for pacing work (API calls, renders, or
 ## Example
 
 ```javascript
-import { PowerThrottle } from '../src/helpers/powerThrottle.js';
+import { PowerThrottle } from 'performance-helpers/powerThrottle';
 
 const limiter = new PowerThrottle({ capacity: 5, refillRate: 1 }); // burst 5, 1 token/sec
 const pending = [];

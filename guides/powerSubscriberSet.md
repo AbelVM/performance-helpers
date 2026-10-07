@@ -46,7 +46,7 @@ you are finished with it.
 ## Example
 
 ```js
-import { PowerSubscriberSet } from '../src/helpers/powerSubscriberSet.js';
+import { PowerSubscriberSet } from 'performance-helpers/powerSubscriberSet';
 
 const subs = new PowerSubscriberSet({ weak: true, maxListeners: 10 });
 

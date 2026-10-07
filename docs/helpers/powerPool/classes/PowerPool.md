@@ -1212,6 +1212,34 @@ Remove the last worker from the pool and terminate it.
 
 ***
 
+### request()
+
+> **request**(`message`, `options`): `Promise`\<`any`\>
+
+Post a message and wait for its worker response.
+
+#### Parameters
+
+##### message
+
+`any`
+
+The message to post to a worker.
+
+##### options
+
+`PostMessageOptions` & `object` \| `undefined`
+
+Request options.
+
+#### Returns
+
+`Promise`\<`any`\>
+
+The response from the worker.
+
+***
+
 ### resize()
 
 > **resize**(`n`): `void`

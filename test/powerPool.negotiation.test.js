@@ -104,6 +104,17 @@ describe("messageCodec: 'negotiated' upgrades a worker that advertises, and only
     pool.shutdown();
   });
 
+  it('request returns the response and forwards request options', async () => {
+    const worker = new NegotiationWorker({ advertise: false });
+    const pool = poolFor(() => worker);
+
+    const res = await pool.request({ task: 'compute', n: 7 }, { correlationId: 'request-1' });
+
+    expect(res.echo.task).toBe('compute');
+    expect(res.echo.correlationId).toBe('request-1');
+    pool.shutdown();
+  });
+
   it('a worker that does not advertise still receives the framed carrier', async () => {
     const worker = new NegotiationWorker({ advertise: false });
     const pool = poolFor(() => worker);

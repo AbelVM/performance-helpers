@@ -15,7 +15,7 @@ Returns: `Uint8Array` — UTF-8 encoded bytes. Throws if no encoder is available
 Example
 
 ```javascript
-import { o2u8, u82o } from '../src/helpers/powerBuffer.js';
+import { o2u8, u82o } from 'performance-helpers/powerBuffer';
 
 // encode a JSON payload to transferable Uint8Array and post to a worker
 const payload = { id: 42, name: 'big-image', meta: { size: 1024 * 1024 } };
@@ -35,7 +35,7 @@ Returns: parsed JS value. Throws `TypeError` for unsupported input types or malf
 Example — worker receiver
 
 ```javascript
-import { u82o } from '../src/helpers/powerBuffer.js';
+import { u82o } from 'performance-helpers/powerBuffer';
 
 self.onmessage = (e) => {
   // decode transferable Uint8Array back to JS value

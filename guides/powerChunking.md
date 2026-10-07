@@ -30,8 +30,8 @@ boilerplate yourself.
 ## Example
 
 ```javascript
-import { PowerChunker } from '../src/helpers/powerChunking.js';
-import { PowerLogger } from '../src/helpers/powerLogger.js';
+import { PowerChunker } from 'performance-helpers/powerChunking';
+import { PowerLogger } from 'performance-helpers/powerLogger';
 
 const data = Array.from({ length: 1000 }, (_, i) => ({ id: i, payload: `item-${i}` }));
 function process(item) {
@@ -71,7 +71,7 @@ pool.terminate();
 ## Real-world Example — bulk CSV processing
 
 ```javascript
-import { PowerChunker } from '../src/helpers/powerChunking.js';
+import { PowerChunker } from 'performance-helpers/powerChunking';
 
 // `readCsvRows` is a user helper that yields/returns many parsed rows.
 const rows = await readCsvRows('large-export.csv');

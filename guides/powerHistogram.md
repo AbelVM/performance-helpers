@@ -49,7 +49,7 @@ That buys three things:
 ## Example
 
 ```javascript
-import { PowerHistogram } from '../src/helpers/powerHistogram.js';
+import { PowerHistogram } from 'performance-helpers/powerHistogram';
 
 const histogram = new PowerHistogram({ relativeAccuracy: 0.01 });
 
@@ -69,7 +69,7 @@ console.log('p99', histogram.percentile(99));
 Ideal for in-process telemetry inside worker pools, request handlers, or batch processors. The sketch is `O(1)` per record and one `Math.log`.
 
 ```javascript
-import { PowerHistogram } from '../src/helpers/powerHistogram.js';
+import { PowerHistogram } from 'performance-helpers/powerHistogram';
 
 const latency = new PowerHistogram({ relativeAccuracy: 0.01 });
 
@@ -85,7 +85,7 @@ async function handleRequest(req) {
 Because merges are exact, keep one sketch per worker and fold them together for reporting. This is not possible with rank-error sketches without loss.
 
 ```javascript
-import { PowerPool, PowerHistogram } from '../src/index.js';
+import { PowerPool, PowerHistogram } from 'performance-helpers';
 
 const pool = new PowerPool(workerSource, { size: 4 });
 const perWorker = new Map();

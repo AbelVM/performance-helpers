@@ -119,7 +119,7 @@ reports nothing at all.
 ## Example
 
 ```javascript
-import { PowerLogger } from '../src/helpers/powerLogger.js';
+import { PowerLogger } from 'performance-helpers/powerLogger';
 
 const logger = new PowerLogger(3, {
   format: 'json',
@@ -168,7 +168,7 @@ async function handleRequest(req, res) {
 You can customize the JSON payload shape by passing a `formatter` function in `options`. The formatter may return an object (which will be JSON.stringified) or a string which will be emitted as-is. Example:
 
 ```javascript
-import { PowerLogger as PowerLoggerJSON } from '../src/helpers/powerLogger.js';
+import { PowerLogger as PowerLoggerJSON } from 'performance-helpers/powerLogger';
 
 const logger = new PowerLoggerJSON(3, {
   format: 'json',
@@ -199,7 +199,7 @@ sLogger.log('boot');
 - Pass lazy functions to debug methods when computing the string is expensive; they will only be evaluated when the message will actually be emitted.
 
 ```javascript
-import { PowerLogger as PowerLoggerLite } from '../src/helpers/powerLogger.js';
+import { PowerLogger as PowerLoggerLite } from 'performance-helpers/powerLogger';
 
 const logger = new PowerLoggerLite(2);
 logger.warn(() => `Expensive message: ${compute()}`);

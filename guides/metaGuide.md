@@ -73,18 +73,17 @@ admission over time. They are not interchangeable.
 | Stop retries amplifying an outage                                      | `PowerRetry` with a shared `PowerRetryBudget`      | `PowerCircuit`, `PowerDeadline`                            | `maxAttempts` alone, which caps nothing across traffic                  |
 | Cut a p99 far above your p50                                           | `PowerRetry` with `hedgeDelay`                     | `PowerDeadline`                                            | raising `maxAttempts`, which costs retries, not tail latency            |
 | Put a hard time budget on work                                         | `PowerDeadline`                                    | `PowerRetry`, `PowerCircuit`                               | ad hoc `Promise.race` everywhere                                        |
-| Broadcast events across components                                     | `PowerEventBus`                                    | `PowerObserver`, `PowerLogger`                             | `PowerSubscriberSet` unless you are building infrastructure             |
+| Expose a single changing value reactively                              | `PowerObserver`                                    | `PowerEventBus`                                            | a full event bus                                                        |
+| Coordinate callbacks or multi-step async completion                    | `PowerDefer`, `PowerLatch`                         | `PowerLogger`                                              | hand-rolled promise state                                               |
+| Batch near-synchronous calls into one flush                            | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                                      |
+| Run something on a fixed cadence without drift                         | `PowerCron`                                        | `PowerScheduler` (one flush per turn, not a cadence)       | `setInterval`, which drifts and queues                                  |
+| Tell whether a latency regression is yours or the host's               | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site            |
 
 `PowerEventBus` is **intra-process**. It is not a cross-tab or cross-worker bus,
 and reaching for a platform broadcast primitive to extend it is slower, unbounded,
 and — written the obvious way — an infinite message loop. `guides/powerEventBus.md`
 has the measurements; `guides/troubleshooting.md` has the two platform properties
 that make it counter-intuitive.
-| Expose a single changing value reactively | `PowerObserver` | `PowerEventBus` | a full event bus |
-| Coordinate callbacks or multi-step async completion | `PowerDefer`, `PowerLatch` | `PowerLogger` | hand-rolled promise state |
-| Batch near-synchronous calls into one flush | `PowerBatch` | `PowerScheduler`, `PowerQueue` | `PowerQueue` alone |
-| Run something on a fixed cadence without drift | `PowerCron` | `PowerScheduler` (one flush per turn, not a cadence) | `setInterval`, which drifts and queues |
-| Tell whether a latency regression is yours or the host's | `PowerEventLoopMonitor` | `PowerHistogram`, `PowerLogger` | adding `performance.now()` deltas around the whole call site |
 
 ---
 
@@ -187,6 +186,24 @@ the call. Cancellation has different effects at different boundaries:
 Helpers do not discover a process-wide signal, convert cancellation into a
 retryable failure, or promise to interrupt work that the underlying runtime
 cannot abort.
+
+### Lifecycle contract
+
+Use the operation that matches the resource boundary. `dispose()` releases
+what the helper attached; it does not automatically terminate resources owned
+by the caller.
+
+| Helper                 | Owns or attaches                                 | Teardown                                                                 |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------ |
+| `PowerPool`            | Workers, queues, pending responses, and timers   | `shutdown()` / `terminate()` clears state and rejects pending responses. |
+| `WorkerAgnostic`       | Event handlers attached to a caller-owned worker | `dispose()` detaches handlers; the worker remains running.               |
+| `PowerMessagePort`     | Port listeners and the wrapped message port      | `close()` closes the port; `dispose()` is idempotent cleanup.            |
+| `PowerRealtimeHub`     | Subscriber state and pending outbound batches    | `close()` is immediate; `asyncDispose` flushes, then closes.             |
+| `PowerWebSocketClient` | Connection readers, writers, and reconnect work  | `close()` cancels transport work and prevents reconnect.                 |
+
+Helpers that own workers, transports, timers, or listener registries should be
+disposed during application teardown. A state reset is not timer cancellation,
+and an adapter must not terminate a resource that its caller owns.
 
 ### Runtime capability matrix
 

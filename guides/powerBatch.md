@@ -50,7 +50,7 @@ An already-aborted signal rejects without flushing at all.
 
 ```javascript
 // Realistic example — batching DB upserts with connection pooling
-import { PowerBatch } from '../src/helpers/powerBatch.js';
+import { PowerBatch } from 'performance-helpers/powerBatch';
 import { getDbClient } from './db'; // user helper returning a pooled client
 
 const writer = new PowerBatch(
