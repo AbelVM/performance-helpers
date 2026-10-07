@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { execFile } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const execFileAsync = promisify(execFile);
 
@@ -35,7 +37,8 @@ const execFileAsync = promisify(execFile);
  * assertion is on that timeout elapsing.
  */
 
-const CHUNKER = '/data/projects/performance-helpers/src/helpers/powerChunking.js';
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const CHUNKER = pathToFileURL(resolve(ROOT, 'src/helpers/powerChunking.js')).href;
 
 /** Run a snippet in a child, resolving to `{ ok, timedOut, stdout }`. */
 async function probeWithTimeout(source, timeoutMs = 4000) {
@@ -45,7 +48,7 @@ async function probeWithTimeout(source, timeoutMs = 4000) {
       ['--input-type=module', '-e', source],
       {
         timeout: timeoutMs,
-        cwd: '/data/projects/performance-helpers',
+        cwd: ROOT,
       }
     );
     return { ok: true, timedOut: false, stdout };
