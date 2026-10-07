@@ -1,8 +1,8 @@
-[**performance-helpers**](../../../README.md)
+[**performance-helpers**](../../../../README.md)
 
 ***
 
-[performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerTimedCache
+[performance-helpers](../../../../README.md) / [helpers/cache/timedCache](../README.md) / PowerTimedCache
 
 # Class: PowerTimedCache
 
@@ -51,7 +51,7 @@ Default TTL in milliseconds for entries.
 
 ### cache
 
-> **cache**: [`PowerCache`](PowerCache.md)
+> **cache**: [`PowerCache`](../../core/classes/PowerCache.md)
 
 ## Accessors
 
@@ -370,9 +370,18 @@ method is written out per class.
 
 ##### options?
 
-###### ignoreExpiry?
+`allowStale`
+  returns an expired entry and refreshes in the background, bounded by
+  `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
+  serves a value of any age.
+
+###### allowStale?
 
 `boolean`
+
+###### staleTtl?
+
+`number`
 
 #### Returns
 

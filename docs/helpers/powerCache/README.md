@@ -6,12 +6,26 @@
 
 # helpers/powerCache
 
-## Classes
+## References
 
-- [PowerCache](classes/PowerCache.md)
-- [PowerMemoizer](classes/PowerMemoizer.md)
-- [PowerTimedCache](classes/PowerTimedCache.md)
+### PowerCache
 
-## Functions
+Re-exports [PowerCache](../cache/core/classes/PowerCache.md)
 
-- [simpleArgsKey](functions/simpleArgsKey.md)
+***
+
+### PowerMemoizer
+
+Re-exports [PowerMemoizer](../cache/memoizer/classes/PowerMemoizer.md)
+
+***
+
+### PowerTimedCache
+
+Re-exports [PowerTimedCache](../cache/timedCache/classes/PowerTimedCache.md)
+
+***
+
+### simpleArgsKey
+
+Re-exports [simpleArgsKey](../cache/memoizer/functions/simpleArgsKey.md)

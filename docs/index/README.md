@@ -42,6 +42,12 @@ Re-exports [collectTransferables](../powerMessageCodec/functions/collectTransfer
 
 ***
 
+### createBroadcastBus
+
+Re-exports [createBroadcastBus](../helpers/powerBroadcastBus/functions/createBroadcastBus.md)
+
+***
+
 ### createFrameDecoder
 
 Re-exports [createFrameDecoder](../powerMessageCodec/functions/createFrameDecoder.md)
@@ -248,7 +254,7 @@ Re-exports [PowerBulkhead](../helpers/powerBulkhead/classes/PowerBulkhead.md)
 
 ### PowerCache
 
-Re-exports [PowerCache](../helpers/powerCache/classes/PowerCache.md)
+Re-exports [PowerCache](../helpers/cache/core/classes/PowerCache.md)
 
 ***
 
@@ -332,7 +338,7 @@ Re-exports [PowerLogger](../helpers/powerLogger/classes/PowerLogger.md)
 
 ### PowerMemoizer
 
-Re-exports [PowerMemoizer](../helpers/powerCache/classes/PowerMemoizer.md)
+Re-exports [PowerMemoizer](../helpers/cache/memoizer/classes/PowerMemoizer.md)
 
 ***
 
@@ -446,7 +452,7 @@ Re-exports [PowerThrottle](../helpers/powerThrottle/classes/PowerThrottle.md)
 
 ### PowerTimedCache
 
-Re-exports [PowerTimedCache](../helpers/powerCache/classes/PowerTimedCache.md)
+Re-exports [PowerTimedCache](../helpers/cache/timedCache/classes/PowerTimedCache.md)
 
 ***
 
@@ -488,7 +494,7 @@ Re-exports [selectCodec](../powerMessageCodec/functions/selectCodec.md)
 
 ### simpleArgsKey
 
-Re-exports [simpleArgsKey](../helpers/powerCache/functions/simpleArgsKey.md)
+Re-exports [simpleArgsKey](../helpers/cache/memoizer/functions/simpleArgsKey.md)
 
 ***
 

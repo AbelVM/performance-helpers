@@ -1,0 +1,3447 @@
+import { SmallLfuSketch } from '../../utils/smallLfu.js';
+
+/**
+ * Half-life, as a multiple of `maxEntries`. TinyLFU's guidance is ~10x, but the
+ * sketch here is incremented on `get` as well as `set`, so a short warm-up can
+ * trip a reset and halve a working set that had only just been learned. Tuned by
+ * measurement - see the scan-resistance table in guides/powerCache.md.
+ */
+const ADMISSION_SAMPLE_MULTIPLE = 200;
+
+/**
+ * Counters per cache entry in the TinyLFU admission sketch, per Caffeine.
+ *
+ * 4-bit counters, two to a byte, so this is 8 bytes per entry — the figure
+ * Caffeine quotes for its own frequency sketch. Held as a count of counters
+ * rather than bytes so the relationship to `depth` below is visible.
+ */
+const SKETCH_COUNTERS_PER_ENTRY = 16;
+
+/**
+ * Rows in the sketch. Unchanged at the sketch's own default of 4: taking the
+ * minimum across rows is what makes this a Count-Min, so a key can read
+ * slightly hotter than it is but never colder — the safe direction for an
+ * admission filter. This class is Count-Min, not Caffeine's single-table
+ * variant, and lowering it would give that guarantee up for memory.
+ */
+const SKETCH_DEPTH = 4;
+
+/**
+ * Largest cache the sketch table is sized for, matching the clamp already
+ * applied to `sampleSize` above.
+ *
+ * `maxEntries` defaults to `Infinity`, so this is not a formality: an unbounded
+ * cache cannot be sized from and must not be asked to allocate `Infinity`
+ * counters. A cache that large also never consults the sketch, because
+ * `_admit` only arbitrates once `size >= maxEntries` — the filter exists to
+ * choose what to evict, and an unbounded cache never evicts. The cost at the
+ * ceiling is 16 counters per entry, or 8 bytes per entry: a 1 000 000-entry
+ * cache spends ~8 MB on the filter, and only when `admission: 'tinylfu'` was
+ * asked for.
+ */
+const SKETCH_SIZE_CEILING = 1e6;
+
+/**
+ * Table width, in counters, for a cache holding `maxEntries`.
+ *
+ * Power of two, because the sketch indexes with a mask (`this.mask = width - 1`).
+ * Rounding **up** matters: rounding down would land below the target budget and
+ * re-create the undersized-table problem at exactly the capacities where the
+ * ratio is closest.
+ *
+ * @param {number} maxEntries
+ * @returns {number}
+ */
+function sketchWidthFor(maxEntries) {
+  const entries = Math.min(Math.max(1, Number(maxEntries) || 1), SKETCH_SIZE_CEILING);
+  const wanted = Math.ceil((SKETCH_COUNTERS_PER_ENTRY * entries) / SKETCH_DEPTH);
+  // `Math.max(2, …)` matches the sketch's own floor, so this cannot ask for a
+  // table the constructor would silently widen.
+  return Math.max(2, 1 << Math.ceil(Math.log2(wanted)));
+}
+/**
+ * @typedef {import('../jsdoc-types.js').CacheNode} CacheNode
+ */
+
+/**
+ * @typedef {import('../jsdoc-types.js').PowerCacheOptions} PowerCacheOptions
+ * @typedef {import('../jsdoc-types.js').PowerCacheGetOrFetchOptions} PowerCacheGetOrFetchOptions
+ */
+
+/**
+ * @typedef {import('../jsdoc-types.js').PowerMemoizerOptions} PowerMemoizerOptions
+ */
+
+/**
+ * @typedef {import('../jsdoc-types.js').PowerTimedCacheOptions} PowerTimedCacheOptions
+ */
+
+/**
+ * @example
+ * // Create a cache with caps and a simple weight function
+ * const cache = new PowerCache({
+ *   maxEntries: 100,
+ *   maxWeight: 1024 * 1024,
+ *   weightFn: (v) => (v?.byteLength) ? v.byteLength : 1,
+ *   defaultTTL: 60_000,
+ *   rejectOversized: true
+ * });
+ *
+ * // Insert a value with explicit weight and TTL
+ * cache.set('tile:0:0:0', { labels: [] }, { ttl: 5 * 60_000, weight: 1024 });
+ *
+ * // Retrieve and mark as used
+ * const val = cache.get('tile:0:0:0');
+ *
+ * // Iterate MRU-first
+ * for (const [key, value] of cache.entries('MRU')) { ... }
+ *
+ * // Start periodic cleanup every 10s scanning up to 200 nodes per tick
+ * cache.startCleanup({ interval: 10000, maxCleanupPerTick: 200 });
+ *
+ * // Inspect stats
+ * logger.log(cache.stats());
+ *
+ * @class PowerCache
+ * @public
+ */
+import { nowMs } from '../../utils/now.js';
+import { attach, detach } from '../metrics.js';
+import {
+  assertFunction,
+  assertLimitRequired,
+  assertSeed,
+  normalizeTtl,
+  assertKnownOptions,
+} from '../../utils/options.js';
+import { setSafeTimeout } from '../../utils/timers.js';
+import {
+  DEFAULT_MAX_CLEANUP_PER_TICK,
+  DEFAULT_CACHE_DEFAULT_TTL_MS,
+  DEFAULT_CACHE_MAX_POOL_SIZE,
+  DEFAULT_TIMEOUT_MS,
+  MS_PER_SEC,
+  MAX_DEEP_EQUAL_DEPTH,
+  MAX_DEEP_EQUAL_NODES,
+} from '../constants.js';
+
+/**
+ * Underscore-prefixed fields exposed as read/write aliases for backwards
+ * compatibility. `cache.map`, `cache.head` and friends have been public since
+ * 1.0, so they stay accessors rather than plain fields: the state lives in
+ * `_map` and `_head`, and a plain field would shadow it and desynchronise.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+const ALIASED_FIELDS = Object.freeze([
+  'map',
+  'head',
+  'tail',
+  'pool',
+  'currentWeight',
+  'hits',
+  'misses',
+  'evictions',
+  'rejected',
+  'expirations',
+]);
+
+/**
+ * PowerCache
+ *
+ * In-memory cache with weight-aware eviction, TTLs and optional cleanup.
+ * Provides MRU/LRU iteration helpers and hooks for eviction/expiration.
+ *
+ * @class PowerCache
+ * @public
+ */
+/**
+ * Every option `PowerCache` accepts, in one place.
+ *
+ * CACHE-013: `PowerTimedCache` needs to validate the `cacheOptions` it forwards, and
+ * the first version of that fix hand-copied this list. It was wrong in four places —
+ * it carried `ttl`, `weight`, `keyResolver` and `cacheOptions`, none of which this
+ * constructor accepts, and it **omitted `seed`** — so a wrapper advertised options the
+ * cache behind it rejected. Two numbers in one file disagreeing is the failure this
+ * repository keeps paying for; a *third* copy of a 22-item list would guarantee it.
+ *
+ * `PowerTimedCache` therefore derives its own allowlist from this array rather than
+ * restating it, and `test/powerTimedCache.delegation.test.js` checks the two against
+ * each other through the error message, which prints the enforced set.
+ *
+ * @type {ReadonlyArray<string>}
+ */
+export const POWER_CACHE_OPTIONS = Object.freeze([
+  'maxEntries',
+  'maxInflightRefreshes',
+  'maxWeight',
+  'weightFn',
+  'defaultTTL',
+  'maxPoolSize',
+  'rejectOversized',
+  'onEvict',
+  'onExpire',
+  'initialPoolSize',
+  'maxCleanupPerTick',
+  'defaultAsyncTimeout',
+  'now',
+  'onError',
+  'admission',
+  'windowSize',
+  'seed',
+  'policy',
+  'allowStale',
+  'staleTtl',
+  'fetchMethod',
+  'observability',
+]);
+
+export class PowerCache {
+  /**
+   * Create a PowerCache.
+   *
+   * The options type is the `PowerCacheOptions` typedef, not a second inline
+   * list. The two had drifted: `defaultAsyncTimeout`, `onError` and `policy`
+   * were destructured here and documented in the typedef, but absent from a
+   * duplicated `@param` list on this constructor - so TypeScript synthesised an
+   * options type without them, the body failed to type-check against its own
+   * signature, and the three options were missing from the published
+   * declarations. One source of truth, not two that have to be kept in step.
+   *
+   * @param {PowerCacheOptions} [options]
+   * @throws {TypeError} When a non-object is provided as the options argument.
+   */
+  constructor(options = {}) {
+    assertKnownOptions(options, POWER_CACHE_OPTIONS, 'PowerCache');
+    const {
+      maxEntries = Infinity,
+      // No default here on purpose: `undefined` is what tells the constructor the
+      // caller said nothing, as distinct from having said `null`, which
+      // `assertLimitRequired` rightly rejects.
+      maxInflightRefreshes,
+      maxWeight = Infinity,
+      weightFn = () => 1,
+      defaultTTL = DEFAULT_CACHE_DEFAULT_TTL_MS,
+      // ── Stale-while-revalidate ──────────────────────────────────────────────
+      // `staleWhileRevalidate` already existed as a **per-call** flag, and that is
+      // where the defect lived: with no upper bound on the stale window, it
+      // served a value expired at *any* point in the past. Measured — a value
+      // **5 years** past `expiresAt` was still returned as "stale", with the
+      // refresh running in the background and failing silently every time. That is
+      // not stale-while-revalidate, it is serve-forever-while-refreshing, and it
+      // is the one failure mode SWR must not have: a caller asking for
+      // freshness-while-not-blocking is asking for it for a bounded time.
+      allowStale = false,
+      staleTtl = Infinity,
+      // A default producer for `getOrFetch`. Declared here rather than required at
+      // each call site because the per-call form still wins, so a cache can have a
+      // general default that one caller overrides.
+      fetchMethod = null,
+      maxPoolSize = DEFAULT_CACHE_MAX_POOL_SIZE,
+      rejectOversized = false,
+      onEvict = null,
+      onExpire = null,
+      initialPoolSize = 0,
+      maxCleanupPerTick = DEFAULT_MAX_CLEANUP_PER_TICK,
+      // default timeout (ms) applied to `getOrSetAsync` when callers omit per-call timeout
+      defaultAsyncTimeout = DEFAULT_TIMEOUT_MS,
+      // invoked as onError(err, message) whenever an internal failure is
+      // swallowed (throwing onEvict/onExpire, a failing weightFn, ...)
+      onError = null,
+      /** @see PowerCache#_policy - `'lru'` (default) or `'slru'`. */
+      policy = 'lru',
+      admission = 'none',
+      windowSize = 0,
+      // CACHE-020. The sketch has taken a `seed` since it was written, and
+      // documented it as "per-cache seed, so two caches do not share a hash
+      // pattern" — but the cache never passed one, so `smallLfu.js:138` drew it
+      // from `Math.random()` on every construction. That is the right default for
+      // two caches sharing a process and the wrong one for anyone trying to
+      // attribute an admission-sensitive result to a run: two caches built with
+      // identical options hash differently, so a regression that moves admission
+      // cannot be reproduced from its configuration. Validated even when
+      // `admission` is off, because "the option I passed was silently ignored"
+      // is the failure mode this library's option pass exists to remove.
+      seed,
+      /**
+       * Injected clock in milliseconds, matching the limiters (PERF-007) and
+       * `PowerTTLMap`. Expiry is the one behaviour in this class that cannot be
+       * observed synchronously, so this is what turns "assert it expired after
+       * 100 ms" from a sleep into an exact assertion.
+       */
+      now,
+    } = options;
+    // Basic options validation: when an explicit options argument is provided it must be an object
+    if (arguments.length > 0 && arguments[0] != null && typeof arguments[0] !== 'object') {
+      throw new TypeError('PowerCache options must be an object');
+    }
+    // Validate limits. `Infinity` is a legitimate "no limit" and is the
+    // documented default for `maxEntries`/`maxWeight`, so it stays allowed.
+    // What is *not* allowed is a `NaN` (which made `size > NaN` always false,
+    // so eviction silently never ran and the cache grew without bound) or a
+    // negative bound (which emptied the cache and kept it empty). Both are
+    // configuration errors, so fail loudly.
+    this.maxEntries = assertLimitRequired(maxEntries, {
+      name: 'maxEntries',
+      className: 'PowerCache',
+      integer: true,
+      min: 0,
+      allowInfinity: true,
+    });
+    // MEM-001. Defaults to `maxEntries`, which gives the invariant that matters:
+    // **at most one in-flight background refresh per cacheable key.** Both maps
+    // grew without any bound before this, so a scan across distinct keys with a
+    // slow factory retained one promise and one `AbortController` per key —
+    // measured at 20,000 of each, against a `maxEntries` of 20,000, and
+    // uncapped when it was larger.
+    //
+    // `maxEntries` rather than `Infinity` because a refresh for a key the cache
+    // can no longer hold is work whose result will be discarded, and because the
+    // cache's own size is the only figure a caller already has a feel for. Note
+    // the default is deliberately *not* `maxEntries * 2`: the extra headroom
+    // buys nothing here, and a round number with a stated invariant is easier to
+    // reason about than a multiple.
+    //
+    // A cap of `0` is allowed and means "never refresh in the background", which
+    // is a legitimate configuration for a cache whose values are cheap to
+    // recompute synchronously.
+    //
+    // The default is resolved rather than passed to `assertLimitRequired`, because
+    // that helper rejects a `null` fallback outright — and "derive it from
+    // `maxEntries`" is exactly the case where no caller-supplied value exists.
+    if (maxInflightRefreshes === undefined) {
+      this.maxInflightRefreshes = Number.isFinite(this.maxEntries) ? this.maxEntries : 1024;
+    } else {
+      this.maxInflightRefreshes = assertLimitRequired(maxInflightRefreshes, {
+        name: 'maxInflightRefreshes',
+        className: 'PowerCache',
+        integer: true,
+        min: 0,
+      });
+    }
+    this.maxWeight = assertLimitRequired(maxWeight, {
+      name: 'maxWeight',
+      className: 'PowerCache',
+      min: 0,
+      allowInfinity: true,
+    });
+    this.maxPoolSize = assertLimitRequired(maxPoolSize, {
+      name: 'maxPoolSize',
+      className: 'PowerCache',
+      integer: true,
+      min: 0,
+      allowInfinity: true,
+    });
+    this.weightFn = assertFunction(weightFn, { name: 'weightFn', className: 'PowerCache' })
+      ? weightFn
+      : () => 1;
+    this.defaultTTL = defaultTTL;
+    /**
+     * Serve a stale value on `getOrSet`/`getOrSetAsync` by default, so a caller
+     * does not have to pass `staleWhileRevalidate` at every call site. The
+     * per-call flag still wins, and `false` here does not remove the per-call
+     * option - it only stops it being the default.
+     */
+    this.allowStale = Boolean(allowStale);
+    // `staleTtl` is a validated *duration*, not a boolean, and the validation is
+    // the feature: an unvalidated one let `staleTtl: 'soon'` read as `NaN` and
+    // compare false, so stale was silently disabled by a typo rather than
+    // rejected. `Infinity` is accepted explicitly, as "no bound", because that
+    // is a real (if unwise) choice a caller may make on purpose.
+    if (staleTtl !== Infinity && !(Number.isFinite(staleTtl) && staleTtl >= 0)) {
+      throw new TypeError(
+        'PowerCache: `staleTtl` must be a non-negative finite number or Infinity ' +
+          `(received ${String(staleTtl)}). An unparseable stale window would compare ` +
+          'false against every entry and silently disable stale serving.'
+      );
+    }
+    // `allowStale` without a `staleTtl` is the one combination refused, and the
+    // refusal is the point.
+    //
+    // `staleTtl` defaults to `Infinity` rather than `0` because the per-call
+    // `staleWhileRevalidate: true` flag **already existed and already served
+    // stale without an upper bound**. Defaulting to `0` would have silently
+    // switched that off for every existing caller — the flag would still be
+    // passed and nothing would be stale, which is a behaviour change with no
+    // error and no way to notice. Two existing tests caught exactly that.
+    //
+    // So the *new* surface is the one that is safe by construction: reaching
+    // `allowStale` means opting into per-key stale on every call, and that has
+    // to be paired with a chosen bound. `staleTtl: Infinity` is still available
+    // for a caller who wants unbounded deliberately — they just have to say so.
+    // `arguments[0]` is the caller's original options object — the constructor
+    // destructures anonymously, so there is no named `options` to ask, and
+    // `staleTtl === Infinity` cannot distinguish "defaulted" from "explicitly
+    // passed Infinity", which are opposite intentions here. A `Symbol` sentinel
+    // would distinguish them and cost two type errors against the declared
+    // `number` option, so this asks the object directly.
+    if (this.allowStale && !('staleTtl' in arguments[0])) {
+      throw new TypeError(
+        'PowerCache: `allowStale` requires an explicit `staleTtl`. A stale window with ' +
+          'no bound serves a value expired at any point in the past — measured at five ' +
+          'years — so the bound is required. Pass the window you can tolerate, or ' +
+          '`staleTtl: Infinity` to opt out of it on purpose.'
+      );
+    }
+    this.staleTtl = staleTtl;
+    if (fetchMethod != null && typeof fetchMethod !== 'function') {
+      throw new TypeError('fetchMethod must be a function when supplied');
+    }
+    // Annotated rather than defaulted to a function.
+    //
+    // `fetchMethod = () => null` silenced a `Type 'null' is not assignable to
+    // type '() => any'` error, and in doing so **broke `getOrFetch`**: its
+    // `factory ?? this.fetchMethod` then always resolved to a function, so the
+    // "no factory anywhere" path stopped rejecting and returned `null` instead
+    // of a `TypeError`. The error was in the *type*, not the value, and the
+    // annotation is where it belonged.
+    /** @type {Function|null} */
+    this.fetchMethod = fetchMethod;
+    // Injected clock, matching the limiters (PERF-007) and `PowerTTLMap`. It
+    // is read through `this._now()` at seven sites, all of which are "what time
+    // is it" reads with no other argument, so this is the whole change.
+    this._now = typeof now === 'function' ? now : nowMs;
+    this.rejectOversized = Boolean(rejectOversized);
+    this.onEvict = typeof onEvict === 'function' ? onEvict : null;
+    this.onError = typeof onError === 'function' ? onError : null;
+    /** number of times `weightFn` threw; a non-zero value means `maxWeight`
+     *  could not be enforced. It used to say "should be surfaced by the caller"
+     *  and could not be, because nothing in `stats()` carried it (CACHE-011);
+     *  `stats().weightErrors` is where a caller reads it now, and `attach()`
+     *  flattens that into a metric series. */
+    this._weightErrors = 0;
+    this.onExpire = typeof onExpire === 'function' ? onExpire : null;
+    this.maxCleanupPerTick = Number.isFinite(+maxCleanupPerTick)
+      ? Math.max(1, +maxCleanupPerTick)
+      : DEFAULT_MAX_CLEANUP_PER_TICK;
+
+    this._map = new Map();
+    // NOTE: there is deliberately no `eagerCleanupOnRead` option. It was
+    // documented for two releases, promised that `peek()`/`has()` would remove
+    // expired entries when observed, and did nothing — because
+    // `_fetchValidNode` already removes them, unconditionally, on every read path.
+    // Measured with both values set: identical `size`, `_expirations` and
+    // `onExpire` counts. The *guide* was the actual defect, claiming a
+    // non-mutating default the code never had. See CACHE-008.
+    /** @type {CacheNode|null} */
+    this._head = null;
+    /** @type {CacheNode|null} */
+    this._tail = null;
+    /**
+     * Recycled nodes, kept to avoid allocating one per insert.
+     *
+     * Annotated because an empty `[]` takes its element type from whatever is
+     * first pushed into it, and the prefill literal below is a *narrower* type
+     * than `CacheNode` — which then made every other push into this pool a type
+     * error. The annotation is the fix; the two prefill fields are the rest of
+     * it.
+     *
+     * @type {CacheNode[]}
+     */
+    this._pool = [];
+    // Prefill pool to reduce runtime allocations if requested. `inWindow` is set
+    // on every prefilled node as well as on freshly allocated ones: a prefilled
+    // node without it would be `undefined` rather than `false`, which behaves
+    // the same today and is exactly the kind of latent divergence that becomes a
+    // bug when someone writes `node.inWindow === false`.
+    for (let i = 0; i < Math.min(initialPoolSize || 0, this.maxPoolSize); i++)
+      this._pool.push({
+        key: null,
+        value: null,
+        weight: 0,
+        expiresAt: 0,
+        prev: null,
+        next: null,
+        inWindow: false,
+        visited: false,
+        queue: 'main',
+      });
+
+    this._currentWeight = 0;
+    this._hits = 0;
+    /**
+     * Serves of an **expired** value, from the stale-while-revalidate path.
+     *
+     * Separate from `_hits` because a stale serve is the one case where the cache
+     * answered without having fresh data, and a caller cannot otherwise tell
+     * it apart from a real hit. Operating stale-while-revalidate blind to that
+     * rate is how a broken upstream turns into a silently wrong service: every
+     * request is "successful" and the numbers look like a warm cache.
+     *
+     * A subset of `_hits` — a stale serve still counts as a hit, because from the
+     * caller's side it was served.
+     */
+    this._staleServes = 0;
+    this._misses = 0;
+    this._evictions = 0;
+    // MEM-001: background refreshes refused because `maxInflightRefreshes` was
+    // reached. Counted rather than swallowed, because the cap makes a refresh
+    // *not happen* and a refresh that silently does not happen reads as a cache
+    // that is not refreshing — the same reasoning as `_rejected` and
+    // `_rejectedAdmission` beside it.
+    this._refreshesSkipped = 0;
+    this._rejected = 0; // rejected oversized insert attempts
+    // Public since CACHE-011 as `stats().rejectedAdmission`. Note that `clear()`
+    // zeroes it along with the sketch: the refusals counted so far were decisions
+    // about entries that no longer exist, and carrying them across a clear would
+    // make the next admission look like it refused nothing.
+    this._rejectedAdmission = 0; // insert attempts refused by the TinyLFU filter
+    this._expirations = 0;
+
+    // Backwards-compatible aliases for external access. These were ten
+    // copy-pasted `Object.defineProperty` blocks (~110 lines) whose descriptors
+    // are all identical; one loop is equivalent, and keeps the aliased set
+    // reviewable in one place instead of scattered through a constructor.
+    for (const name of ALIASED_FIELDS) {
+      const priv = `_${name}`;
+      Object.defineProperty(this, name, {
+        configurable: true,
+        enumerable: false,
+        get() {
+          return this[priv];
+        },
+        set(v) {
+          this[priv] = v;
+        },
+      });
+    }
+
+    this._cleanupTimer = null;
+    this._cleanupRunning = false;
+    this._cleanupParams = null;
+    // Cursor used to resume incremental expiration scans to avoid re-scanning the list start
+    /** @type {CacheNode|null} */
+    this._cleanupCursor = null;
+    // Whether the `_cleanupCursor` still points to a live node in `this._map`.
+    // This avoids a Map lookup on every incremental cleanup scan — mutation paths
+    // that remove or advance the cursor will update this flag accordingly.
+    this._cleanupCursorValid = false;
+    // Eviction candidate pointer to avoid repeated head lookups during large
+    // eviction sweeps. Kept in sync with head mutations.
+    this._evictionCandidate = null;
+    /**
+     * SIEVE eviction hand pointer. Scans from tail toward head during eviction.
+     * Visited entries get a second chance (bit cleared), unvisited are evicted.
+     * @type {CacheNode|null}
+     */
+    this._sieveHand = null;
+    /**
+     * S3-FIFO Small queue head/tail/size. Holds the newest entries as a filter
+     * for one-hit wonders. Promoted to Main when Main has room.
+     * @type {CacheNode|null}
+     */
+    this._smallHead = null;
+    /** @type {CacheNode|null} */
+    this._smallTail = null;
+    /** @type {number} */
+    this._smallSize = 0;
+    /**
+     * S3-FIFO Ghost queue head/tail/size. Metadata-only FIFO of recently evicted
+     * keys, used to fast-track re-admission directly to Main.
+     * @type {CacheNode|null}
+     */
+    this._ghostHead = null;
+    /** @type {CacheNode|null} */
+    this._ghostTail = null;
+    /** @type {number} */
+    this._ghostSize = 0;
+    /** @type {number} Max entries in the Small queue. */
+    this._smallMaxSize = 0;
+    /** @type {number} Max entries in the Ghost queue. */
+    this._ghostMaxSize = 0;
+    /** @type {Map<string, CacheNode>} Key -> ghost node for O(1) lookup. */
+    this._ghostMap = new Map();
+    /** @type {Map<string, CacheNode>} Small queue entries for S3-FIFO. */
+    this._smallMap = new Map();
+    /**
+     * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
+     * behaviour. `'slru'` splits the list into a probation segment and a
+     * protected segment and promotes on access, which makes the cache far more
+     * resistant to a one-off sequential scan evicting the working set.
+     * `'sieve'` uses the SIEVE algorithm (NSDI '24): a FIFO queue with a
+     * visited bit per entry and a scanning hand pointer. On eviction, the hand
+     * scans toward the head; visited entries get their bit cleared (second
+     * chance), unvisited entries are evicted.
+     * `'s3fifo'` uses the S3-FIFO algorithm (SOSP '23): three static FIFO queues
+     * (Small, Main, Ghost) for workload-oblivious high hit ratios.
+     */
+    this._policy =
+      policy === 'slru'
+        ? 'slru'
+        : policy === 'sieve'
+          ? 'sieve'
+          : policy === 's3fifo'
+            ? 's3fifo'
+            : 'lru';
+
+    // S3-FIFO queue sizing. Small is 10% of maxEntries (min 1), Ghost is 20%
+    // (min 1), Main gets the remainder. These are fixed after construction;
+    // `resize` does not currently rebalance them.
+    if (this._policy === 's3fifo') {
+      const base = Number.isFinite(this.maxEntries) ? this.maxEntries : 1000;
+      this._smallMaxSize = Math.max(1, Math.floor(base * 0.1));
+      this._ghostMaxSize = Math.max(1, Math.floor(base * 0.2));
+    }
+
+    // CACHE-020. Validated here, ahead of the sketch branch below rather than
+    // inside it, so a bad `seed` is rejected even when no sketch is built. `seed`
+    // under `admission: 'none'` or `policy: 'slru'` has no effect, and "the option
+    // I passed was silently ignored" is the exact failure the unknown-option pass
+    // was added to remove (`assertKnownOptions`, five helper classes) — a value
+    // that cannot be honoured should say so rather than sit there doing nothing.
+    //
+    // Kept out of the `/** … @private */` block below on purpose: a declaration
+    // between that JSDoc and `this._sketch` steals it, and the field stops being
+    // emitted as `private` with its description attached. That is not cosmetic —
+    // it is how `_sketch` lost both in this pass before the ordering was fixed.
+    const sketchSeed = assertSeed(seed, 'PowerCache');
+
+    /**
+     * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
+     * admission is off. See {@link SmallLfuSketch}.
+     * @type {SmallLfuSketch|null}
+     * @private
+     */
+    // **`admission: 'tinylfu'` is a no-op under `policy: 'slru'`.**
+    //
+    // SLRU's probation segment is the same mechanism the sketch provides: both
+    // absorb one-shot traffic before it can reach the main region. Stacking them
+    // is not a weaker version of either, it is a worse cache - measured on the
+    // paired Zipf + scan workload (`node bench/claims.js zipf`), `slru` +
+    // `tinylfu` retained **70.9 %** of the working set against `slru` alone's
+    // **89.4 %**, and plain LRU's 75.0 %. Composing "the two scan-resistant
+    // options" produced the worse of each rather than the better.
+    //
+    // Not building the sketch is the smallest change that makes the combination
+    // predictable: a user who asks for SLRU gets SLRU. The cost is a hash and a
+    // memory probe per access, which is what not building it saves.
+    //
+    // The broader W-TinyLFU admission window that this option was heading
+    // towards **is** in this release, reachable behind an opt-in `windowSize`
+    // and left at 0. It is correct, it passes three of ADR 0003's four
+    // acceptance criteria, and it misses the fourth by 79 points: on a cold
+    // start the best window size scores 1.0 % against plain LRU's 80.0 %.
+    // That is the case it was built to fix, so it is not the default.
+    // `adr/0003-tinylfu-admission-window.md` has the full sweep and why.
+    this._sketch =
+      admission === 'tinylfu' && this._policy === 'lru'
+        ? new SmallLfuSketch({
+            // Sized from the cache's capacity, not left at the sketch's own
+            // default. The default is a fixed 64x4 = 256 counters, so the
+            // filter's accuracy depended on nothing about the cache it was
+            // protecting: 16 counters per entry at `maxEntries: 16`, 4.0 at 64,
+            // **0.256 at 1 000**, 0.00026 at 1e6. At 1 000 the sketch cannot
+            // discriminate at all — measured, a working set at capacity drove
+            // every hot key to 15 and a key **never inserted** also read 15, so
+            // a one-shot scan key was indistinguishable from the working set and
+            // the admission filter carried zero information. That is the
+            // failure the filter exists to prevent, and it arrived through the
+            // one part of the policy that was not sized to the workload.
+            //
+            // Caffeine's recipe, which this now follows: a 4-bit CountMinSketch
+            // "growing at 8 bytes per cache entry" = 16 counters per entry, with
+            // the table a power of two so the index is a mask. Depth is held at
+            // 4, so the width carries a quarter of the budget.
+            width: sketchWidthFor(this.maxEntries),
+            // The half-life has to be sized against the working set, not left
+            // at the sketch's own default of 10 operations. At 10 a reset
+            // fired every ten set/get and halved everything, so by the time a
+            // scan began the hot keys had decayed to the same estimate as the
+            // scan keys and the filter admitted every one of them - 0/40 on the
+            // scan-resistance benchmark, exactly as plain LRU does. TinyLFU's own
+            // guidance is roughly 10x the distinct-key count.
+            sampleSize: Math.max(1, ADMISSION_SAMPLE_MULTIPLE * Math.min(this.maxEntries, 1e6)),
+            // CACHE-020. Undefined means the sketch draws its own random seed,
+            // which is the shipped default and stays it — this costs nothing on
+            // the read path, it decides which counter a key maps to once.
+            seed: sketchSeed,
+          })
+        : null;
+    /**
+     * Size of the W-TinyLFU admission window, or `0` for no window.
+     *
+     * The window is the last `windowSize` entries of the recency list: new keys
+     * land there unconditionally, and only the window's oldest entry is
+     * arbitrated against the main-space victim. That is what lets a one-shot
+     * scan be absorbed in a region it cannot displace the working set from.
+     *
+     * It defaults to **`0` — the window is off** — and that is the shipped
+     * behaviour of `admission: 'tinylfu'`. See the note below and
+     * `adr/0003-tinylfu-admission-window.md`.
+     *
+     * Arming is last because it depends on `_sketch` and `_maxEntries`. An
+     * earlier version computed it just below the sketch and was then zeroed
+     * again by the declaration further down, so the option silently did nothing
+     * and every test that turned it on failed for the same uninteresting reason.
+     *
+     * @type {number}
+     * @private
+     */
+    this._windowSize =
+      this._sketch && this._policy === 'lru'
+        ? windowSize === null
+          ? Math.min(
+              Math.max(4, Math.ceil(this.maxEntries * 0.01)),
+              Math.floor(this.maxEntries / 4)
+            )
+          : Math.max(0, Math.floor(Number(windowSize) || 0))
+        : 0;
+    if (this._windowSize >= this.maxEntries && this.maxEntries >= 4) {
+      // A window that is the whole cache is not a window: every newcomer would be
+      // admitted and the filter would never run. Clamp so main space always has
+      // room for the comparison to mean something.
+      this._windowSize = Math.floor(this.maxEntries / 4);
+    }
+    // There is no `_windowStart` field here, and that is the record rather than
+    // an omission. It was a maintained window pointer, assigned `null` in two
+    // places and read by neither, left behind by the attempt `_windowOldest()`
+    // documents: the window is *positional*, and a node carrying a correct
+    // `inWindow` flag can still sit on the wrong side of the boundary.
+    //
+    // It is gone because leaving it was worse than removing it. An unused field
+    // that a comment says is the *reason* the current design is derived is an
+    // invitation to the next person to "fix" it by populating it, which is the
+    // exact change that already failed here once. CACHE-006 still wants this
+    // cost removed; the route it should take is spelled out in that row, and it
+    // is not a resurrected field.
+    //
+    // These two are not a pointer and must not become one. `_windowOldest()`
+    // memoises its walk in `_windowStartMemo` and *validates* the memo on every
+    // read, so a mistake about some mutation costs a walk instead of producing a
+    // confidently wrong answer. `_windowTail` is the tail at the time of that
+    // walk, and it is what makes a memo written before an unlink comparable to
+    // the list afterwards. See that method for why each condition is needed.
+    this._windowStartMemo = null;
+    this._windowTail = null;
+    /**
+     * MRU end of the probation segment. With `policy: 'slru'` the list is
+     * ordered:
+     *
+     *   head (probation LRU) ... _probationEnd (probation MRU)
+     *        -> protected LRU ... tail (protected MRU)
+     *
+     * New entries are spliced in at the probation/protected boundary and a hit
+     * promotes a node to the tail. `null` when the list is empty.
+     * @type {CacheNode|null}
+     */
+    this._probationEnd = null;
+    // Track in-flight async factories for `getOrSetAsync` to dedupe concurrent callers
+    this._inflightPromises = new Map();
+    // AbortControllers for the fetches named in `_inflightPromises`, held in a
+    // **parallel map** rather than by widening the value of that one to a
+    // `{promise, controller}` record.
+    //
+    // The record shape was the first attempt and it was the wrong call: 13 test
+    // assertions across 4 files read `_inflightPromises` and expect a bare
+    // promise, and every one of them would have had to change for no gain. A
+    // second map costs one `Map` and leaves the observable shape alone, so the
+    // cancellation work does not gate on a migration of unrelated tests.
+    this._inflightControllers = new Map();
+    this._defaultAsyncTimeout = Number.isFinite(Number(defaultAsyncTimeout))
+      ? Math.max(0, Math.floor(Number(defaultAsyncTimeout)))
+      : 30000;
+    // FEAT-007: opt-in metrics. Off by default, so the common case pays
+    // nothing and allocates no closure.
+    this._metrics = attach(this, 'cache', arguments[0] || {});
+  }
+
+  /**
+   * Allocate a pool node or create a new one.
+   *
+   * This helper either reuses a node from the internal `pool` or creates a
+   * fresh node object. The returned node is initialized with the provided
+   * key/value/weight/expiresAt and has its `prev`/`next` pointers nulled.
+   *
+   * @private
+   * @param {*} key
+   * @param {*} value
+   * @param {number} weight
+   * @param {number} expiresAt
+   * @returns {CacheNode}
+   */
+  _allocNode(key, value, weight, expiresAt) {
+    const node = this._pool.pop() || {
+      key: null,
+      value: null,
+      weight: 0,
+      expiresAt: 0,
+      prev: null,
+      next: null,
+      // Whether this node sits in the admission window. A pooled node carries
+      // its last role's flag, so this is reset on every allocation rather than
+      // at insert — the window path sets it, the plain path never reads it, and
+      // a stale `true` from a pooled node would misplace a fresh entry.
+      inWindow: false,
+      // SIEVE visited bit: set on access, cleared by the hand during eviction
+      // scanning. A pooled node carries its last role's flag, so reset here.
+      visited: false,
+      // S3-FIFO queue label: 'main' | 'small' | 'ghost'. A pooled node carries
+      // its last role's label, so reset here.
+      queue: 'main',
+    };
+    node.key = key;
+    node.value = value;
+    node.weight = weight || 0;
+    node.expiresAt = expiresAt || 0;
+    node.prev = null;
+    node.next = null;
+    node.inWindow = false;
+    node.visited = false;
+    node.queue = 'main';
+    return node;
+  }
+
+  /**
+   * Compute and validate a weight for a value.
+   * If `explicitWeight` is provided it is normalized and returned.
+   * Otherwise `this.weightFn` is invoked safely and any thrown error
+   * or non-finite return value results in a weight of `0`.
+   * @private
+   * @param {*} value
+   * @param {number|null|undefined} explicitWeight
+   * @returns {number}
+   */
+  _computeWeight(value, explicitWeight) {
+    if (explicitWeight != null) {
+      const v = +explicitWeight;
+      return Number.isFinite(v) ? Math.max(0, v) : 0;
+    }
+    try {
+      // `weightFn` is nullable, and the null case is deliberately handled by the
+      // catch below rather than by a guard here: calling a missing function throws
+      // `TypeError`, the catch swallows it, and the method's documented contract is
+      // that any thrown error yields a weight of 0. The cast states that contract;
+      // adding a null check would silently take a different path to the same answer.
+      const w = /** @type {function(any): number} */ (this.weightFn)(value);
+      const n = +w;
+      return Number.isFinite(n) ? Math.max(0, n) : 0;
+    } catch (err) {
+      // Previously this returned 0 in silence, which quietly voided the whole
+      // `maxWeight` budget: every entry looked weightless so nothing was ever
+      // evicted. Surface it and count it.
+      this._weightErrors++;
+      this._notifyError(err, 'PowerCache weightFn threw');
+      return 0;
+    }
+  }
+
+  /**
+   * Report an internal failure (a throwing user callback, a failing
+   * `weightFn`, ...) exactly once, through the configured `onError` handler
+   * when present and otherwise to `console.error`.
+   *
+   * Every catch site in this class funnels through here, so a swallowed
+   * failure is consistent and observable rather than invisible in some paths
+   * and logged in others.
+   *
+   * @param {any} err - The thrown value.
+   * @param {string} msg - Human-readable context.
+   * @returns {void}
+   * @private
+   */
+  _notifyError(err, msg) {
+    try {
+      if (typeof this.onError === 'function') {
+        this.onError(err, msg);
+        return;
+      }
+    } catch (_) {
+      /* a failing error handler must never break the cache */
+    }
+    try {
+      if (typeof console !== 'undefined' && typeof console.error === 'function') {
+        console.error(msg, err);
+      }
+    } catch (_) {
+      /* ignore console failures */
+    }
+  }
+
+  /**
+   * Reset and return a node to the pool for reuse.
+   *
+   * This helper clears the node fields and returns it to the node pool when
+   * the pool has capacity. It is called for evicted or deleted nodes to
+   * reduce allocation churn.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @returns {void}
+   */
+  _freeNode(node) {
+    node.key = null;
+    node.value = null;
+    node.weight = 0;
+    node.expiresAt = 0;
+    node.prev = null;
+    node.next = null;
+    if (this._pool.length < this.maxPoolSize) this._pool.push(node);
+  }
+
+  /**
+   * Remove a node that has expired.
+   *
+   * Performs map deletion, linked-list unlink, invokes `onExpire`, returns the
+   * node to the pool, and updates bookkeeping counters (`misses` and
+   * `expirations`). This helper is called from several expiration paths and
+   * centralizes the necessary cleanup steps.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @param {number} now - Current timestamp (ms) used for comparisons
+   * @remarks This helper does not modify the `misses` counter; callers should
+   * increment `this._misses` when the removal corresponds to a user-facing
+   * lookup (for example, `get()`/`getMany()`/`getOrSet()`).
+   */
+  _removeExpiredNode(node, now) {
+    // Only remove when the node is actually expired according to `now`.
+    if (!node.expiresAt || node.expiresAt > now) return false;
+    const k = node.key;
+    const v = node.value;
+    this._unlinkNode(node);
+    try {
+      if (this.onExpire) this.onExpire(k, v);
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onExpire callback threw');
+    }
+    this._freeNode(node);
+    this._expirations++;
+    return true;
+  }
+
+  /**
+   * Fetch a node and validate expiry.
+   * @public
+   * @param {*} key
+   * @param {Object} [options]
+   * @param {boolean} [options.ignoreExpiry=false]
+   * @param {boolean} [options.countMiss=false]
+   * @param {boolean} [options.allowExpired=false] Return an expired node instead
+   *   of `null`. Read by `_fetchValidNode` and passed by `getOrSet` when
+   *   `staleWhileRevalidate` is on; previously read but never documented, so it
+   *   was missing from the declared options type.
+   * @param {number} [options.now] A clock reading the caller has already taken.
+   *   Threading it in halves the clock reads on the hot path (PERF-003):
+   *   `getOrSet` and `touch` each read the clock and then called this, which read
+   *   it again — and `utils/now.js` puts `nowMs()` at 141 ns and calls it "on the
+   *   hot path of essentially every helper". Omit it and this reads its own, so
+   *   the callers that have no reading to pass are unaffected.
+   * @returns {CacheNode|null}
+   */
+  _fetchValidNode(
+    key,
+    // Inline cast, not a `@param [options]` tag: this is destructured in the
+    // signature, so there is no parameter named `options` for a tag to bind
+    // to and TS rejects the tag with TS8024.
+    /** @type {{ignoreExpiry?: boolean, countMiss?: boolean, allowExpired?: boolean, now?: number}} */ {
+      ignoreExpiry = false,
+      countMiss = false,
+      allowExpired = false,
+      now: providedNow,
+    } = {}
+  ) {
+    let node = this._map.get(key);
+    if (!node) {
+      // S3-FIFO: check Small and Ghost queues.
+      if (this._policy === 's3fifo') {
+        node = this._smallMap.get(key) || this._ghostMap.get(key);
+      }
+      if (!node) {
+        if (countMiss) this._misses++;
+        return null;
+      }
+    }
+    // Only sample the clock when we need to check expiry to avoid unnecessary
+    // system calls on non-expiry paths. `0` still means "do not check", and
+    // `ignoreExpiry` still wins over a reading the caller passed: the value is
+    // consulted only when expiry is actually being checked.
+    const now =
+      ignoreExpiry || !node.expiresAt ? 0 : providedNow !== undefined ? providedNow : this._now();
+    if (now && node.expiresAt <= now) {
+      if (allowExpired) return node;
+      this._removeExpiredNode(node, now);
+      if (countMiss) this._misses++;
+      return null;
+    }
+    return node;
+  }
+
+  /**
+   * Whether an expired node may still be served at `now`.
+   *
+   * The whole point of the row, and the predicate that makes
+   * `staleWhileRevalidate` safe: a stale value is servable only **within
+   * `staleTtl` of its `expiresAt`**. Before this, the flag had no upper bound at
+   * all and a value five years past expiry was still returned as "stale".
+   *
+   * `staleTtl === 0` means the feature is off, which is the default and the
+   * pre-existing behaviour, so nothing changes for a caller who never asked for
+   * it. `Infinity` means explicitly unbounded.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @param {number} now
+   * @returns {boolean}
+   */
+  _staleServable(node, now) {
+    // `Infinity` is the one value arithmetic cannot answer for, so it is
+    // short-circuited; everything else reduces to the comparison, **including
+    // `0`**. There was an `if (!(this.staleTtl > 0)) return false` guard here and
+    // a mutation check proved it dead: with `staleTtl: 0` the comparison alone is
+    // already false for every expired entry, since `now > expiresAt` always. The
+    // guard restated the arithmetic, and a restatement that cannot change the
+    // answer is a second thing to keep correct.
+    if (this.staleTtl === Infinity) return true;
+    return now <= node.expiresAt + this.staleTtl;
+  }
+
+  /**
+   * Signal the factory in flight for `key`, if there is one.
+   *
+   * The linkage `lru-cache` documents: *"if the key is evicted or deleted before
+   * the fetchMethod resolves, the AbortSignal passed to the fetchMethod will
+   * receive an abort event."* Before this there was no cancellation path at all
+   * — measured, zero occurrences of `AbortController` in this file — so an
+   * evicted key's factory ran to completion and then wrote its result into a
+   * cache that no longer wanted it.
+   *
+   * Aborting is a **request**, not a kill. A factory that predates this takes no
+   * argument and cannot be stopped, so it still completes and still stores; the
+   * signal is there for a factory that can cooperate, and refusing to store
+   * because a key was deleted would lose the value for a caller that wanted it.
+   *
+   * @private
+   * @param {*} key
+   * @param {string} [reason] - Diagnostic surfaced through `onError`.
+   * @returns {boolean} Whether a factory was signalled.
+   */
+  _abortInflight(key, reason = 'evicted') {
+    const controller = this._inflightControllers.get(key);
+    if (!controller || controller.signal.aborted) return false;
+    // **A `try`/`catch` around `abort()` does not contain a throwing listener,
+    // and the first version of this claimed it did.** `abort()` dispatches
+    // listeners synchronously but `runAbort` re-reports a listener exception on
+    // `process.nextTick`, so it surfaces as an uncaught exception rather than a
+    // rejection this call could catch. Verified: a factory whose abort handler
+    // throws took the process down, and the `catch` never ran.
+    //
+    // That is the platform's contract, not something to wrap — the same is true
+    // of `addEventListener` handlers generally — so the comment here records it
+    // instead of pretending to handle it. The caller's own listener is the
+    // caller's own risk, exactly as with any `abort()`.
+    controller.abort(new Error(`PowerCache: in-flight fetch for a ${reason} key was aborted`));
+    return true;
+  }
+
+  /**
+   * Start a background refresh for an expired entry.
+   *
+   * If a refresh is already in flight for the key, this helper does nothing.
+   * The refreshed value is written back to cache when the factory resolves.
+   * Errors are swallowed so the stale value remains available.
+   *
+   * @private
+   * @param {*} key
+   * @param {Function} factory
+   * @param {Object} [options]
+   * @param {number} [options.ttl]
+   * @param {number} [options.weight]
+   * @returns {void}
+   */
+  _refreshStaleEntry(key, factory, { ttl = undefined, weight = undefined } = {}) {
+    if (this._inflightPromises.has(key)) return;
+    // **MEM-001: the cap, and a skip rather than an eviction.** Reaching the cap
+    // means dropping a *background* refresh, and the cost of that is precisely
+    // zero: the caller has already been served the stale value, and the next
+    // `getOrSet` for this key will schedule a refresh if there is room by then.
+    // Evicting the oldest in-flight entry instead would abort a fetch a caller
+    // may be awaiting — `getOrSetAsync` hands out the very promise stored here —
+    // which trades a bounded background queue for a real caller-visible failure.
+    if (this._inflightPromises.size >= this.maxInflightRefreshes) {
+      this._refreshesSkipped += 1;
+      return;
+    }
+    // The signal is the factory's first argument, as in `fetch` and
+    // `lru-cache`, so a factory written for either works here unchanged.
+    const controller = new AbortController();
+    let p;
+    try {
+      p = Promise.resolve().then(() => factory(controller.signal));
+    } catch (err) {
+      return;
+    }
+    const tracked = p
+      .then((value) => {
+        try {
+          this.set(key, value, { ttl, weight });
+        } catch (err) {
+          this._notifyError(err, 'PowerCache: storing a refreshed value threw');
+        }
+        return value;
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this._inflightControllers.delete(key);
+        this._inflightPromises.delete(key);
+      });
+    this._inflightPromises.set(key, tracked);
+    this._inflightControllers.set(key, controller);
+  }
+
+  /**
+   * Append a node to the tail (mark it most-recently used).
+   * This updates the linked-list pointers appropriately and is used when
+   * inserting new nodes or promoting a node to MRU.
+   *
+   * @private
+   * @param {CacheNode} node - Node to append at the tail.
+   * @returns {void}
+   */
+  _append(node) {
+    if (!this._tail) {
+      if (this._policy === 's3fifo') {
+        this._s3fifoAppendSmall(node);
+        return;
+      }
+      this._head = this._tail = node;
+      this._evictionCandidate = this._head;
+      if (this._policy === 'slru') this._probationEnd = node;
+      if (this._policy === 'sieve') this._sieveHand = node;
+      return;
+    }
+    if (this._policy === 'slru') {
+      this._insertIntoProbation(node);
+      return;
+    }
+    if (this._policy === 'sieve') {
+      // SIEVE is FIFO: new entries go to the tail.
+      node.prev = this._tail;
+      node.next = null;
+      this._tail.next = node;
+      this._tail = node;
+      return;
+    }
+    if (this._policy === 's3fifo') {
+      // S3-FIFO: new entries go to Small queue.
+      this._s3fifoAppendSmall(node);
+      return;
+    }
+    // LRU: new entries go to the tail (MRU).
+    node.prev = this._tail;
+    node.next = null;
+    this._tail.next = node;
+    this._tail = node;
+  }
+
+  /**
+   * Splice `node` in as the new MRU of the probation segment (SLRU only).
+   *
+   * The list puts probation at the front and protected behind it, so a new
+   * entry goes immediately *before* the protected LRU rather than at the tail.
+   * The head-splice case (no probation segment exists yet) is what stops a
+   * freshly-emptied cache from growing its probation at the wrong end.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @returns {void}
+   */
+  _insertIntoProbation(node) {
+    const boundary = this._probationEnd;
+    if (!boundary) {
+      // No probation segment: the whole list is protected, so the new entry
+      // becomes the sole probation node at the very front.
+      node.next = this._head;
+      node.prev = null;
+      if (this._head) this._head.prev = node;
+      this._head = node;
+      this._evictionCandidate = node;
+    } else if (boundary === this._tail) {
+      // The whole list is still probation: a plain append extends it.
+      node.prev = this._tail;
+      node.next = null;
+      this._tail.next = node;
+      this._tail = node;
+    } else {
+      const after = boundary.next;
+      if (after) {
+        node.prev = boundary;
+        node.next = after;
+        boundary.next = node;
+        after.prev = node;
+      }
+    }
+    this._probationEnd = node;
+  }
+
+  /**
+   * Unlink a node and update every piece of bookkeeping that depends on it.
+   *
+   * Four call sites - expiry, eviction, `delete()` and the cleanup sweep -
+   * each had their own copy of this sequence, which is exactly the kind of
+   * duplication that lets one path drift. The only difference between them is
+   * that eviction sweeps must also advance `_evictionCandidate`, hence the
+   * flag.
+   *
+   * A cursor may only ever name a live node: `_remove` nulls both links, so a
+   * cursor left pointing at a removed node would be handed by `_evictIfNeeded`
+   * to `_unlinkNode`, whose `!p` and `!n` branches would set `head` and `tail`
+   * to `null` and destroy the list. That is unreachable today — the eviction
+   * sweeps pass the flag, and every other caller happens to remove the head,
+   * which `_remove` repairs — and `review.md`'s CACHE-001 records it as
+   * `**[verified]**` when it is not. **If you add a fifth call site, advance the
+   * cursor when it is on the node you are removing**, or assert the invariant
+   * that currently guards it. See `test/powerCache.cursor.ttl.test.js`.
+   *
+   * @private
+   * @param {CacheNode} node - Node to unlink. Must currently be in the list.
+   * @param {Object} [options]
+   * @param {boolean} [options.advanceEvictionCandidate=false] - Also move the
+   *   eviction cursor past the removed node.
+   * @returns {CacheNode|null} The node that followed it, now at this position.
+   */
+  _unlinkNode(node, { advanceEvictionCandidate = false } = {}) {
+    const next = node.next;
+    this._map.delete(node.key);
+    this._currentWeight -= node.weight || 0;
+    // If a cursor pointed at the node being removed, step it past the gap.
+    if (this._cleanupCursor === node) this._cleanupCursor = next;
+    this._cleanupCursorValid = Boolean(this._cleanupCursor);
+    if (advanceEvictionCandidate) this._evictionCandidate = next;
+    this._remove(node);
+    return next;
+  }
+
+  /**
+   * Remove a node from the linked list without freeing it. The node's
+   * `prev`/`next` references are updated on neighbors and the node's links
+   * are nulled. Does not modify `this.map` or bookkeeping counters; callers
+   * are responsible for those actions.
+   *
+   * @private
+   * @param {CacheNode} node - Node to unlink from the list.
+   * @returns {void}
+   */
+  _remove(node) {
+    const p = node.prev,
+      n = node.next;
+    if (p) p.next = n;
+    else this._head = n;
+    // Keep eviction candidate aligned with the head when head changes
+    if (!p) this._evictionCandidate = this._head;
+    if (n) n.prev = p;
+    else this._tail = p;
+    if (this._probationEnd === node) this._probationEnd = p;
+    // SIEVE: if the hand points at the removed node, advance it to the next
+    // live node (or head if we removed the tail).
+    if (this._policy === 'sieve' && this._sieveHand === node) {
+      this._sieveHand = node.next || this._head;
+    }
+    // S3-FIFO: remove from the appropriate queue's map/list.
+    if (this._policy === 's3fifo') {
+      if (node.queue === 'small') {
+        this._s3fifoRemoveFromSmall(node);
+      } else if (node.queue === 'ghost') {
+        this._s3fifoRemoveFromGhost(node);
+      }
+      // Main queue nodes are already removed from `this._map` by `_unlinkNode`.
+    }
+    // Drop the window memo when a window node leaves the list. This is here, in
+    // the one funnel every unlink passes through, rather than in `_unlinkNode`:
+    // `_moveToTail` unlinks and re-appends through `_remove` directly, so
+    // invalidating only in the map-removing path would miss it, and a memo that
+    // is "usually" invalidated is the maintained pointer this design exists to
+    // avoid. `_remove` cannot know whether it removed the *start* of the run, and
+    // guessing is the failure `_windowOldest()` documents — so it discards rather
+    // than corrects, and the next read walks. An unlink of a main-space node
+    // cannot move the window's start and is left alone, which is the common case
+    // on the read path the memo is here to make cheap.
+    if (node.inWindow) {
+      this._windowStartMemo = null;
+      this._windowTail = null;
+    }
+    node.prev = node.next = null;
+  }
+
+  // --- S3-FIFO queue helpers ---------------------------------------------------
+  // S3-FIFO uses three static FIFO queues: Small (10%), Main (80%), Ghost (20%).
+  // Main reuses the existing linked list + `_map`. Small and Ghost have their own
+  // linked lists and maps.
+
+  /** @param {CacheNode} node */
+  _s3fifoAppendSmall(node) {
+    if (!this._smallTail) {
+      this._smallHead = this._smallTail = node;
+    } else {
+      this._smallTail.next = node;
+      node.prev = this._smallTail;
+      this._smallTail = node;
+    }
+    node.next = null;
+    node.queue = 'small';
+    this._smallMap.set(node.key, node);
+    this._smallSize += 1;
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoAppendMain(node) {
+    // Append directly to the Main linked list, bypassing `_append`'s policy
+    // routing which would otherwise send this back to Small.
+    if (!this._tail) {
+      this._head = this._tail = node;
+      this._evictionCandidate = this._head;
+    } else {
+      node.prev = this._tail;
+      node.next = null;
+      this._tail.next = node;
+      this._tail = node;
+    }
+    this._map.set(node.key, node);
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoAppendGhost(node) {
+    if (!this._ghostTail) {
+      this._ghostHead = this._ghostTail = node;
+    } else {
+      this._ghostTail.next = node;
+      node.prev = this._ghostTail;
+      this._ghostTail = node;
+    }
+    node.next = null;
+    node.queue = 'ghost';
+    this._ghostMap.set(node.key, node);
+    this._ghostSize += 1;
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoRemoveFromSmall(node) {
+    const p = node.prev,
+      n = node.next;
+    if (p) p.next = n;
+    else this._smallHead = n;
+    if (n) n.prev = p;
+    else this._smallTail = p;
+    this._smallMap.delete(node.key);
+    this._smallSize -= 1;
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoRemoveFromGhost(node) {
+    const p = node.prev,
+      n = node.next;
+    if (p) p.next = n;
+    else this._ghostHead = n;
+    if (n) n.prev = p;
+    else this._ghostTail = p;
+    this._ghostMap.delete(node.key);
+    this._ghostSize -= 1;
+  }
+
+  /**
+   * Move an existing node to the tail (mark as most-recently used).
+   * Implemented as an unlink followed by an append. No-op when node is
+   * already the tail.
+   *
+   * @private
+   * @param {CacheNode} node - Node to promote to MRU position.
+   * @returns {void}
+   */
+  _moveToTail(node) {
+    if (this._policy === 'slru') {
+      // A hit promotes the node out of probation into the protected MRU. This
+      // must NOT go through `_append`, which would re-insert at the probation
+      // boundary and undo the promotion.
+      // The predecessor has to be captured *before* `_remove`, which nulls the
+      // node's links, and before `node.prev` is repurposed for the tail splice.
+      const wasProbationEnd = this._probationEnd === node;
+      const prevProbation = node.prev;
+      if (this._tail === node) {
+        // Already at the tail. The early-out below would skip the promotion and
+        // leave the boundary pointing at a node that is now protected, which
+        // corrupts the segment order on the next insert. Close the probation
+        // segment behind it instead.
+        if (wasProbationEnd) this._probationEnd = prevProbation;
+        return;
+      }
+      this._remove(node);
+      node.prev = this._tail;
+      node.next = null;
+      if (this._tail) this._tail.next = node;
+      this._tail = node;
+      if (wasProbationEnd) this._probationEnd = prevProbation;
+      return;
+    }
+    if (this._policy === 'sieve') {
+      // SIEVE: hits do not move the node. Set the visited bit so the eviction
+      // hand gives it a second chance.
+      node.visited = true;
+      return;
+    }
+    if (this._policy === 's3fifo') {
+      // S3-FIFO: a hit in Small promotes to Main. A hit in Ghost admits to Main.
+      // A hit in Main is a no-op.
+      if (node.queue === 'small') {
+        this._s3fifoRemoveFromSmall(node);
+        node.queue = 'main';
+        node.prev = null;
+        node.next = null;
+        this._s3fifoAppendMain(node);
+        this._evictIfNeeded();
+      } else if (node.queue === 'ghost') {
+        this._s3fifoRemoveFromGhost(node);
+        node.queue = 'main';
+        node.prev = null;
+        node.next = null;
+        this._s3fifoAppendMain(node);
+        this._evictIfNeeded();
+      }
+      return;
+    }
+    if (this._windowSize > 0) {
+      // A hit in main space must refresh its recency *within main space*. Moving
+      // it to the tail of the whole list would put it inside the window region
+      // without being counted or flagged there, and the region and the counter
+      // would stop describing the same set of nodes — the exact defect the
+      // derived `_windowOldest()` exists to make impossible.
+      if (!node.inWindow) {
+        this._remove(node);
+        this._insertAtMainSpaceMrU(node);
+        return;
+      }
+      if (this._tail === node) return;
+      this._remove(node);
+      this._append(node);
+      return;
+    }
+    if (this._tail === node) return;
+    this._remove(node);
+    this._append(node);
+  }
+
+  /**
+   * The oldest node in the admission window, or `null` when the window is empty.
+   *
+   * Derived from the tail run of flagged nodes rather than maintained as a
+   * pointer, and derived by *following the flag* rather than by walking back a
+   * fixed number of steps. Both halves matter:
+   *
+   * - A pointer has to be updated by every mutation of the list. Every attempt
+   *   that maintained one missed a mutation, and produced a counter reading
+   *   negative some distance from the splice that caused it.
+   * - A fixed walk of `windowSize` steps is only right while the window is
+   *   **full**. A challenger that loses arbitration is dropped and the window is
+   *   briefly one short, at which point the walk reaches past the boundary into
+   *   main space: `main space, k-47, k-6, window` with the window's two
+   *   survivors after it, which put a recency bump for `k-6` *behind* a key
+   *   inserted fifty sets later and quietly destroyed the recency order of main
+   *   space. The window is "the flagged run at the tail" at every fill level,
+   *   and that is what this returns.
+   *
+   * The flag is the source of truth for _membership_ because it is set in
+   * exactly one place (admission) and cleared in exactly one (promotion or
+   * drop). List consistency against it is checked by `test/powerCache.window.test.js`,
+   * which is the half this cannot verify on its own.
+   *
+   * **The walk is memoised, and the memo is validated rather than maintained.**
+   * This is deliberately not the maintained pointer the note above describes as
+   * having failed: a pointer has to be *corrected* by every mutation, and the
+   * way it went wrong was producing a confidently wrong answer, because a node
+   * with a correct `inWindow` flag can still sit on the wrong side of the
+   * boundary. Here the memo can only be **trusted or discarded**, never
+   * adjusted, so a mistake in reasoning about some mutation costs a walk and
+   * nothing else — and the conditions below are each individually
+   * necessary, so the failure mode is a stale memo rather than a wrong one.
+   *
+   * The memo is valid when the walk would return the same node, and the two
+   * checks are the complete set of ways that can stop being true:
+   *
+   * 1. `memo.prev === null || !memo.prev.inWindow`. If the node *before* the
+   *    memo is now flagged, the memo is no longer the start of the run.
+   * 2. `this._windowTail === this._tail`, where `_windowTail` is the tail at the
+   *    moment of the walk. This is what makes a memo written before an unlink
+   *    comparable to the list afterwards: the tail is unchanged, the removed node
+   *    was not the memo, and the run's start is genuinely unmoved — so a walk
+   *    would return the same node and skipping it is correct.
+   *
+   * **There is deliberately no `memo.inWindow` check**, and it was there first.
+   * It is redundant rather than merely untested: every way a node stops being
+   * flagged is a promotion or a drop, and both of those *unlink* it, and `_remove`
+   * discards the memo for any window node it unlinks. Deleting the check left
+   // every test in `test/powerCache.window.test.js` passing, and the reason it
+   * is safe to delete is that `_remove` is the single funnel every unlink passes
+   * through. The same test run is what established it — the check had survived
+   * deleting it, which is how a guard nobody has watched fail gets deleted
+   * instead of justified.
+   *
+   * **There is also no `memo === this._tail` condition**, and the first draft of
+   * this had one. The walk starts at the tail and walks *backwards*, so the
+   * window's oldest node is the tail only when the window holds a single entry —
+   * requiring it made the memo miss on *every* read while a multi-entry window was
+   * resident, which is precisely the case the row is about. It measured 1.00
+   * calls per get and zero benefit, and the diagnostic that found it printed which
+   * condition had failed rather than a bare count.
+   *
+   * The case that is *not* free is a node removed from the window **immediately
+   * before the memo**, which moves the run's start without touching the tail or
+   * the memo. That is one unlink, and it is covered by the same rule the rest
+   * of this class uses: any unlink of a window node drops the memo, because
+   * `_remove` cannot know whether it removed the run's start and a wrong guess
+   * is the failure this whole design exists to avoid. Dropping it costs one
+   * walk, which is what the walk is for.
+   *
+   * @private
+   * @returns {CacheNode|null}
+   */
+  _windowOldest() {
+    const memo = this._windowStartMemo;
+    if (
+      memo !== null &&
+      (memo.prev === null || !memo.prev.inWindow) &&
+      this._windowTail === this._tail
+    ) {
+      return memo;
+    }
+    let node = this._tail;
+    if (!node || !node.inWindow) {
+      this._windowStartMemo = null;
+      this._windowTail = this._tail;
+      return null;
+    }
+    while (node.prev && node.prev.inWindow) node = node.prev;
+    this._windowStartMemo = node;
+    this._windowTail = this._tail;
+    return node;
+  }
+
+  /**
+   * The eviction candidate in main space: the entry just below the window.
+   *
+   * `null` when the window holds the whole list, which is the cold-cache case
+   * the note calls out: with no main space there is nothing to compare against,
+   * and evicting a node against *itself* would remove it from `_map` and lose
+   * it permanently.
+   *
+   * @private
+   * @returns {CacheNode|null}
+   */
+  _windowVictim() {
+    const oldest = this._windowOldest();
+    if (!oldest || oldest === this._head) return null;
+    return oldest.prev;
+  }
+
+  /**
+   * Splice an unlinked node in at the MRU end of main space — immediately
+   * before the window's oldest entry.
+   *
+   * This is the *one* splice that may place a node on the main-space side of
+   * the boundary, and every path that leaves the window goes through it.
+   * Appending to the tail instead is the error three separate implementations
+   * made: it puts a main-space node back inside the window region, the region
+   * and the counter stop describing the same set of nodes, and the visible
+   * symptom is a counter bug some distance from its cause.
+   *
+   * Falls back to the tail when the window is empty (main space then runs to
+   * the end of the list) and to a head fix when there is no main space at all.
+   *
+   * @private
+   * @param {CacheNode} node - An unlinked node. Its links are overwritten.
+   * @returns {void}
+   */
+  _insertAtMainSpaceMrU(node) {
+    const windowStart = this._windowOldest();
+    if (!windowStart) {
+      node.prev = this._tail;
+      node.next = null;
+      if (this._tail) this._tail.next = node;
+      else {
+        this._head = node;
+        this._evictionCandidate = node;
+      }
+      this._tail = node;
+      return;
+    }
+    const prev = windowStart.prev;
+    node.prev = prev;
+    node.next = windowStart;
+    if (prev) prev.next = node;
+    else {
+      this._head = node;
+      // The head moved, so the eviction cursor has to move with it or the sweep
+      // will start unlinking from a node that is no longer in the list.
+      this._evictionCandidate = node;
+    }
+    windowStart.prev = node;
+  }
+
+  /**
+   * Move a node out of the window and into main space, in front of the window.
+   *
+   * @private
+   * @param {CacheNode} node - A linked window node.
+   * @returns {void}
+   */
+  _promoteFromWindow(node) {
+    this._remove(node);
+    this._insertAtMainSpaceMrU(node);
+    node.inWindow = false;
+  }
+
+  /**
+   * Evict one node, reporting it and returning it to the node pool.
+   *
+   * Single-node sibling of `_evictIfNeeded`, for the paths that displace a
+   * specific victim rather than sweeping. Sharing the unlink/report/free
+   * sequence is what keeps `onEvict` firing on every path — a window eviction
+   * that skipped the callback would be invisible to every user cleanup and to
+   * the pool's own node accounting.
+   *
+   * @private
+   * @param {CacheNode} node
+   * @returns {void}
+   */
+  _evictNode(node) {
+    if (!node) return;
+    const k = node.key;
+    const v = node.value;
+    this._unlinkNode(node, { advanceEvictionCandidate: true });
+    this._evictions++;
+    try {
+      if (this.onEvict) this.onEvict(k, v, 'evicted');
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onEvict callback threw');
+    }
+    this._freeNode(node);
+  }
+
+  /**
+   * Admit a new key into the window, then arbitrate the window's oldest entry.
+   *
+   * Called after a new key has been appended at the tail. Once the window is
+   * full, its oldest entry is the challenger: it either takes a place in main
+   * space or is dropped, and which one is the only place the sketch arbitrates.
+   *
+   * Two rules here are not in the W-TinyLFU *description* and both were found
+   * by attempting it (see `adr/0003-tinylfu-admission-window.md`):
+   *
+   * - **The challenger wins ties.** A tie means "no evidence either is better",
+   *   and discarding the challenger discards the only evidence the filter has.
+   *   Refusing ties is what made a fill-then-read caller lose every key written
+   *   after the first few, because they all tie at estimate 1.
+   * - **Only arbitrate at capacity.** While main space has room the filter has
+   *   nothing to protect and a comparison has no signal — every fresh key sits
+   *   at estimate 1, so every comparison is a tie and the churn evicts the
+   *   entry the previous `set` just promoted. Measured: a 40-key warm ended with
+   *   5 entries instead of 40. Caffeine's `admit` makes the same check.
+   *
+   * `previousSize` is the count **before** the arrival, and it has to be. A
+   * cache filled to exactly `maxEntries` has been full the whole time the last
+   * key was arriving; testing the count *after* the insert makes the final key
+   * of every fill contend with a main-space victim it should have been promoted
+   * past, which drops it. That is a 40-key warm ending at 39 — one key short,
+   * no error, and invisible unless the test checks the count.
+   *
+   * @private
+   * @param {number} previousSize - `this._map.size` before this arrival.
+   * @returns {void}
+   */
+  _arbitrateWindow(previousSize) {
+    if (this._map.size <= this._windowSize) return;
+    const challenger = this._windowOldest();
+    if (!challenger) return;
+    const victim = this._windowVictim();
+    // Rule 2b: "full" counts the window, because the window is admission slack
+    // and not capacity on top of `maxEntries`. Excluding it makes a main-only
+    // test read as never-full, admit every scan key, and churn through the
+    // working set one key at a time.
+    const atCapacity = victim != null && previousSize >= this.maxEntries;
+    if (!atCapacity) {
+      // Below capacity nothing is displaced — only the promotion happens. Doing
+      // the eviction here too is what made a warm lose 35 of 40 keys: promoted,
+      // then immediately evicted by the next arrival, forever.
+      this._promoteFromWindow(challenger);
+      return;
+    }
+    if (!victim) return;
+    /** @type {CacheNode} */
+    const v = victim;
+    const victimKey = v.key;
+    if (this._sketch.estimate(challenger.key) > this._sketch.estimate(victimKey)) {
+      this._evictNode(victim);
+      this._promoteFromWindow(challenger);
+    } else {
+      this._rejectedAdmission += 1;
+      this._evictNode(challenger);
+    }
+  }
+
+  /**
+   * Evict nodes from the head (least-recently used) until the cache
+   * satisfies both `maxEntries` and `maxWeight` constraints. For each
+   * evicted node `onEvict` is invoked if provided and the node is returned
+   * to the node pool via `_freeNode`.
+   *
+   * @private
+   * @returns {void}
+   */
+  _evictIfNeeded() {
+    if (this._policy === 'sieve') {
+      this._sieveEvict();
+      return;
+    }
+    if (this._policy === 's3fifo') {
+      this._s3fifoEvict();
+      return;
+    }
+    // Use the eviction candidate pointer to avoid repeatedly reading `head` in
+    // large eviction sweeps. Keep the candidate in sync with head mutations.
+    while (this._map.size > this.maxEntries || this._currentWeight > this.maxWeight) {
+      const node = this._evictionCandidate || this._head;
+      if (!node) break;
+      const k = node.key;
+      const v = node.value;
+      this._abortInflight(k, 'evicted');
+      this._unlinkNode(node, { advanceEvictionCandidate: true });
+      this._evictions++;
+      try {
+        if (this.onEvict) this.onEvict(k, v, 'evicted');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw');
+      }
+      this._freeNode(node);
+    }
+    // Ensure eviction candidate remains aligned with current head after evictions
+    if (!this._evictionCandidate) this._evictionCandidate = this._head;
+  }
+
+  /** SIEVE eviction: scan from tail, clear visited bits, evict first unvisited. */
+  _sieveEvict() {
+    while (this._map.size > this.maxEntries || this._currentWeight > this.maxWeight) {
+      if (!this._sieveHand) {
+        this._sieveHand = this._head;
+        if (!this._sieveHand) break;
+      }
+      const node = this._sieveHand;
+      // Advance hand before freeing so we don't point at a removed node.
+      this._sieveHand = node.next || this._tail;
+      if (node.visited) {
+        // Second chance: clear the bit and keep.
+        node.visited = false;
+        continue;
+      }
+      const k = node.key;
+      const v = node.value;
+      this._abortInflight(k, 'evicted');
+      this._unlinkNode(node, { advanceEvictionCandidate: false });
+      this._evictions++;
+      try {
+        if (this.onEvict) this.onEvict(k, v, 'evicted');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw');
+      }
+      this._freeNode(node);
+    }
+  }
+
+  /** S3-FIFO eviction: enforce Small, Main, and Ghost queue limits. */
+  _s3fifoEvict() {
+    // Evict from Small if over capacity.
+    while (this._smallSize > this._smallMaxSize) {
+      const node = this._smallHead;
+      if (!node) break;
+      // Move to Ghost if there is room, otherwise drop.
+      if (this._ghostSize < this._ghostMaxSize) {
+        this._s3fifoRemoveFromSmall(node);
+        this._s3fifoAppendGhost(node);
+      } else {
+        this._s3fifoRemoveFromSmall(node);
+        this._evictions++;
+        const k = node.key;
+        const v = node.value;
+        this._abortInflight(k, 'evicted');
+        try {
+          if (this.onEvict) this.onEvict(k, v, 'evicted');
+        } catch (err) {
+          this._notifyError(err, 'PowerCache onEvict callback threw');
+        }
+        this._freeNode(node);
+      }
+    }
+    // Evict from Main if over capacity.
+    while (this._map.size >= this.maxEntries || this._currentWeight > this.maxWeight) {
+      const node = this._evictionCandidate || this._head;
+      if (!node) break;
+      // Move to Ghost if there is room, otherwise drop.
+      if (this._ghostSize < this._ghostMaxSize) {
+        this._unlinkNode(node, { advanceEvictionCandidate: true });
+        this._s3fifoAppendGhost(node);
+      } else {
+        const k = node.key;
+        const v = node.value;
+        this._abortInflight(k, 'evicted');
+        this._unlinkNode(node, { advanceEvictionCandidate: true });
+        this._evictions++;
+        try {
+          if (this.onEvict) this.onEvict(k, v, 'evicted');
+        } catch (err) {
+          this._notifyError(err, 'PowerCache onEvict callback threw');
+        }
+        this._freeNode(node);
+      }
+    }
+    // Ensure eviction candidate remains aligned with current head after evictions
+    if (!this._evictionCandidate) this._evictionCandidate = this._head;
+  }
+
+  /**
+   * Normalise a caller-supplied TTL into the `expiresAt` this entry stores.
+   *
+   * The arithmetic used to be written out at each of `set`, `setMany` and
+   * `touch`, and `now + ttl` on a non-number does **string concatenation** rather
+   * than failing. With `now === 3000`, `{ ttl: 'abc' }` therefore stored
+   * `expiresAt === '3000abc'`; every expiry test then compared a number against a
+   * string, produced `NaN`, and `NaN > anything` is `false` — so the entry never
+   * expired. A one-character typo in a config value silently disabled expiry,
+   * which is the worst direction a cache has to fail in: it looks like the value
+   * it was given, and memory grows until something else breaks.
+   *
+   * A numeric *string* is still accepted, because `'1000'` from an environment
+   * variable is a reasonable thing to pass and rejecting it would be pedantry.
+   * What is rejected is anything that does not name a duration — including
+   * `{ ttl: [] }` and `{ ttl: true }`, which `Number()` would happily coerce to 0
+   * and 1.
+   *
+   * @private
+   * @param {number|string|null|undefined} ttl - Caller-supplied TTL in ms.
+   * @param {number} now - The clock reading this expiry is relative to.
+   * @returns {number} `0` for "no expiry", otherwise an absolute expiry.
+   * @throws {TypeError} If `ttl` is neither nullish, `Infinity`, nor a finite
+   *   number.
+   */
+  _expiresAt(ttl, now) {
+    // `0` is the stored sentinel for "this entry has no expiry", and it is
+    // deliberately *not* how a zero TTL is spelled: `{ ttl: 0 }` means expire now
+    // and callers of that behaviour existed before this helper did. Nullish
+    // short-circuits here so the two are told apart while the caller's intent is
+    // still visible, rather than being conflated in a sentinel and reconstructed
+    // at each call site.
+    //
+    // The *validation* now lives in `utils/options.js` as `normalizeTtl`,
+    // because `PowerTTLMap` needs the identical rules and could not reach the
+    // copy that lived here — `powerCache.js` exports nothing, so CACHE-003's fix
+    // fixed one class of two. `PowerTTLMap.set(k, 1, 'abc')` stored an immortal
+    // entry while this method throws for the same value. The nullish test stays
+    // here because `normalizeTtl` reports "no expiry" as `0`, which is also what
+    // a real `{ ttl: 0 }` resolves to, and the two mean opposite things.
+    if (ttl == null || ttl === Infinity) return 0;
+    return now + normalizeTtl(ttl, 'PowerCache');
+  }
+
+  /**
+   * The oversize rejection, shared by `set` and `setMany`.
+   *
+   * Extracted because `setMany` used to carry its own copy of the insert path and
+   * this check was the first thing it omitted: a 999-byte value written through
+   * `set` was refused with `onEvict` reporting `'rejected-oversized'`, and the
+   * same value written through `setMany` was admitted and then swept out by the
+   * bulk eviction pass with the **wrong reason**, `'evicted'`. A caller watching
+   * `onEvict` to count rejections — which is the only way to observe them, since
+   * `setMany` returns `this` for chaining — was counting the wrong thing.
+   *
+   * @private
+   * @param {*} key
+   * @param {*} value
+   * @param {number} w - Already-computed weight.
+   * @returns {boolean} `true` when the insert was rejected and must be skipped.
+   */
+  _rejectIfOversized(key, value, w) {
+    if (!this.rejectOversized || !Number.isFinite(this.maxWeight) || w <= this.maxWeight) {
+      return false;
+    }
+    this._rejected++;
+    try {
+      if (this.onEvict) this.onEvict(key, value, 'rejected-oversized');
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onEvict callback threw (rejected-oversized)');
+    }
+    return true;
+  }
+
+  /**
+   * Insert a key that is not already present, applying the admission policy.
+   *
+   * Shared by `set` and `setMany` for the same reason as
+   * {@link PowerCache#_rejectIfOversized}: `setMany` omitted the TinyLFU sketch
+   * and the admission window entirely, so a bulk load was invisible to admission
+   * — `sketch.estimate(key) === 0` for every key written that way, and a
+   * frequency-driven filter cannot judge a key it has never seen.
+   *
+   * @private
+   * @param {*} key
+   * @param {*} value
+   * @param {number} w - Already-computed weight.
+   * @param {number} expiresAt - Already-computed absolute expiry.
+   * @param {number} previousSize - `this._map.size` before this insert, which the
+   *   window arbitration needs to tell "grew by one" from "replaced one".
+   * @returns {boolean} `false` when the admission filter refused the key.
+   */
+  _insertNew(key, value, w, expiresAt, previousSize) {
+    // **The window path.** A new key is admitted to the window unconditionally —
+    // that is what makes the cold start stop collapsing, because a one-shot key
+    // displaces the previous one-shot key inside the window rather than a
+    // working-set entry in main space. The filter then arbitrates only the
+    // window's oldest entry, which is a comparison between two established keys
+    // rather than between a newcomer and a cold sketch.
+    //
+    // This has to be tested *before* the capacity check below, not after it. As an
+    // `else if` it was unreachable exactly when it mattered: once the cache was
+    // full, the old refuse-on-tie rule ran instead and every arrival was judged
+    // against a single main-space victim, so the window never arbitrated and
+    // nothing was ever evicted through it.
+    if (this._sketch && this._windowSize > 0) {
+      const node = this._allocNode(key, value, w, expiresAt);
+      this._map.set(key, node);
+      node.inWindow = true;
+      this._append(node);
+      this._currentWeight += node.weight || 0;
+      this._arbitrateWindow(previousSize);
+      // The sketch increment and the eviction pass are the caller's, shared with
+      // the no-window path. Doing them here as well double-counted every key
+      // that went through a window.
+      return true;
+    }
+    // Admission, decided *before* the insert. An LRU evicts the coldest by
+    // recency, which a one-off scan does not disturb: the scan's keys are the
+    // *most* recent by definition, and it walks the working set straight out.
+    // A frequency filter asks a different question - is the thing about to be
+    // evicted still wanted - and refuses the insertion when the incumbent is
+    // the better bet.
+    //
+    // Refusing here rather than inside the eviction sweep matters. An earlier
+    // version returned from `_evictIfNeeded` to reject, which skipped the sweep
+    // entirely and let the cache grow to 77 entries against a limit of 10.
+    // Rejection is about *this key*, so it belongs at the insert. Only ever
+    // consulted at capacity. A frequency filter compares the challenger's
+    // popularity against the victim's, and a brand-new key's estimate is 0 - so
+    // applying the rule below capacity refuses every insert after the first and
+    // the cache can never fill. Measured: 200 insertions rejected, `size` 1.
+    // Admission is about what to *displace*, so it needs something to displace.
+    if (this._sketch && this._map.size >= this.maxEntries) {
+      const incumbent = this._evictionCandidate || this._head;
+      // A brand-new key is **refused whenever the incumbent's estimate is greater
+      // than or equal to its own**, and a brand-new key's estimate is 0. In a
+      // cold sketch every estimate is 0, so `0 >= 0` holds and the key is refused.
+      // Read that against the comment this block used to carry, which claimed a
+      // first-seen key was "admitted unconditionally ... the TinyLFU admission
+      // window in its simplest form". That was false, and so was the rest of it,
+      // which simultaneously asserted that "only a *strictly* hotter incumbent
+      // may refuse" (which would need `>`) and that "`>=`, so a tie keeps the
+      // incumbent" (which is what the code does, and which refuses the
+      // challenger).
+      //
+      // **This is a known defect, and the refusal rule above is why
+      // `admission: 'tinylfu'` currently underperforms plain LRU.** Measured on
+      // the paired Zipf + scan workload in `bench/claims.js` (`node bench/claims.js
+      // coldstart`): on a cold 40-entry cache preceded by a 460-key scan burst the
+      // working-set hit rate is **0.0 %** against plain LRU's **80.0 %**, retaining
+      // **0 of 40** working-set keys against LRU's 40/40, because the scan keys
+      // fill the cache while it is still below capacity and the working set is
+      // then refused every time. On a sustained Zipf mix (`node bench/claims.js
+      // zipf`), working-set retention is 15.0/40 against LRU's 17.2/40, and the
+      // worst hot keys sit at estimate 0 - and a key at 0 can never re-enter.
+      //
+      // These two figures are restated from a re-run on the current build, not
+      // copied forward: the sketch is now sized from the cache's capacity and the
+      // key is hashed once per call, and the numbers moved with it. They moved by
+      // about a point, and the ranking did not move at all.
+      //
+      // **The fix is not a comparison operator.** Changing `>=` to `>` admits the
+      // challenger on every tie, which lets a scan walk the working set - the
+      // exact failure this filter exists to prevent. The correct mechanism is
+      // W-TinyLFU's admission *window*: a small region at the MRU end that
+      // accepts new keys unconditionally, so scan traffic is absorbed there and
+      // the frequency filter arbitrates only that window's victim against a
+      // main-space victim. That is built and reachable behind `windowSize`, and it
+      // is off by default: it fixes the sustained mix and not the cold one, so it
+      // did not meet its own acceptance criteria.
+      //
+      // `adr/0003-tinylfu-admission-window.md` has the full sweep, the four
+      // criteria, and the two boundary bugs the experiment found. The decision is
+      // recorded there; this comment is the pointer, because it is the only place
+      // a reader of this block will look.
+      //
+      // The sketch itself is sound: `test/smallLfu.test.js` asserts at a
+      // production-shaped half-life that a recurring key outranks a one-shot one
+      // on every key, so do not "fix" this by re-tuning the sketch.
+      const challenger = this._sketch.estimate(key);
+      if (incumbent && this._sketch.estimate(incumbent.key) >= challenger) {
+        this._rejectedAdmission += 1;
+        return false;
+      }
+    }
+    const node = this._allocNode(key, value, w, expiresAt);
+    if (this._policy !== 's3fifo') {
+      this._map.set(key, node);
+    }
+    this._append(node);
+    this._currentWeight += node.weight || 0;
+    return true;
+  }
+
+  /**
+   * Set a value in the cache (add or update).
+   * Marks the entry as most-recently used.
+   * If `rejectOversized` is enabled and the computed/explicit weight exceeds `maxWeight`,
+   * the insertion will be rejected and `set` returns `false` (otherwise returns `this`).
+   * @param {*} key - Cache key
+   * @param {*} value - Value to store
+   * @param {Object} [options]
+   * @param {number} [options.ttl] - Time-to-live in ms. Use `null` or `Infinity` to disable expiration.
+   * @param {number|null} [options.weight] - Optional explicit weight for the entry. If omitted, `weightFn` is used.
+   * @returns {this|false} `this` on success, or `false` when insertion was rejected due to oversize.
+   */
+  set(key, value, { ttl = this.defaultTTL, weight = null } = {}) {
+    const now = this._now();
+    const expiresAt = this._expiresAt(ttl, now);
+    // Compute weight once and validate it before mutating bookkeeping.
+    const w = this._computeWeight(value, weight);
+    if (this._rejectIfOversized(key, value, w)) return false;
+
+    // **PERF-003: one lookup instead of two.** This read `has(key)` and then
+    // `_updateExisting` read the same key again, so a hit cost two reads of one map.
+    // A single `get` answers it, and unambiguously: `_map` holds *nodes*, which are
+    // objects, so `undefined` means absent **even when the stored value is
+    // `undefined`** — which is the case that would break a naive `get(key) !==
+    // undefined` test on a value map, and is why this is safe here and would not be
+    // on `get(key)` itself. Both readers looked at the raw `_map`, so expiry
+    // semantics are untouched: `has()` never filtered expired entries either.
+    //
+    // The saving is on the **hit path only** — a miss was already one lookup. And it
+    // is not a measurable end-to-end win: at a 44–55 % hit rate this saves roughly
+    // one `Map.get` on half the calls, which lands far inside the 28 % median
+    // min/max spread BENCH-001 measures on this machine. It is taken because it is
+    // strictly less work with identical semantics and a counter can prove it, not
+    // because it makes `set` faster by a number anyone could observe.
+    let existing = this._map.get(key);
+    if (existing === undefined && this._policy === 's3fifo') {
+      // S3-FIFO: check Small and Ghost queues for existing entries.
+      existing = this._smallMap.get(key) || this._ghostMap.get(key);
+    }
+    if (existing !== undefined) {
+      this._updateExisting(existing, value, w, expiresAt);
+    } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
+      // Refused by the admission filter. The key is deliberately *not*
+      // recorded in the sketch: it did not reach the cache, and counting a
+      // refusal would let a scan inflate its own estimate by being refused.
+      return this;
+    }
+    // The key is recorded even when the insert was admitted, so the sketch
+    // reflects attempted demand rather than only what survived.
+    this._sketch?.increment(key);
+    this._evictIfNeeded();
+    return this;
+  }
+
+  /**
+   * Overwrite an entry that is already in the cache.
+   *
+   * Shared by `set` and `setMany`. Split out for the same reason as the insert
+   * path above: `setMany` had its own copy of this arithmetic too, so the two
+   * had already drifted on the TTL and on admission before the weight bookkeeping
+   * was checked.
+   *
+   * @private
+   * @param {*} node - The already-fetched node from `_map`, passed in rather than
+   *   re-fetched. This used to take a `key` and call `this._map.get(key)` itself,
+   *   which made every caller read the map twice — see PERF-003 at the call site.
+   * @param {*} value
+   * @param {number} w - Already-computed weight.
+   * @param {number} expiresAt - Already-computed absolute expiry.
+   * @returns {void}
+   */
+  _updateExisting(node, value, w, expiresAt) {
+    this._currentWeight -= node.weight || 0;
+    node.value = value;
+    node.weight = w;
+    node.expiresAt = expiresAt;
+    this._currentWeight += node.weight || 0;
+    this._moveToTail(node);
+  }
+
+  /**
+   * Retrieve a value and mark it as recently used.
+   * @param {*} key
+   * @returns {*|undefined} The stored value or `undefined` if missing/expired.
+   */
+  get(key) {
+    const node = this._fetchValidNode(key, { countMiss: true });
+    if (!node) return undefined;
+    this._moveToTail(node);
+    this._hits++;
+    // A hit is the strongest frequency evidence there is, and TinyLFU is
+    // frequency-driven: without this the sketch only ever sees writes, so a
+    // read-mostly cache would admit one-off writes on the strength of a
+    // history it never had.
+    this._sketch?.increment(key);
+    return node.value;
+  }
+
+  /**
+   * Get a value without updating recency.
+   * Returns `undefined` for missing or expired entries.
+   * @param {*} key
+   * @returns {*|undefined}
+   */
+  peek(key) {
+    const node = this._fetchValidNode(key);
+    return node ? node.value : undefined;
+  }
+
+  /**
+   * Check membership without affecting recency.
+   * @param {*} key
+   * @param {Object} [options]
+   * @param {boolean} [options.ignoreExpiry=false] If true, consider expired entries as present.
+   * @returns {boolean}
+   */
+  has(key, { ignoreExpiry = false } = {}) {
+    return Boolean(this._fetchValidNode(key, { ignoreExpiry }));
+  }
+
+  /**
+   * `getOrSetAsync` using the cache's `fetchMethod` when no per-call factory is
+   * given.
+   *
+   * The reason this exists rather than as a required argument: the row's shape
+   * (`fetchMethod` on the instance) removes a function literal from **every**
+   * call site, which is most of the cost of the async cache API in a hot path.
+   * The per-call factory still wins, so one caller can override a cache-wide
+   * default — a cache is often keyed by more than one kind of resource.
+   *
+   * @param {*} key
+   * @param {Function} [factory] Overrides the cache's `fetchMethod`.
+   * @param {PowerCacheGetOrFetchOptions} [options] Passed through to `getOrSetAsync`.
+   * @returns {Promise<*>}
+   */
+  getOrFetch(key, factory, options = {}) {
+    const fn = factory ?? this.fetchMethod;
+    if (typeof fn !== 'function') {
+      return Promise.reject(
+        new TypeError('PowerCache.getOrFetch: no factory given and no `fetchMethod` configured')
+      );
+    }
+    return this.getOrSetAsync(key, fn, options);
+  }
+
+  /**
+   * Atomically read-or-compute a value for `key`.
+   * If the key is present and not expired the stored value is returned.
+   * Otherwise `factory` is invoked to produce the value which is stored
+   * in the cache and returned. `factory` may be a value (in which case it
+   * is stored directly) or a function. If the function returns a Promise,
+   * the Promise is returned and the resolved value is stored when it settles.
+   *
+   * Note: this method does not deduplicate concurrent async factories —
+   * for async factories prefer `getOrSetAsync` or use
+   * `PowerMemoizer` for inflight deduplication.
+   *
+   * @param {*} key
+   * @param {Function|*} factory - Function that produces the value or a direct value.
+   * @param {Object} [options]
+   * @param {number} [options.ttl]
+   * @param {number} [options.weight]
+   * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
+   * @returns {*|Promise<*>}
+   */
+
+  getOrSet(
+    key,
+    factory,
+    { ttl = undefined, weight = undefined, staleWhileRevalidate = this.allowStale } = {}
+  ) {
+    const now = this._now();
+    // PERF-003: `now` was read above and `_fetchValidNode` read it again.
+    const node = this._fetchValidNode(key, {
+      countMiss: false,
+      allowExpired: staleWhileRevalidate,
+      now,
+    });
+
+    if (node) {
+      if (node.expiresAt && node.expiresAt <= now) {
+        // Expired. Servable only inside the stale window — this is the branch
+        // that used to return the value unconditionally.
+        if (typeof factory === 'function' && this._staleServable(node, now)) {
+          this._moveToTail(node);
+          this._hits++;
+          this._staleServes++;
+          this._refreshStaleEntry(key, factory, { ttl, weight });
+          return node.value;
+        }
+        this._removeExpiredNode(node, now);
+        this._misses++;
+      } else {
+        this._moveToTail(node);
+        this._hits++;
+        return node.value;
+      }
+    } else {
+      this._misses++;
+    }
+
+    // Compute and store
+    if (typeof factory === 'function') {
+      const res = factory();
+      if (typeof res?.then === 'function') {
+        // `res` is whatever a user-supplied factory returned, so the resolved
+        // value is genuinely untyped here - this is not a hole in the types but
+        // the boundary they stop at. Annotated inline because the factory's own
+        // return type is `any` and a named type would be a lie.
+        return res.then((/** @type {any} */ value) => {
+          try {
+            this.set(key, value, { ttl, weight });
+          } catch (err) {
+            this._notifyError(err, 'PowerCache: storing an async value threw');
+          }
+          return value;
+        });
+      }
+      this.set(key, res, { ttl, weight });
+      return res;
+    }
+
+    // factory is a direct value
+    this.set(key, factory, { ttl, weight });
+    return factory;
+  }
+
+  /**
+   * Bulk set multiple entries. Accepts an iterable/array of [key, value] pairs.
+   * Computes weight once per value and applies a single eviction pass at the end.
+   *
+   * The per-entry decisions are `set`'s, not a second set of them: oversize
+   * rejection, the TinyLFU sketch and the admission window are all applied here.
+   * `setMany` used to insert through a simplified path that did none of the
+   * three, so a bulk load was invisible to admission and a rejected value came
+   * back out of the bulk eviction pass wearing the wrong `onEvict` reason.
+   *
+   * **It still returns `this`, not `false`, when a value is rejected** — that is
+   * its documented contract for chaining, and changing it would be a breaking API
+   * change for a batch of a thousand entries. The signal is `onEvict` with
+   * `'rejected-oversized'`, and `stats().rejected` afterwards. `set` returns
+   * `false` because it can.
+   *
+   * @param {Iterable<[*,*]>} entries
+   * @param {Object} [options]
+   * @param {number} [options.ttl]
+   * @param {number} [options.weight]
+   * @returns {this}
+   */
+  setMany(entries, { ttl = undefined, weight = undefined } = {}) {
+    const now = this._now();
+    const expiresAt = this._expiresAt(ttl, now);
+    for (const pair of entries) {
+      if (!pair) continue;
+      const [key, value] = pair;
+      const w = this._computeWeight(value, weight);
+      if (this._rejectIfOversized(key, value, w)) continue;
+
+      // PERF-003, as in `set`: one lookup rather than `has` then `get`.
+      const existing = this._map.get(key);
+      if (existing !== undefined) {
+        this._updateExisting(existing, value, w, expiresAt);
+      } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
+        continue;
+      }
+      this._sketch?.increment(key);
+    }
+    // One eviction pass for the whole batch, which is the point of `setMany` and
+    // the reason it does not simply loop over `set`: an N-entry load would
+    // otherwise walk the eviction list N times.
+    this._evictIfNeeded();
+    return this;
+  }
+
+  /**
+   * Bulk get multiple keys. Returns a Map of found entries.
+   * @param {Iterable<*>} keys
+   * @param {Object} [options]
+   * @param {boolean} [options.ignoreExpiry=false]
+   * @returns {Map<string, *>} One entry per resolved key, in input order.
+   */
+  getMany(keys, { ignoreExpiry = false } = {}) {
+    const res = new Map();
+    for (const key of keys) {
+      const node = this._fetchValidNode(key, { ignoreExpiry, countMiss: true });
+      if (!node) continue;
+      this._moveToTail(node);
+      this._hits++;
+      res.set(key, node.value);
+    }
+    return res;
+  }
+
+  /**
+   * Touch an entry: update its recency and optionally refresh TTL without
+   * reading or modifying the stored value.
+   * @param {*} key
+   * @param {number} [ttl] - Optional per-call TTL in ms. Use `null`/`Infinity` to disable expiry.
+   * @returns {boolean} True if the entry existed (and was not expired), false otherwise.
+   */
+  touch(key, ttl = undefined) {
+    // PERF-003: the reading is taken *before* the lookup and threaded into it.
+    // Reading it afterwards - as this did - meant two reads per call whenever
+    // the node carried an expiry.
+    const now = this._now();
+    const node = this._fetchValidNode(key, { now });
+    if (!node) return false;
+    if (ttl !== undefined) {
+      node.expiresAt = this._expiresAt(ttl, now);
+    }
+    this._moveToTail(node);
+    return true;
+  }
+
+  /**
+   * Async read-or-compute with inflight deduplication.
+   * If a factory is already running for `key`, returns the same Promise.
+   * Otherwise invokes `asyncFactory` and stores the resolved value in cache.
+   * @param {*} key
+   * @param {Function} asyncFactory - Function returning a Promise or value.
+   * @param {Object} [options]
+   * @param {number} [options.ttl]
+   * @param {number} [options.weight]
+   * @param {boolean} [options.staleWhileRevalidate=false] If true, return an expired value immediately and refresh the cache in the background.
+   * @param {number} [options.timeout] Per-call override of the cache's `defaultAsyncTimeout`, in ms.
+   * @returns {Promise<*>}
+   */
+  getOrSetAsync(
+    key,
+    asyncFactory,
+    {
+      ttl = undefined,
+      weight = undefined,
+      staleWhileRevalidate = this.allowStale,
+      timeout = undefined,
+    } = {}
+  ) {
+    if (typeof asyncFactory !== 'function') {
+      // treat non-function as direct value
+      return Promise.resolve(this.getOrSet(key, asyncFactory, { ttl, weight }));
+    }
+
+    const now = this._now();
+    const node = this._map.get(key);
+    if (node) {
+      if (node.expiresAt && node.expiresAt <= now) {
+        // Bounded, for the same reason and with the same predicate as
+        // `getOrSet`. Before it, this branch returned the value with no upper
+        // bound on how long "stale" could mean — measured at five years.
+        if (staleWhileRevalidate && this._staleServable(node, now)) {
+          this._moveToTail(node);
+          this._hits++;
+          this._staleServes++;
+          this._refreshStaleEntry(key, asyncFactory, { ttl, weight });
+          return Promise.resolve(node.value);
+        }
+        // expired: remove and proceed to compute; count the miss once below.
+        this._removeExpiredNode(node, now);
+      } else {
+        this._moveToTail(node);
+        this._hits++;
+        return Promise.resolve(node.value);
+      }
+    }
+
+    // If a factory is already in-flight for this key, return it (not a cache miss)
+    if (this._inflightPromises.has(key)) return this._inflightPromises.get(key);
+
+    // No cached node and no inflight factory: count as a miss and invoke factory
+    this._misses++;
+
+    // Invoke and normalize result to a Promise. The factory receives the
+    // signal; one written before this takes no argument and is unaffected.
+    const controller = new AbortController();
+    let p;
+    try {
+      p = Promise.resolve().then(() => asyncFactory(controller.signal));
+    } catch (err) {
+      return Promise.reject(err);
+    }
+
+    // Determine effective timeout: per-call `timeout` overrides cache default
+    const effectiveTimeout = Number.isFinite(Number(timeout))
+      ? Math.max(0, Math.floor(Number(timeout)))
+      : Number.isFinite(Number(this._defaultAsyncTimeout))
+        ? this._defaultAsyncTimeout
+        : undefined;
+
+    // Wrap with a timeout race when requested
+    let timed = p;
+    const hasTimeout =
+      typeof effectiveTimeout === 'number' &&
+      Number.isFinite(effectiveTimeout) &&
+      effectiveTimeout > 0;
+    if (hasTimeout) {
+      /** @type {ReturnType<typeof setTimeout>|undefined} */
+      let timer;
+      timed = new Promise((resolve, reject) => {
+        timer = setTimeout(() => {
+          try {
+            reject(new Error('getOrSetAsync timeout'));
+          } catch (e) {
+            /* ignore */
+          }
+        }, effectiveTimeout);
+        p.then(
+          (v) => {
+            try {
+              if (timer) clearTimeout(timer);
+            } catch (e) {
+              this._notifyError(e, 'PowerCache: clearTimeout threw');
+            }
+            resolve(v);
+          },
+          (err) => {
+            try {
+              if (timer) clearTimeout(timer);
+            } catch (e) {
+              this._notifyError(e, 'PowerCache: clearTimeout threw');
+            }
+            reject(err);
+          }
+        );
+      });
+    }
+
+    // Store in inflight map to dedupe concurrent callers.
+    //
+    // The cache write is deliberately attached to the *factory* promise `p`
+    // rather than to `timed` (the timeout race). `timed` rejects as soon as
+    // the client's timeout elapses, so a successful-but-late factory result
+    // was thrown away and the next caller had to pay the full cost again.
+    // Writing on `p` keeps the expensive computation, while `tracked` (what
+    // the caller awaits) still settles on the timeout. Only *fulfilments* are
+    // cached, so a factory rejection is never cached.
+    p.then(
+      (value) => {
+        try {
+          this.set(key, value, { ttl, weight });
+        } catch (err) {
+          this._notifyError(err, 'PowerCache getOrSetAsync: storing a late value threw');
+        }
+      },
+      () => {
+        /* factory rejected: nothing to cache */
+      }
+    );
+
+    // Releasing the slot at the **timeout**, and signalling the factory at the
+    // same moment, is one decision rather than two.
+    //
+    // Holding the slot until the factory settles closes the F-09 duplicate and
+    // leaks: a factory that never settles - `() => new Promise(() => {})`,
+    // which `powerCache.timeout.test.js` uses twice - would hold its slot
+    // forever, so the key could never fetch again and every entry accumulated
+    // one Map row per hanging factory. A duplicate costs compute; a permanent
+    // slot is a memory leak *and* a permanently broken key, so the release stays
+    // here and the signal is what stops the work.
+    //
+    // A joining caller still dedupes against the running factory, and receives
+    // the value rather than the previous caller's rejection: it awaits
+    // `_inflightPromises`, which holds the factory's own promise, not the
+    // timeout race.
+    const tracked = timed.finally(() => {
+      // **Abort before dropping the controller.** The first version deleted
+      // `_inflightControllers` first and then called `_abortInflight`, which
+      // looks up the controller it had just removed - so the timeout never
+      // signalled anything. Caught by a probe that checked `signal.aborted`
+      // rather than by the suite, because nothing asserted on it yet.
+      this._abortInflight(key, 'timed out');
+      this._inflightPromises.delete(key);
+      this._inflightControllers.delete(key);
+    });
+
+    this._inflightPromises.set(key, p);
+    this._inflightControllers.set(key, controller);
+    return tracked;
+  }
+
+  /**
+   * Check membership without affecting recency and verify the stored value is deep-equal
+   * to the provided `value`.
+   *
+   * Optimizations:
+   * - Fast reference equality short-circuit
+   * - Fast primitive checks
+   * - Special-cases for Arrays, TypedArrays/ArrayBuffer, Date, RegExp, Map and Set
+   * - WeakMap/WeakSet-based cycle detection
+   *
+   * @param {*} key
+   * @param {*} value
+   * @param {{ignoreExpiry?: boolean, maxNodes?: number, compareFn?: function(any, any): boolean}} [options]
+   *   `ignoreExpiry` considers expired entries as present; `maxNodes` bounds how far
+   *   the scan goes and `compareFn` replaces the default deep comparison.
+   * @returns {boolean}
+   */
+  hasEqual(key, value, options = {}) {
+    const { ignoreExpiry = false, maxNodes, compareFn } = options || {};
+    const node = this._fetchValidNode(key, { ignoreExpiry });
+    if (!node) return false;
+    const stored = node.value;
+    // Fast reference equality
+    if (stored === value) return true;
+
+    // Fast primitive check
+    const tStored = typeof stored;
+    const tIncoming = typeof value;
+    if (tStored !== 'object' || stored === null || tIncoming !== 'object' || value === null) {
+      return stored === value;
+    }
+
+    // Delegate to module-level deep equality helper to avoid allocating a
+    // new closure on every call. The deepEqual helper will handle cycles.
+    //
+    // The comparison state is built from an **allowlist**, not by spreading the
+    // caller's options bag. `makeState` reads `seen` off whatever it is given,
+    // so `{ ...options }` kept the removed `seen` option alive: a caller
+    // passing one still got a stale pair short-circuiting to `true` without
+    // any comparison, which is the whole hazard. An allowlist means a removed
+    // option cannot be reintroduced by a caller who never updated.
+    //
+    // `seen` is deliberately not caller-suppliable. It answers "have I already
+    // compared this exact pair *in this walk*?" by short-circuiting to `true`,
+    // which is correct for a cycle and wrong for a stale pair: reused across
+    // two calls, the second returned `true` for a pair a previous, unrelated
+    // call had recorded. Since the stored value is mutable, that is reachable
+    // in ordinary code, and the failure mode is a cache reporting a hit for a
+    // value that is not in it. The allocation it avoided was one `WeakMap`,
+    // created only when the walk actually reaches object comparison — the
+    // primitive, reference-equality and typed-array fast paths above all return
+    // before touching it.
+    return deepEqual(stored, value, makeState({ maxNodes, compareFn }));
+  }
+
+  /**
+   * Delete an entry from the cache.
+   * @param {*} key
+   * @returns {boolean} true if the key was removed.
+   */
+  delete(key) {
+    this._abortInflight(key, 'deleted');
+    let node = this._map.get(key);
+    if (!node && this._policy === 's3fifo') {
+      node = this._smallMap.get(key) || this._ghostMap.get(key);
+    }
+    if (!node) return false;
+    this._unlinkNode(node);
+    try {
+      if (this.onEvict) this.onEvict(node.key, node.value, 'deleted');
+    } catch (err) {
+      this._notifyError(err, 'PowerCache onEvict callback threw (deleted)');
+    }
+    this._freeNode(node);
+    return true;
+  }
+
+  /**
+   * Remove every entry the predicate selects, and return how many went.
+   *
+   * The row that asked for this (`GAP-017`) also asked for
+   * `entriesAscending()` / `entriesDescending()`. **Those are not added**, and
+   * the reason is worth more than the two methods would be: `entries(order)`
+   * already takes `'LRU'` and `'MRU'`, so an alias pair for the same two orders
+   * is a second spelling of one decision, and a second spelling is a second
+   * thing to document, to type, to test and to keep in sync. Every reference
+   * implementation checked has them because it does **not** have an order
+   * parameter — this one does, and the parameter is the whole capability.
+   *
+   * The predicate is evaluated over a **snapshot** of the entries before any of
+   * them is removed. Two reasons, and the second is the important one:
+   *
+   * 1. `entries()` documents that removing two *adjacent* entries in one
+   *    iteration step can end its walk early, so driving removal off the public
+   *    generator would silently drop matches. This walks the list directly
+   *    instead, and the list is not being mutated while the predicate runs.
+   * 2. A predicate that throws leaves the cache **untouched**. Collecting first
+   *    means a failure cannot leave half the entries gone, which is the one
+   *    outcome a bulk-removal API must never produce — there is no way to undo
+   *    it and no counter that would tell a caller which half survived.
+   *
+   * @param {(key: *, value: *) => boolean} predicate - Return truthy to remove.
+   * @returns {number} Entries removed.
+   */
+  invalidate(predicate) {
+    if (typeof predicate !== 'function') {
+      throw new TypeError(
+        `PowerCache invalidate(predicate): predicate must be a function, got ${typeof predicate}`
+      );
+    }
+    /** @type {Array<CacheNode>} */
+    const doomed = [];
+    for (let node = this._head; node; node = node.next) {
+      if (predicate(node.key, node.value)) doomed.push(node);
+    }
+    let removed = 0;
+    for (const node of doomed) {
+      // A node collected above may have been removed by an earlier predicate call
+      // — the predicate is caller code and may delete as a side effect. Skipping
+      // the absent one is not defensive padding: unlinking a freed node would
+      // corrupt the pool, and counting it would report a removal that did not
+      // happen.
+      if (this._map.get(node.key) !== node) continue;
+      this._abortInflight(node.key, 'invalidated');
+      this._unlinkNode(node);
+      this._evictions += 1;
+      removed += 1;
+      try {
+        if (this.onEvict) this.onEvict(node.key, node.value, 'invalidated');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw (invalidated)');
+      }
+      this._freeNode(node);
+    }
+    if (!this._evictionCandidate || !isLinked(this._evictionCandidate, this._head, this._tail)) {
+      this._evictionCandidate = this._head;
+    }
+    return removed;
+  }
+
+  /**
+   * Evict up to `count` entries, least-recently-used first, and return how many
+   * went.
+   *
+   * Distinct from the sweep `maxEntries` drives, which evicts until the cache is
+   * *within* its limit and reports no number. This is the explicit version: a
+   * caller shedding memory before a spike, or after a deploy, wants a count and a
+   * return value, not a cache that happens to be smaller.
+   *
+   * `count` above the current size removes everything and reports the real
+   * number removed rather than the number asked for — reporting the request
+   * would make `evict(1e9)` on an empty cache report 1000000000.
+   *
+   * `count` must be a `number`, and `Number()` is deliberately **not** used to
+   * coerce: it would turn `null` into 0, `true` into 1 and `'3'` into 3, so
+   * `evict(null)` would silently do nothing and `evict(true)` would silently evict
+   * one. This is the same rule the TTL normaliser in this class already applies,
+   * for the same reason — a typo in a count must not read as a deliberate value.
+   *
+   * @param {number} [count=1]
+   * @returns {number} Entries removed.
+   */
+  evict(count = 1) {
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) {
+      throw new TypeError(
+        `PowerCache evict(count): count must be a non-negative integer number, got ${
+          typeof count === 'string' ? `'${count}'` : String(count)
+        }`
+      );
+    }
+    let removed = 0;
+    while (removed < count) {
+      const node = this._evictionCandidate || this._head;
+      if (!node) break;
+      this._abortInflight(node.key, 'evicted');
+      this._unlinkNode(node, { advanceEvictionCandidate: true });
+      this._evictions += 1;
+      removed += 1;
+      try {
+        if (this.onEvict) this.onEvict(node.key, node.value, 'evicted');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw');
+      }
+      this._freeNode(node);
+    }
+    if (!this._evictionCandidate) this._evictionCandidate = this._head;
+    return removed;
+  }
+
+  /**
+   * Clear the cache and return nodes to the pool.
+   * @returns {void}
+   */
+  clear() {
+    // Abort every outstanding fetch, including one whose key has no node yet -
+    // the node sweep below cannot, because a key mid-fetch is not resident and
+    // `clear()` does not go through `delete()`. Wired without this, `clear()`
+    // aborted nothing at all.
+    for (const key of [...this._inflightPromises.keys()]) this._abortInflight(key, 'cleared');
+    for (let node = this._head; node;) {
+      const next = node.next;
+      this._freeNode(node);
+      node = next;
+    }
+    this._head = this._tail = null;
+    this._map.clear();
+    this._smallMap?.clear();
+    this._ghostMap?.clear();
+    this._smallSize = 0;
+    this._ghostSize = 0;
+    this._smallHead = this._smallTail = null;
+    this._ghostHead = this._ghostTail = null;
+    this._sieveHand = null;
+    // The frequency history goes with the entries. Carrying it across a clear
+    // would let the next admission decisions be made from a workload that no
+    // longer exists.
+    this._sketch?.clear();
+    this._rejectedAdmission = 0;
+    this._currentWeight = 0;
+    this._cleanupCursor = null;
+    this._cleanupCursorValid = false;
+    this._evictionCandidate = null;
+    this._probationEnd = null;
+    // Abandon in-flight dedupe entries. They cannot be cancelled (JS cannot
+    // interrupt a running factory), but dropping the map means a `getOrSetAsync`
+    // started *after* the clear is not deduped into a pre-clear request, and
+    // `stats().inflight` stops reporting work the caller has discarded.
+    // The `p.then(...)` late-write hook deliberately still populates the cache
+    // with a value computed before the clear, which is the useful behaviour.
+    this._inflightPromises.clear();
+  }
+
+  /**
+   * Remove expired entries by scanning from least-recently used to most.
+   * @returns {void}
+   */
+  /**
+   * @returns {number} How many expired entries the sweep removed.
+   */
+  cleanupExpired() {
+    // Backwards-compatible: allow optional scan limit
+    return this.cleanupExpiredUpTo();
+  }
+
+  /**
+   * Cleanup expired entries, scanning up to `maxScan` nodes.
+   * Scanning resumes from an internal cursor so repeated small passes will cover the list
+   * without repeatedly scanning the head of a very large cache. When the end is reached the
+   * cursor wraps to the head.
+   * @param {number} [maxScan=Infinity] Maximum nodes to scan in this pass.
+   * @returns {number} Number of nodes scanned
+   */
+  cleanupExpiredUpTo(maxScan = Infinity) {
+    const now = this._now();
+    let scanned = 0;
+    // Resume from the previous cursor when possible to avoid re-scanning from head.
+    // `_cleanupCursorValid` is toggled by mutation paths that affect the cursor,
+    // avoiding an expensive `Map.get()` on every scan.
+    let node = this._cleanupCursor && this._cleanupCursorValid ? this._cleanupCursor : this._head;
+    while (node && scanned < maxScan) {
+      const next = node.next;
+      if (node.expiresAt && node.expiresAt <= now) {
+        const k = node.key;
+        const v = node.value;
+        this._unlinkNode(node);
+        try {
+          if (this.onExpire) this.onExpire(k, v);
+        } catch (err) {
+          this._notifyError(err, 'PowerCache onExpire callback threw');
+        }
+        this._freeNode(node);
+        this._expirations++;
+      }
+      node = next;
+      scanned++;
+    }
+    // resume from where we left off; if we've reached the end, wrap to head
+    this._cleanupCursor = node || this._head;
+    this._cleanupCursorValid = Boolean(this._cleanupCursor);
+    return scanned;
+  }
+
+  /**
+   * Start periodic, non-blocking cleanup.
+   * Accepts either a numeric interval (ms) or an options object `{ interval, maxCleanupPerTick }`.
+   * The loop is implemented with `setTimeout` and scans up to `maxCleanupPerTick` nodes per pass
+   * to avoid long event-loop stalls.
+   * Note: call `stopCleanup()` to stop the periodic timer (for example, on application shutdown)
+   * to ensure the internal timer is cleared and resources can be reclaimed.
+   * @param {number|{interval?: number, intervalMs?: number, maxCleanupPerTick?: number}} [intervalOrOptions] -
+   *   Cleanup interval in ms, or an options object. Written as one type expression rather
+   *   than a bare `{Object}` with nested `@param` tags: those tags are only valid when
+   *   the parent is a bare object, so the earlier spelling had to be `{number|Object}`
+   *   and every property read off it was an error. Spelling the shape out removes the
+   *   reason the nested tags were dropped.
+   * @returns {void}
+   */
+  startCleanup(intervalOrOptions = {}) {
+    // PERF-006. `interval` was validated with `Number.isFinite` alone, so `0` and a
+    // negative both reached `setSafeTimeout` — where Node treats a negative as `0`
+    // — and the cleanup tick rescheduled itself with no delay. Measured, with the
+    // tick counted: `startCleanup(0)` 93 ticks in 100 ms, `-5` 94,
+    // `{ interval: 0 }` 93, against 0 for the derived default. The numeric argument
+    // form did not validate at all.
+    //
+    // A floor of 1 ms is the minimum that means "scheduled" rather than "as fast as
+    // the event loop can turn". It is not a recommendation: a 1 ms cleanup scan is
+    // still a hot loop, and the derived default (the cache's TTL, floored at one
+    // second) remains what a caller gets when they do not ask for anything.
+    const derivedInterval = Math.max(
+      MS_PER_SEC,
+      Math.min(this.defaultTTL || DEFAULT_CACHE_DEFAULT_TTL_MS, DEFAULT_CACHE_DEFAULT_TTL_MS)
+    );
+    const limit = {
+      name: 'interval',
+      className: 'PowerCache',
+      min: 1,
+      integer: true,
+      fallback: derivedInterval,
+    };
+
+    let interval, maxCleanupPerTick;
+    if (typeof intervalOrOptions === 'number') {
+      interval = assertLimitRequired(intervalOrOptions, limit);
+      maxCleanupPerTick = this.maxCleanupPerTick;
+    } else {
+      // `intervalMs` is accepted as an alias for `interval`, because it is the
+      // spelling roughly fifteen other options in this library use and a caller
+      // reaching for the obvious name had it accepted and dropped — the one
+      // argument shape `startCleanup` silently ignored.
+      const requestedInterval = intervalOrOptions.interval ?? intervalOrOptions.intervalMs;
+      interval = assertLimitRequired(requestedInterval, limit);
+      maxCleanupPerTick = Number.isFinite(Number(intervalOrOptions.maxCleanupPerTick))
+        ? Math.max(1, Number(intervalOrOptions.maxCleanupPerTick))
+        : this.maxCleanupPerTick;
+    }
+    this.stopCleanup();
+    this._cleanupParams = { interval, maxCleanupPerTick };
+    // start loop using prototype cleanup tick method
+    this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), interval);
+  }
+
+  /**
+   * Stop periodic cleanup.
+   * @returns {void}
+   */
+  stopCleanup() {
+    if (this._cleanupTimer) {
+      clearTimeout(this._cleanupTimer);
+      this._cleanupTimer = null;
+    }
+    this._cleanupRunning = false;
+    this._cleanupParams = null;
+  }
+
+  /**
+   * Synchronous disposal hook (TC39 Explicit Resource Management).
+   * Stops any background cleanup and clears the cache.
+   */
+
+  /**
+   * Named alias for the `Symbol.dispose` implementation, so callers who do not
+   * want to reach for the symbol still have something to call.
+   * @returns {void}
+   */
+  dispose() {
+    this[Symbol.dispose]();
+  }
+
+  [Symbol.dispose]() {
+    // The detach lives **here**, not in `dispose()`. `using cache = …` and
+    // `await using` call the symbol and nothing else, so a detach that only
+    // `dispose()` performed left the series registered for the life of the
+    // collector — sampling an object nobody can reach, which answers every time
+    // and so fails nothing. `PowerBulkhead` and `PowerRetryBudget` had already
+    // been fixed for exactly this, and `using` is the teardown path the
+    // guarantee is about: a scope exit.
+    detach(this._metrics);
+    this._metrics = null;
+    try {
+      this.stopCleanup();
+    } catch (e) {
+      /* ignore */
+    }
+    try {
+      this.clear();
+    } catch (e) {
+      /* ignore */
+    }
+  }
+
+  /**
+   * Asynchronous disposal hook. Provided for symmetry with `using`/`await using`.
+   * Cache cleanup is synchronous so this simply performs the same actions and
+   * returns a resolved Promise for await compatibility.
+   */
+  async [Symbol.asyncDispose]() {
+    try {
+      this.stopCleanup();
+    } catch (e) {
+      /* ignore */
+    }
+    try {
+      this.clear();
+    } catch (e) {
+      /* ignore */
+    }
+    return;
+  }
+
+  /**
+   * Prototype tick used by the cleanup timer loop. Separated to avoid
+   * allocating a per-call closure inside `startCleanup()`.
+   * @private
+   */
+  _cleanupTick() {
+    if (this._cleanupTimer == null) return; // stopped
+    if (this._cleanupRunning) {
+      // schedule next run
+      if (this._cleanupParams) {
+        this._cleanupTimer = setSafeTimeout(
+          () => this._cleanupTick(),
+          this._cleanupParams.interval
+        );
+      }
+      return;
+    }
+    this._cleanupRunning = true;
+    try {
+      if (this._cleanupParams) {
+        this.cleanupExpiredUpTo(this._cleanupParams.maxCleanupPerTick);
+      }
+    } finally {
+      this._cleanupRunning = false;
+    }
+    if (this._cleanupParams) {
+      this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+    }
+  }
+
+  /**
+   * Current number of entries in cache.
+   * @returns {number}
+   */
+  get size() {
+    if (this._policy === 's3fifo') {
+      return this._map.size + this._smallSize + this._ghostSize;
+    }
+    return this._map.size;
+  }
+
+  /**
+   * Hit rate as a fraction (hits / (hits + misses)).
+   * @returns {number}
+   */
+  get hitRate() {
+    const total = (this._hits || 0) + (this._misses || 0);
+    return total ? this._hits / total : 0;
+  }
+
+  /**
+   * Return runtime statistics for the cache.
+   *
+   * Two of these counters were unreachable until CACHE-011, and both are read
+   * for opposite reasons. `rejectedAdmission` is the *policy working*: non-zero
+   * under `admission: 'tinylfu'` is what makes a scan-resistant cache
+   * scan-resistant, so a benchmark that reports zero rejections has measured
+   * nothing and a monitoring dashboard that expects a non-zero floor after a
+   * traffic shift should be told the filter stopped running.
+   * `weightErrors` is the opposite — a swallowed failure. `weightFn` threw, the
+   * throw was routed to `onError` if one exists, and the entry was skipped; a
+   * cache silently under-weighting itself will evict too much, or too little, and
+   * nothing else in this object moves when it does.
+   *
+   * Both were private fields with tests reading them directly, which is the tell
+   * that they were meant to be public: `PowerCache` publishes the rest of its
+   * counters here and lets `attach()` flatten them into metric series, so a
+   * field missing from `stats()` is a field no collector can ever see.
+   *
+   * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
+   *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
+   *   weightErrors:number, refreshesSkipped:number, poolSize:number}}
+   */
+  stats() {
+    return {
+      size: this.size,
+      weight: this._currentWeight,
+      hits: this._hits,
+      misses: this._misses,
+      // A subset of `hits`, not an addition to it.
+      staleServes: this._staleServes,
+      evictions: this._evictions,
+      expirations: this._expirations,
+      rejected: this._rejected,
+      // Inserts the TinyLFU filter refused. Always `0` unless
+      // `admission: 'tinylfu'` is on *and* the policy is `'lru'`, because
+      // `'slru'` builds no sketch at all.
+      rejectedAdmission: this._rejectedAdmission,
+      // `weightFn` throws that were swallowed and reported to `onError`.
+      weightErrors: this._weightErrors,
+      // MEM-001. Non-zero means background refreshes are being *dropped* because
+      // `maxInflightRefreshes` was reached — the cache still serves, but it is
+      // not refreshing those keys. Worth alerting on separately from `size`: a
+      // cache whose stale values are never being refreshed looks healthy on every
+      // other counter.
+      refreshesSkipped: this._refreshesSkipped,
+      poolSize: this._pool.length,
+    };
+  }
+
+  /**
+   * Alias for {@link stats}.
+   *
+   * See `guides/stats-naming.md` for why both spellings exist and why this
+   * method is written out per class.
+   */
+  getStats() {
+    return this.stats();
+  }
+
+  /**
+   * Resize the cache limits and evict if necessary.
+   * @param {Object} options
+   * @param {number} [options.maxEntries]
+   * @param {number} [options.maxWeight]
+   */
+  resize({ maxEntries, maxWeight } = {}) {
+    // `Number(x)` rather than `+x`: identical at runtime (unary `+` is defined as
+    // `Number(x)`, and `Number(undefined)` is `NaN`, so an omitted option still
+    // fails the `isFinite` gate below) but it accepts an optional property, where
+    // `+x` on a possibly-undefined value is a type error at every one of these.
+    if (Number.isFinite(Number(maxEntries))) this.maxEntries = Math.max(0, Number(maxEntries));
+    if (Number.isFinite(Number(maxWeight))) this.maxWeight = Math.max(0, Number(maxWeight));
+    // Mutations that trigger bulk evictions can invalidate the incremental
+    // cleanup cursor used by `cleanupExpiredUpTo`. Reset the cursor so
+    // subsequent incremental scans start from a known-good head node.
+    this._evictIfNeeded();
+    this._cleanupCursor = null;
+    this._cleanupCursorValid = false;
+    // Eviction candidate should align with the (possibly new) head. `head` is an
+    // alias onto `_head` (see `ALIASED_FIELDS`), so this is the head node.
+    //
+    // An earlier version of this comment claimed `this.head` was a typo and that
+    // the assignment stored `undefined`. It was not: `head` is one of ten
+    // `Object.defineProperty` accessors, and `cache.head === cache._head`. The
+    // claim was wrong, and the reordering that came with it changed no
+    // observable behaviour — see the note on `_unlinkNode` and `review.md`'s
+    // CACHE-001, which records this whole area as unreproducible. The reset runs
+    // after `_evictIfNeeded()` because that is where the head can change.
+    this._evictionCandidate = this._head;
+  }
+
+  /**
+   * Iterate entries in LRU or MRU order.
+   *
+   * **Mutating the cache from inside the loop is supported, and the walk reads
+   * the next link *before* each `yield` rather than after.** A walk that advanced
+   * after the resume was silently cut short by any mutation of the node the
+   * iterator was standing on, because `_remove` nulls both links on the node it
+   * removes — so `for (const [k] of cache.entries()) cache.delete(k)`, the most
+   * natural way to write "empty this cache", removed exactly one entry and left
+   * the rest, while `size` reported the truth afterwards so nothing raised.
+   * `cleanupExpired()` called from inside the loop was worse, because a caller
+   * has no reason to know that calling a public maintenance method is a
+   * mutation: a bulk export that swept each turn silently exported nothing.
+   *
+   * The contract, since a live iterator that can skip is only a legitimate
+   * choice when it is a stated one:
+   *
+   * - Removing the entry currently being visited continues at the next one.
+   * - Removing an entry not yet visited skips it (it is gone), and the walk
+   *   completes.
+   * - Entries *added* during the walk are not visited: the walk started at the
+   *   then-tail, and inserting an entry moves the tail out from under it.
+   * - Removing two *adjacent* entries in one iteration step may end the walk
+   *   early. That is the one residual loss, it needs two removals before a
+   *   single resume, and closing it would mean snapshotting the walk into an
+   *   array — an allocation on every call to a bulk-export API.
+   *
+   * **A recency mutation (`get()`, `touch()`, or `set()` on a key already in the
+   * list) relinks the entry to the MRU end, which is behind an MRU-first cursor,
+   * so the walk arrives back at it.** Left alone that is an infinite loop, not a
+   * wrong answer, and it was reachable from one line of loop body. The walk now
+   * visits at most as many entries as existed when it started, which ends the
+   * cycle; the entries beyond that point are *not* reported, so a loop that
+   * refreshes recency as it goes sees a prefix rather than a full pass. Collect
+   * the keys first (`Array.from(cache.keys())`) if you need every entry.
+   *
+   * @param {'LRU'|'MRU'} [order='MRU']
+   * @returns {IterableIterator<[*,*]>}
+   */
+  *entries(order = 'MRU') {
+    const link = order === 'MRU' ? 'prev' : 'next';
+    let node = order === 'MRU' ? this._tail : this._head;
+    // The number of nodes this walk may visit, captured before the first yield.
+    // A recency mutation — `get()`, `touch()`, or `set()` on a key already in the
+    // list — relinks the node the caller is standing on to the *tail*, which is
+    // behind an MRU-first cursor, so the walk arrives back at it and cycles
+    // forever. That is a hang, not a wrong answer, and it is reachable from the
+    // documented `get` in one line of loop body.
+    //
+    // The bound is a count of nodes, not a check for a repeat: a Set of visited
+    // nodes would be an allocation on every iteration call, and this class does
+    // not spend one to save a caller from its own loop body. Measured across the
+    // four list shapes, no walk that does *not* relink yields more entries than
+    // existed when it started — inserting during a walk lands the new entry
+    // behind the cursor, so additions are never visited (tinylfu 40 yields for 40
+    // entries, plain LRU 10 for 10, slru 15 for 20) and a truncation here cannot
+    // drop an entry a correct walk owed the caller.
+    let budget = this.size;
+    while (node) {
+      if (budget-- <= 0) return;
+      // Read the continuation before handing control to the caller: the node we
+      // are standing on may be removed while the loop body runs, and `_remove`
+      // nulls both of its links on the way out.
+      const next = node[link];
+      yield [node.key, node.value];
+      if (!isLinked(node, this._head, this._tail)) {
+        // The node just yielded was removed. Its captured successor was not
+        // touched by that removal, so it is still the right place to resume — or
+        // the walk is genuinely over if the end of the list was reached.
+        node = isLinked(next, this._head, this._tail) ? next : null;
+      } else if (isLinked(next, this._head, this._tail)) {
+        node = next;
+      } else {
+        // The successor was removed before we reached it, so it is skipped. The
+        // removal repaired *our* link past it, so re-reading it is how the walk
+        // steps over the hole rather than stopping on it.
+        node = node[link];
+      }
+    }
+  }
+
+  [Symbol.iterator]() {
+    return this.entries('MRU');
+  }
+
+  /**
+   * Iterate keys in LRU or MRU order.
+   * @param {'LRU'|'MRU'} [order='MRU']
+   */
+  *keys(order = 'MRU') {
+    for (const [k] of this.entries(order)) yield k;
+  }
+
+  /**
+   * Iterate values in LRU or MRU order.
+   * @param {'LRU'|'MRU'} [order='MRU']
+   */
+  *values(order = 'MRU') {
+    for (const [, v] of this.entries(order)) yield v;
+  }
+}
+
+/**
+ * Whether `node` is still a member of the cache's linked list.
+ *
+ * Liveness cannot be read off the links alone. A lone entry has `prev` and
+ * `next` both `null` and is still in the list, and a removed entry has both
+ * `null` and is not — the same shape. The tie is broken by the ends: `_remove`
+ * moves `_head` and `_tail` past the node it removes, so a removed node is
+ * never either, while a lone entry is both.
+ *
+ * Module scope rather than a method because it needs no instance state beyond
+ * the two ends it is handed, and because `PowerCache` is on the hot path of
+ * every helper in the library that caches anything.
+ *
+ * @private
+ * @param {CacheNode|null} node
+ * @param {CacheNode|null} head
+ * @param {CacheNode|null} tail
+ * @returns {boolean}
+ */
+function isLinked(node, head, tail) {
+  if (!node) return false;
+  return node.prev !== null || node.next !== null || node === head || node === tail;
+}
+
+/**
+ * Deep equality check for cache values. Extracted to module scope to avoid
+ * allocating a new closure on each call to `hasEqual`.
+ * Uses a WeakMap-of-WeakSet for cycle detection and enforces a recursion
+ * depth limit to protect against pathological cyclic structures causing
+ * stack blowups. When the depth limit is exceeded we fall back to reference
+ * equality (i.e. return `a === b`).
+ * @private
+ * @param {*} a
+ * @param {*} b
+ * @param {*} state - Comparison state: cycle map, node budget, `compareFn`.
+ * @param {number} [depth=0] - Nesting depth, per *level* - not per element.
+ * @returns {boolean}
+ */
+/**
+ * One comparison's mutable state: cycle map, depth, node budget and the
+ * caller's `compareFn`.
+ *
+ * A single object rather than the `(seen, depth)` pair it replaced, so a
+ * top-level comparison allocates once instead of threading two parallel
+ * parameters through six recursion sites.
+ *
+ * @param {{compareFn?: ?function(*, *): (boolean|undefined), maxNodes?: number, seen?: WeakMap<object, WeakSet<object>>}|undefined} [options]
+ * @returns {{seen: ?WeakMap<object, WeakSet<object>>, nodes: number, maxNodes: number, compareFn: ?function(*, *): (boolean|undefined), exhausted: boolean}}
+ * @private
+ */
+function makeState(options) {
+  const o = options || {};
+  return {
+    seen: o.seen ?? null,
+    nodes: 0,
+    maxNodes: Number.isFinite(o.maxNodes)
+      ? Math.max(1, Math.floor(Number(o.maxNodes)))
+      : MAX_DEEP_EQUAL_NODES,
+    compareFn: typeof o.compareFn === 'function' ? o.compareFn : null,
+    exhausted: false,
+  };
+}
+
+/**
+ * Deep equality for cache values, with a cycle guard and two explicit limits.
+ *
+ * Module scope so `hasEqual` does not allocate a closure per call.
+ *
+ * @param {*} a
+ * @param {*} b
+ * @param {{seen: ?WeakMap<object, WeakSet<object>>, nodes: number, maxNodes: number, compareFn: ?function(*, *): (boolean|undefined), exhausted: boolean}} state
+ *   Comparison state: cycle map, node budget, `compareFn`, exhaustion flag.
+ * @param {number} [depth=0] - Nesting depth, counted per *level* and not per
+ *   element. Counting per element was a real bug: a flat 101-element array of
+ *   objects exhausted the limit, and every remaining pair fell back to
+ *   reference equality, so two structurally identical copies compared as
+ *   **unequal** and the entry could never be found.
+ * @returns {boolean} `false` if the comparison ran out of budget - the safe
+ *   direction for a cache, where a false negative costs a recompute and a false
+ *   positive returns the wrong value.
+ * @private
+ */
+function deepEqual(a, b, state, depth = 0) {
+  if (depth > MAX_DEEP_EQUAL_DEPTH) {
+    // Fall back to reference equality when we've recursed too deep.
+    return a === b;
+  }
+  // Width budget, not just depth (PERF-004, an earlier review's width-budget
+  // row — NOT `review.md`'s PERF-004, which is a `powerMessageCodec` item about
+  // `u82o`'s `TextDecoder` fallback). Row IDs were reused across review cycles,
+  // so a bare one is ambiguous; this subject is the only thing that disambiguates
+  // it. `MAX_DEEP_EQUAL_DEPTH` bounds how
+  // *deep* a comparison goes and says nothing about how *wide* it is: a
+  // one-million-element array of scalars recurses at depth 2 and never trips
+  // the depth limit, and comparing two of them measured 37 ms. `hasEqual` is a
+  // cache lookup, so that is 37 ms of blocked event loop on a path a caller
+  // reaches by accident. The budget bounds the work instead.
+  //
+  // Truncation reports **false**, not `true`. A false negative costs a
+  // recompute; a false positive hands back the wrong value, and this is a
+  // cache. `exhausted` makes the answer sticky so a run that ran out of budget
+  // cannot be rescued by a later leaf that happens to match.
+  if (state.exhausted) return false;
+  if (state.nodes >= state.maxNodes) {
+    state.exhausted = true;
+    return false;
+  }
+  state.nodes += 1;
+
+  // Reference equality, *after* the budget. A width budget that exempts
+  // reference-equal pairs is not a width budget: two equal arrays of a million
+  // scalars are a million reference comparisons, and exempting each one is
+  // exactly the unbounded work the budget exists to stop. Rationing it means
+  // such a pair reports `false` - a cache miss, a recompute - which is the
+  // cheap way to be wrong.
+  if (a === b) return true;
+
+  // Escape hatch for values this walk cannot model: classes with private state,
+  // domain objects, anything with its own notion of equality. Returning
+  // `undefined` means "no opinion" and the walk continues.
+  if (state.compareFn) {
+    const verdict = state.compareFn(a, b);
+    if (verdict !== undefined) return Boolean(verdict);
+  }
+  if (a == null || b == null) return a === b;
+  const ta = typeof a,
+    tb = typeof b;
+  if (ta !== 'object' || tb !== 'object') return a === b;
+
+  if (!state.seen) state.seen = new WeakMap();
+  let mapForA = state.seen.get(a);
+  if (mapForA?.has(b)) return true;
+  if (!mapForA) {
+    mapForA = new WeakSet();
+    state.seen.set(a, mapForA);
+  }
+  mapForA.add(b);
+
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+
+  // Uint8Array fast-path
+  if (typeof Uint8Array !== 'undefined' && a instanceof Uint8Array) {
+    if (!(b instanceof Uint8Array)) return false;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  // Arrays
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!deepEqual(a[i], b[i], state, depth + 1)) return false;
+    return true;
+  }
+
+  // TypedArray / DataView / other ArrayBuffer views
+  if (ArrayBuffer.isView(a)) {
+    if (!ArrayBuffer.isView(b) || a.byteLength !== b.byteLength) return false;
+    const ua = new Uint8Array(a.buffer, a.byteOffset || 0, a.byteLength);
+    const ub = new Uint8Array(b.buffer, b.byteOffset || 0, b.byteLength);
+    for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
+    return true;
+  }
+
+  // ArrayBuffer
+  if (a instanceof ArrayBuffer) {
+    if (!(b instanceof ArrayBuffer) || a.byteLength !== b.byteLength) return false;
+    const ua = new Uint8Array(a),
+      ub = new Uint8Array(b);
+    for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
+    return true;
+  }
+
+  // Date
+  if (a instanceof Date) {
+    if (!(b instanceof Date)) return false;
+    return a.getTime() === b.getTime();
+  }
+
+  // RegExp
+  if (a instanceof RegExp) {
+    if (!(b instanceof RegExp)) return false;
+    return a.toString() === b.toString();
+  }
+
+  // Map
+  if (a instanceof Map) {
+    if (!(b instanceof Map) || a.size !== b.size) return false;
+    for (const [k, v] of a) {
+      if (!b.has(k)) return false;
+      if (!deepEqual(v, b.get(k), state, depth + 1)) return false;
+    }
+    return true;
+  }
+
+  // Set
+  if (a instanceof Set) {
+    if (!(b instanceof Set) || a.size !== b.size) return false;
+    let allPrimitive = true;
+    for (const item of a) {
+      if (item !== null && typeof item === 'object') {
+        allPrimitive = false;
+        break;
+      }
+    }
+    if (allPrimitive) {
+      for (const item of a) if (!b.has(item)) return false;
+      return true;
+    }
+    // For non-primitive items try to reduce comparisons:
+    // 1) fast reference matches
+    // 2) attempt a safe JSON-based signature grouping to limit candidates
+    // 3) fall back to structural deepEqual scan for remaining items
+    const bItems = Array.from(b);
+    const used = new Array(bItems.length).fill(false);
+
+    // Fast reference check: mark direct reference matches
+    const refIndex = new Map();
+    for (let i = 0; i < bItems.length; i++) refIndex.set(bItems[i], i);
+
+    // Helper: try to produce a stable-ish signature for many common objects
+    // `any`, and deliberately so: this is called on values that came out of a
+    // user's cache, whose type the library does not know.
+    const trySignature = (/** @type {any} */ val) => {
+      try {
+        return JSON.stringify(val, (k, v) => {
+          if (v instanceof Date) return { __type: 'Date', v: v.getTime() };
+          if (v instanceof RegExp) return { __type: 'RegExp', v: v.toString() };
+          if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(v))
+            return {
+              __type: 'TypedArray',
+              v: Array.from(new Uint8Array(v.buffer, v.byteOffset || 0, v.byteLength)),
+            };
+          if (typeof ArrayBuffer !== 'undefined' && v instanceof ArrayBuffer)
+            return { __type: 'ArrayBuffer', v: Array.from(new Uint8Array(v)) };
+          return v;
+        });
+      } catch (err) {
+        return null;
+      }
+    };
+
+    // Build signature -> indices map for bItems when possible
+    const sigMap = new Map();
+    const unsigIndices = [];
+    for (let i = 0; i < bItems.length; i++) {
+      const s = trySignature(bItems[i]);
+      if (s == null) unsigIndices.push(i);
+      else {
+        const arr = sigMap.get(s);
+        if (arr) arr.push(i);
+        else sigMap.set(s, [i]);
+      }
+    }
+
+    // For each item in `a`, try to find a matching unused candidate in bItems
+    for (const itemA of a) {
+      // reference match
+      const refI = refIndex.get(itemA);
+      if (refI !== undefined && !used[refI]) {
+        used[refI] = true;
+        continue;
+      }
+
+      // signature match
+      const sigA = trySignature(itemA);
+      let found = false;
+      if (sigA != null) {
+        const cand = sigMap.get(sigA) || [];
+        for (const idx of cand) {
+          if (used[idx]) continue;
+          if (deepEqual(itemA, bItems[idx], state, depth + 1)) {
+            used[idx] = true;
+            found = true;
+            break;
+          }
+        }
+        if (found) continue;
+      }
+
+      // fallback structural scan across any remaining unmatched bItems
+      for (let i = 0; i < bItems.length; i++) {
+        if (used[i]) continue;
+        if (deepEqual(itemA, bItems[i], state, depth + 1)) {
+          used[i] = true;
+          found = true;
+          break;
+        }
+      }
+      if (!found) return false;
+    }
+    return true;
+  }
+
+  // Plain objects
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (let i = 0; i < keysA.length; i++) {
+    const k = keysA[i];
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+    if (!deepEqual(a[k], b[k], state, depth + 1)) return false;
+  }
+  return true;
+}
+
+/**
+ * PowerMemoizer
+ *
+ * A small memoization wrapper backed by `PowerCache`.
+ * It memoizes synchronous values and Promise-returning functions.
+ * Concurrent calls for the same arguments are deduplicated (single inflight Promise).
+ * Rejected Promises are not cached.
+ *
+ * Usage (constructor returns a `PowerMemoizer` instance; when a function is supplied
+ * the instance creates a memoized wrapper and exposes a convenience `run()` alias):
+ * const fetcher = async (id) => await fetchData(id)
+ * const pm = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
+ * // call the memoized function via the convenience alias
+ * await pm.run(1)
+ *
+ * @class PowerMemoizer
+ * @public
+ */

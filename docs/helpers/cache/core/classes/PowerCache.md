@@ -1,8 +1,8 @@
-[**performance-helpers**](../../../README.md)
+[**performance-helpers**](../../../../README.md)
 
 ***
 
-[performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerCache
+[performance-helpers](../../../../README.md) / [helpers/cache/core](../README.md) / PowerCache
 
 # Class: PowerCache
 
@@ -195,7 +195,7 @@ sometimes required.** It is what lets a test harness that fakes `Date.now()`
 drive a helper's notion of time, and it is why `PowerCron.nextRunAt` can be
 documented as epoch milliseconds. The price is that a helper which only ever
 *subtracts* inherits the wall clock's ability to jump - see
-[monoMs](../../../utils/now/functions/monoMs.md) for the measurement and for the four helpers that use it
+[monoMs](../../../../utils/now/functions/monoMs.md) for the measurement and for the four helpers that use it
 instead.
 
 #### Returns

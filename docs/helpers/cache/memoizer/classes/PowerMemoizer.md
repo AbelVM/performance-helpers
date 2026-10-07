@@ -1,26 +1,10 @@
-[**performance-helpers**](../../../README.md)
+[**performance-helpers**](../../../../README.md)
 
 ***
 
-[performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / PowerMemoizer
+[performance-helpers](../../../../README.md) / [helpers/cache/memoizer](../README.md) / PowerMemoizer
 
 # Class: PowerMemoizer
-
-PowerMemoizer
-
-A small memoization wrapper backed by `PowerCache`.
-It memoizes synchronous values and Promise-returning functions.
-Concurrent calls for the same arguments are deduplicated (single inflight Promise).
-Rejected Promises are not cached.
-
-Usage (constructor returns a `PowerMemoizer` instance; when a function is supplied
-the instance creates a memoized wrapper and exposes a convenience `run()` alias):
-const fetcher = async (id) => await fetchData(id)
-const pm = new PowerMemoizer(fetcher, { cacheOptions: { defaultTTL: 1000 } })
-// call the memoized function via the convenience alias
-await pm.run(1)
-
- PowerMemoizer
 
 ## Constructors
 
@@ -40,7 +24,7 @@ Optional function to memoize immediately.
 
 ##### options?
 
-`PowerMemoizerOptions` = `{}`
+`any` = `{}`
 
 #### Returns
 
@@ -94,23 +78,13 @@ Optional function to memoize immediately.
 
 ### cache
 
-> **cache**: [`PowerCache`](PowerCache.md)
+> **cache**: [`PowerCache`](../../core/classes/PowerCache.md)
 
 ***
 
 ### keyResolver
 
-> **keyResolver**: (`arg0`) => `string`
-
-#### Parameters
-
-##### arg0
-
-`any`[]
-
-#### Returns
-
-`string`
+> **keyResolver**: `any`
 
 ***
 

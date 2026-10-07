@@ -1,8 +1,8 @@
-[**performance-helpers**](../../../README.md)
+[**performance-helpers**](../../../../README.md)
 
 ***
 
-[performance-helpers](../../../README.md) / [helpers/powerCache](../README.md) / simpleArgsKey
+[performance-helpers](../../../../README.md) / [helpers/cache/memoizer](../README.md) / simpleArgsKey
 
 # Function: simpleArgsKey()
 
