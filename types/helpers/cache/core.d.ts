@@ -1015,8 +1015,8 @@ export class PowerCache {
      *
      * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
      *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
-    *   weightErrors:number, refreshesSkipped:number, refreshesFailed:number,
-    *   refreshesAborted:number, poolSize:number}}
+     *   weightErrors:number, refreshesSkipped:number, refreshesFailed:number,
+     *   refreshesAborted:number, poolSize:number}}
      */
     stats(): {
         size: number;
