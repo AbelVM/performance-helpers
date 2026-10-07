@@ -1,7 +1,7 @@
 # 0011. An acknowledging BroadcastChannel protocol is required before the hub can use it
 
-**Status:** Proposed
-**Affects:** `PowerRealtimeHub`, BC-003, future `createBroadcastBus` helper
+**Status:** Accepted
+**Affects:** `PowerRealtimeHub`, BC-003, `createBroadcastBus`
 
 ## Context
 

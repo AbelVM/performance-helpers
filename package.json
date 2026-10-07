@@ -61,6 +61,11 @@
       "import": "./src/helpers/powerBackpressure.js",
       "default": "./src/helpers/powerBackpressure.js"
     },
+    "./powerBroadcastBus": {
+      "types": "./types/helpers/powerBroadcastBus.d.ts",
+      "import": "./src/helpers/powerBroadcastBus.js",
+      "default": "./src/helpers/powerBroadcastBus.js"
+    },
     "./powerBatch": {
       "types": "./types/helpers/powerBatch.d.ts",
       "import": "./src/helpers/powerBatch.js",

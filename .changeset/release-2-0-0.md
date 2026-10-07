@@ -6173,6 +6173,369 @@ Found while attempting the corresponding strict-options change, which is not
 included here. Every case found is now fixed; the strict-options change itself is
 still to land, and is mechanical once these are.
 
+### From `post-consolidation changesets` (2026-10-05 → 2026-10-07)
+
+Fifteen changesets were added after the consolidation in `9ffcd12` and had not
+been folded into `release-2-0-0.md`. They are merged here under their original
+filenames so the move is auditable, and the originals are deleted. Nothing was
+dropped.
+
+#### SIEVE and S3-FIFO eviction policies (`alg-001-sieve-alg-002-s3fifo`, minor)
+
+`PowerCache` gains two new `policy` values beyond `lru`, `tinylfu` and `slru`:
+**SIEVE** (ALG-001) and **S3-FIFO** (ALG-002). Both are documented in
+`bench/claims.js sieve`, which measures them against what ships.
+
+SIEVE is a single FIFO queue plus a "last-chance" probation segment: a newcomer
+enters the probation segment and is evicted on its second miss, while a
+re-accessed item graduates to the main segment, which is FIFO-evicted. It needs
+no per-entry frequency state, so it is cheaper to maintain than TinyLFU.
+
+S3-FIFO splits the cache into a small "head" FIFO (one-tenth of capacity) and a
+large "main" FIFO. A newcomer first rides the head; if it is re-accessed before
+eviction it moves to the main, which is itself FIFO-evicted. A ghost queue
+records the keys the head evicted, so a hot key that happened to miss during a
+busy window is re-admitted rather than lost.
+
+The typecheck ratchet ceiling was raised to 162 to account for the new
+`visited` and `queue` properties on `CacheNode`, and `test/docsCodeAgreement.test.js`
+was updated for the new transport adapters.
+
+#### HyperLogLog and the `PowerRateLimit.builder()` fluent API (`alg005-dx002-hyperloglog-ratelimit-builder`, minor)
+
+**ALG-005.** `src/utils/hyperlogLog.js` ships a 64-register HyperLogLog
+cardinality estimator (~13 % standard error, 64 bytes) wired into
+`SmallLfuSketch.reset()` so the admission filter's half-life `sampleSize` adapts
+to the working set rather than staying at the default 10.
+
+Two bugs were found in the first draft of this file and are recorded in its
+header. `addHash` did not finalise its input, so sequential integers 0..N all had
+`h >>> 6 === 0` and every register saturated at rank 27, reporting a cardinality
+of 5.7 billion for a 100-element set. And the small-range correction used
+`zeros * ln(m / Z)` instead of the linear-counting `m * ln(m / Z)`. Both are
+fixed, and the fix is mutation-checked.
+
+**DX-002.** `PowerRateLimit.builder()` returns a `PowerRateLimitBuilder` with
+fluent `add()`, `atomic()`, `keyFn()` and `buckets()` methods, so a composed
+limiter reads `PowerRateLimit.builder().add(t).add(w).build()`. A factory
+function may be passed to `add()` in place of an instance, and an empty builder
+builds a permissive limiter.
+
+#### Audit `smart.md` and close its tasks (`audit-smart-helpers-second-sweep`, minor)
+
+Audits `smart.md` and documents the enforcement gaps, hidden coupling, race
+conditions, default-value traps, test coverage holes and API inconsistencies
+found in the second deeper sweep. Completed implementation tasks from that audit:
+
+- **CQ-002**: deduplicate `getStats()` boilerplate — created `guides/stats-naming.md`,
+  replaced 13 verbose JSDoc blocks across 13 helper files with a 5-line
+  cross-reference.
+- **CQ-004**: document the error-code table — created `guides/errors.md` with a
+  `## Codes outside the pool` table (10 codes), satisfying `test/errorCodes.test.js`.
+- **DUP-003**: removed the local `num()` helper from `normalizeAdaptive()` in
+  `src/helpers/powerBackpressure.js`; replaced with `assertLimitRequired`.
+- **FEAT-004**: refuted — premise inverted. `PowerBatch` does not flush-on-size;
+  it flushes on every microtask. `maxWaitMs` would add latency, not reduce it.
+- **RT-014**: added `nonRetryableCloseCodes` to `PowerWebSocketClient` with
+  `reconnectExhaustedBy: 'close-code'` stats tracking.
+- **RT-003**: added per-topic rate limiting to `PowerRealtimeHub` via the
+  `rateLimit` option; drops messages for over-budget topics and increments
+  `stats().rateLimited`.
+- **RT-006**: added `connectionUptime` and `backpressureRatio` to
+  `PowerWebSocketClient.stats()`.
+- **DX-004**: added a generic type parameter `T` to `PowerEventBus` with default
+  `Record<string, any>`. Public methods now accept `keyof T & string` for event
+  names, so a typo is caught at compile time. Updated `guides/powerEventBus.md`
+  and added type tests in `test/types.test-d.ts`.
+- **FEAT-005**: added `computed()` and `effect()` reactive primitives to
+  `PowerObserver`. `computed()` derives a signal from other signals; `effect()`
+  runs a callback on change and supports cleanup functions.
+- **FEAT-006**: added wildcard/glob subscription support to `PowerEventBus`.
+  Callers can subscribe to `'user:*'` and receive all `user.created`,
+  `user.updated`, etc. Matches literal events first, then wildcards;
+  unsubscription removes both literal and wildcard listeners.
+- **FEAT-002**: added task priority support to `PowerPool`. `PostMessageOptions`
+  and `PreparedItem` gained an optional `priority` field (default `0`).
+  `PowerQueue` gained `shiftHighestPriority(priorityFn)`; `PowerPool` stores
+  priority on queued items and dispatches highest-priority first, preserving
+  FIFO among equal-priority tasks. Composes with all `queuePolicy` values.
+  11 tests added in `test/powerPool.priority.test.js`.
+
+No breaking behaviour changes in this commit; the changeset records the findings
+and the implementation tasks (T-015–T-042) that follow from them.
+
+#### `createBroadcastBus` — a `BroadcastChannel` bus with per-frame ack (`bc-003-create-broadcast-bus`, minor)
+
+Add `createBroadcastBus`, a `BroadcastChannel` bus with per-frame acknowledgement,
+a pending counter with timeout, and slow-consumer detection. This implements the
+acknowledging protocol described in ADR 0011, so a `BroadcastChannel` can carry
+`PowerRealtimeHub`'s slow-consumer contract honestly.
+
+`BroadcastChannel` exposes no backpressure signal — no `bufferedAmount`, no
+`readyState`, no `desiredSize`, and `postMessage` returns `undefined`. A slow
+receiver is invisible to the sender until the process runs out of memory. The bus
+adds an application-level ack protocol so the sender can observe and react to a
+slow consumer honestly.
+
+The hub's `send(sub, frame)` adapter is one frame to one subscriber, but
+`BroadcastChannel` is one-to-many: one `postMessage` reaches every context on the
+channel. The adapter shape does not fit — the hub would have to call `postMessage`
+once per subscriber, which `bench/claims.js bcfanout` measured and found slower
+than a single channel post at K ≥ 4. The right shape is a **bus**: one channel,
+one `postMessage` per frame, and a per-receiver ack stream the bus demultiplexes.
+The hub subscribes to the bus, not to the channel.
+
+The bus assigns a sequence number to every frame it posts, tracks pending acks
+per receiver, and marks a receiver slow when its pending count exceeds the
+threshold (`SLOW_THRESHOLD = 2`) or when an ack times out. Slow-consumer policy
+is driven by the pending counter, not an invisible queue. The bus does **not**
+touch subscriber records — it reports slow receivers through `getSlowConsumerIds()`
+and the optional `onSlowConsumer` callback, and the hub decides what to do.
+
+The hub's existing slow-consumer contract is driven by a queue length:
+`sub.queue.length >= sub.maxQueue`. A `BroadcastChannel` has no queue the hub can
+see, so the bus substitutes a **pending counter**: the number of frames sent but
+not yet acked. The counter is not a queue — it does not buffer frames, reorder
+them, or drop them. It counts outstanding acks, and the timeout is the signal that
+a receiver is not keeping up.
+
+Constructor options: `channel` (required `BroadcastChannel`), `ackTimeoutMs`
+(default `5000`), and `onSlowConsumer`. An unrecognised option throws.
+
+API: `send(sub, frame) → boolean` (posts with a sequence number and the
+receiver's id; returns `true` while open, `false` after `dispose()`; throws if
+`sub.id` is not a string), `close(sub) → void` (clears pending timers and resets
+the pending counter for `sub.id`; a no-op if `sub.id` is missing),
+`getSlowConsumerIds() → Set<string>` (a snapshot of receivers currently marked
+slow), and `dispose() → void` (removes the message listener, clears all timers
+and state; idempotent).
+
+A timed-out frame is **not retransmitted**: the timeout is the slow-consumer
+signal, not a retry trigger, and retrying would hide the signal the bus exists
+to surface. The bus is one-directional — it posts frames and listens for acks on
+the same channel; if your topology needs a separate ack channel, create a second
+`BroadcastChannel` and pass it as the bus's `channel`.
+
+17 tests in `test/powerBroadcastBus.hub.test.js` and `test/powerBroadcastBus.test.js`.
+
+#### Four benchmark workloads that closed four review rows (`bench-close-res022-rt027-rt031-gap018`, patch)
+
+Four workloads added to `bench/claims.js` measured and closed four review rows:
+
+- `runDeferWorkload()` for RES-022 (`PowerDefer` WeakMap overhead, 14.74× —
+  closed as not adopted).
+- `runCodecWorkload()` for RT-027 (binary codec vs `JSON.stringify`, 2.31× slower
+  for 1000-number payloads — closed as not adopted).
+- `runSabRingWorkload()` for RT-031 (SAB ring vs `structuredClone`, 5.27× slower
+  — closed as not adopted).
+- `runKeyShapeWorkload()` for GAP-018 (cache key-shape throughput: integer
+  fastest, string 1.21× slower, object keys collapse to `"[object Object]"`
+  collisions — adopted).
+
+Also fixed five lint errors in the same file (1 `prefer-const`, 4
+`prettier/prettier`).
+
+#### The test suite passes on Node 22.12 again (`ci-node-22-12-version-aware-tests`, patch)
+
+CI runs `npm run test:coverage` on a `['22.12', '24']` matrix and was red on 22.12
+with 13 failed suites. The failures were three environment/floor mismatches, not
+library bugs, and each is now gated on a capability probe rather than skipped
+outright:
+
+- **`using` declarations (9 suites).** Node 22.12 has no `using` syntax, and
+  rolldown 1.2.12 — the only transformer in the tree — passes `using` through
+  verbatim rather than downlevelling it, so there is no tooling path. The 9 suites
+  (and 64 usages across 36 files) are rewritten as explicit
+  `try { ... } finally { instance.dispose() }` blocks; the behaviour under test is
+  identical, and each carries a comment saying why the scope exit is spelled out.
+- **`Error.isError` cross-realm assertions** (`errors.realm`, `powerBulkhead.resetReason`,
+  `powerLogger.isError`). The brand check is absent on 22.12, where the
+  `instanceof` fallback is realm-unsafe and a cross-realm error surfaces with its
+  class prefix. The assertions are gated with `it.runIf(HAS_IS_ERROR)`; the
+  realm-independent halves stay ungated.
+- **`PowerCrossLock`.** `node:worker_threads.locks` is absent on 22.12. The suite
+  is now `describe.skipIf(!hasCrossWorkerLocks())`, with a separate ungated block
+  pinning the `supported` flag and the "no cross-worker lock manager" residual.
+
+Also corrected a false claim in `.github/workflows/ci.yml`: the comment said 22.12
+was the floor "because the CommonJS entry point relies on `require(esm)`". It does
+not — `dist/performance-helpers.cjs` contains no such call and loads cleanly on
+22.12 with 81 exports. The library runs on 22.12; only the _tests_ use Node-24
+features, and the comment now says so.
+
+No behaviour change. Verified on both: Node 24 `npm run verify` 11/11 steps and
+3012 tests; Node 22.12 `npm run test:coverage` 2977 passed / 35 skipped / 0 failed.
+
+#### Split `powerCache.js` into a `cache/` directory (`cq-001-split-powercache-into-cache-dir`, minor)
+
+Split `src/helpers/powerCache.js` into `src/helpers/cache/{core,memoizer,timedCache,index}.js`
+for maintainability. The original module path remains a backward-compatible
+re-export, so all existing imports continue to work unchanged.
+
+#### Documentation cleanup: remove devlog claims, add options tables, label transports (`docs-cleanup-devlog-removal`, patch)
+
+Clean up user-facing documentation: remove internal measurement claims and bench
+citations from guides, add missing options tables, and label transport helpers
+as client-side or server-side with links to their counterparts.
+
+#### Documentation review: disposal docs, anchors, deduplication (`docs-guide-disposal-and-anchor-fixes`, patch)
+
+Documentation review and cleanup across guides, README, and assets:
+
+- Deduplicated overlapping Clocks sections in `powerThrottle.md`, `powerRateLimit.md`,
+  `powerSlidingWindow.md`, and `powerGCRA.md`.
+- Removed stale `smart.md` reference from `autoscale.md` and `review.md` reference
+  from `powerCache.md`.
+- Fixed broken markdown anchors in `powerMessageCodec.md` and `powerServo.md`.
+- Added missing "Cancelling a wait" section to `powerPermitGate.md`.
+- Removed duplicate `fnComplexity` bullet in `powerChunking.md`.
+- Reordered `powerBackpressure.md` and added disposal documentation.
+- Fixed table formatting and added disposal docs in `powerSemaphore.md`.
+- Added disposal documentation in `powerSubscriberSet.md`, `powerPool.md`, and
+  `powerCache.md`.
+- Updated the README Caching section to include `PowerMemoizer` and
+  `PowerTimedCache`.
+- Verified all markdown anchors reference valid sections and `docs:claims` passes.
+
+#### Distributed rate limiting via a `sharedState` adapter (`gap-015-distributed-rate-limiting`, minor)
+
+Add distributed rate limiting via a user-supplied `sharedState` adapter. The adapter
+is consulted before the local legs, and on backend error the limiter degrades
+according to `degrade`: `'local'` falls back to local legs only, `'fail-closed'`
+refuses the request. The path taken is exposed through `stats().path` and the
+`lastPath` getter. This respects REJ-008: the user brings the client, and the
+N-is-unknown case is handled by the external store.
+
+#### The Release workflow stopped opening a version PR (`release-no-pr-creation`, patch)
+
+The Release workflow's `version` job failed on every release: it used
+`changesets/action` with `commit`/`title`, which pushes the version commit to a
+branch and then creates a "chore: version packages" pull request, and this
+repository does not permit GitHub Actions to create or approve pull requests. The
+job errored after cutting the version and before `publish` ran, so nothing shipped.
+A job-level `pull-requests: write` permission cannot fix it — that is a repository
+setting, not a workflow permission.
+
+The job is deleted. The version cut is now made by a maintainer pushing to `main`
+(`changeset version`, or `npm run release:version`), and `publish` runs
+`changeset publish` on every push to `main`, which no-ops when the version on npm
+already matches `package.json` — so a non-version push is a cheap no-op rather
+than a failed release. The version PR was only ever a review surface for the
+`package.json` + `CHANGELOG.md` + `types/` diff, and that diff still lands on
+`main` in the maintainer's own commit.
+
+#### Hide `_`-prefixed private members from the published `.d.ts` (`res-014-strip-internal-types`, patch)
+
+Hide `_`-prefixed private members from generated `.d.ts` files via a
+post-processing script, reducing the published type surface. `_metrics` is
+preserved because it is deliberately emitted as a plain object type. Update the
+consumer type test and the metrics runtime test to stop reaching into private
+state.
+
+#### `PowerCron`: `maxCatchUp` cap and `overlap` option (`res-018-powercron-maxcatchup-overlap`, minor)
+
+Add `maxCatchUp` cap and `overlap` option to `PowerCron`.
+
+- `maxCatchUp` (default `Infinity`) caps the `catch-up` replay loop so a large
+  backlog does not become a synchronous burst. Measured: a 10 ms cron that fell
+  ~600 periods behind replayed all 600 in one tick, extrapolating to ~8.6 M
+  invocations for 24 h. The refused periods are reported as `missed` by the
+  following run, so they are not silently dropped.
+- `overlap` (default `false`) blocks a tick while a task is in flight. Measured:
+  a 50 ms task on a 20 ms interval fired 15 times with 15 concurrent runs before
+  this option existed. `runNow()` is out of band and ungated.
+
+#### `PowerDatagramChannel` — ordered datagrams over one channel (`wt003-power-datagram-channel`, minor)
+
+Add `PowerDatagramChannel`, a new realtime helper that multiplexes ordered datagram
+streams over a single `MessagePort` or `BroadcastChannel`. It frames each datagram
+with a 4-byte big-endian length prefix, assigns a per-stream sequence number, and
+delivers out-of-order or late frames through a configurable `onError` callback
+rather than silently dropping them.
+
+The queue behaviour changed from "refuse when full" to "drop-oldest then queue
+new datagram" (WT-003). The previous behaviour back-pressured the sender by
+throwing, which is the wrong contract for a datagram channel: a dropped datagram
+is already lost, so the channel should make room for newer data rather than
+forcing the sender to handle a synchronous throw on a path that is otherwise
+fire-and-forget. The queue now has a fixed `maxSize` (default 256); when a new
+datagram would exceed it, the oldest pending datagram is discarded and the new
+one is queued. `onError` is invoked for the discarded datagram so accounting stays
+accurate.
+
+Wired into the public surface: `src/index.js`, `test/apiSurface.test.js`,
+`guides/metaGuide.md`, `assets/5_Realtime.md`, `README.md`.
+
+17 tests in `test/powerDatagramChannel.test.js`, covering send/receive, queue
+overflow, drop-oldest behaviour, error callback, and close/drain semantics.
+
+No breaking changes to existing helpers.
+
+#### `bytesAcknowledged` on hub subscriptions (`wt004-bytes-acknowledged`, minor)
+
+Add an optional `bytesAcknowledged` callback to `PowerRealtimeHub` subscriptions
+(WT-004). `bytesAcknowledged` is a transport-reported per-stream callback the
+caller wires up at `subscribe()` time. It reports bytes the transport has
+_acknowledged_ for that subscriber, as opposed to bytes the hub handed over. On
+HTTP/2 it matches the hub's own `bytesSent`; on transports that do not report it
+the callback is simply not supplied and the hub keeps `bytesSent` as the floor.
+
+The shape is a function rather than a number because the value moves: a number
+captured at subscribe time would be stale by the next flush. The callback is
+invoked **after** the transport has taken the frame, in the same statement that
+increments `bytesSent`, so the two move together.
+
+A new static `PowerRealtimeHub._validateAcknowledged(fn)` validates the callback
+at subscribe time. It accepts `null` and `undefined` as the explicit "not
+supplied" sentinel and returns `null` for both; anything that is not a function
+throws `TypeError`. The check is extracted because it is its own branch and
+because the error message needs to name the parameter.
+
+The callback is stored on the `HubSubscriber` record as `bytesAcknowledged` and
+invoked inside the existing `sub.bytesSent += frame.length` statement, wrapped in
+`try/catch` so a bad accounting callback is reported through `_notify` rather than
+taking the subscriber down.
+
+7 tests in `test/powerRealtimeHub.bytesAcknowledged.test.js`, mutation-checked.
+Two mutants were caught: removing the `_validateAcknowledged` call in `subscribe()`
+(2 failures), and bypassing the callback invocation in `_flushSubscriber`
+(2 failures).
+
+No breaking behaviour change; the default is no callback and `bytesSent` remains
+the floor.
+
+#### `priority` on hub subscriptions (`wt005-hub-subscriber-priority`, minor)
+
+Implement `priority` on `PowerRealtimeHub` subscriptions (WT-005).
+
+A per-subscriber `priority` number (default `0`) controls drain order: on every
+flush, subscribers with queued work are visited highest priority first, ties
+broken by insertion order. Both flush paths go through one extracted
+`_queuedSubscribers()` rather than each sorting its own copy, because `flush()`
+walks the same set through `_flushAll` and a priority that only applied to the
+microtask path would leave the two paths disagreeing about who gets served first.
+
+A new static `PowerRealtimeHub._validatePriority(value)` rejects non-finite
+input. The case that matters is `NaN`: it coerces silently and compares unequal to
+everything, so `Array.sort` lands the subscriber in an arbitrary position without
+throwing — a wrong-order delivery with no error, months after the subscribe that
+accepted it. The check is extracted from `subscribe()` because that method was
+already at the cyclomatic-complexity ceiling.
+
+`stats().list` reflects `priority` back rather than re-deriving it: it is a value
+the caller supplied, so reporting it is honest and recomputing it would be
+inventing one.
+
+7 tests in `test/powerRealtimeHub.priority.test.js`, mutation-checked. Two mutants
+were caught and each caught for a different reason: removing the sort from
+`_drain()` (2 failures), and bypassing `_queuedSubscribers()` in `_flushAll`
+(2 failures). The second is the one that justifies the extraction: a sort in
+`_drain()` alone passes every test, because the caller-driven path was never
+exercising it.
+
+No breaking behaviour change; the default is `0` and equal-priority subscribers
+keep insertion order, which is what every existing caller relies on.
+
 ## Benchmarks: the numbers that were not numbers
 
 **Added two benchmark modes, because two recorded numbers were not numbers.**
@@ -9676,3 +10039,18 @@ only thing that distinguishes "stopped because you said so" from "stopped becaus
 
 17 tests, mutation-checked: 15 mutants all killed, and three tests were added
 after the first pass because three were un-killed — they were decoration.
+
+#### Consolidate pending changesets into `release-2-0-0.md` (`consolidate-pending-changesets`, patch)
+
+Folded 16 pending changesets (15 tracked + 1 untracked `bc-003`) into the
+`## Folded in from the remaining individual changesets` section of
+`.changeset/release-2-0-0.md` and deleted the originals. Nothing was dropped;
+the move is auditable by filename inside the consolidated file.
+
+Also fixed a type-generation defect in `src/helpers/cache/memoizer.js`: the
+constructor JSDoc referenced `PowerMemoizerOptions` without importing the type
+from `jsdoc-types.js`, so `types/helpers/cache/memoizer.d.ts` was emitted with
+an unresolved identifier and `npm run test:types` failed. Added the missing
+`@typedef` import; types now regenerate cleanly.
+
+Verified: `npm run verify` 11/11 steps, 3139 tests, 0 errors.

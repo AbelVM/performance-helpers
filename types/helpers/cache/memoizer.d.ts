@@ -15,6 +15,9 @@
  * @public
  */
 export function simpleArgsKey(...args: any[]): string;
+/**
+ * @typedef {import('../jsdoc-types.js').PowerMemoizerOptions} PowerMemoizerOptions
+ */
 export class PowerMemoizer {
     /**
      * Create a PowerMemoizer.
@@ -22,7 +25,7 @@ export class PowerMemoizer {
      * @param {PowerMemoizerOptions} [options]
      */
     constructor(fn?: Function, options?: PowerMemoizerOptions);
-    keyResolver: any;
+    keyResolver: (...arg0: any[]) => string;
     cache: PowerCache;
     _inflight: Map<any, any>;
     /** @type {{ttl?: number, weight?: number}} */
@@ -206,4 +209,5 @@ export class PowerMemoizer {
      */
     [Symbol.dispose](): void;
 }
+export type PowerMemoizerOptions = import("../jsdoc-types.js").PowerMemoizerOptions;
 import { PowerCache } from './core.js';

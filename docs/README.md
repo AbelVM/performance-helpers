@@ -6,10 +6,15 @@
 
 ## Modules
 
+- [helpers/cache](helpers/cache/README.md)
+- [helpers/cache/core](helpers/cache/core/README.md)
+- [helpers/cache/memoizer](helpers/cache/memoizer/README.md)
+- [helpers/cache/timedCache](helpers/cache/timedCache/README.md)
 - [helpers/constants](helpers/constants/README.md)
 - [helpers/metrics](helpers/metrics/README.md)
 - [helpers/powerBackpressure](helpers/powerBackpressure/README.md)
 - [helpers/powerBatch](helpers/powerBatch/README.md)
+- [helpers/powerBroadcastBus](helpers/powerBroadcastBus/README.md)
 - [helpers/powerBuffer](helpers/powerBuffer/README.md)
 - [helpers/powerBulkhead](helpers/powerBulkhead/README.md)
 - [helpers/powerCache](helpers/powerCache/README.md)

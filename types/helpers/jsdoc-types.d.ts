@@ -1010,6 +1010,25 @@ export type PowerRTCChannelOptions = {
     expectUnreliable?: boolean | undefined;
 };
 /**
+ * Options for `PowerBroadcastBus`.
+ */
+export type PowerBroadcastBusOptions = {
+    /**
+     * - The BroadcastChannel to use.
+     */
+    channel: BroadcastChannel;
+    /**
+     * - Timeout in milliseconds for acks.
+     */
+    ackTimeoutMs?: number | undefined;
+    /**
+     * - Called when a
+     * receiver is marked as slow. The hub passes a callback that sets
+     * `sub.slowConsumer = true`; the bus itself never touches subscriber records.
+     */
+    onSlowConsumer?: ((receiverId: string) => void) | undefined;
+};
+/**
  * Options for `PowerMessagePort`.
  */
 export type PowerMessagePortOptions = {

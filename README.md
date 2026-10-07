@@ -85,6 +85,7 @@ The transport helpers split into two roles: **client-side** helpers dial out and
   It is **not** a speedup. Structured clone is a tie for small objects, slower for deeply nested structure, and faster only for string-heavy payloads. Fidelity is the reason the frame exists; the per-worker decision is what keeps a pool from adopting it where it does not pay.
 
 - [PowerRealtimeHub: Topic fan-out with slow-consumer control](guides/powerRealtimeHub.md). Per-subscriber bounded queues and a declared policy (`drop-oldest` / `drop-newest` / `disconnect`) so one slow consumer cannot stall or OOM the process. Transport-agnostic via a `send` adapter; batches over `PowerMessageCodec`.
+- [createBroadcastBus: BroadcastChannel bus with per-frame ack and slow-consumer detection](guides/powerBroadcastBus.md). Adds an application-level ack protocol so a `BroadcastChannel` can carry the hub's slow-consumer contract honestly. One `postMessage` per frame, a per-receiver pending counter with timeout, and `getSlowConsumerIds()` for the hub to observe.
 
 - [PowerMessagePort: `MessagePort` transport adapter for `PowerRealtimeHub`](guides/powerMessagePort.md). Uses the platform's native structured-clone codec so `Map`, `Set`, `Date`, `BigInt` and cycles survive the boundary without JSON round-tripping. Supplies inbound decoding through `decodeInbound` and safe listener teardown on `dispose()`.
 

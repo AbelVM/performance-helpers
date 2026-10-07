@@ -726,6 +726,17 @@ export {};
  */
 
 /**
+ * Options for `PowerBroadcastBus`.
+ *
+ * @typedef {Object} PowerBroadcastBusOptions
+ * @property {BroadcastChannel} channel - The BroadcastChannel to use.
+ * @property {number} [ackTimeoutMs=5000] - Timeout in milliseconds for acks.
+ * @property {(receiverId: string) => void} [onSlowConsumer] - Called when a
+ *   receiver is marked as slow. The hub passes a callback that sets
+ *   `sub.slowConsumer = true`; the bus itself never touches subscriber records.
+ */
+
+/**
  * Options for `PowerMessagePort`.
  *
  * @typedef {Object} PowerMessagePortOptions

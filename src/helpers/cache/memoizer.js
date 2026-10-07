@@ -2,6 +2,10 @@ import { assertKnownOptions } from '../../utils/options.js';
 import { PowerCache } from './core.js';
 import { isError } from '../../utils/errors.js';
 
+/**
+ * @typedef {import('../jsdoc-types.js').PowerMemoizerOptions} PowerMemoizerOptions
+ */
+
 export class PowerMemoizer {
   /**
    * Create a PowerMemoizer.

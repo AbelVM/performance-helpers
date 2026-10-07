@@ -33,6 +33,7 @@ export { PowerWebTransportClient } from "./helpers/powerWebTransportClient.js";
 export { createWebTransportAdapter } from "./helpers/powerWebTransportAdapter.js";
 export { PowerRTCChannel } from "./helpers/powerRTCChannel.js";
 export { PowerDatagramChannel } from "./helpers/powerDatagramChannel.js";
+export { createBroadcastBus } from "./helpers/powerBroadcastBus.js";
 export { createSseAdapter } from "./helpers/powerSseAdapter.js";
 export { o2b, o2u8, u82o, b2o } from "./helpers/powerBuffer.js";
 export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./helpers/powerCache.js";

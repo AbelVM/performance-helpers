@@ -636,6 +636,9 @@ data channel, and the other two sit between them.
 - `PowerRealtimeHub`: every subscription gets its own bounded queue and a declared slow-consumer
   policy, so a single client that stops reading becomes a bounded, observable problem instead of a
   process-wide memory leak. Batches over `PowerMessageCodec`.
+- `createBroadcastBus`: a `BroadcastChannel` bus with per-frame acknowledgement and a pending counter
+  with timeout, so the hub can observe slow consumers on a one-to-many channel that exposes no
+  backpressure signal. One `postMessage` per frame; the receiver acks with a native envelope.
 - `PowerMessagePort`: a `MessagePort` transport adapter for the hub. The platform's native
   structured-clone codec carries `Map`, `Set`, `Date`, `BigInt` and cycles losslessly, so inbound
   frames are decoded through `decodeInbound` and listeners are torn down on `dispose()`. Use it

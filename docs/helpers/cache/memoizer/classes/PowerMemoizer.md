@@ -24,7 +24,7 @@ Optional function to memoize immediately.
 
 ##### options?
 
-`any` = `{}`
+`PowerMemoizerOptions` = `{}`
 
 #### Returns
 
@@ -84,7 +84,17 @@ Optional function to memoize immediately.
 
 ### keyResolver
 
-> **keyResolver**: `any`
+> **keyResolver**: (`arg0`) => `string`
+
+#### Parameters
+
+##### arg0
+
+`any`[]
+
+#### Returns
+
+`string`
 
 ***
 

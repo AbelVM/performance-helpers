@@ -48,6 +48,7 @@ export { PowerSocketAdapter, detectSocketKind, READY_STATE } from './helpers/pow
 export { createWebTransportAdapter } from './helpers/powerWebTransportAdapter.js';
 export { PowerRTCChannel } from './helpers/powerRTCChannel.js';
 export { PowerDatagramChannel } from './helpers/powerDatagramChannel.js';
+export { createBroadcastBus } from './helpers/powerBroadcastBus.js';
 export { createSseAdapter } from './helpers/powerSseAdapter.js';
 export {
   PowerMessageCodec,
