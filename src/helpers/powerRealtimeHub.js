@@ -196,11 +196,12 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @property {'json'|'raw'} [codec='json'] - Payload codec for outgoing frames.
  * @property {function(Error, object):void} [onError] - Called when the `send`
  *   adapter rejects or throws, instead of leaving an unhandled rejection.
- * @property {import('./powerRateLimit.js').PowerRateLimit|null} [rateLimit] - Optional
+ * @property {import('./jsdoc-types.js').RateLimiterLike} [rateLimit] - Optional
  *   per-topic rate limiter. When set, `publish()` calls `tryConsume(1, { context:
  *   { topic } })` before enqueuing; a `false` return drops the message for that
- *   topic and increments `stats().rateLimited`. The caller is expected to configure
- *   `keyFn` on the `PowerRateLimit` so the topic is routed to its own limiter slot.
+ *   topic and increments `stats().rateLimited`. Composes with any helper that
+ *   satisfies {@link RateLimiterLike} — `PowerThrottle`, `PowerGCRA`,
+ *   `PowerRateLimit` with `keyFn`, etc.
  */
 
 let _nextSubId = 0;
@@ -293,7 +294,15 @@ export class PowerRealtimeHub {
       ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError', 'rateLimit'],
       'PowerRealtimeHub'
     );
-    const { send, close, batch = true, batchDelayMs = 0, codec = 'json', onError } = options || {};
+    const {
+      send,
+      close,
+      batch = true,
+      batchDelayMs = 0,
+      codec = 'json',
+      onError,
+      rateLimit,
+    } = options || {};
 
     if (typeof send !== 'function') {
       throw new TypeError('PowerRealtimeHub: a `send(subscriber, frame)` adapter is required');
@@ -385,6 +394,10 @@ export class PowerRealtimeHub {
     this._frameMemoLength = -1;
     this._frameMemoFirst = null;
     this._frameMemoLast = null;
+    // RT-003: optional per-topic rate limiter. Composes with any helper that
+    // satisfies `RateLimiterLike`; the hub calls `tryConsume(1, { context:
+    //   { topic } })` in `publish()` and drops the message when it returns `false`.
+    this._rateLimit = rateLimit ?? null;
     // FEAT-007: opt-in metrics. Off by default, so the common case pays nothing and allocates no closure.
     this._metrics = attach(this, 'hub', options);
   }

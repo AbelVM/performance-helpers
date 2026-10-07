@@ -296,6 +296,19 @@ for (const guide of guideNames) {
   }
   const helperSource = readFileSync(helperPath, 'utf8');
   const declared = declaredNames(helperSource);
+  // `powerCache.js` was split into `cache/` and is now a re-export, so its own
+  // source declares nothing. The guide documents the public API that file
+  // re-exports, so follow it into the subdirectory rather than reporting every
+  // method of the cache as undocumented.
+  if (declared.size === 0) {
+    const cacheDir = path.join(ROOT, 'src/helpers/cache');
+    for (const f of readdirSync(cacheDir)) {
+      if (!f.endsWith('.js')) continue;
+      for (const n of declaredNames(readFileSync(path.join(cacheDir, f), 'utf8'))) {
+        declared.add(n);
+      }
+    }
+  }
   // A guide names its own class in the first line of most examples. From the
   // source, not the filename: `powerLatch.js` exports `PowerLatch`, so deriving
   // it from the path silently failed for every guide whose two names differ.

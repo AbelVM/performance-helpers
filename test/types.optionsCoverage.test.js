@@ -412,22 +412,38 @@ function resolveType(typeText, dts) {
   return null;
 }
 
-const typeFiles = readdirSync(TYPES_DIR).filter(
-  (f) => f.endsWith('.d.ts') && f !== 'jsdoc-types.d.ts'
-);
+const typeFiles = (() => {
+  // Recurses into subdirectories: `powerCache.js` was split into `cache/`, so
+  // `PowerCache`/`PowerMemoizer`/`PowerTimedCache` are declared under
+  // `types/helpers/cache/` rather than the top level. A flat read of
+  // `types/helpers/*.d.ts` skipped all three, which would have dropped
+  // `surfacesChecked` below its floor and let the tripwire pass quietly.
+  const walk = (dir) => {
+    const out = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...walk(full));
+      else if (entry.name.endsWith('.d.ts') && entry.name !== 'jsdoc-types.d.ts') {
+        out.push(full);
+      }
+    }
+    return out;
+  };
+  return walk(TYPES_DIR);
+})();
 
 const findings = [];
 let surfacesChecked = 0;
 
 for (const file of typeFiles) {
-  const jsPath = path.join(SRC_DIR, file.replace(/\.d\.ts$/, '.js'));
+  const jsPath = path.join(SRC_DIR, path.relative(TYPES_DIR, file).replace(/\.d\.ts$/, '.js'));
   let js;
   try {
     js = read(jsPath);
   } catch {
     continue; // no 1:1 source module (e.g. a pure type module)
   }
-  for (const s of optionsSurfaces(read(path.join(TYPES_DIR, file)), js)) {
+  for (const s of optionsSurfaces(read(file), js)) {
     if (!s.declared || !s.destructured.length) continue;
     surfacesChecked += 1;
     for (const key of s.destructured) {
@@ -442,9 +458,12 @@ for (const file of typeFiles) {
 
 describe('published options types declare everything the constructors destructure', () => {
   it('the extraction works, so a silent no-pass is impossible', () => {
+    // `powerCache.js` was split into `cache/`, so the class is declared in
+    // `cache/core.d.ts` paired with `cache/core.js` — reading the barrel file
+    // here would find nothing and make this tripwire pass vacuously.
     const cache = optionsSurfaces(
-      read(path.join(TYPES_DIR, 'powerCache.d.ts')),
-      read(path.join(SRC_DIR, 'powerCache.js'))
+      read(path.join(TYPES_DIR, 'cache', 'core.d.ts')),
+      read(path.join(SRC_DIR, 'cache', 'core.js'))
     );
     const powerCache = cache.find((c) => c.className === 'PowerCache');
     expect(powerCache).toBeDefined();

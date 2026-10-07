@@ -72045,15 +72045,32 @@
 									},
 									{
 										"kind": "text",
-										"text": ". The caller is expected to configure\n  "
+										"text": ". Composes with any helper that\n  satisfies "
 									},
 									{
-										"kind": "code",
-										"text": "`keyFn`"
+										"kind": "inline-tag",
+										"tag": "@link",
+										"text": "RateLimiterLike"
 									},
 									{
 										"kind": "text",
-										"text": " on the "
+										"text": " — "
+									},
+									{
+										"kind": "code",
+										"text": "`PowerThrottle`"
+									},
+									{
+										"kind": "text",
+										"text": ", "
+									},
+									{
+										"kind": "code",
+										"text": "`PowerGCRA`"
+									},
+									{
+										"kind": "text",
+										"text": ",\n  "
 									},
 									{
 										"kind": "code",
@@ -72061,24 +72078,27 @@
 									},
 									{
 										"kind": "text",
-										"text": " so the topic is routed to its own limiter slot."
+										"text": " with "
+									},
+									{
+										"kind": "code",
+										"text": "`keyFn`"
+									},
+									{
+										"kind": "text",
+										"text": ", etc."
 									}
 								]
 							},
 							"type": {
-								"type": "union",
-								"types": [
-									{
-										"type": "reference",
-										"target": 2249,
-										"name": "PowerRateLimit",
-										"package": "performance-helpers"
-									},
-									{
-										"type": "literal",
-										"value": null
-									}
-								]
+								"type": "reference",
+								"target": {
+									"packageName": "performance-helpers",
+									"packagePath": "src/helpers/jsdoc-types.js",
+									"qualifiedName": "RateLimiterLike"
+								},
+								"name": "RateLimiterLike",
+								"package": "performance-helpers"
 							}
 						},
 						{

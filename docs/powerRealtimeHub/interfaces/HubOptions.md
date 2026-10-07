@@ -98,13 +98,14 @@ Called when the `send`
 
 ### rateLimit?
 
-> `optional` **rateLimit?**: [`PowerRateLimit`](../../helpers/powerRateLimit/classes/PowerRateLimit.md) \| `null`
+> `optional` **rateLimit?**: `RateLimiterLike`
 
 Optional
   per-topic rate limiter. When set, `publish()` calls `tryConsume(1, { context:
   { topic } })` before enqueuing; a `false` return drops the message for that
-  topic and increments `stats().rateLimited`. The caller is expected to configure
-  `keyFn` on the `PowerRateLimit` so the topic is routed to its own limiter slot.
+  topic and increments `stats().rateLimited`. Composes with any helper that
+  satisfies RateLimiterLike — `PowerThrottle`, `PowerGCRA`,
+  `PowerRateLimit` with `keyFn`, etc.
 
 ***
 

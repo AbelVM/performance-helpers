@@ -437,10 +437,21 @@ describe('observability: true on the helpers', () => {
     // `src/helpers/` is what makes a helper register, which is the thing the
     // guide's guarantee is about, and reading it here means a tenth helper
     // added tomorrow fails this test rather than being silently left untested.
-    const source = readdirSync(HELPERS_DIR)
-      .filter((f) => f.endsWith('.js'))
-      .map((f) => readFileSync(join(HELPERS_DIR, f), 'utf8'))
-      .join('\n');
+    const source = (() => {
+      // Recurse into subdirectories: `powerCache.js` was split into `cache/`, and
+      // `attach(this, 'cache'` lives in `cache/core.js` — a top-level read alone
+      // would miss it and report 14 helpers against a 15-entry list.
+      const collect = (dir) => {
+        const out = [];
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) out.push(...collect(full));
+          else if (entry.name.endsWith('.js')) out.push(readFileSync(full, 'utf8'));
+        }
+        return out;
+      };
+      return collect(HELPERS_DIR).join('\n');
+    })();
 
     const attached = [...source.matchAll(/attach\(this,\s*'([A-Za-z0-9_]+)'/g)].map((m) => m[1]);
     expect(attached.length).toBeGreaterThan(0); // the regex must still find something

@@ -204,10 +204,16 @@ describe('getStats is declared in the published types', () => {
     return null;
   };
 
-  /** file -> class name, for the files that declare both spellings. */
+  /** file -> class name, for the files that declare both spellings.
+   *
+   * `powerCache.js` was split into `cache/`, so the three cache-shaped
+   * classes are no longer declared in `powerCache.d.ts` — that file is now a
+   * barrel re-export. The declarations live in the subdirectory, which is what
+   * a consumer's `tsc` actually resolves, so this reads them there.
+   */
   const FILES = [
     ['powerGCRA.d.ts', 'PowerGCRA'],
-    ['powerCache.d.ts', 'PowerCache'],
+    ['cache/core.d.ts', 'PowerCache'],
     ['powerBulkhead.d.ts', 'PowerBulkhead'],
     ['powerEventLoopMonitor.d.ts', 'PowerEventLoopMonitor'],
     ['powerRealtimeHub.d.ts', 'PowerRealtimeHub'],
@@ -217,6 +223,8 @@ describe('getStats is declared in the published types', () => {
     ['powerThrottle.d.ts', 'PowerThrottle'],
     ['powerSlidingWindow.d.ts', 'PowerSlidingWindow'],
     ['powerRateLimit.d.ts', 'PowerRateLimit'],
+    ['cache/memoizer.d.ts', 'PowerMemoizer'],
+    ['cache/timedCache.d.ts', 'PowerTimedCache'],
   ];
 
   it('read the generated types it claims to', () => {
@@ -255,9 +263,13 @@ describe('getStats is declared in the published types', () => {
     // The scripted insertion that produced the broken `@returns` also only
     // replaced the *first* matching block in a file, so `PowerMemoizer` and
     // `PowerTimedCache` kept a malformed annotation while the file looked
-    // correct. Counting catches that; `powerCache.d.ts` declares all three.
-    const src = read('powerCache.d.ts');
-    expect((src.match(/^\s+getStats\(\):/gm) || []).length).toBe(3);
+    // correct. Counting catches that; the three cache-shaped classes now live
+    // in `cache/core.d.ts`, `cache/memoizer.d.ts` and `cache/timedCache.d.ts`,
+    // so each is counted where it is declared.
+    const count = (file) => (read(file).match(/^\s+getStats\(\):/gm) || []).length;
+    expect(count('cache/core.d.ts'), 'PowerCache').toBe(1);
+    expect(count('cache/memoizer.d.ts'), 'PowerMemoizer').toBe(1);
+    expect(count('cache/timedCache.d.ts'), 'PowerTimedCache').toBe(1);
   });
 
   it('leaves PowerPool with getStats and no stats, as it was', () => {

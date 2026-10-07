@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import * as api from '../src/index.js';
 
 /**
@@ -22,10 +23,16 @@ import * as api from '../src/index.js';
 
 /** Module files under src/ that could declare an exported class. */
 function sourceFiles() {
-  return [
-    ...readdirSync('src/helpers').map((f) => `src/helpers/${f}`),
-    ...readdirSync('src/utils').map((f) => `src/utils/${f}`),
-  ].filter((f) => f.endsWith('.js'));
+  const walk = (dir) => {
+    const out = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...walk(full));
+      else if (entry.name.endsWith('.js')) out.push(full);
+    }
+    return out;
+  };
+  return [...walk('src/helpers'), ...walk('src/utils')];
 }
 
 /** Exported class names per source file. */
