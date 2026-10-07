@@ -455,6 +455,7 @@ export class PowerCache {
         next: null,
         inWindow: false,
         visited: false,
+        queue: 'main',
       });
 
     this._currentWeight = 0;
@@ -526,6 +527,34 @@ export class PowerCache {
      */
     this._sieveHand = null;
     /**
+     * S3-FIFO Small queue head/tail/size. Holds the newest entries as a filter
+     * for one-hit wonders. Promoted to Main when Main has room.
+     * @type {CacheNode|null}
+     */
+    this._smallHead = null;
+    /** @type {CacheNode|null} */
+    this._smallTail = null;
+    /** @type {number} */
+    this._smallSize = 0;
+    /**
+     * S3-FIFO Ghost queue head/tail/size. Metadata-only FIFO of recently evicted
+     * keys, used to fast-track re-admission directly to Main.
+     * @type {CacheNode|null}
+     */
+    this._ghostHead = null;
+    /** @type {CacheNode|null} */
+    this._ghostTail = null;
+    /** @type {number} */
+    this._ghostSize = 0;
+    /** @type {number} Max entries in the Small queue. */
+    this._smallMaxSize = 0;
+    /** @type {number} Max entries in the Ghost queue. */
+    this._ghostMaxSize = 0;
+    /** @type {Map<string, CacheNode>} Key -> ghost node for O(1) lookup. */
+    this._ghostMap = new Map();
+    /** @type {Map<string, CacheNode>} Small queue entries for S3-FIFO. */
+    this._smallMap = new Map();
+    /**
      * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
      * behaviour. `'slru'` splits the list into a probation segment and a
      * protected segment and promotes on access, which makes the cache far more
@@ -534,8 +563,26 @@ export class PowerCache {
      * visited bit per entry and a scanning hand pointer. On eviction, the hand
      * scans toward the head; visited entries get their bit cleared (second
      * chance), unvisited entries are evicted.
+     * `'s3fifo'` uses the S3-FIFO algorithm (SOSP '23): three static FIFO queues
+     * (Small, Main, Ghost) for workload-oblivious high hit ratios.
      */
-    this._policy = policy === 'slru' ? 'slru' : policy === 'sieve' ? 'sieve' : 'lru';
+    this._policy =
+      policy === 'slru'
+        ? 'slru'
+        : policy === 'sieve'
+          ? 'sieve'
+          : policy === 's3fifo'
+            ? 's3fifo'
+            : 'lru';
+
+    // S3-FIFO queue sizing. Small is 10% of maxEntries (min 1), Ghost is 20%
+    // (min 1), Main gets the remainder. These are fixed after construction;
+    // `resize` does not currently rebalance them.
+    if (this._policy === 's3fifo') {
+      const base = Number.isFinite(this.maxEntries) ? this.maxEntries : 1000;
+      this._smallMaxSize = Math.max(1, Math.floor(base * 0.1));
+      this._ghostMaxSize = Math.max(1, Math.floor(base * 0.2));
+    }
 
     // CACHE-020. Validated here, ahead of the sketch branch below rather than
     // inside it, so a bad `seed` is rejected even when no sketch is built. `seed`
@@ -729,6 +776,9 @@ export class PowerCache {
       // SIEVE visited bit: set on access, cleared by the hand during eviction
       // scanning. A pooled node carries its last role's flag, so reset here.
       visited: false,
+      // S3-FIFO queue label: 'main' | 'small' | 'ghost'. A pooled node carries
+      // its last role's label, so reset here.
+      queue: 'main',
     };
     node.key = key;
     node.value = value;
@@ -738,6 +788,7 @@ export class PowerCache {
     node.next = null;
     node.inWindow = false;
     node.visited = false;
+    node.queue = 'main';
     return node;
   }
 
@@ -861,7 +912,7 @@ export class PowerCache {
 
   /**
    * Fetch a node and validate expiry.
-   * @protected
+   * @public
    * @param {*} key
    * @param {Object} [options]
    * @param {boolean} [options.ignoreExpiry=false]
@@ -890,10 +941,16 @@ export class PowerCache {
       now: providedNow,
     } = {}
   ) {
-    const node = this._map.get(key);
+    let node = this._map.get(key);
     if (!node) {
-      if (countMiss) this._misses++;
-      return null;
+      // S3-FIFO: check Small and Ghost queues.
+      if (this._policy === 's3fifo') {
+        node = this._smallMap.get(key) || this._ghostMap.get(key);
+      }
+      if (!node) {
+        if (countMiss) this._misses++;
+        return null;
+      }
     }
     // Only sample the clock when we need to check expiry to avoid unnecessary
     // system calls on non-expiry paths. `0` still means "do not check", and
@@ -1043,15 +1100,34 @@ export class PowerCache {
    */
   _append(node) {
     if (!this._tail) {
+      if (this._policy === 's3fifo') {
+        this._s3fifoAppendSmall(node);
+        return;
+      }
       this._head = this._tail = node;
       this._evictionCandidate = this._head;
       if (this._policy === 'slru') this._probationEnd = node;
+      if (this._policy === 'sieve') this._sieveHand = node;
       return;
     }
     if (this._policy === 'slru') {
       this._insertIntoProbation(node);
       return;
     }
+    if (this._policy === 'sieve') {
+      // SIEVE is FIFO: new entries go to the tail.
+      node.prev = this._tail;
+      node.next = null;
+      this._tail.next = node;
+      this._tail = node;
+      return;
+    }
+    if (this._policy === 's3fifo') {
+      // S3-FIFO: new entries go to Small queue.
+      this._s3fifoAppendSmall(node);
+      return;
+    }
+    // LRU: new entries go to the tail (MRU).
     node.prev = this._tail;
     node.next = null;
     this._tail.next = node;
@@ -1088,10 +1164,12 @@ export class PowerCache {
       this._tail = node;
     } else {
       const after = boundary.next;
-      node.prev = boundary;
-      node.next = after;
-      boundary.next = node;
-      after.prev = node;
+      if (after) {
+        node.prev = boundary;
+        node.next = after;
+        boundary.next = node;
+        after.prev = node;
+      }
     }
     this._probationEnd = node;
   }
@@ -1154,6 +1232,20 @@ export class PowerCache {
     if (n) n.prev = p;
     else this._tail = p;
     if (this._probationEnd === node) this._probationEnd = p;
+    // SIEVE: if the hand points at the removed node, advance it to the next
+    // live node (or head if we removed the tail).
+    if (this._policy === 'sieve' && this._sieveHand === node) {
+      this._sieveHand = node.next || this._head;
+    }
+    // S3-FIFO: remove from the appropriate queue's map/list.
+    if (this._policy === 's3fifo') {
+      if (node.queue === 'small') {
+        this._s3fifoRemoveFromSmall(node);
+      } else if (node.queue === 'ghost') {
+        this._s3fifoRemoveFromGhost(node);
+      }
+      // Main queue nodes are already removed from `this._map` by `_unlinkNode`.
+    }
     // Drop the window memo when a window node leaves the list. This is here, in
     // the one funnel every unlink passes through, rather than in `_unlinkNode`:
     // `_moveToTail` unlinks and re-appends through `_remove` directly, so
@@ -1169,6 +1261,81 @@ export class PowerCache {
       this._windowTail = null;
     }
     node.prev = node.next = null;
+  }
+
+  // --- S3-FIFO queue helpers ---------------------------------------------------
+  // S3-FIFO uses three static FIFO queues: Small (10%), Main (80%), Ghost (20%).
+  // Main reuses the existing linked list + `_map`. Small and Ghost have their own
+  // linked lists and maps.
+
+  /** @param {CacheNode} node */
+  _s3fifoAppendSmall(node) {
+    if (!this._smallTail) {
+      this._smallHead = this._smallTail = node;
+    } else {
+      this._smallTail.next = node;
+      node.prev = this._smallTail;
+      this._smallTail = node;
+    }
+    node.next = null;
+    node.queue = 'small';
+    this._smallMap.set(node.key, node);
+    this._smallSize += 1;
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoAppendMain(node) {
+    // Append directly to the Main linked list, bypassing `_append`'s policy
+    // routing which would otherwise send this back to Small.
+    if (!this._tail) {
+      this._head = this._tail = node;
+      this._evictionCandidate = this._head;
+    } else {
+      node.prev = this._tail;
+      node.next = null;
+      this._tail.next = node;
+      this._tail = node;
+    }
+    this._map.set(node.key, node);
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoAppendGhost(node) {
+    if (!this._ghostTail) {
+      this._ghostHead = this._ghostTail = node;
+    } else {
+      this._ghostTail.next = node;
+      node.prev = this._ghostTail;
+      this._ghostTail = node;
+    }
+    node.next = null;
+    node.queue = 'ghost';
+    this._ghostMap.set(node.key, node);
+    this._ghostSize += 1;
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoRemoveFromSmall(node) {
+    const p = node.prev,
+      n = node.next;
+    if (p) p.next = n;
+    else this._smallHead = n;
+    if (n) n.prev = p;
+    else this._smallTail = p;
+    this._smallMap.delete(node.key);
+    this._smallSize -= 1;
+  }
+
+  /** @param {CacheNode} node */
+  _s3fifoRemoveFromGhost(node) {
+    const p = node.prev,
+      n = node.next;
+    if (p) p.next = n;
+    else this._ghostHead = n;
+    if (n) n.prev = p;
+    else this._ghostTail = p;
+    this._ghostMap.delete(node.key);
+    this._ghostSize -= 1;
   }
 
   /**
@@ -1203,6 +1370,32 @@ export class PowerCache {
       if (this._tail) this._tail.next = node;
       this._tail = node;
       if (wasProbationEnd) this._probationEnd = prevProbation;
+      return;
+    }
+    if (this._policy === 'sieve') {
+      // SIEVE: hits do not move the node. Set the visited bit so the eviction
+      // hand gives it a second chance.
+      node.visited = true;
+      return;
+    }
+    if (this._policy === 's3fifo') {
+      // S3-FIFO: a hit in Small promotes to Main. A hit in Ghost admits to Main.
+      // A hit in Main is a no-op.
+      if (node.queue === 'small') {
+        this._s3fifoRemoveFromSmall(node);
+        node.queue = 'main';
+        node.prev = null;
+        node.next = null;
+        this._s3fifoAppendMain(node);
+        this._evictIfNeeded();
+      } else if (node.queue === 'ghost') {
+        this._s3fifoRemoveFromGhost(node);
+        node.queue = 'main';
+        node.prev = null;
+        node.next = null;
+        this._s3fifoAppendMain(node);
+        this._evictIfNeeded();
+      }
       return;
     }
     if (this._windowSize > 0) {
@@ -1470,7 +1663,11 @@ export class PowerCache {
       this._promoteFromWindow(challenger);
       return;
     }
-    if (this._sketch.estimate(challenger.key) > this._sketch.estimate(victim.key)) {
+    if (!victim) return;
+    /** @type {CacheNode} */
+    const v = victim;
+    const victimKey = v.key;
+    if (this._sketch.estimate(challenger.key) > this._sketch.estimate(victimKey)) {
       this._evictNode(victim);
       this._promoteFromWindow(challenger);
     } else {
@@ -1489,6 +1686,14 @@ export class PowerCache {
    * @returns {void}
    */
   _evictIfNeeded() {
+    if (this._policy === 'sieve') {
+      this._sieveEvict();
+      return;
+    }
+    if (this._policy === 's3fifo') {
+      this._s3fifoEvict();
+      return;
+    }
     // Use the eviction candidate pointer to avoid repeatedly reading `head` in
     // large eviction sweeps. Keep the candidate in sync with head mutations.
     while (this._map.size > this.maxEntries || this._currentWeight > this.maxWeight) {
@@ -1505,6 +1710,85 @@ export class PowerCache {
         this._notifyError(err, 'PowerCache onEvict callback threw');
       }
       this._freeNode(node);
+    }
+    // Ensure eviction candidate remains aligned with current head after evictions
+    if (!this._evictionCandidate) this._evictionCandidate = this._head;
+  }
+
+  /** SIEVE eviction: scan from tail, clear visited bits, evict first unvisited. */
+  _sieveEvict() {
+    while (this._map.size > this.maxEntries || this._currentWeight > this.maxWeight) {
+      if (!this._sieveHand) {
+        this._sieveHand = this._head;
+        if (!this._sieveHand) break;
+      }
+      const node = this._sieveHand;
+      // Advance hand before freeing so we don't point at a removed node.
+      this._sieveHand = node.next || this._tail;
+      if (node.visited) {
+        // Second chance: clear the bit and keep.
+        node.visited = false;
+        continue;
+      }
+      const k = node.key;
+      const v = node.value;
+      this._abortInflight(k, 'evicted');
+      this._unlinkNode(node, { advanceEvictionCandidate: false });
+      this._evictions++;
+      try {
+        if (this.onEvict) this.onEvict(k, v, 'evicted');
+      } catch (err) {
+        this._notifyError(err, 'PowerCache onEvict callback threw');
+      }
+      this._freeNode(node);
+    }
+  }
+
+  /** S3-FIFO eviction: enforce Small, Main, and Ghost queue limits. */
+  _s3fifoEvict() {
+    // Evict from Small if over capacity.
+    while (this._smallSize > this._smallMaxSize) {
+      const node = this._smallHead;
+      if (!node) break;
+      // Move to Ghost if there is room, otherwise drop.
+      if (this._ghostSize < this._ghostMaxSize) {
+        this._s3fifoRemoveFromSmall(node);
+        this._s3fifoAppendGhost(node);
+      } else {
+        this._s3fifoRemoveFromSmall(node);
+        this._evictions++;
+        const k = node.key;
+        const v = node.value;
+        this._abortInflight(k, 'evicted');
+        try {
+          if (this.onEvict) this.onEvict(k, v, 'evicted');
+        } catch (err) {
+          this._notifyError(err, 'PowerCache onEvict callback threw');
+        }
+        this._freeNode(node);
+      }
+    }
+    // Evict from Main if over capacity.
+    while (this._map.size >= this.maxEntries || this._currentWeight > this.maxWeight) {
+      const node = this._evictionCandidate || this._head;
+      if (!node) break;
+      // Move to Ghost if there is room, otherwise drop.
+      if (this._ghostSize < this._ghostMaxSize) {
+        this._unlinkNode(node, { advanceEvictionCandidate: true });
+        this._s3fifoAppendGhost(node);
+      } else {
+        const k = node.key;
+        const v = node.value;
+        this._abortInflight(k, 'evicted');
+        this._unlinkNode(node, { advanceEvictionCandidate: true });
+        this._evictions++;
+        try {
+          if (this.onEvict) this.onEvict(k, v, 'evicted');
+        } catch (err) {
+          this._notifyError(err, 'PowerCache onEvict callback threw');
+        }
+        this._freeNode(node);
+      }
     }
     // Ensure eviction candidate remains aligned with current head after evictions
     if (!this._evictionCandidate) this._evictionCandidate = this._head;
@@ -1697,7 +1981,9 @@ export class PowerCache {
       }
     }
     const node = this._allocNode(key, value, w, expiresAt);
-    this._map.set(key, node);
+    if (this._policy !== 's3fifo') {
+      this._map.set(key, node);
+    }
     this._append(node);
     this._currentWeight += node.weight || 0;
     return true;
@@ -1712,7 +1998,7 @@ export class PowerCache {
    * @param {*} value - Value to store
    * @param {Object} [options]
    * @param {number} [options.ttl] - Time-to-live in ms. Use `null` or `Infinity` to disable expiration.
-   * @param {number} [options.weight] - Optional explicit weight for the entry. If omitted, `weightFn` is used.
+   * @param {number|null} [options.weight] - Optional explicit weight for the entry. If omitted, `weightFn` is used.
    * @returns {this|false} `this` on success, or `false` when insertion was rejected due to oversize.
    */
   set(key, value, { ttl = this.defaultTTL, weight = null } = {}) {
@@ -1737,7 +2023,11 @@ export class PowerCache {
     // min/max spread BENCH-001 measures on this machine. It is taken because it is
     // strictly less work with identical semantics and a counter can prove it, not
     // because it makes `set` faster by a number anyone could observe.
-    const existing = this._map.get(key);
+    let existing = this._map.get(key);
+    if (existing === undefined && this._policy === 's3fifo') {
+      // S3-FIFO: check Small and Ghost queues for existing entries.
+      existing = this._smallMap.get(key) || this._ghostMap.get(key);
+    }
     if (existing !== undefined) {
       this._updateExisting(existing, value, w, expiresAt);
     } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
@@ -2089,9 +2379,13 @@ export class PowerCache {
 
     // Wrap with a timeout race when requested
     let timed = p;
-    if (Number.isFinite(effectiveTimeout) && effectiveTimeout > 0) {
-      /** @type {ReturnType<typeof setTimeout>|null} */
-      let timer = null;
+    const hasTimeout =
+      typeof effectiveTimeout === 'number' &&
+      Number.isFinite(effectiveTimeout) &&
+      effectiveTimeout > 0;
+    if (hasTimeout) {
+      /** @type {ReturnType<typeof setTimeout>|undefined} */
+      let timer;
       timed = new Promise((resolve, reject) => {
         timer = setTimeout(() => {
           try {
@@ -2103,7 +2397,7 @@ export class PowerCache {
         p.then(
           (v) => {
             try {
-              clearTimeout(timer);
+              if (timer) clearTimeout(timer);
             } catch (e) {
               this._notifyError(e, 'PowerCache: clearTimeout threw');
             }
@@ -2111,7 +2405,7 @@ export class PowerCache {
           },
           (err) => {
             try {
-              clearTimeout(timer);
+              if (timer) clearTimeout(timer);
             } catch (e) {
               this._notifyError(e, 'PowerCache: clearTimeout threw');
             }
@@ -2236,7 +2530,10 @@ export class PowerCache {
    */
   delete(key) {
     this._abortInflight(key, 'deleted');
-    const node = this._map.get(key);
+    let node = this._map.get(key);
+    if (!node && this._policy === 's3fifo') {
+      node = this._smallMap.get(key) || this._ghostMap.get(key);
+    }
     if (!node) return false;
     this._unlinkNode(node);
     try {
@@ -2377,6 +2674,13 @@ export class PowerCache {
     }
     this._head = this._tail = null;
     this._map.clear();
+    this._smallMap?.clear();
+    this._ghostMap?.clear();
+    this._smallSize = 0;
+    this._ghostSize = 0;
+    this._smallHead = this._smallTail = null;
+    this._ghostHead = this._ghostTail = null;
+    this._sieveHand = null;
     // The frequency history goes with the entries. Carrying it across a clear
     // would let the next admission decisions be made from a workload that no
     // longer exists.
@@ -2583,16 +2887,25 @@ export class PowerCache {
     if (this._cleanupTimer == null) return; // stopped
     if (this._cleanupRunning) {
       // schedule next run
-      this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+      if (this._cleanupParams) {
+        this._cleanupTimer = setSafeTimeout(
+          () => this._cleanupTick(),
+          this._cleanupParams.interval
+        );
+      }
       return;
     }
     this._cleanupRunning = true;
     try {
-      this.cleanupExpiredUpTo(this._cleanupParams.maxCleanupPerTick);
+      if (this._cleanupParams) {
+        this.cleanupExpiredUpTo(this._cleanupParams.maxCleanupPerTick);
+      }
     } finally {
       this._cleanupRunning = false;
     }
-    this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+    if (this._cleanupParams) {
+      this._cleanupTimer = setSafeTimeout(() => this._cleanupTick(), this._cleanupParams.interval);
+    }
   }
 
   /**
@@ -2600,6 +2913,9 @@ export class PowerCache {
    * @returns {number}
    */
   get size() {
+    if (this._policy === 's3fifo') {
+      return this._map.size + this._smallSize + this._ghostSize;
+    }
     return this._map.size;
   }
 
@@ -2701,7 +3017,7 @@ export class PowerCache {
     // observable behaviour — see the note on `_unlinkNode` and `review.md`'s
     // CACHE-001, which records this whole area as unreproducible. The reset runs
     // after `_evictIfNeeded()` because that is where the head can change.
-    this._evictionCandidate = this.head;
+    this._evictionCandidate = this._head;
   }
 
   /**
@@ -3215,7 +3531,10 @@ export class PowerMemoizer {
         // Provide a simple convenience method to invoke the memoized wrapper
         // directly on the instance for callers that previously relied on
         // constructor-returned functions.
-        this.run = (...args) => this._fnWrapper(...args);
+        /** @param {...any} args */
+        this.run = (...args) => {
+          if (typeof this._fnWrapper === 'function') return this._fnWrapper(...args);
+        };
       } catch (err) {
         // Ignore failures to create the wrapper; callers can still call
         // `memoize(fn)` explicitly.
@@ -3302,6 +3621,7 @@ export class PowerMemoizer {
     // receiver and the wrapper falls back to the argument-only key space.
     /**
      * @this {object|null}
+     * @this {object|null}
      * @param {...any} args
      */
     return function memoized(...args) {
@@ -3379,7 +3699,9 @@ export class PowerMemoizer {
         Object.prototype.hasOwnProperty.call(options, 'weight'))
         ? options
         : this._defaultMemoizeOptions;
-    const memoizedFn = this._memoize(fn, useOptions);
+    const memoizedFn = /** @type {import('./jsdoc-types.js').MemoizedFunction<F>} */ (
+      this._memoize(fn, useOptions)
+    );
     // Ordinary functions, not arrows, so the receiver survives. See
     // `_scopedKey` for what that receiver means and why the plain call
     // `memo.get(10)` still resolves the unscoped key.
@@ -3401,6 +3723,7 @@ export class PowerMemoizer {
     // `PowerMemoizer.prototype` chains to `Object.prototype`, so the mutation
     // removes `Function.prototype` from the chain and the returned function
     // loses `.call`/`.apply`/`.bind`. Use the own-properties above instead.
+    /** @type {import('./jsdoc-types.js').MemoizedFunction<F>} */
     return memoizedFn;
   }
 
@@ -3661,15 +3984,15 @@ export class PowerTimedCache {
   }
   /**
    * @param {any} key
-   * @param {{allowStale?: boolean, staleTtl?: number}} [options] `allowStale`
-   *   returns an expired entry and refreshes in the background, bounded by
-   *   `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
-   *   serves a value of any age.
+   * @param {{ignoreExpiry?: boolean}} [options]
    * @returns {boolean}
    */
   has(key, options = {}) {
     return this.cache.has(key, options);
   }
+  /**
+   * @param {any} key
+   */
   delete(key) {
     return this.cache.delete(key);
   }
@@ -3997,6 +4320,7 @@ function encodeArg(v, seen) {
  *
  * Example: `new PowerMemoizer(fn, { keyResolver: simpleArgsKey })`
  *
+ * @param {...any} args
  * @public
  */
 export function simpleArgsKey(...args) {

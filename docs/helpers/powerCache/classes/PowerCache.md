@@ -86,7 +86,7 @@ When a non-object is provided as the options argument.
 
 ### \_evictionCandidate
 
-> **\_evictionCandidate**: `any`
+> **\_evictionCandidate**: `CacheNode` \| `null`
 
 ***
 
@@ -99,6 +99,39 @@ When a non-object is provided as the options argument.
 ### \_expirations
 
 > **\_expirations**: `number`
+
+***
+
+### \_ghostHead
+
+> **\_ghostHead**: `CacheNode` \| `null`
+
+S3-FIFO Ghost queue head/tail/size. Metadata-only FIFO of recently evicted
+keys, used to fast-track re-admission directly to Main.
+
+***
+
+### \_ghostMap
+
+> **\_ghostMap**: `Map`\<`string`, `CacheNode`\>
+
+***
+
+### \_ghostMaxSize
+
+> **\_ghostMaxSize**: `number`
+
+***
+
+### \_ghostSize
+
+> **\_ghostSize**: `number`
+
+***
+
+### \_ghostTail
+
+> **\_ghostTail**: `CacheNode` \| `null`
 
 ***
 
@@ -185,6 +218,8 @@ resistant to a one-off sequential scan evicting the working set.
 visited bit per entry and a scanning hand pointer. On eviction, the hand
 scans toward the head; visited entries get their bit cleared (second
 chance), unvisited entries are evicted.
+`'s3fifo'` uses the S3-FIFO algorithm (SOSP '23): three static FIFO queues
+(Small, Main, Ghost) for workload-oblivious high hit ratios.
 
 ***
 
@@ -241,6 +276,39 @@ promotes a node to the tail. `null` when the list is empty.
 
 SIEVE eviction hand pointer. Scans from tail toward head during eviction.
 Visited entries get a second chance (bit cleared), unvisited are evicted.
+
+***
+
+### \_smallHead
+
+> **\_smallHead**: `CacheNode` \| `null`
+
+S3-FIFO Small queue head/tail/size. Holds the newest entries as a filter
+for one-hit wonders. Promoted to Main when Main has room.
+
+***
+
+### \_smallMap
+
+> **\_smallMap**: `Map`\<`string`, `CacheNode`\>
+
+***
+
+### \_smallMaxSize
+
+> **\_smallMaxSize**: `number`
+
+***
+
+### \_smallSize
+
+> **\_smallSize**: `number`
+
+***
+
+### \_smallTail
+
+> **\_smallTail**: `CacheNode` \| `null`
 
 ***
 
@@ -410,7 +478,7 @@ Current number of entries in cache.
 
 ### \_fetchValidNode()
 
-> `protected` **\_fetchValidNode**(`key`, `options?`): `CacheNode` \| `null`
+> **\_fetchValidNode**(`key`, `options?`): `CacheNode` \| `null`
 
 Fetch a node and validate expiry.
 
@@ -453,6 +521,110 @@ A clock reading the caller has already taken.
 #### Returns
 
 `CacheNode` \| `null`
+
+***
+
+### \_s3fifoAppendGhost()
+
+> **\_s3fifoAppendGhost**(`node`): `void`
+
+#### Parameters
+
+##### node
+
+`CacheNode`
+
+#### Returns
+
+`void`
+
+***
+
+### \_s3fifoAppendMain()
+
+> **\_s3fifoAppendMain**(`node`): `void`
+
+#### Parameters
+
+##### node
+
+`CacheNode`
+
+#### Returns
+
+`void`
+
+***
+
+### \_s3fifoAppendSmall()
+
+> **\_s3fifoAppendSmall**(`node`): `void`
+
+#### Parameters
+
+##### node
+
+`CacheNode`
+
+#### Returns
+
+`void`
+
+***
+
+### \_s3fifoEvict()
+
+> **\_s3fifoEvict**(): `void`
+
+S3-FIFO eviction: enforce Small, Main, and Ghost queue limits.
+
+#### Returns
+
+`void`
+
+***
+
+### \_s3fifoRemoveFromGhost()
+
+> **\_s3fifoRemoveFromGhost**(`node`): `void`
+
+#### Parameters
+
+##### node
+
+`CacheNode`
+
+#### Returns
+
+`void`
+
+***
+
+### \_s3fifoRemoveFromSmall()
+
+> **\_s3fifoRemoveFromSmall**(`node`): `void`
+
+#### Parameters
+
+##### node
+
+`CacheNode`
+
+#### Returns
+
+`void`
+
+***
+
+### \_sieveEvict()
+
+> **\_sieveEvict**(): `void`
+
+SIEVE eviction: scan from tail, clear visited bits, evict first unvisited.
+
+#### Returns
+
+`void`
 
 ***
 
@@ -1111,7 +1283,7 @@ Time-to-live in ms. Use `null` or `Infinity` to disable expiration.
 
 ###### weight?
 
-`number` = `null`
+`number` \| `null` = `null`
 
 Optional explicit weight for the entry. If omitted, `weightFn` is used.
 

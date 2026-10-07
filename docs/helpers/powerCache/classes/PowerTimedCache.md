@@ -370,18 +370,9 @@ method is written out per class.
 
 ##### options?
 
-`allowStale`
-  returns an expired entry and refreshes in the background, bounded by
-  `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
-  serves a value of any age.
-
-###### allowStale?
+###### ignoreExpiry?
 
 `boolean`
-
-###### staleTtl?
-
-`number`
 
 #### Returns
 

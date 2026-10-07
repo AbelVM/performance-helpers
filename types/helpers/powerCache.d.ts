@@ -11,6 +11,7 @@
  *
  * Example: `new PowerMemoizer(fn, { keyResolver: simpleArgsKey })`
  *
+ * @param {...any} args
  * @public
  */
 export function simpleArgsKey(...args: any[]): string;
@@ -88,6 +89,24 @@ export class PowerCache {
      * @type {CacheNode|null}
      */
     /**
+     * S3-FIFO Small queue head/tail/size. Holds the newest entries as a filter
+     * for one-hit wonders. Promoted to Main when Main has room.
+     * @type {CacheNode|null}
+     */
+    /** @type {CacheNode|null} */
+    /** @type {number} */
+    /**
+     * S3-FIFO Ghost queue head/tail/size. Metadata-only FIFO of recently evicted
+     * keys, used to fast-track re-admission directly to Main.
+     * @type {CacheNode|null}
+     */
+    /** @type {CacheNode|null} */
+    /** @type {number} */
+    /** @type {number} Max entries in the Small queue. */
+    /** @type {number} Max entries in the Ghost queue. */
+    /** @type {Map<string, CacheNode>} Key -> ghost node for O(1) lookup. */
+    /** @type {Map<string, CacheNode>} Small queue entries for S3-FIFO. */
+    /**
      * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
      * behaviour. `'slru'` splits the list into a probation segment and a
      * protected segment and promotes on access, which makes the cache far more
@@ -96,6 +115,8 @@ export class PowerCache {
      * visited bit per entry and a scanning hand pointer. On eviction, the hand
      * scans toward the head; visited entries get their bit cleared (second
      * chance), unvisited entries are evicted.
+     * `'s3fifo'` uses the S3-FIFO algorithm (SOSP '23): three static FIFO queues
+     * (Small, Main, Ghost) for workload-oblivious high hit ratios.
      */
     /**
      * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
@@ -204,7 +225,7 @@ export class PowerCache {
      */
     /**
      * Fetch a node and validate expiry.
-     * @protected
+     * @public
      * @param {*} key
      * @param {Object} [options]
      * @param {boolean} [options.ignoreExpiry=false]
@@ -221,7 +242,7 @@ export class PowerCache {
      *   the callers that have no reading to pass are unaffected.
      * @returns {CacheNode|null}
      */
-    protected _fetchValidNode(key: any, { ignoreExpiry, countMiss, allowExpired, now: providedNow, }?: {
+    public _fetchValidNode(key: any, { ignoreExpiry, countMiss, allowExpired, now: providedNow, }?: {
         ignoreExpiry?: boolean;
         countMiss?: boolean;
         allowExpired?: boolean;
@@ -336,6 +357,16 @@ export class PowerCache {
      * @param {CacheNode} node - Node to unlink from the list.
      * @returns {void}
      */
+    /** @param {CacheNode} node */
+    _s3fifoAppendSmall(node: CacheNode): void;
+    /** @param {CacheNode} node */
+    _s3fifoAppendMain(node: CacheNode): void;
+    /** @param {CacheNode} node */
+    _s3fifoAppendGhost(node: CacheNode): void;
+    /** @param {CacheNode} node */
+    _s3fifoRemoveFromSmall(node: CacheNode): void;
+    /** @param {CacheNode} node */
+    _s3fifoRemoveFromGhost(node: CacheNode): void;
     /**
      * Move an existing node to the tail (mark as most-recently used).
      * Implemented as an unlink followed by an append. No-op when node is
@@ -508,6 +539,10 @@ export class PowerCache {
      * @private
      * @returns {void}
      */
+    /** SIEVE eviction: scan from tail, clear visited bits, evict first unvisited. */
+    _sieveEvict(): void;
+    /** S3-FIFO eviction: enforce Small, Main, and Ghost queue limits. */
+    _s3fifoEvict(): void;
     /**
      * Normalise a caller-supplied TTL into the `expiresAt` this entry stores.
      *
@@ -577,12 +612,12 @@ export class PowerCache {
      * @param {*} value - Value to store
      * @param {Object} [options]
      * @param {number} [options.ttl] - Time-to-live in ms. Use `null` or `Infinity` to disable expiration.
-     * @param {number} [options.weight] - Optional explicit weight for the entry. If omitted, `weightFn` is used.
+     * @param {number|null} [options.weight] - Optional explicit weight for the entry. If omitted, `weightFn` is used.
      * @returns {this|false} `this` on success, or `false` when insertion was rejected due to oversize.
      */
     set(key: any, value: any, { ttl, weight }?: {
         ttl?: number | undefined;
-        weight?: number | undefined;
+        weight?: number | null | undefined;
     }): this | false;
     /**
      * Overwrite an entry that is already in the cache.
@@ -1240,16 +1275,15 @@ export class PowerTimedCache {
     }): false | PowerTimedCache;
     /**
      * @param {any} key
-     * @param {{allowStale?: boolean, staleTtl?: number}} [options] `allowStale`
-     *   returns an expired entry and refreshes in the background, bounded by
-     *   `staleTtl` — see the `PowerCache` guide, because an unbounded stale window
-     *   serves a value of any age.
+     * @param {{ignoreExpiry?: boolean}} [options]
      * @returns {boolean}
      */
     has(key: any, options?: {
-        allowStale?: boolean;
-        staleTtl?: number;
+        ignoreExpiry?: boolean;
     }): boolean;
+    /**
+     * @param {any} key
+     */
     delete(key: any): boolean;
     clear(): void;
     stats(): {
