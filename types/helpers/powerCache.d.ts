@@ -88,24 +88,6 @@ export class PowerCache {
      * @type {CacheNode|null}
      */
     /**
-     * S3-FIFO Small queue head/tail/size. Holds the newest entries as a filter
-     * for one-hit wonders. Promoted to Main when Main has room.
-     * @type {CacheNode|null}
-     */
-    /** @type {CacheNode|null} */
-    /** @type {number} */
-    /**
-     * S3-FIFO Ghost queue head/tail/size. Metadata-only FIFO of recently evicted
-     * keys, used to fast-track re-admission directly to Main.
-     * @type {CacheNode|null}
-     */
-    /** @type {CacheNode|null} */
-    /** @type {number} */
-    /** @type {number} Max entries in the Small queue. */
-    /** @type {number} Max entries in the Ghost queue. */
-    /** @type {Map<string, CacheNode>} Key -> ghost node for O(1) lookup. */
-    /** @type {Map<string, CacheNode>} Small queue entries for S3-FIFO. */
-    /**
      * Eviction policy. `'lru'` (default) keeps the previous single-recency-list
      * behaviour. `'slru'` splits the list into a probation segment and a
      * protected segment and promotes on access, which makes the cache far more
@@ -114,8 +96,6 @@ export class PowerCache {
      * visited bit per entry and a scanning hand pointer. On eviction, the hand
      * scans toward the head; visited entries get their bit cleared (second
      * chance), unvisited entries are evicted.
-     * `'s3fifo'` uses the S3-FIFO algorithm (SOSP '23): three static FIFO queues
-     * (Small, Main, Ghost) for workload-oblivious high hit ratios.
      */
     /**
      * Frequency sketch backing `{ admission: 'tinylfu' }`, or `null` when
@@ -356,18 +336,6 @@ export class PowerCache {
      * @param {CacheNode} node - Node to unlink from the list.
      * @returns {void}
      */
-    /** @param {CacheNode} node */
-    _s3fifoAppendSmall(node: CacheNode): void;
-    /** @param {CacheNode} node */
-    _s3fifoAppendMain(node: CacheNode): void;
-    /** @param {CacheNode} node */
-    _s3fifoAppendGhost(node: CacheNode): void;
-    /** @param {CacheNode} node */
-    _s3fifoRemoveFromSmall(node: CacheNode): void;
-    /** @param {CacheNode} node */
-    _s3fifoRemoveFromGhost(node: CacheNode): void;
-    _s3fifoEvictSmall(): void;
-    _s3fifoEvictMain(): void;
     /**
      * Move an existing node to the tail (mark as most-recently used).
      * Implemented as an unlink followed by an append. No-op when node is
