@@ -2,8 +2,9 @@
 
 - [PowerAdaptiveProposal: Bounded adaptation controller](../guides/powerAdaptiveProposal.md). Turn feedback into bounded, explainable proposals with hysteresis, cooldown, and rollback.
 - [PowerBrownout: Optional-work shedding](../guides/powerBrownout.md). Shed caller-declared optional work when normalized resource pressure crosses a threshold.
-- [PowerOperationContext: Explicit operation coordination](../guides/powerOperationContext.md). Pass deadlines, cancellation, retry budgets, correlation ids, and priority explicitly.
+- [createOperationContext: Explicit operation coordination](../guides/powerOperationContext.md). Pass deadlines, cancellation, retry budgets, correlation ids, and priority explicitly.
 - [PowerPool: Worker pool](../guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling scales the worker count from a latency-threshold heuristic; `autoScale.policy` (`'aimd' | 'vegas' | 'gradient2'`) enforces an adaptive concurrency limit, queueing excess work when `taskQueue` is enabled. `maxQueueLength` bounds the task queue so a saturated pool refuses overflow instead of growing until OOM, and `drain({ signal, timeout })` bounds the wait without stopping the work.
+- [Autoscaling](../guides/autoscale.md). Tune `PowerPool` worker growth, adaptive concurrency policies, cooldowns, and scale outcomes.
 - [WorkerAgnostic: One worker abstraction for Node, browser and web worker](../guides/WorkerAgnostic.md). Resolves the environment and returns a worker-like object either way, from a factory function or a path/code string. Handles the pure-ESM `node:worker_threads` caveat. Used directly by `PowerPool` and `PowerChunker`.
 - [PowerChunker: Chunk + pool helper](../guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerBulkhead: Partitioned executor](../guides/powerBulkhead.md). Isolate noisy workloads into separate lanes so one hot partition cannot starve the rest.

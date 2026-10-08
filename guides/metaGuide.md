@@ -39,7 +39,7 @@ admission over time. They are not interchangeable.
 - Add composition helpers only when the system boundary demands them.
 - Reach for low-level primitives like `PowerPermitGate`, `PowerScheduler`, and `PowerSubscriberSet` only when higher-level helpers stop fitting.
 - Propagating a W3C `traceparent` through a `PowerPool`? [Trace context](traceContext.md) — and note it needs nothing from the library; the pool already round-trips a field you choose.
-- Collecting numbers from several helpers for one dashboard? [Metrics](metrics.md) gives them stable, versioned names; each helper's own `stats()` is a different _shape_.
+  Collecting numbers from several helpers for one dashboard? [Metrics](metrics.md) gives them stable, versioned names; each helper's own `stats()` is a different _shape_. For the method naming convention, see [Stats naming](stats-naming.md).
 - If you would rather see a working call than read about one, `npm run example <name>` runs a short script per family — see [`examples/`](../examples/README.md). They are executed by the test suite, so they cannot drift from the API.
 
 ---
@@ -61,8 +61,8 @@ admission over time. They are not interchangeable.
 | Handle an accepted socket without knowing which library produced it    | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
 | Push to a WebRTC peer without tripping over the channel's string state | `PowerRTCChannel`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | `dc.readyState === READY_STATE.OPEN`, which is always false             |
 | Push datagrams to a transport without silent loss                      | `PowerDatagramChannel`                             | `PowerMessageCodec`                                        | hand-rolled `send()` with no size check                                 |
-| Push to SSE clients without unbounded server-side buffering            | `PowerSseAdapter`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `Response.body.pipeTo()` without back-pressure                      |
-| Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `PowerWebTransportAdapter`                                 | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
+| Push to SSE clients without unbounded server-side buffering            | `createSseAdapter`                                 | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `Response.body.pipeTo()` without back-pressure                      |
+| Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `createWebTransportAdapter`                                | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
 | Process a very large iterable in parallel                              | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
 | Smooth bursts from producers                                           | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                                  |
 | Limit concurrent async work globally                                   | `PowerSemaphore`                                   | `PowerBulkhead`, `PowerHistogram`                          | `PowerPermitGate` unless you need a building block                      |
@@ -109,6 +109,8 @@ Rule of thumb:
 ### Parallel work and throughput
 
 Use `PowerPool` when you need explicit worker orchestration: request/response, batching, autoscaling, or direct control over dispatch.
+
+For worker-pool tuning, see the [autoscaling guide](autoscale.md).
 
 Use `PowerChunker` when the input is already an iterable and you mainly want a fast path to chunked processing without building pool plumbing yourself.
 
@@ -204,6 +206,49 @@ by the caller.
 Helpers that own workers, transports, timers, or listener registries should be
 disposed during application teardown. A state reset is not timer cancellation,
 and an adapter must not terminate a resource that its caller owns.
+
+### Using helpers in React, Vue, and Angular
+
+Performance helpers are framework-neutral. Keep them at the application or
+feature lifetime that owns them, then expose only the state a component needs.
+
+| Framework | Good integration boundary                       | Reactive state bridge                             |
+| --------- | ----------------------------------------------- | ------------------------------------------------- |
+| React     | A module, provider, or `useRef`-stable instance | `PowerObserver` with `useSyncExternalStore`       |
+| Vue       | A composable or an effect scope                 | `PowerObserver` subscription and `onScopeDispose` |
+| Angular   | An injectable service                           | `PowerObserver` subscription and `DestroyRef`     |
+
+The [PowerObserver guide](powerObserver.md#framework-neutral-integration)
+contains copyable adapters for all three frameworks. The [framework
+examples](../examples/frameworks/) include request-cache recipes and testing
+patterns for React, Vue, and Angular. For caches, queues, limiters, and worker
+pools, the same lifecycle rules apply:
+
+- Do not construct a helper during React render or on every Vue computed run.
+- Create shared helpers once at the provider, composable, service, or feature
+  boundary that owns them.
+- Dispose or close owned helpers when that boundary is destroyed. Unsubscribe
+  from shared helpers without disposing the shared owner.
+- Keep high-volume helper state outside component state unless the UI needs a
+  deliberately sampled or observed value. Use `PowerObserver` for that bridge.
+- In SSR, avoid constructing browser-only workers or transports on the server;
+  create them from a client-only lifecycle hook or capability-checked factory.
+- Prefer the package root import for normal bundler use. Use a deep helper path
+  when the application intentionally wants one helper and its ESM entry point.
+
+Typical UI-facing choices are:
+
+- `PowerCache` for bounded client data or request-result caching.
+- `PowerPool` for CPU-heavy work that would otherwise block the main thread;
+  create it lazily and shut it down with the feature that owns it.
+- `PowerSemaphore`, `PowerBulkhead`, or `PowerRateLimit` for bounding work
+  triggered by user actions, effects, or route changes.
+- `PowerObserver` for the small, explicit state surface that components render.
+
+Framework integration is an ownership problem, not a reason to wrap every
+helper in a framework-specific abstraction. Start with the helper's dedicated
+guide, then add a thin adapter only where the framework needs lifecycle or
+reactive-state integration.
 
 ### Runtime capability matrix
 
@@ -710,7 +755,7 @@ data channel, and the other two sit between them.
 > `PowerWebTransportClient`
 >
 > **Server-side** (wraps an existing transport): `PowerSocketAdapter`,
-> `PowerWebTransportAdapter`, `PowerRTCChannel`, `PowerSseAdapter`,
+> `createWebTransportAdapter`, `PowerRTCChannel`, `createSseAdapter`,
 > `PowerDatagramChannel`
 
 - `PowerMessageCodec`: `encodeMessage` / `decodeMessage` for a `[version][codec][length][payload]`
@@ -775,11 +820,11 @@ data channel, and the other two sit between them.
   is **not** a hub `send` adapter: `retain` and datagrams contradict each other. Use it directly
   for bounded, counted datagram delivery, or wrap it in your own adapter that knows how to frame
   and retain.
-- `PowerSseAdapter`: the **unidirectional** transport for the hub. SSE is HTTP/1.1-native, works
+- `createSseAdapter`: the **unidirectional** transport for the hub. SSE is HTTP/1.1-native, works
   through every proxy and CDN, and needs no handshake beyond the initial GET. Each frame is written
   as one base64-encoded `data:` line, so binary payloads survive the event-stream format. Use it
   when the client is an `EventSource` and you do not need WebSocket's bidirectional path.
-- `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing any `WebTransport` branch, and note it is detection only. The transport adapter is [`PowerWebTransportAdapter`](powerWebTransportAdapter.md) — wrap a `WebTransport` session's `createBidirectionalStream()` in the `kind: 'stream'` socket shape `PowerSocketAdapter` expects. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
+- `detectWebTransportSupport()` (`guides/webTransportSupport.md`): reach for this **before** writing any `WebTransport` branch, and note it is detection only. The transport adapter factory is [`createWebTransportAdapter`](powerWebTransportAdapter.md) — wrap a `WebTransport` session's `createBidirectionalStream()` in the `kind: 'stream'` socket shape `PowerSocketAdapter` expects. Branch on `reliableOnly`, not on the individual fields: three of the surfaces it
   reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so a build can
   expose one and still throw from it. Every non-Baseline surface defaults to `false` rather than
   optimistic `true`, and the probe opens no connection — so the instance-level answers

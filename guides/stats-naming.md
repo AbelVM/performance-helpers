@@ -2,11 +2,10 @@
 
 ## The two spellings
 
-Every helper that reports anything does it through a method called `stats()`.
-`PowerPool` is the exception: it has always spelled its reporting method
-`getStats()` and never had a `stats()`. To smooth over that inconsistency the
-other helpers also expose `getStats()` as an alias that delegates to `stats()`.
-Both spellings work everywhere now.
+Helpers that report runtime state use a method called `stats()`. `PowerPool` is
+the exception: it has always spelled its reporting method `getStats()` and
+never had a `stats()`. To smooth over that inconsistency, helpers that expose
+both methods provide `getStats()` as an alias that delegates to `stats()`.
 
 ```js
 cache.stats(); // canonical
@@ -41,21 +40,27 @@ two are mutually assignable, which is the property a consumer relies on.
 
 ## Helper coverage
 
-| Helper                  | Canonical | Alias             |
-| ----------------------- | --------- | ----------------- |
-| `PowerCache`            | `stats()` | `getStats()`      |
-| `PowerBulkhead`         | `stats()` | `getStats()`      |
-| `PowerEventLoopMonitor` | `stats()` | `getStats()`      |
-| `PowerGCRA`             | `stats()` | `getStats()`      |
-| `PowerMessagePort`      | `stats()` | `getStats()`      |
-| `PowerPool`             | —         | `getStats()` only |
-| `PowerRateLimit`        | `stats()` | `getStats()`      |
-| `PowerRealtimeHub`      | `stats()` | `getStats()`      |
-| `PowerRetryBudget`      | `stats()` | `getStats()`      |
-| `PowerRTCChannel`       | `stats()` | `getStats()`      |
-| `PowerSlidingWindow`    | `stats()` | `getStats()`      |
-| `PowerSocketAdapter`    | `stats()` | `getStats()`      |
-| `PowerThrottle`         | `stats()` | `getStats()`      |
-| `PowerWebSocketClient`  | `stats()` | `getStats()`      |
+| Helper                    | Canonical | Alias             |
+| ------------------------- | --------- | ----------------- |
+| `PowerAdaptiveProposal`   | `stats()` | `getStats()`      |
+| `PowerBackpressure`       | `stats()` | —                 |
+| `PowerBrownout`           | `stats()` | `getStats()`      |
+| `PowerCache`              | `stats()` | `getStats()`      |
+| `PowerCrossLock`          | `stats()` | —                 |
+| `PowerDatagramChannel`    | `stats()` | `getStats()`      |
+| `PowerBulkhead`           | `stats()` | `getStats()`      |
+| `PowerEventLoopMonitor`   | `stats()` | `getStats()`      |
+| `PowerGCRA`               | `stats()` | `getStats()`      |
+| `PowerMessagePort`        | `stats()` | `getStats()`      |
+| `PowerPool`               | —         | `getStats()` only |
+| `PowerRateLimit`          | `stats()` | `getStats()`      |
+| `PowerRealtimeHub`        | `stats()` | `getStats()`      |
+| `PowerRetryBudget`        | `stats()` | `getStats()`      |
+| `PowerRTCChannel`         | `stats()` | `getStats()`      |
+| `PowerSlidingWindow`      | `stats()` | `getStats()`      |
+| `PowerSocketAdapter`      | `stats()` | `getStats()`      |
+| `PowerThrottle`           | `stats()` | `getStats()`      |
+| `PowerWebSocketClient`    | `stats()` | `getStats()`      |
+| `PowerWebTransportClient` | `stats()` | `getStats()`      |
 
 `PowerTTLMap` and `PowerLogger` have no `stats()` and therefore no alias.

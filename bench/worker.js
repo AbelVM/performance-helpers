@@ -1,20 +1,5 @@
 import { parentPort } from 'worker_threads';
-import { TextDecoder } from 'util';
-
-const decoder = new TextDecoder();
-
-function decodeMessage(data) {
-  if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
-    const u8 = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
-    try {
-      const str = decoder.decode(u8);
-      return JSON.parse(str);
-    } catch (e) {
-      return u8;
-    }
-  }
-  return data;
-}
+import { decodeInbound } from '../src/helpers/powerMessageCodec.js';
 
 function heavy(iterations) {
   let s = 0;
@@ -25,7 +10,7 @@ function heavy(iterations) {
 parentPort.on('message', async (msg) => {
   // Use high-resolution timing to measure decode and compute durations
   const decodeStart = process.hrtime.bigint();
-  const data = decodeMessage(msg);
+  const data = decodeInbound(msg).value;
   const decodeDuration = Number(process.hrtime.bigint() - decodeStart) / 1e6;
   // (no-op) worker debug logging removed
   const id = data && (data.id ?? null);

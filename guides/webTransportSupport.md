@@ -90,7 +90,7 @@ The returned object is `Object.freeze`d. It is a plain data snapshot, not a live
 
 ## See also
 
-- [`PowerWebTransportAdapter`](powerWebTransportAdapter.md) — the `kind: 'stream'` socket adapter that wraps a `WebTransport` session's `createBidirectionalStream()` for `PowerRealtimeHub`.
+- [`createWebTransportAdapter`](powerWebTransportAdapter.md) — the `kind: 'stream'` socket adapter that wraps a `WebTransport` session's `createBidirectionalStream()` for `PowerRealtimeHub`.
 - [`PowerRealtimeHub`](powerRealtimeHub.md) — transport-agnostic fan-out; the adapter supplies its `send`.
 - [`PowerSocketAdapter`](powerSocketAdapter.md) and [`PowerWebSocketClient`](powerWebSocketClient.md) — the WebSocket path, which is what you fall back to when `available` is `false`.
 - [`troubleshooting.md`](troubleshooting.md) — for the `SharedArrayBuffer` and cross-origin-isolation questions that decide whether a `WebTransport` connection can be established at all.

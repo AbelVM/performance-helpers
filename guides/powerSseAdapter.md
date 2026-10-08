@@ -1,4 +1,4 @@
-# PowerSseAdapter
+# createSseAdapter
 
 > **Server-side helper** — bridges `PowerRealtimeHub` to an SSE `Response`
 > stream for unidirectional push to browser `EventSource` clients.

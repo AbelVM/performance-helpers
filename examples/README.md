@@ -26,6 +26,8 @@ numbers are.
 | Observability | `observability.mjs` | `PowerHistogram` quantiles and `PowerEventLoopMonitor`                 |
 | Real-time     | `realtime.mjs`      | `PowerRealtimeHub` fan-out with a slow-consumer policy                 |
 | Protocol      | `codec.mjs`         | `PowerMessageCodec` framing, and why the version byte exists           |
+| Frameworks    | `frameworks.mjs`    | Framework-neutral lifecycle boundary for React, Vue, and Angular       |
 
 The guides under [`guides/`](../guides/) cover the reference material; these
-exist so you can see a working call before reading the prose.
+exist so you can see a working call before reading the prose. The copyable
+framework snippets are in [`frameworks/`](frameworks/).

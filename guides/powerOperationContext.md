@@ -1,4 +1,4 @@
-# PowerOperationContext
+# createOperationContext
 
 `createOperationContext` creates a frozen plain object for passing operation coordination data explicitly between helpers.
 

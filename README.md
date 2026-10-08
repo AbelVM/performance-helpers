@@ -4,42 +4,43 @@
 
 ![logo](assets/logo.png)
 
-Small, dependency-free helpers for bounding work, moving data, and observing
-runtime pressure in Node.js and browser applications. Start with the
-[Quick Guide](guides/metaGuide.md) when you are choosing a primitive; use the
-dedicated guides below when you already know the boundary you need to control.
+Dependency-free building blocks for controlling work in Node.js and the browser.
+Cache data, limit concurrency, move messages, protect dependencies, and measure
+runtime pressure with small, composable helpers. The backbone of [nimbiCMS](https://abelvm.github.io/nimbiCMS) and a core part of [OMT Router](https://abelvm.github.io/omt-router/). Code at [AbelVM/performance-helpers](https://github.com/AbelVM/performance-helpers).
 
-The library is organized by the boundary you need to control: cached data,
-parallel work, rate and concurrency limits, realtime transports, and runtime
-observability.
+**Predictable primitives. Minimal overhead. No runtime dependencies.**
 
-The package root supports both ESM and CommonJS (`import` and `require`). Deep
-helper subpaths are ESM-only; use the root entry point when CommonJS is needed.
+Start with the [Quick Guide](guides/metaGuide.md) to choose a helper, or browse
+the categories below. The root package supports both ESM and CommonJS;
+ESM-only subpaths are available when you want smaller bundles.
 
-> ## ⚠️ Upgrading to 2.0 — the worker wire format changed
->
-> `PowerPool` now posts a versioned [`PowerMessageCodec`](guides/powerMessageCodec.md) frame
-> (`[version][codec][length][payload]`) instead of a bare `Uint8Array` of JSON. In 1.x every
-> worker had to hand-decode the bytes, the format had no version so it could never evolve, and a
-> genuinely binary message was silently corrupted by `JSON.parse`.
->
-> **One line changes in each worker:**
->
-> ```diff
-> -import { u82o } from 'performance-helpers';
-> +import { decodeMessage, encodeMessage } from 'performance-helpers';
-> -self.onmessage = (e) => handle(u82o(e.data));
-> -self.postMessage({ result });
-> +self.onmessage = (e) => handle(decodeMessage(e.data).value);
-> +self.postMessage(encodeMessage({ result }));
-> ```
->
-> Your worker must also **reply in the shape it received** — a worker talking to a pool still on
-> `messageCodec: 'legacy'` must reply with `o2u8`, not a frame. Full details, a
-> try-the-frame-and-fall-back recipe, and the `messageCodec: 'legacy'` escape hatch are in
-> [Migrating to the framed protocol](guides/powerPool.md#migrating-to-the-framed-protocol).
->
-> Nothing else in the public API breaks.
+## What’s new in v2.0
+
+v2.0 adds versioned worker messaging, realtime transports, retry budgets,
+adaptive concurrency, event-loop monitoring, richer observability, and safer
+resource lifecycles. Read the concise [what’s new guide](assets/whatsnew2.0.md).
+
+## Upgrade from v1.x
+
+`PowerPool` now posts a versioned [`PowerMessageCodec`](guides/powerMessageCodec.md) frame
+(`[version][codec][length][payload]`) instead of a bare `Uint8Array` of JSON.
+Update each worker to decode and return the same message shape:
+
+Browser worker example:
+
+```diff
+-import { u82o } from 'performance-helpers';
++import { decodeMessage, encodeMessage } from 'performance-helpers';
+-self.onmessage = (e) => handle(u82o(e.data));
+-self.postMessage({ result });
++self.onmessage = (e) => handle(decodeMessage(e.data).value);
++self.postMessage(encodeMessage({ result }));
+```
+
+Workers must reply in the shape they received. A worker serving a pool that
+still uses `messageCodec: 'legacy'` must return `o2u8`, not a frame. See
+[Migrating to the framed protocol](guides/powerPool.md#migrating-to-the-framed-protocol-breaking-change-in-20)
+for fallback guidance and the legacy compatibility option.
 
 ## Compatibility policy
 
@@ -66,8 +67,8 @@ helper subpaths are ESM-only; use the root entry point when CommonJS is needed.
 
 - [PowerAdaptiveProposal: Bounded adaptation controller](guides/powerAdaptiveProposal.md). Turn feedback into bounded, explainable proposals with hysteresis, cooldown, and rollback without applying hidden policy.
 - [PowerBrownout: Optional-work shedding](guides/powerBrownout.md). Shed caller-declared optional work when normalized resource pressure crosses a threshold.
-- [PowerOperationContext: Explicit operation coordination](guides/powerOperationContext.md). Pass deadlines, cancellation, retry budgets, correlation ids, and priority without hidden global state.
-- [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling scales the worker count from a latency-threshold heuristic; `autoScale.policy` (`'aimd' | 'vegas' | 'gradient2'`) also enforces an adaptive admission limit, queueing excess work when `taskQueue` is enabled.
+- [createOperationContext: Explicit operation coordination](guides/powerOperationContext.md). Pass deadlines, cancellation, retry budgets, correlation ids, and priority without hidden global state.
+- [PowerPool: Worker pool](guides/powerPool.md). A small, dependency-free worker pool that wraps underlying Worker instances. Autoscaling scales the worker count from a latency-threshold heuristic; `autoScale.policy` (`'aimd' | 'vegas' | 'gradient2'`) also enforces an adaptive admission limit, queueing excess work when `taskQueue` is enabled. See the [autoscaling guide](guides/autoscale.md) for tuning details.
 - [WorkerAgnostic: One worker abstraction for Node, browser and web worker](guides/WorkerAgnostic.md). Resolves the environment and returns a worker-like object either way, from a factory function or a path/code string. Handles the pure-ESM `node:worker_threads` caveat. Used directly by `PowerPool` and `PowerChunker`.
 - [PowerChunker: Chunk + pool helper](guides/powerChunking.md). Convenience helper to chunk iterables and process items via a `PowerPool`.
 - [PowerBulkhead: Partitioned executor](guides/powerBulkhead.md). Isolate noisy workloads into separate lanes so one hot partition cannot starve the rest.
@@ -126,8 +127,8 @@ The transport helpers split into two roles: **client-side** helpers dial out and
 - [PowerSocketAdapter: One interface over three socket models](guides/powerSocketAdapter.md). Normalise a Node `ws` socket, a browser `WebSocket`, or a `WebSocketStream` behind one API. They are genuinely incompatible — a `ws` `message` handler receives `(data, isBinary)`, an `EventTarget` one receives an event object, and a `WebSocketStream` has neither `on`, `readyState`, nor `bufferedAmount` — and the mismatches fail silently. Adds socket-level liveness, per-message rate limiting, and a graceful `drain()` for shutdown. The server-side counterpart to `PowerWebSocketClient`; there is no WebSocket server here, and there should not be.
 - [PowerRTCChannel: One `RTCDataChannel` behind the same shape as `PowerSocketAdapter`](guides/powerRTCChannel.md) — string `readyState` normalised, SCTP's message-size ceiling enforced, and back-pressure that arrives as a push signal instead of a poll timer. A data channel's `readyState` is `'open'`, not `1`, so the `=== READY_STATE.OPEN` guard every other transport satisfies is silently false on a healthy channel. `send()` **throws** above the SCTP ceiling where a `WebSocket` would buffer, which is the one case a hub can actually see — a `false` is invisible to `PowerRealtimeHub`, so watch `sendRefusals`. `binaryType` is already `arraybuffer`, so the framed codec works unchanged; `expectUnreliable` asserts the `ordered:false, maxRetransmits:0` this class cannot set for you.
 - [PowerDatagramChannel: Bounded, drop-counting datagram wrapper](guides/powerDatagramChannel.md). Enforces a hard `maxDatagramSizeBytes` ceiling before the platform sees the datagram, so an oversize frame is refused with a `TypeError` and counted in `stats().oversizeDatagrams` rather than silently discarded. When the internal queue is full, the oldest queued datagram is dropped first and the new one is queued in its place, so the loss is observable in `droppedCount`. This is **not** a hub `send` adapter: `retain` and datagrams contradict each other. Use it directly for bounded, counted datagram delivery, or wrap it in your own adapter that knows how to frame and retain.
-- [PowerWebTransportAdapter: `WebTransportBidirectionalStream` behind the same shape as `PowerSocketAdapter`](guides/powerWebTransportAdapter.md). Wraps a `WebTransport` session's bidirectional stream and decodes inbound frames with `createFrameDecoder` so split frames do not surface as `RangeError`s at the reader. `maxFrameBytes` is `Infinity`; enforcement is left to `PowerSocketAdapter`'s `maxPayloadSizeBytes`.
-- [PowerSseAdapter: Server-sent events transport adapter for `PowerRealtimeHub`](guides/powerSseAdapter.md). Bridges the hub's `send(subscriber, frame)` contract to an SSE `Response` stream. Each frame is written as one base64-encoded `data:` line, so binary payloads do not break the event-stream format. Works through every proxy and CDN that supports SSE.
+- [createWebTransportAdapter: `WebTransportBidirectionalStream` behind the same shape as `PowerSocketAdapter`](guides/powerWebTransportAdapter.md). Wraps a `WebTransport` session's bidirectional stream and decodes inbound frames with `createFrameDecoder` so split frames do not surface as `RangeError`s at the reader. `maxFrameBytes` is `Infinity`; enforcement is left to `PowerSocketAdapter`'s `maxPayloadSizeBytes`.
+- [createSseAdapter: Server-sent events transport adapter for `PowerRealtimeHub`](guides/powerSseAdapter.md). Bridges the hub's `send(subscriber, frame)` contract to an SSE `Response` stream. Each frame is written as one base64-encoded `data:` line, so binary payloads do not break the event-stream format. Works through every proxy and CDN that supports SSE.
 
 - [WebTransport feature detection](guides/webTransportSupport.md). `detectWebTransportSupport()` — a pure probe for what a build actually supports, with no connection opened. Three of the surfaces it reports (`reliability`, `getStats()`, `WebTransportSendGroup`) are **not** Baseline, so `reliableOnly` is the one flag to branch on: it is `true` only when every surface present is Baseline.
 
@@ -147,6 +148,8 @@ The transport helpers split into two roles: **client-side** helpers dial out and
 ## Observability
 
 - [PowerEventLoopMonitor: Event-loop delay and utilization](guides/powerEventLoopMonitor.md). Timer-drift histogram plus Node's `eventLoopUtilization()`, so a latency regression can be attributed to the host instead of guessed at. Zero dependencies, both runtimes; `utilization()` returns `null` where the runtime cannot measure it. `stats()` also reports the milliseconds blocked alongside the count of blocked ticks, the readings it refused, and the share of wall-clock time it actually sampled.
+- [Metrics: Stable observability snapshots](guides/metrics.md). Normalize helper measurements into versioned names, observations, deltas, or Prometheus text.
+- [Stats naming](guides/stats-naming.md). Use canonical `stats()` methods and the compatible `getStats()` alias where available.
 
 ## Utils
 
@@ -180,7 +183,7 @@ without treating missing values as zero.
 
 ## Quick start
 
-Requirements: Node.js and npm.
+Requirements: Node.js `>=22.12.0` and npm.
 
 Install the package:
 
@@ -202,25 +205,9 @@ Run coverage (v8):
 npm run test:coverage
 ```
 
-## Quality bar
+## Development
 
-Helpers intended to be Tier 1 in this repository should meet a consistent bar:
-
-- dedicated guide plus README coverage
-- concise JSDoc for public constructor options and methods
-- focused regression tests for edge cases and failure paths
-- repo-wide coverage stays above the Vitest thresholds, and Tier 1 promotion work raises the helper's own file coverage to the same bar
-- no known open correctness bugs in the public contract
-
-Helpers that remain larger or more experimental can stay as advanced helpers, but Tier 1 helpers should be predictable, narrow in scope, and cheap to maintain.
-
-Current classification notes:
-
-- `PowerPool` is an advanced helper by design. It has a broader surface area than the narrow Tier 1 primitives, so coverage and maintenance expectations should be interpreted with that scope in mind.
-- `PowerRateLimit` is treated as a metric outlier for function coverage. Its public behavior and rollback paths are heavily covered; the remaining low function number is not currently considered a release blocker on its own.
-- Promotion work should prioritize public correctness, narrow APIs, and edge-case coverage before chasing residual coverage misses in broad orchestration helpers.
-
-Build (Vite):
+Build with Vite:
 
 ```bash
 npm run build
@@ -245,7 +232,7 @@ npm run example -- --all     # run every one
 The guides below cover the reference material; the examples exist so you can see
 a working call before reading the prose.
 
-Import everything from the package entry:
+Import common helpers from the package entry:
 
 ```javascript
 import {

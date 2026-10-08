@@ -238,6 +238,7 @@ function createWorkerPool(poolSize, autoscale = false, queuePolicy = 'enqueue') 
     idleTimeout: 10000,
     taskQueue: true,
     queuePolicy,
+    awaitResponseTimeout: 0,
     lazy: autoscale,
     workerOptions: { type: 'module' },
   };
@@ -322,7 +323,11 @@ async function runWorkerPool(poolSize, tasks, iterations) {
 
 async function runWorkerPoolOptimized(poolSize, tasks, iterations, keys) {
   const pool = createWorkerPool(poolSize, false);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
 
   const taskPromises = new Array(tasks);
   const t0 = process.hrtime.bigint();
@@ -370,7 +375,11 @@ async function runWorkerPoolAutoscale(poolSize, tasks, iterations) {
 
 async function runWorkerPoolAutoscaleOptimized(poolSize, tasks, iterations, keys) {
   const pool = createWorkerPool(poolSize, true);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
 
   const taskPromises = new Array(tasks);
   const t0 = process.hrtime.bigint();
@@ -621,7 +630,8 @@ function buildMixedSizeProfile(tasks, baseIterations) {
   const entries = [];
   for (let i = 0; i < tasks; i += 1) {
     const iters = i % 2 === 0 ? smallIterations : largeIterations;
-    entries.push({ iterations: iters, key: `mix:${i % repeatedKeyCount}` });
+    const size = i % 2 === 0 ? 'small' : 'large';
+    entries.push({ iterations: iters, key: `mix:${size}:${i % repeatedKeyCount}` });
   }
   const shuffled = shuffleArray(entries);
   return {
@@ -683,7 +693,11 @@ async function runWorkerPoolBurst(poolSize, tasks, iterations) {
 
 async function runWorkerPoolBurstOptimized(poolSize, tasks, iterations, keys) {
   const pool = createWorkerPool(poolSize, false);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const t0 = process.hrtime.bigint();
   const burstCount = 3;
   const tasksPerBurst = Math.ceil(tasks / burstCount);
@@ -735,7 +749,11 @@ async function runWorkerPoolBurstAutoscale(poolSize, tasks, iterations) {
 
 async function runWorkerPoolBurstAutoscaleOptimized(poolSize, tasks, iterations, keys) {
   const pool = createWorkerPool(poolSize, true);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const t0 = process.hrtime.bigint();
   const burstCount = 3;
   const tasksPerBurst = Math.ceil(tasks / burstCount);
@@ -797,7 +815,11 @@ async function runWorkerPoolRampTraffic(poolSize, tasks, iterations) {
 
 async function runWorkerPoolRampTrafficOptimized(poolSize, tasks, iterations, keys) {
   const pool = createWorkerPool(poolSize, false);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const t0 = process.hrtime.bigint();
   const phases = [15, 30, 60, 30];
   const tasksPerPhase = Math.ceil(tasks / phases.length);
@@ -853,7 +875,11 @@ async function runWorkerPoolRampTrafficAutoscale(poolSize, tasks, iterations) {
 
 async function runWorkerPoolRampTrafficAutoscaleOptimized(poolSize, tasks, iterations, keys) {
   const pool = createWorkerPool(poolSize, true);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const t0 = process.hrtime.bigint();
   const phases = [15, 30, 60, 30];
   const tasksPerPhase = Math.ceil(tasks / phases.length);
@@ -888,8 +914,8 @@ function buildPayloadSizeProfile(tasks, baseIterations) {
   const keyCount = Math.max(1, Math.min(20, Math.round(tasks / 10)));
   const entries = Array.from({ length: tasks }, (_, i) => ({
     iterations: baseIterations,
-    key: `payload:${i % keyCount}`,
     payloadSize: payloadSizes[i % payloadSizes.length],
+    key: `payload:${payloadSizes[i % payloadSizes.length]}:${i % keyCount}`,
   }));
   const shuffled = shuffleArray(entries);
   return {
@@ -919,7 +945,11 @@ async function runWorkerPoolPayloadSize(poolSize, tasks, iterations, payloadSize
 
 async function runWorkerPoolPayloadSizeOptimized(poolSize, tasks, iterations, keys, payloadSizes) {
   const pool = createWorkerPool(poolSize, false);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const promises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i += 1) {
@@ -968,7 +998,11 @@ async function runWorkerPoolPayloadSizeAutoscaleOptimized(
   payloadSizes
 ) {
   const pool = createWorkerPool(poolSize, true);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const promises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i += 1) {
@@ -1024,7 +1058,11 @@ async function runWorkerPoolIOBound(poolSize, tasks, iterations, waitMs) {
 
 async function runWorkerPoolIOBoundOptimized(poolSize, tasks, iterations, keys, waitMs) {
   const pool = createWorkerPool(poolSize, false);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const promises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i += 1) {
@@ -1069,7 +1107,11 @@ async function runWorkerPoolIOBoundAutoscale(poolSize, tasks, iterations, waitMs
 
 async function runWorkerPoolIOBoundAutoscaleOptimized(poolSize, tasks, iterations, keys, waitMs) {
   const pool = createWorkerPool(poolSize, true);
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const promises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i += 1) {
@@ -1101,7 +1143,11 @@ function buildCacheWarmupProfile(tasks, baseIterations) {
 }
 
 async function runCacheWarmupBenchmark(tasks, iterations) {
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const profile = buildCacheWarmupProfile(tasks, iterations);
 
   const coldStart = await runCacheWarmupPhase(cache, profile.iterations, profile.keys);
@@ -1133,10 +1179,13 @@ async function benchVariantRepeat(runs, fn, label) {
   // Silent warmup — lets V8 JIT-compile the hot path before we start timing.
   await fn();
   const times = [];
-  for (let r = 0; r < runs; r++) times.push(await fn());
-  // Collect between repeats so run N is not measured on run N-1's garbage.
+  // Collect before each repeat so run N is not measured on run N-1's garbage.
   // Skipped silently when `global.gc` is unavailable; the report records that.
-  collectGarbage();
+  // The warmup stays uncollected deliberately: it primes JIT code, not the heap.
+  for (let r = 0; r < runs; r++) {
+    collectGarbage();
+    times[r] = await fn();
+  }
   // Returns the trimmed median, so the call sites that assign straight into
   // `totalMs` are unchanged, while the band accumulates for the report.
   return recordBand(label ?? 'unlabelled', times);
@@ -1855,11 +1904,11 @@ async function benchPowerCacheHelpers(ops) {
   // A miss is measured too, because the admission path is where a structural
   // change (the W-TinyLFU window, for one) shows up, and a gate that only saw
   // hits would miss every one of them.
-  const missCache = new PowerCache({ maxEntries: size, defaultTTL: 60000 });
   const missKeys = Array.from({ length: size }, (_, i) => `gate-miss:${i}`);
   const missMs = await benchVariantRepeat(
     BENCH_RUNS,
     async () => {
+      const missCache = new PowerCache({ maxEntries: size, defaultTTL: 60000 });
       const t0 = process.hrtime.bigint();
       for (let i = 0; i < ops; i++) missCache.set(missKeys[i % size], i);
       return Number(process.hrtime.bigint() - t0) / 1e6;
@@ -1960,7 +2009,11 @@ async function runCacheSerialVsConcurrent(tasks) {
 
   // Serial: one getOrSetAsync at a time — no in-flight deduplication benefit.
   // Each unique key's factory runs once then subsequent calls are cache hits.
-  const serialCache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const serialCache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
     await serialCache.getOrSetAsync(`s:${i % uniqueKeys}`, asyncFactory, { ttl: 60000 });
@@ -1970,7 +2023,11 @@ async function runCacheSerialVsConcurrent(tasks) {
 
   // Concurrent: all getOrSetAsync calls fired at once — identical keys coalesce
   // to a single underlying call (in-flight deduplication).
-  const concCache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const concCache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const t2 = process.hrtime.bigint();
   await Promise.all(
     Array.from({ length: tasks }, (_, i) =>
@@ -2223,7 +2280,11 @@ async function runCacheGetOrSetAsyncBenchmark(
   iterations,
   uniqueKeys = CACHE_DUPLICATE_KEYS
 ) {
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const promises = new Array(tasks);
   const t0 = process.hrtime.bigint();
   for (let i = 0; i < tasks; i++) {
@@ -2330,7 +2391,11 @@ async function runWorkerThreadBaselineVariable(tasks, iterationsArray) {
 // Note: removed runWorkerPoolSimple fallback — we now rely on PowerPool only.
 
 async function runCacheBenchmark(tasks, iterations) {
-  const cache = new PowerCache({ maxEntries: Infinity, defaultTTL: 60000 });
+  const cache = new PowerCache({
+    maxEntries: Infinity,
+    defaultTTL: 60000,
+    defaultAsyncTimeout: 0,
+  });
   const keys = Array.from({ length: tasks }, (_, i) => `key:${i}`);
   // Miss scenario
   const t0 = process.hrtime.bigint();

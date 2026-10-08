@@ -1,7 +1,7 @@
 # PowerWebTransportClient
 
 > **Client-side helper** — dials out and owns the connection lifecycle. The
-> server-side counterpart is [`PowerWebTransportAdapter`](powerWebTransportAdapter.md).
+> server-side counterpart is [`createWebTransportAdapter`](powerWebTransportAdapter.md).
 
 Reconnecting WebTransport client with **stream-based back-pressure**, heartbeats, and `PowerMessageCodec` framing.
 

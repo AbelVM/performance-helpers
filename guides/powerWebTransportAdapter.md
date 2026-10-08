@@ -1,4 +1,4 @@
-# PowerWebTransportAdapter
+# createWebTransportAdapter
 
 > **Server-side helper** — wraps a `WebTransport` session's bidirectional
 > stream. The client-side counterpart is

@@ -263,9 +263,8 @@ describe('documentation coverage (TEST-001 companion)', () => {
     }
   });
 
-  it('every assets index file is reachable from navigation.md', () => {
+  it('every assets index file is reachable from the navigation tree', () => {
     const navPath = resolve(root, 'assets/navigation.md');
-    const nav = readFileSync(navPath, 'utf8');
     // Resolve each link *from the file that contains it* rather than looking
     // for the path as a literal substring. The literal check passed for years
     // while every link in this file was broken: `navigation.md` links are
@@ -276,9 +275,19 @@ describe('documentation coverage (TEST-001 companion)', () => {
     // `test/docsLinks.test.js` now checks every link in the repository. This
     // test stays because it asserts something that one does not: that the
     // navigation page reaches *each index*, not merely that its links resolve.
-    const linked = new Set(
-      [...nav.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map((m) => resolve(dirname(navPath), m[1]))
-    );
+    const linked = new Set();
+    const pending = [navPath];
+    while (pending.length) {
+      const current = pending.pop();
+      const base = dirname(current);
+      const content = readFileSync(current, 'utf8');
+      for (const match of content.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+        const target = resolve(base, match[1]);
+        if (linked.has(target) || !existsSync(target) || !target.endsWith('.md')) continue;
+        linked.add(target);
+        pending.push(target);
+      }
+    }
     const files = [
       '1_Caching.md',
       '2_Parallelizing.md',
