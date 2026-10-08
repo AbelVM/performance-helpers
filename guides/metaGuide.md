@@ -847,47 +847,6 @@ falls behind.
 - A global limit has no shared state, gateway, or rate-limit service.
 - A performance claim has not been measured on the real call path.
 
-## Proposed interactive selector
-
-The useful interactive tool is a **problem-signature selector**, not a helper
-name search box. It should be a zero-dependency single HTML file backed by the
-same structured data as this guide. This guide remains the canonical offline
-path, so the tool must not become a second undocumented decision system.
-
-Ask, in order:
-
-1. What is going wrong: memory growth, slow work, overload, dependency
-   failure, realtime delivery, or unclear measurement?
-2. Where does it cross: same process, worker, transport, or service instance?
-3. What must be bounded: queue, concurrency, rate, retries, bytes, cache
-   entries, or subscriber backlog?
-4. What may be lost: nothing, stale data, old work, new work, or a subscriber?
-
-Return one primary helper, optional companions, a disqualifier warning, the
-dedicated guide, a minimal starter snippet, and a measurement checklist. Show
-the answer path and explain competing choices; never guess capacity or worker
-size from these answers.
-
-Use records shaped like this:
-
-```json
-{
-  "helper": "PowerBackpressure",
-  "when": ["producer-faster-than-consumer", "bounded-waiting"],
-  "pairsWith": ["PowerQueue", "PowerBatch", "PowerPool"],
-  "avoidWhen": ["strict-concurrent-holder-ceiling"],
-  "warning": "adaptive refill is not a strict semaphore ceiling",
-  "guide": "guides/powerBackpressure.md"
-}
-```
-
-The selector should support back navigation, keyboard access, mobile layouts,
-versioned recommendation data, and copyable snippets. Generate or validate its
-records from public exports and dedicated guides so a renamed helper cannot
-silently remain selectable.
-
----
-
 ## Final advice
 
 Most real systems here start with one dominant helper and then gain one supporting helper from each of these categories:
