@@ -3992,6 +3992,91 @@ async function runDeferWorkload() {
   return { deferNs, powerNs };
 }
 
+// ─── Workload: object pooling for MessageCodec envelopes (P1) ────────────────
+//
+// P1 asks whether pooling the decode envelope pays for itself on a hot realtime
+// path. The premise is that allocation is the cost; this measures it against the
+// real `decodeMessage` call path rather than a synthetic object literal, because
+// a synthetic one would measure the wrong thing — the envelope is one of several
+// allocations per message, and the ratio is what decides the row.
+//
+// The pooled arm reuses one envelope object and overwrites its four fields. That
+// is only sound if the caller consumes the envelope before the next decode,
+// which is exactly the assumption a pool makes and the reason the row says
+// "behind opt-in flag" rather than "by default".
+
+async function runEnvelopePoolWorkload() {
+  const N = Number(process.env.CLAIM_POOL_OPS || 200000);
+  const { encodeMessage, decodeMessage } = await import('../src/helpers/powerMessageCodec.js');
+
+  console.log('BENCH-003 — envelope allocation vs pooling on the decode path (P1)\n');
+  console.log('  P1 asks whether pooling the decode envelope pays for itself. The');
+  console.log('  premise is that allocation is the cost. Both arms below run the real');
+  console.log('  `decodeMessage`; the pooled arm reuses one envelope object and');
+  console.log('  overwrites its four fields.\n');
+
+  // A payload shaped like a realtime message, so the stringify and the clone
+  // are representative rather than a bare number.
+  const message = { seq: 1, topic: 'ticks', at: 1234567890, v: [1, 2, 3, 4, 5] };
+  const frames = [];
+  for (let i = 0; i < 64; i++) frames.push(encodeMessage({ ...message, seq: i }));
+
+  const time = (fn) => {
+    // Warm up, then measure. Without the warm-up the first iteration pays the
+    // IC and inline-cache setup and the ratio is noise.
+    for (let i = 0; i < 5000; i++) fn(i % frames.length);
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < N; i++) fn(i % frames.length);
+    return Number(process.hrtime.bigint() - t0) / N;
+  };
+
+  // Arm 1: the shipped path. A fresh envelope per decode.
+  let sink = null;
+  const freshNs = time((i) => {
+    sink = decodeMessage(frames[i]);
+  });
+
+  // Arm 2: pooled. One envelope, fields overwritten in place.
+  const pooled = { version: 0, codec: '', value: undefined, byteLength: 0 };
+  const pooledNs = time((i) => {
+    const decoded = decodeMessage(frames[i]);
+    pooled.version = decoded.version;
+    pooled.codec = decoded.codec;
+    pooled.value = decoded.value;
+    pooled.byteLength = decoded.byteLength;
+    sink = pooled;
+  });
+
+  // Arm 3: the floor. Decode and read one field, allocating nothing extra, so
+  // the envelope's own share of the total is visible as the gap to arm 1.
+  const floorNs = time((i) => {
+    const decoded = decodeMessage(frames[i]);
+    sink = decoded.byteLength;
+  });
+
+  console.log(`  fresh envelope per decode   ${freshNs.toFixed(1).padStart(9)} ns/op`);
+  console.log(
+    `  pooled, fields overwritten  ${pooledNs.toFixed(1).padStart(9)} ns/op   ${(pooledNs / freshNs).toFixed(2)}x`
+  );
+  console.log(
+    `  floor (read one field)      ${floorNs.toFixed(1).padStart(9)} ns/op   ${(floorNs / freshNs).toFixed(2)}x`
+  );
+
+  const saving = freshNs - pooledNs;
+  const pct = (saving / freshNs) * 100;
+  console.log(`\n  Pooling saves ${saving.toFixed(1)} ns/op, ${pct.toFixed(1)} % of the decode.`);
+
+  console.log('\n  What that number has to clear before the row is worth building:');
+  console.log('  the pool is only sound behind an opt-in flag, because it hands the');
+  console.log('  caller an object that the next decode overwrites. A caller who keeps');
+  console.log('  a reference — a queue, a retry, a log line — sees silent corruption,');
+  console.log('  which is a far worse failure than the allocation it saves. So the');
+  console.log('  saving has to be large enough to be worth a documented footgun.');
+
+  void sink;
+  return { freshNs, pooledNs, floorNs };
+}
+
 // ─── Workload 9: JSON.stringify cost vs a minimal binary encoding ─────────────
 //
 // RT-027 asks whether a binary codec (MessagePack / CBOR) is worth building.
@@ -4343,6 +4428,7 @@ const MODES = {
   bcfanout: runBroadcastFanoutWorkload,
   defer: runDeferWorkload,
   codec: runCodecWorkload,
+  envelopepool: runEnvelopePoolWorkload,
   sabring: runSabRingWorkload,
   keyshape: runKeyShapeWorkload,
   ratelimit: runRateLimitWorkload,
