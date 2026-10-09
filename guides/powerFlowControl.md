@@ -41,6 +41,15 @@ Options: `{ capacity?, initialRate?, minRate?, maxRate?, setpoint?, kp?, ki?, kd
 - `tokens`, `capacity` — live bucket state.
 - `servo` — the underlying `PowerServo`, for runtime retuning.
 
+### stats()
+
+`{ rate, tokens, capacity, minRate, maxRate, observations }`. `getStats()` is an alias.
+
+**`observations` is the number to alert on.** It counts controller samples, so a
+loop that has stopped being fed is a loop whose rate has gone stale — and a stale
+rate is a limit that is no longer limiting anything, which fails silently in the
+direction that looks like working code.
+
 ## The measurement sign — read this before wiring it up
 
 `observe()` takes the process variable in the servo's own convention: the controller drives it **toward** `setpoint`, so the output rises when `measured` is _below_ the setpoint and falls when it is above.
