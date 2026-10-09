@@ -30,6 +30,7 @@ export { PowerEventBus } from "./helpers/powerEventBus.js";
 export { PowerGCRA } from "./helpers/powerGCRA.js";
 export { PowerDeduplication } from "./helpers/powerDeduplication.js";
 export { PowerHeartbeat } from "./helpers/powerHeartbeat.js";
+export { PowerSequencer } from "./helpers/powerSequencer.js";
 export { PowerEventLoopMonitor } from "./helpers/powerEventLoopMonitor.js";
 export { PowerRealtimeHub } from "./helpers/powerRealtimeHub.js";
 export { PowerMessagePort } from "./helpers/powerMessagePort.js";

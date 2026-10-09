@@ -33,6 +33,7 @@ import { PowerSlidingWindow } from '../src/helpers/powerSlidingWindow.js';
 import { PowerRateLimit } from '../src/helpers/powerRateLimit.js';
 import { PowerMessagePort } from '../src/helpers/powerMessagePort.js';
 import { PowerDatagramChannel } from '../src/helpers/powerDatagramChannel.js';
+import { PowerSequencer } from '../src/helpers/powerSequencer.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -474,6 +475,10 @@ describe('observability: true on the helpers', () => {
       () => new PowerRateLimit([new PowerThrottle({ capacity: 10 })], { observability: true }),
       'rateLimit',
     ],
+    // S1d. Needs no constructor argument at all — it is a pure state machine —
+    // which is the cheapest row in this list and the reason it was not one of
+    // the five that needed a real argument when the list was first written.
+    ['PowerSequencer', () => new PowerSequencer({ observability: true }), 'sequencer'],
   ];
 
   // Every prefix this describe block mutates, torn down after each test.

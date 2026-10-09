@@ -42,6 +42,7 @@
 - [helpers/powerRTCChannel](helpers/powerRTCChannel/README.md)
 - [helpers/powerScheduler](helpers/powerScheduler/README.md)
 - [helpers/powerSemaphore](helpers/powerSemaphore/README.md)
+- [helpers/powerSequencer](helpers/powerSequencer/README.md)
 - [helpers/powerServo](helpers/powerServo/README.md)
 - [helpers/powerSlidingWindow](helpers/powerSlidingWindow/README.md)
 - [helpers/powerSocketAdapter](helpers/powerSocketAdapter/README.md)

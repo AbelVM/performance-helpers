@@ -63,6 +63,7 @@ admission over time. They are not interchangeable.
 | Push datagrams to a transport without silent loss                      | `PowerDatagramChannel`                             | `PowerMessageCodec`                                        | hand-rolled `send()` with no size check                                 |
 | Push to SSE clients without unbounded server-side buffering            | `createSseAdapter`                                 | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `Response.body.pipeTo()` without back-pressure                      |
 | Detect a dead peer instead of waiting for the transport to notice      | `PowerHeartbeat`                                   | `PowerRealtimeHub`, `PowerCircuit`                         | a bare `setInterval` with no jitter, which fires a fleet in lockstep    |
+| Reassemble datagrams that arrive out of order                          | `PowerSequencer`                                   | `PowerDatagramChannel`, `PowerHeartbeat`                   | buffering everything and hoping, which grows without bound              |
 | Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `createWebTransportAdapter`                                | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
 | Process a very large iterable in parallel                              | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
 | Smooth bursts from producers                                           | `PowerQueue`                                       | `PowerBackpressure`, `PowerBatch`, `PowerPool`             | `PowerSemaphore` alone                                                  |
@@ -118,6 +119,8 @@ Use `PowerChunker` when the input is already an iterable and you mainly want a f
 Use `PowerQueue` when the real issue is burst smoothing between producers and consumers. Use `PowerPriorityQueue` when jobs/messages must be processed in priority order (higher priority first, FIFO on ties). Use `PowerDeduplication` to drop duplicate events within a time window.
 
 Use `PowerHeartbeat` when a peer is expected to check in on a schedule and you need to declare it dead yourself, rather than waiting for the transport to notice. Jitter the interval so a fleet of peers does not fire its checks in lockstep.
+
+Use `PowerSequencer` when a datagram transport can deliver out of order and ordered state matters. It buffers what arrives early, releases only when the gap in front is filled, and reports the gap rather than waiting on it forever.
 
 Use `PowerBackpressure` when producers must slow down before queues or memory grow unbounded.
 

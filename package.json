@@ -314,6 +314,11 @@
       "types": "./types/helpers/powerHeartbeat.d.ts",
       "import": "./src/helpers/powerHeartbeat.js",
       "default": "./src/helpers/powerHeartbeat.js"
+    },
+    "./powerSequencer": {
+      "types": "./types/helpers/powerSequencer.d.ts",
+      "import": "./src/helpers/powerSequencer.js",
+      "default": "./src/helpers/powerSequencer.js"
     }
   },
   "scripts": {

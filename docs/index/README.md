@@ -486,6 +486,12 @@ Re-exports [PowerSemaphore](../helpers/powerSemaphore/classes/PowerSemaphore.md)
 
 ***
 
+### PowerSequencer
+
+Re-exports [PowerSequencer](../helpers/powerSequencer/classes/PowerSequencer.md)
+
+***
+
 ### PowerServo
 
 Re-exports [PowerServo](../helpers/powerServo/classes/PowerServo.md)
