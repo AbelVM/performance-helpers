@@ -306,6 +306,13 @@ Percentile between `0` and `100`, or fraction
   rather than accidental: see `guides/powerHistogram.md`, which calls `1`
   "the one to watch".
 
+  A value **above 100 saturates to the maximum** rather than throwing.
+  That is deliberate and is the one place this method degrades instead of
+  rejecting: `NaN` and a negative both throw, because they would index
+  nonsense, whereas `150` asks for "at or above the top" and the maximum is
+  the correct answer to that. Pinned by
+  `test/powerHistogram.quantileRange.test.js`.
+
 #### Returns
 
 `number` \| `undefined`

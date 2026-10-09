@@ -31281,7 +31281,31 @@
 													},
 													{
 														"kind": "text",
-														"text": "\n  \"the one to watch\"."
+														"text": "\n  \"the one to watch\".\n\n  A value **above 100 saturates to the maximum** rather than throwing.\n  That is deliberate and is the one place this method degrades instead of\n  rejecting: "
+													},
+													{
+														"kind": "code",
+														"text": "`NaN`"
+													},
+													{
+														"kind": "text",
+														"text": " and a negative both throw, because they would index\n  nonsense, whereas "
+													},
+													{
+														"kind": "code",
+														"text": "`150`"
+													},
+													{
+														"kind": "text",
+														"text": " asks for \"at or above the top\" and the maximum is\n  the correct answer to that. Pinned by\n  "
+													},
+													{
+														"kind": "code",
+														"text": "`test/powerHistogram.quantileRange.test.js`"
+													},
+													{
+														"kind": "text",
+														"text": "."
 													}
 												]
 											},

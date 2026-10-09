@@ -233,6 +233,13 @@ export class PowerHistogram {
    *   Use `0.5` or `50` for p50 and `100` for the maximum. This is documented
    *   rather than accidental: see `guides/powerHistogram.md`, which calls `1`
    *   "the one to watch".
+   *
+   *   A value **above 100 saturates to the maximum** rather than throwing.
+   *   That is deliberate and is the one place this method degrades instead of
+   *   rejecting: `NaN` and a negative both throw, because they would index
+   *   nonsense, whereas `150` asks for "at or above the top" and the maximum is
+   *   the correct answer to that. Pinned by
+   *   `test/powerHistogram.quantileRange.test.js`.
    * @returns {number|undefined} Estimated percentile value, or `undefined` when empty.
    */
   percentile(quantile) {
