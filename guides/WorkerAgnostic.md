@@ -15,10 +15,11 @@ worker.postMessage({ hello: true });
 
 `WorkerAgnostic.create(workerSource, options)` takes either shape:
 
-| form                      | example                                  | notes                                                                      |
-| ------------------------- | ---------------------------------------- | -------------------------------------------------------------------------- |
-| **a factory function**    | `() => new MyWorker()`                   | the recommended form. Fully synchronous, no module-loading concerns.       |
-| **a path or code string** | `'./worker.js'` / `'self.onmessage = …'` | loaded with `importScripts()` in a browser and `new Worker(path)` in Node. |
+| form                      | example                                      | notes                                                                         |
+| ------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------- |
+| **a factory function**    | `() => new MyWorker()`                       | the recommended form. Fully synchronous, no module-loading concerns.          |
+| **a path or code string** | `'./worker.js'` / `'self.onmessage = …'`     | loaded with `importScripts()` in a browser and `new Worker(path)` in Node.    |
+| **a `SharedWorker` URL**  | `'./workers/hub.js'` with `{ shared: true }` | browser only. Adapts the port; `terminate()` closes the port, not the worker. |
 
 A **class** is accepted directly and constructed with `new`. An **arrow function or bound function** is called as a factory. A function that throws a `TypeError` mentioning "not a constructor" is retried as a factory, so a callable-vs-constructable mix-up degrades instead of failing.
 
@@ -67,6 +68,55 @@ Not needed for a classic script (step 2 works) or for an absolute worker source
 (step 1 is unnecessary when nothing has to be resolved). Node is unaffected: a
 string source is handed to `node:worker_threads` directly, which does its own
 resolution.
+
+## A `SharedWorker` instead of a `Worker`: `shared`
+
+```js
+const wa = new WorkerAgnostic('./workers/hub.js', { shared: true });
+```
+
+A `SharedWorker` is **not** a `Worker`. It has no `postMessage` of its own and no
+`terminate()`: you get a `MessagePort` off `.port` and every message goes through
+that. This option constructs one and adapts the port to the same worker-like
+surface everything else here uses, so `postMessage`, the event model and
+`dispose()` behave identically.
+
+It requires a **browser** (a global `SharedWorker`) and a **string** source. A
+factory function is refused, because a `SharedWorker is constructed from a script
+URL and a function has nothing to be shared between.
+
+### `terminate()` closes the port, not the worker
+
+This is the one thing to know before reaching for the option:
+
+```js
+wa.terminate(); // detaches this client; the shared worker keeps running
+```
+
+A `SharedWorker` is shared by **every client connected to the same URL**. Closing
+one client's port must not kill the script the others are still using, so
+`terminate()` closes the port and leaves the worker alone. A caller who wants the
+shared worker gone has to close every port, and that is a decision above this
+class — which is why the adapter does not attempt it.
+
+### The port is started for you
+
+A `MessagePort` delivers nothing until `start()` is called, and the browser calls
+it implicitly only when `onmessage` is **assigned**. This adapter registers
+through `addEventListener`, so it calls `start()` itself. Without that the port
+would silently receive nothing — a worker that looks connected and never speaks.
+
+### `error` comes from two places
+
+`error` is forwarded from both the `SharedWorker` and its port, because they fire
+it for different reasons:
+
+- the **`SharedWorker`** fires it when the script fails to load or throws during
+  evaluation;
+- the **port** fires it for a deserialization failure on an inbound message.
+
+Forwarding only one would drop the other, and a dropped script-load error reads
+as a worker that simply never starts.
 
 ## The pure-ESM caveat in Node
 

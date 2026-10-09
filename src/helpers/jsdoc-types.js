@@ -1355,6 +1355,19 @@ export {};
  * actually change behaviour here and are named for discoverability; the index
  * signature is what stops the type from rejecting the rest.
  *
+ * @property {boolean} [shared=false] - Construct a `SharedWorker` instead of a
+ *   `Worker`, and adapt its `port` to the worker-like surface. Requires a global
+ *   `SharedWorker` (a browser) and a **string** source, because a `SharedWorker`
+ *   is constructed from a script URL and a factory function has nothing to be
+ *   shared between.
+ *
+ *   The one thing to know before reaching for it: `terminate()` **closes the
+ *   port and leaves the shared worker running.** A `SharedWorker` is shared by
+ *   every client connected to the same URL, so detaching one client must not
+ *   kill the script the others are still using. A caller who wants the shared
+ *   worker gone has to close every port, and that is a decision above this
+ *   class. See `guides/WorkerAgnostic.md`.
+ *
  * @property {string} [baseUrl] - The URL a *string* worker source is resolved
  *   against, in a **browser** with a path rather than inline code.
  *

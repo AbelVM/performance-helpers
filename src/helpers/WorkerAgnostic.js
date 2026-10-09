@@ -139,12 +139,33 @@ function stripOnError(options) {
  *
  * @param {Function|string} workerSource - Worker constructor, factory function,
  *   or path/URL string.
- * @param {Object} options - Options forwarded to the native Worker constructor.
+ * @param {Object<string, *>} options - Options forwarded to the native Worker
+ *   constructor. Typed as an open bag because that is what it is: the keys are
+ *   Node's `WorkerOptions` on one side and the browser's on the other, and
+ *   `shared` is this library's own addition on top of both.
  * @param {string} env - Resolved environment from `detectEnv()`.
  * @returns {import('./jsdoc-types.js').WorkerLike} The underlying worker-like object.
  * @private
  */
 function resolveWorker(workerSource, options, env) {
+  // F1b: the SharedWorker path, taken before anything else so the `shared` flag
+  // is honoured regardless of what else the environment offers. A browser has
+  // both `Worker` and `SharedWorker` globals, so without this the string source
+  // would take the plain-Worker branch below and the flag would be silently
+  // ignored — the misspelled-option failure this library refuses to have.
+  //
+  // `shared` is stripped before the bag reaches any native constructor: it is
+  // this library's option, not the platform's, and forwarding it would be the
+  // same hygiene problem `onError` already is.
+  if (options && options.shared === true) {
+    // Copied and deleted rather than rest-destructured, for the same reason
+    // `stripOnError` is: the omitted binding would itself trip `no-unused-vars`,
+    // and an eslint-disable for a one-line drop is a worse trade than copying an
+    // object that is already copied on this path.
+    const rest = { ...options };
+    delete rest.shared;
+    return resolveSharedWorker(workerSource, rest);
+  }
   // A globally-available Worker constructor (a browser, a Web Worker polyfill,
   // a runtime that aliases Node's worker_threads to `Worker` as the bench
   // harness does, or a sandboxed/bundled context) can be used directly for
@@ -207,6 +228,134 @@ function resolveWorker(workerSource, options, env) {
   throw new Error(
     'Unsupported environment for WorkerAgnostic: cannot resolve a string workerSource without a global Worker or a known runtime'
   );
+}
+
+/**
+ * Adapt a `SharedWorker`'s port to the {@link WorkerLike} surface.
+ *
+ * A `SharedWorker` is not a `Worker`. It has no `postMessage` of its own and no
+ * `terminate()`: the caller gets a `MessagePort` off `.port` and every message
+ * goes through that. So the two things this adapter exists to do are **route
+ * `postMessage` to the port** and **give `terminate()` a meaning**.
+ *
+ * `terminate()` closes the port. That is deliberately *not* the same as
+ * terminating a `Worker`: a `SharedWorker` is shared by every client that
+ * connected to the same URL, and closing one client's port must not kill the
+ * script the others are still using. The port close detaches this client and
+ * leaves the shared worker running, which is the whole point of the primitive.
+ * A caller who wants the shared worker gone has to close every port, and that
+ * is a decision above this class.
+ *
+ * `error` is forwarded from **both** the `SharedWorker` and its port, because
+ * the two fire it for different reasons: the `SharedWorker` fires it when the
+ * script fails to load or throws during evaluation, and the port fires it for
+ * deserialization failures on an inbound message. Forwarding only one would
+ * silently drop the other, and a dropped script-load error reads as a worker
+ * that never starts.
+ *
+ * @param {SharedWorker} sharedWorker - A constructed `SharedWorker`.
+ * @returns {import('./jsdoc-types.js').WorkerLike} A worker-like object.
+ * @private
+ */
+function createSharedWorkerAdapter(sharedWorker) {
+  const port = sharedWorker.port;
+  if (!port) {
+    throw new TypeError(
+      'WorkerAgnostic: the SharedWorker has no `port`. A SharedWorker exposes its ' +
+        'messages through `worker.port`, and an object without one is not a SharedWorker.'
+    );
+  }
+  // Started here rather than left to the caller. A `MessagePort` does not
+  // deliver messages until `start()` is called, and the browser calls it
+  // implicitly only when `onmessage` is assigned — which this adapter never
+  // does, because it registers through `addEventListener`. Without the explicit
+  // `start()` the port would silently receive nothing.
+  if (typeof port.start === 'function') port.start();
+
+  /**
+   * The targets an event type must be registered on.
+   *
+   * `error` goes to **both**, because the two fire it for different reasons: the
+   * `SharedWorker` fires it when the script fails to load or throws during
+   * evaluation, and the port fires it for a deserialization failure on an
+   * inbound message. Forwarding only one silently drops the other, and a
+   * dropped script-load error reads as a worker that never starts.
+   * @param {string} type
+   * @returns {any[]}
+   */
+  const targetsFor = (type) => (type === 'error' ? [port, sharedWorker] : [port]);
+
+  return {
+    /**
+     * @param {string} type
+     * @param {...*} handler
+     * @returns {void}
+     */
+    addEventListener(type, ...handler) {
+      for (const target of targetsFor(type)) target.addEventListener(type, ...handler);
+    },
+    /**
+     * @param {string} type
+     * @param {...*} handler
+     * @returns {void}
+     */
+    removeEventListener(type, ...handler) {
+      for (const target of targetsFor(type)) target.removeEventListener(type, ...handler);
+    },
+    /**
+     * @param {*} data
+     * @param {*} [transfer]
+     * @returns {void}
+     */
+    postMessage(data, transfer) {
+      port.postMessage(data, transfer);
+    },
+    /**
+     * Detach this client. Closes the port and leaves the shared worker running
+     * for its other clients — see the note above.
+     * @returns {void}
+     */
+    terminate() {
+      try {
+        port.close();
+      } catch {
+        // Already closed. `MessagePort.close()` throws if the port is detached
+        // or its owner is gone, and a second `terminate()` reaching that is
+        // normal on a teardown path.
+      }
+    },
+  };
+}
+
+/**
+ * Resolve a `SharedWorker` for the given source and adapt its port.
+ *
+ * @param {Function|string} workerSource - The worker script URL. A non-string is
+ *   rejected inside, because a `SharedWorker` is constructed from a URL.
+ * @param {Object<string, *>} options - Options forwarded to the `SharedWorker`
+ *   constructor.
+ * @returns {import('./jsdoc-types.js').WorkerLike} The adapted port.
+ * @private
+ */
+function resolveSharedWorker(workerSource, options) {
+  const GlobalSharedWorker =
+    (typeof globalThis !== 'undefined' && globalThis.SharedWorker) ||
+    (typeof SharedWorker !== 'undefined' ? SharedWorker : undefined);
+  if (typeof GlobalSharedWorker !== 'function') {
+    throw new TypeError(
+      'WorkerAgnostic: `shared: true` requires a global `SharedWorker`, which this ' +
+        'runtime does not provide. SharedWorker is a browser API; in Node use a ' +
+        'regular worker source.'
+    );
+  }
+  if (typeof workerSource !== 'string') {
+    throw new TypeError(
+      'WorkerAgnostic: `shared: true` requires a string worker source (a URL). A ' +
+        'SharedWorker is constructed from a script URL, so a factory function has ' +
+        'nothing to be shared between.'
+    );
+  }
+  return createSharedWorkerAdapter(new GlobalSharedWorker(workerSource, options));
 }
 
 /**
