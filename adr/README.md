@@ -45,6 +45,7 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 | [0008](./0008-throw-or-false-for-an-unsendable-frame.md)    | `send()` throws for a permanent refusal, returns `false` for transient | Accepted |
 | [0009](./0009-which-clock-a-helper-subtracts.md)            | Which clock a helper subtracts                                         | Accepted |
 | [0010](./0010-a-new-strategy-rather-than-a-better-yield.md) | A new `postTask` strategy, rather than a better `yield`                | Accepted |
+| [0012](./0012-sieve-eviction-is-measured-and-rejected.md)   | SIEVE eviction is measured and rejected                                | Rejected |
 
 ## Status values
 
