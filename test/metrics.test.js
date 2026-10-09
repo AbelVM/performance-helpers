@@ -34,6 +34,7 @@ import { PowerRateLimit } from '../src/helpers/powerRateLimit.js';
 import { PowerMessagePort } from '../src/helpers/powerMessagePort.js';
 import { PowerDatagramChannel } from '../src/helpers/powerDatagramChannel.js';
 import { PowerSequencer } from '../src/helpers/powerSequencer.js';
+import { PowerFlowControl } from '../src/helpers/powerFlowControl.js';
 
 /**
  * FEAT-007, part one: the stable shape.
@@ -479,6 +480,12 @@ describe('observability: true on the helpers', () => {
     // which is the cheapest row in this list and the reason it was not one of
     // the five that needed a real argument when the list was first written.
     ['PowerSequencer', () => new PowerSequencer({ observability: true }), 'sequencer'],
+    // F1a. Needs a capacity, because a bucket of 0 is inert.
+    [
+      'PowerFlowControl',
+      () => new PowerFlowControl({ capacity: 10, observability: true }),
+      'flowControl',
+    ],
   ];
 
   // Every prefix this describe block mutates, torn down after each test.

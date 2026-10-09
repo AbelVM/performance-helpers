@@ -366,6 +366,12 @@ Re-exports [PowerEventLoopMonitor](../helpers/powerEventLoopMonitor/classes/Powe
 
 ***
 
+### PowerFlowControl
+
+Re-exports [PowerFlowControl](../helpers/powerFlowControl/classes/PowerFlowControl.md)
+
+***
+
 ### PowerGCRA
 
 Re-exports [PowerGCRA](../powerGCRA/classes/PowerGCRA.md)

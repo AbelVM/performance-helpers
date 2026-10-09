@@ -319,6 +319,11 @@
       "types": "./types/helpers/powerSequencer.d.ts",
       "import": "./src/helpers/powerSequencer.js",
       "default": "./src/helpers/powerSequencer.js"
+    },
+    "./powerFlowControl": {
+      "types": "./types/helpers/powerFlowControl.d.ts",
+      "import": "./src/helpers/powerFlowControl.js",
+      "default": "./src/helpers/powerFlowControl.js"
     }
   },
   "scripts": {

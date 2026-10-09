@@ -28,6 +28,7 @@
 - [helpers/powerDefer](helpers/powerDefer/README.md)
 - [helpers/powerEventBus](helpers/powerEventBus/README.md)
 - [helpers/powerEventLoopMonitor](helpers/powerEventLoopMonitor/README.md)
+- [helpers/powerFlowControl](helpers/powerFlowControl/README.md)
 - [helpers/powerHeartbeat](helpers/powerHeartbeat/README.md)
 - [helpers/powerHistogram](helpers/powerHistogram/README.md)
 - [helpers/powerLatch](helpers/powerLatch/README.md)

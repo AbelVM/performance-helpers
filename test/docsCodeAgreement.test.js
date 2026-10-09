@@ -129,6 +129,12 @@ const NOT_CALLS = new Set([
   'O',
   'o2u8',
   'u82o',
+  // `PowerFlowControl`'s `onRateChange` is an **option**, not a method, so the
+  // method scanner cannot see it — but the guide has to name it, because it is
+  // the hook a caller uses to push the rate into a pool. Listed here rather than
+  // reworded out of the guide, which would have hidden the one thing the option
+  // exists for.
+  'onRateChange',
 ]);
 
 /**

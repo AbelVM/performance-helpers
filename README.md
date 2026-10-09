@@ -89,6 +89,7 @@ for fallback guidance and the legacy compatibility option.
 - [PowerDeduplication: Time-windowed dedup](guides/powerDeduplication.md). Prevent replays/duplicates within a TTL window with max key cap.
 - [PowerHeartbeat: Jittered liveness detector](guides/powerHeartbeat.md). Declare a peer dead when no `beat()` arrives within `timeout`; jitter decorrelates a fleet so checks do not fire in lockstep.
 - [PowerSequencer: Gap detection and reassembly](guides/powerSequencer.md). Buffer out-of-order datagrams and release them in sequence order; `missing()` is the NACK payload.
+- [PowerFlowControl: Adaptive token bucket](guides/powerFlowControl.md). Refill rate set by a closed-loop controller, so the limit retunes itself instead of being re-measured.
 - [PowerSemaphore: Async concurrency gate](guides/powerSemaphore.md). Lightweight semaphore for limiting concurrent I/O and fan-out workloads.
 - [PowerCrossLock: Cross-worker mutex](guides/powerCrossLock.md). A fair mutex shared by every worker in the process, over the platform's Web Locks implementation. Use it when the thing you must exclude is running in _another_ thread — `PowerSemaphore` cannot do that, because every instance is local to its thread.
 - [PowerServo: Closed-loop transfer function](guides/powerServo.md). Hold a measured value at a setpoint — a queue depth, a byte ceiling, a pool size — with an optional feedforward path for a disturbance you can see before it shows up in the measurement. Supplies the arithmetic (PI, derivative on the measurement, an integral that cannot wind up) and takes both terms of the error from you, so the decision of _what to measure_ stays with the caller. The loop cannot diverge: the output is clamped every step and the integral is clamped within the same window.
@@ -262,6 +263,7 @@ import {
   PowerDeduplication,
   PowerHeartbeat,
   PowerSequencer,
+  PowerFlowControl,
   PowerSemaphore,
   PowerServo,
   PowerDefer,
