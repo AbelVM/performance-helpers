@@ -194,6 +194,18 @@ emitting on the bus. A no-op when the state is unchanged.
 
 ***
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

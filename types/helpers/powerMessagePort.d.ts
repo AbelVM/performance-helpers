@@ -91,6 +91,11 @@ export class PowerMessagePort {
      * Alias for {@link PowerMessagePort#dispose}, so `using` works.
      */
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type PowerMessagePortOptions = {
     /**

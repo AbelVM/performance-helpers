@@ -200,6 +200,18 @@ swallowed so one bad waiter cannot strand the rest.
 
 ***
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

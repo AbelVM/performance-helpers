@@ -134,6 +134,18 @@ The ratio of requests to retries this budget permits, in `(0, 1]`.
 
 ## Methods
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

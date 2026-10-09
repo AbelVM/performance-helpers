@@ -22,21 +22,53 @@ the hub detaches the subscriber.
 
 ## Returns
 
-`object`
+### \[asyncDispose\]
+
+> **\[asyncDispose\]**: () => `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+### \[dispose\]
+
+> **\[dispose\]**: () => `void` = `dispose`
+
+#### Returns
+
+`void`
 
 ### close
 
-> **close**: (`arg0`, `arg1`) => `void`
+> **close**: (`sub`) => `void`
 
 #### Parameters
 
-##### arg0
+##### sub
 
 `object`
 
-##### arg1
+#### Returns
 
-`string`
+`void`
+
+### dispose
+
+> **dispose**: () => `void`
+
+#### Returns
+
+`void`
+
+### register
+
+> **register**: (`sub`) => `void`
+
+#### Parameters
+
+##### sub
+
+`object`
 
 #### Returns
 
@@ -44,17 +76,17 @@ the hub detaches the subscriber.
 
 ### send
 
-> **send**: (`arg0`, `arg1`) => `Promise`\<`void`\>
+> **send**: (`sub`, `frame`) => `Promise`\<`void`\>
 
 #### Parameters
 
-##### arg0
+##### sub
 
 `object`
 
-##### arg1
+##### frame
 
-`Uint8Array`
+`Uint8Array`\<`ArrayBufferLike`\>
 
 #### Returns
 

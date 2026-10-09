@@ -256,6 +256,11 @@ export class PowerEventLoopMonitor {
      * @private
      */
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerEventLoopMonitor;
 export type EventLoopMonitorOptions = import("./jsdoc-types.js").EventLoopMonitorOptions;

@@ -539,6 +539,33 @@ export {};
  */
 
 /**
+ * Queue options for `PowerPriorityQueue`.
+ * @typedef {Object} PowerPriorityQueueOptions
+ * @property {number} [initialCapacity]
+ */
+
+/**
+ * Options for `PowerDeduplication`.
+ * @typedef {Object} PowerDeduplicationOptions
+ * @property {number} [ttl]
+ * @property {number} [maxKeys]
+ * @property {() => number} [now]
+ */
+
+/**
+ * Options for `PowerHeartbeat`.
+ * @typedef {Object} PowerHeartbeatOptions
+ * @property {number} [interval] Expected time between beats, in ms.
+ * @property {number} [jitter] Fraction of `interval` in 0..1 applied to the
+ *   scheduled check, so a fleet of peers does not fire in lockstep.
+ * @property {number} [timeout] Silence after which the peer is declared dead.
+ *   Defaults to `interval * 2`.
+ * @property {(missedBeats: number, lastBeatAt: number) => void} [onTimeout]
+ * @property {(lastBeatAt: number) => void} [onBeat]
+ * @property {() => number} [now] Injected clock, as the limiters take (PERF-007).
+ */
+
+/**
  * Queue options for `PowerTTLMap`.
  * @typedef {Object} PowerTTLMapOptions
  * @property {number} [defaultTTL] Default TTL in ms (0 = no expiry).

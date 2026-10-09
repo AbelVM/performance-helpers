@@ -22,17 +22,14 @@
  * the pending counter, not an invisible queue.
  *
  * @param {PowerBroadcastBusOptions} options
- * @returns {{ send: (sub: {id: string}, frame: any) => boolean, close: (sub: {id: string}) => void, getSlowConsumerIds: () => Set<string>, dispose: () => void }}
  */
 export function createBroadcastBus(options: PowerBroadcastBusOptions): {
-    send: (sub: {
-        id: string;
-    }, frame: any) => boolean;
-    close: (sub: {
-        id: string;
-    }) => void;
-    getSlowConsumerIds: () => Set<string>;
-    dispose: () => void;
+    send(sub: any, frame: any): boolean;
+    close(sub: any): void;
+    getSlowConsumerIds(): Set<string>;
+    dispose(): void;
+    [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 };
 export type PowerBroadcastBusOptions = {
     /**

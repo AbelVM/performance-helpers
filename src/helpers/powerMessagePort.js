@@ -165,6 +165,15 @@ export class PowerMessagePort {
   }
 
   /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
+
+  /**
    * A minimal snapshot for the metrics collector.
    *
    * @returns {object}

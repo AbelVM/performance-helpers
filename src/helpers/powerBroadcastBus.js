@@ -27,7 +27,6 @@ import { assertKnownOptions } from '../utils/options.js';
  * the pending counter, not an invisible queue.
  *
  * @param {PowerBroadcastBusOptions} options
- * @returns {{ send: (sub: {id: string}, frame: any) => boolean, close: (sub: {id: string}) => void, getSlowConsumerIds: () => Set<string>, dispose: () => void }}
  */
 export function createBroadcastBus(options) {
   assertKnownOptions(options, ['channel', 'ackTimeoutMs', 'onSlowConsumer'], 'createBroadcastBus');
@@ -175,6 +174,15 @@ export function createBroadcastBus(options) {
       pending.clear();
       receiverPendingCount.clear();
       slowConsumers.clear();
+    },
+
+    [Symbol.dispose]() {
+      this.dispose();
+    },
+
+    async [Symbol.asyncDispose]() {
+      this.dispose();
+      return;
     },
   };
 }

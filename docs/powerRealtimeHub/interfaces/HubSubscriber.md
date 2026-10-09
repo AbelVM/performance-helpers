@@ -120,12 +120,14 @@ asked for `0`, so the common case stays a stable insertion-order walk.
 
 ### queue
 
-> **queue**: `any`[]
+> **queue**: `HubQueue`
 
-Bounded buffer for this subscriber. A plain array - the hub reads
+Bounded buffer for this subscriber. A HubQueue - the hub reads
   `.length`, `.push`, `.shift` and `.splice` off it, so a queue typed as an
   abstract buffer (the previous declaration) had no `.length` at any of the
-  five places that check it before enqueueing.
+  five places that check it before enqueueing. It is a plain array in fifo
+  mode and a `PowerPriorityQueue` behind that surface in priority mode, which
+  is why the ordering policy never reaches the flush walk.
 
 ***
 

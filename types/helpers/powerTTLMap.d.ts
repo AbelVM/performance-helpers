@@ -222,6 +222,11 @@ export class PowerTTLMap {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerTTLMap;
 export type PowerTTLMapOptions = import("./jsdoc-types.js").PowerTTLMapOptions;

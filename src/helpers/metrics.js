@@ -219,6 +219,28 @@ const PROMETHEUS_LABEL = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
  * @param {PrometheusDescriptor[]} descriptors
  * @returns {string}
  */
+/**
+ * What is wrong with a histogram value, or `null` when it is well-formed.
+ *
+ * Extracted from {@link formatPrometheus} because naming the offending field
+ * needs a branch per field, and three of them inline pushed that function past
+ * the complexity ceiling. The extraction is also what makes the message
+ * testable on its own terms: the caller gets the specific field, not a list of
+ * all three requirements to work through.
+ *
+ * @param {any} histogram
+ * @returns {string|null} A phrase like `` `sum` as a finite number ``, or `null`.
+ * @private
+ */
+function describeHistogramProblem(histogram) {
+  if (!histogram || typeof histogram !== 'object') return 'an object';
+  const problems = [];
+  if (!Array.isArray(histogram.buckets)) problems.push('`buckets` as an array');
+  if (!Number.isFinite(histogram.count)) problems.push('`count` as a finite number');
+  if (!Number.isFinite(histogram.sum)) problems.push('`sum` as a finite number');
+  return problems.length > 0 ? problems.join(', ') : null;
+}
+
 export function formatPrometheus(descriptors) {
   if (!Array.isArray(descriptors)) {
     throw new TypeError('formatPrometheus: `descriptors` must be an array');
@@ -240,8 +262,23 @@ export function formatPrometheus(descriptors) {
     }
     const labelText = Object.entries(labels)
       .map(([key, value]) => {
-        if (!PROMETHEUS_LABEL.test(key) || /[\r\n]/.test(String(value))) {
-          throw new TypeError('formatPrometheus: invalid label name or value');
+        // Name the offending label and say which half of the pair is wrong.
+        // The previous message was `invalid label name or value`, which on a
+        // descriptor carrying twenty labels told the caller to bisect their own
+        // input — and the two failure modes need different fixes, so "or" is
+        // the wrong word even when there is only one label.
+        if (!PROMETHEUS_LABEL.test(key)) {
+          throw new TypeError(
+            `formatPrometheus: label name \`${key}\` is not a valid Prometheus label ` +
+              `(received ${JSON.stringify(key)}; expected /^[a-zA-Z_][a-zA-Z0-9_]*$/).`
+          );
+        }
+        if (/[\r\n]/.test(String(value))) {
+          throw new TypeError(
+            `formatPrometheus: label \`${key}\` has a value containing a newline ` +
+              `(received ${JSON.stringify(String(value))}). A newline would end the ` +
+              'sample line early and silently corrupt the exposition format.'
+          );
         }
         return `${key}="${String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"')}` + '"';
       })
@@ -261,14 +298,12 @@ export function formatPrometheus(descriptors) {
     }
 
     const histogram = descriptor.value;
-    if (
-      !histogram ||
-      typeof histogram !== 'object' ||
-      !Array.isArray(histogram.buckets) ||
-      !Number.isFinite(histogram.count) ||
-      !Number.isFinite(histogram.sum)
-    ) {
-      throw new TypeError('formatPrometheus: histogram value needs buckets, count, and sum');
+    const histogramProblem = describeHistogramProblem(histogram);
+    if (histogramProblem) {
+      throw new TypeError(
+        `formatPrometheus: histogram \`${descriptor.name}\` needs ${histogramProblem} ` +
+          `(received ${JSON.stringify(histogram) ?? String(histogram)}).`
+      );
     }
     let previous = 0;
     for (const bucket of histogram.buckets) {

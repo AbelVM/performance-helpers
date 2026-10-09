@@ -90,4 +90,25 @@ describe('a leading numeric argument is accepted positionally or as an option', 
     );
     expect(() => new PowerLogger({ level: 2, nonsense: 1 })).toThrow(/unknown option `nonsense`/);
   });
+
+  it('an object carrying only an unknown key reaches the option check', () => {
+    // R1. The options-object test used to be "carries a *known* key", which let
+    // `new PowerSemaphore({ permits: 3 })` — the obvious spelling, and the one
+    // the guide's neighbours use — fall through to the numeric path. The caller
+    // was then told "`limit` must be a finite number (received [object
+    // Object])": an option they never wrote, and a value they never passed.
+    //
+    // Recognising *any* own key routes it to `assertKnownOptions`, which names
+    // the key and suggests the right one. The bare-`{}` case above still throws,
+    // because `{}` has no keys and so is still an invalid number.
+    expect(() => new PowerSemaphore({ permits: 3 })).toThrow(/unknown option `permits`/);
+    // The accepted set is listed, which is what makes it actionable. Note there
+    // is no "Did you mean" here: `permits` → `limit` is five edits against a
+    // threshold of two, and `suggestOption` deliberately stays quiet rather than
+    // guessing across that distance. Asserting a suggestion the heuristic does
+    // not make would be pinning a wish.
+    expect(() => new PowerSemaphore({ permits: 3 })).toThrow(
+      /Accepted options: limit, queueCapacity/
+    );
+  });
 });

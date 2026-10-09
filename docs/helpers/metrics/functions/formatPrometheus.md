@@ -8,15 +8,11 @@
 
 > **formatPrometheus**(`descriptors`): `string`
 
-Format explicit metric descriptors using the Prometheus text exposition
-format. Values are supplied by the caller so this function remains pure and
-cannot accidentally sample helpers or infer histogram semantics.
-
 ## Parameters
 
 ### descriptors
 
-[`PrometheusDescriptor`](../interfaces/PrometheusDescriptor.md)[]
+`any`
 
 ## Returns
 

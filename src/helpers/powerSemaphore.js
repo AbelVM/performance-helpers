@@ -30,11 +30,21 @@ export class PowerSemaphore {
     // obvious shape, and it used to be rejected outright with a message naming a
     // number they had just passed an object for. `PowerTTLMap` already normalises
     // both forms; so now do these.
-    // An options object is recognised only when it carries at least one known
-    // option key. A bare `{}` still falls through to the numeric path and is
-    // rejected as before — which `test/powerLatch.reset.test.js` pins as a
-    // property: whatever the constructor rejects, `reset()` must reject too.
-    if (limit && typeof limit === 'object' && ('limit' in limit || 'queueCapacity' in limit)) {
+    // An options object is recognised when it carries **any** own key, not only
+    // a known one. The narrower test looked safer and was the opposite:
+    // `new PowerSemaphore({ permits: 3 })` — the obvious spelling, and the one
+    // the guide's neighbours use — carried no known key, so it fell through to
+    // the numeric path and the caller was told "`limit` must be a finite number
+    // (received [object Object])". That names an option they never wrote and a
+    // value they never passed, which is the two-things-wrong failure D1a exists
+    // to remove. Recognising any key routes it to `assertKnownOptions`, which
+    // answers "unknown option `permits`. Did you mean `limit`?".
+    //
+    // A bare `{}` still falls through, because it has no keys — and
+    // `test/constructorForms.test.js` pins that as a property: `{}` is an
+    // invalid number, not an options object, and the constructor and `reset()`
+    // must agree about rejecting it.
+    if (limit && typeof limit === 'object' && Object.keys(limit).length > 0) {
       // Validate the object rather than reading one key out of it — otherwise
       // `{ limit: 3, nonsense: 1 }` would pass, and arriving in the
       // options-object form would be a way to *bypass* 8f83c07 rather than a
@@ -192,6 +202,15 @@ export class PowerSemaphore {
    */
   [Symbol.dispose]() {
     this.dispose();
+  }
+
+  /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
   }
 }
 

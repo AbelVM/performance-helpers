@@ -243,9 +243,41 @@ describe('formatPrometheus', () => {
     expect(() =>
       formatPrometheus([{ name: 'bad-name', type: 'gauge', help: 'bad', value: 1 }])
     ).toThrow(/valid metric name/);
+    // D1a: the message names the metric and what it actually got, rather than
+    // listing all three requirements. The old text was `histogram value needs
+    // buckets, count, and sum`, which told a caller who supplied two of the
+    // three to check the one that was fine.
     expect(() => formatPrometheus([{ name: 'h', type: 'histogram', help: 'h', value: 1 }])).toThrow(
-      /histogram value/
+      /histogram `h` needs an object/
     );
+    // And it distinguishes the three fields, so the fix is actionable rather
+    // than a list to work through.
+    expect(() =>
+      formatPrometheus([
+        { name: 'h', type: 'histogram', help: 'h', value: { buckets: [], count: 1, sum: 'x' } },
+      ])
+    ).toThrow(/`sum` as a finite number/);
+    expect(() =>
+      formatPrometheus([
+        { name: 'h', type: 'histogram', help: 'h', value: { buckets: 'no', count: 1, sum: 1 } },
+      ])
+    ).toThrow(/`buckets` as an array/);
+  });
+
+  it('names the offending label rather than saying "name or value"', () => {
+    // D1a. The two failure modes need different fixes, so "or" was the wrong
+    // word even with one label — and with twenty it meant bisecting your own
+    // input.
+    expect(() =>
+      formatPrometheus([
+        { name: 'm', type: 'gauge', help: 'h', value: 1, labels: { 'bad-key': 1 } },
+      ])
+    ).toThrow(/label name `bad-key` is not a valid Prometheus label/);
+    expect(() =>
+      formatPrometheus([
+        { name: 'm', type: 'gauge', help: 'h', value: 1, labels: { ok: 'line\nbreak' } },
+      ])
+    ).toThrow(/label `ok` has a value containing a newline/);
   });
 });
 
@@ -504,6 +536,29 @@ describe('observability: true on the helpers', () => {
     helper.dispose?.();
     expect(defaultMetrics.names()).not.toContain(prefix);
   });
+
+  it.each(HELPERS)(
+    '%s detaches on the async path too, not only on dispose()',
+    async (_name, make, prefix) => {
+      // B2's actual brief is the **asyncDispose** path, and the two cases above
+      // only exercise `dispose()`. A helper whose `asyncDispose` forwarded to
+      // something other than `dispose()` — `close()`, say — would detach on the
+      // sync path and stay registered on the async one, which is the half of
+      // the contract that is silent when wrong.
+      //
+      // `PowerGCRA` and `PowerRateLimit` had no `asyncDispose` at all while
+      // their sibling limiters did, so `await using` on them did not take part
+      // in teardown. This case is what makes that class of gap fail loudly
+      // rather than passing by never being called.
+      defaultMetrics.unregister(prefix);
+      const helper = make();
+      expect(defaultMetrics.names()).toContain(prefix);
+
+      await helper[Symbol.asyncDispose]();
+
+      expect(defaultMetrics.names()).not.toContain(prefix);
+    }
+  );
 
   it('covers every helper that attaches, and no others', () => {
     // **This is the guard the "all of them or none" rule actually needed**, and the

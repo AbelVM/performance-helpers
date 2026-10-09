@@ -6,7 +6,7 @@
 
 # Function: createWebTransportAdapter()
 
-> **createWebTransportAdapter**(`session`): `Promise`\<\{ `close?`: (`code`, `reason`) => `void`; `kind`: `"stream"`; `readable`: `ReadableStream`; `writable`: `WritableStream`; \}\>
+> **createWebTransportAdapter**(`session`): `Promise`\<\{ `kind`: `string`; `readable`: `ReadableStream`\<`any`\>; `writable`: `WritableStream`\<`any`\>; `[asyncDispose]`: `Promise`\<`void`\>; `[dispose]`: `void`; `close`: `void`; `dispose`: `void`; \}\>
 
 Wrap a `WebTransport` session in a stream socket that decodes inbound
 frames.
@@ -25,12 +25,11 @@ result.
 
 A live `WebTransport` with bidirectional
   streams enabled.
+  A socket object compatible with PowerSocketAdapter.
 
 ## Returns
 
-`Promise`\<\{ `close?`: (`code`, `reason`) => `void`; `kind`: `"stream"`; `readable`: `ReadableStream`; `writable`: `WritableStream`; \}\>
-
-A socket object compatible with PowerSocketAdapter.
+`Promise`\<\{ `kind`: `string`; `readable`: `ReadableStream`\<`any`\>; `writable`: `WritableStream`\<`any`\>; `[asyncDispose]`: `Promise`\<`void`\>; `[dispose]`: `void`; `close`: `void`; `dispose`: `void`; \}\>
 
 ## Since
 

@@ -53,7 +53,6 @@ import { createFrameDecoder } from './powerMessageCodec.js';
  *
  * @param {WebTransport} session - A live `WebTransport` with bidirectional
  *   streams enabled.
- * @returns {Promise<{kind:'stream', writable:WritableStream, readable:ReadableStream, close?:(code:number, reason:string)=>void}>}
  *   A socket object compatible with {@link PowerSocketAdapter}.
  * @since 2.0.0
  */
@@ -127,6 +126,28 @@ export async function createWebTransportAdapter(session) {
     kind: 'stream',
     writable: stream.writable,
     readable: transformStream.readable,
+    /**
+     * Alias of `close()`, so the socket object takes part in `using` /
+     * `await using` teardown like every other long-lived helper here.
+     *
+     * This adapter owns no timer and no listener registry of its own - the
+     * pump loop is driven by the stream itself - so `dispose()` is the same
+     * operation as `close()`, not a state reset.
+     *
+     * @param {number} [code]
+     * @param {string} [reason]
+     * @returns {void}
+     */
+    dispose(code = 1000, reason = '') {
+      close(code, reason);
+    },
+    [Symbol.dispose](code = 1000, reason = '') {
+      close(code, reason);
+    },
+    async [Symbol.asyncDispose](code = 1000, reason = '') {
+      close(code, reason);
+      return;
+    },
     close(code = 1000, reason = '') {
       if (closed) return;
       closed = true;

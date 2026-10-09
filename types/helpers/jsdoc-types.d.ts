@@ -763,6 +763,45 @@ export type PowerQueueOptions = {
     initialCapacity?: number | undefined;
 };
 /**
+ * Queue options for `PowerPriorityQueue`.
+ */
+export type PowerPriorityQueueOptions = {
+    initialCapacity?: number | undefined;
+};
+/**
+ * Options for `PowerDeduplication`.
+ */
+export type PowerDeduplicationOptions = {
+    ttl?: number | undefined;
+    maxKeys?: number | undefined;
+    now?: (() => number) | undefined;
+};
+/**
+ * Options for `PowerHeartbeat`.
+ */
+export type PowerHeartbeatOptions = {
+    /**
+     * Expected time between beats, in ms.
+     */
+    interval?: number | undefined;
+    /**
+     * Fraction of `interval` in 0..1 applied to the
+     * scheduled check, so a fleet of peers does not fire in lockstep.
+     */
+    jitter?: number | undefined;
+    /**
+     * Silence after which the peer is declared dead.
+     * Defaults to `interval * 2`.
+     */
+    timeout?: number | undefined;
+    onTimeout?: ((missedBeats: number, lastBeatAt: number) => void) | undefined;
+    onBeat?: ((lastBeatAt: number) => void) | undefined;
+    /**
+     * Injected clock, as the limiters take (PERF-007).
+     */
+    now?: (() => number) | undefined;
+};
+/**
  * Queue options for `PowerTTLMap`.
  */
 export type PowerTTLMapOptions = {

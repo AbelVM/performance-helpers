@@ -254,4 +254,13 @@ export class PowerSlidingWindow {
   [Symbol.dispose]() {
     this.dispose();
   }
+
+  /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
 }

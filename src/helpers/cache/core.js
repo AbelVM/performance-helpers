@@ -2865,16 +2865,14 @@ export class PowerCache {
    * returns a resolved Promise for await compatibility.
    */
   async [Symbol.asyncDispose]() {
-    try {
-      this.stopCleanup();
-    } catch (e) {
-      /* ignore */
-    }
-    try {
-      this.clear();
-    } catch (e) {
-      /* ignore */
-    }
+    // Delegates rather than repeating the body. It used to repeat it, and the
+    // copy dropped the `detach` that sits at the head of `[Symbol.dispose]()` —
+    // so `await using cache = …` left the series registered for the life of the
+    // collector, sampling an object nobody could reach, which answers every
+    // time and so failed nothing. The comment above `[Symbol.dispose]()` says
+    // the detach has to live on the symbol path precisely because `using` and
+    // `await using` call the symbol and nothing else; this is the other symbol.
+    this[Symbol.dispose]();
     return;
   }
 

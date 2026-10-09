@@ -270,6 +270,11 @@ export class PowerSocketAdapter {
      * Alias for {@link PowerSocketAdapter#dispose}, so `using` works.
      */
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerSocketAdapter;
 /**

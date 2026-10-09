@@ -475,6 +475,15 @@ export class PowerTTLMap {
   [Symbol.dispose]() {
     this.dispose();
   }
+
+  /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
 }
 
 export default PowerTTLMap;

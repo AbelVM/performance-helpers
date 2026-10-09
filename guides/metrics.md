@@ -202,17 +202,33 @@ helper's life are `dispose()`, `terminate()` and, for the loop monitor,
 
 So the pairing is:
 
-| Operation                  | Registration                     |
-| -------------------------- | -------------------------------- |
-| `reset()`, `stop()`        | kept — the helper is still alive |
-| `dispose()`, `terminate()` | released — the helper is done    |
+| Operation                                       | Registration                     |
+| ----------------------------------------------- | -------------------------------- |
+| `reset()`, `stop()`                             | kept — the helper is still alive |
+| `dispose()`, `terminate()`                      | released — the helper is done    |
+| `[Symbol.dispose]()`, `[Symbol.asyncDispose]()` | released — the helper is done    |
+
+The symbol rows are not a footnote. `using x = …` and `await using x = …` call
+the symbol **and nothing else**, so a detach that only the named method performed
+left the series registered for the life of the collector. That is not
+hypothetical: `PowerCache`'s `[Symbol.asyncDispose]()` repeated
+`[Symbol.dispose]()`'s body and the copy dropped the `detach`, and
+`PowerPool`'s called `terminate()`, which never detaches. Both were found by a
+test that drives the symbol path rather than the named one, and both are now
+pinned by it — which is the reason to prefer delegating from one symbol to the
+other over repeating the body.
 
 ### Which helpers take it
 
 `PowerCache`, `PowerPool`, `PowerBulkhead`, `PowerGCRA`, `PowerEventLoopMonitor`,
 `PowerRealtimeHub`, `PowerSocketAdapter`, `PowerWebSocketClient`,
+`PowerWebTransportClient`, `PowerMessagePort`, `PowerDatagramChannel`,
 `PowerRetryBudget`, `PowerRTCChannel`, `PowerThrottle`, `PowerSlidingWindow` and
 `PowerRateLimit`.
+
+`test/metrics.test.js` reads that list out of the source — `attach(this, '<name>'`
+— so a helper that starts attaching without appearing here fails the suite rather
+than being silently left out.
 
 The three limiters were the last to get it, and their `stats()` differ from the
 rest in a way worth knowing before you read a series:

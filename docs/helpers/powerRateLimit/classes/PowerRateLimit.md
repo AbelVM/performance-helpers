@@ -181,6 +181,16 @@ without `sharedState`.
 
 ***
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

@@ -191,6 +191,18 @@ registered against is cleared.
 
 ***
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

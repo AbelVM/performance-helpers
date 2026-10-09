@@ -64,25 +64,7 @@ export function diffObservation(current: {
 }, previous?: {
     series: Record<string, number | boolean | null | string>;
 }): Record<string, number | null>;
-/** @typedef {{le: number, value: number}} PrometheusBucket */
-/** @typedef {{buckets: PrometheusBucket[], count: number, sum: number}} PrometheusHistogram */
-/**
- * @typedef {Object} PrometheusDescriptor
- * @property {string} name
- * @property {'counter'|'gauge'|'histogram'} type
- * @property {string} help
- * @property {Record<string, string|number>} [labels]
- * @property {number|PrometheusHistogram} value
- */
-/**
- * Format explicit metric descriptors using the Prometheus text exposition
- * format. Values are supplied by the caller so this function remains pure and
- * cannot accidentally sample helpers or infer histogram semantics.
- *
- * @param {PrometheusDescriptor[]} descriptors
- * @returns {string}
- */
-export function formatPrometheus(descriptors: PrometheusDescriptor[]): string;
+export function formatPrometheus(descriptors: any): string;
 /**
  * Wire a helper's `stats()` into a collector, and hand back the receipt that
  * undoes it.

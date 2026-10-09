@@ -133,6 +133,18 @@ promptly — which is exactly why it should be visible rather than silent.
 
 ***
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

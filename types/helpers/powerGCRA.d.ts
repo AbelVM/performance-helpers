@@ -273,6 +273,7 @@ export class PowerGCRA {
      */
     clear(): void;
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerGCRA;
 export type PowerGCRAOptions = {

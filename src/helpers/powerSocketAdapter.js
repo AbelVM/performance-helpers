@@ -655,6 +655,15 @@ export class PowerSocketAdapter {
   }
 
   /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
+
+  /**
    * @private
    */
   _attach() {

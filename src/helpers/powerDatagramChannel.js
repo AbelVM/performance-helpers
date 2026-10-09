@@ -303,6 +303,15 @@ export class PowerDatagramChannel {
   }
 
   /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
+
+  /**
    * Counters and configuration for this channel.
    *
    * @returns {object}

@@ -223,6 +223,15 @@ export class PowerRetryBudget {
   }
 
   /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
+
+  /**
    * A snapshot of the budget, for logging and for deciding whether a refusal
    * was routine or a sign the dependency is genuinely sick.
    *

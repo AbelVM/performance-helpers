@@ -462,6 +462,15 @@ export class PowerBulkhead {
   }
 
   /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
+
+  /**
    * The partition a key belongs to: the explicit `partitioner` when given,
    * otherwise a hash of the key, and otherwise round-robin so keys spread
    * evenly when there is nothing to hash.

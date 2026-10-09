@@ -503,6 +503,11 @@ export class PowerGCRA {
   [Symbol.dispose]() {
     this.dispose();
   }
+
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
 }
 
 export default PowerGCRA;

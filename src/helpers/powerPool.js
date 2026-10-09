@@ -4450,7 +4450,11 @@ export class PowerPool {
     } catch (err) {
       // ignore drain failures and proceed to terminate
     }
-    this.terminate();
+    // `dispose()`, not `terminate()`. `terminate()` only shuts down, so the
+    // metrics receipt stayed attached after an `await using` teardown — the
+    // series kept being sampled against a pool nobody could reach. `dispose()`
+    // detaches and then shuts down, which is the whole teardown.
+    this.dispose();
   }
 
   /**

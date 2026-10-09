@@ -184,6 +184,11 @@ export class PowerBulkhead {
     _hashKey(value: string): number;
     _resolveDrainWaitersIfIdle(): void;
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerBulkhead;
 export type PowerBulkheadOptions = import("./jsdoc-types.js").PowerBulkheadOptions;

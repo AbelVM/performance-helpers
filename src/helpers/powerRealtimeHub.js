@@ -29,7 +29,132 @@
  */
 import { encodeMessage, frameEncodedJson } from './powerMessageCodec.js';
 import { attach, detach } from './metrics.js';
+import { PowerPriorityQueue } from './powerPriorityQueue.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+
+/**
+ * A subscriber's pending queue, in its two shapes.
+ *
+ * The hub reads `length`, `push`, `shift` and `splice(0, n)` off a subscriber's
+ * queue in five places, and every one of those is ordering-agnostic — so the
+ * ordering policy lives entirely behind this surface and `_enqueue`,
+ * `_flushSubscriber`, `_queuedSubscribers` and `stats()` never branch on it.
+ * That is the point: a policy that leaked into the flush walk would be a policy
+ * the two flush paths could disagree about.
+ *
+ * `fifo` is the default and is a plain array. Zero allocation per message, and
+ * the documented `drop-oldest` / `drop-newest` / `disconnect` policies mean
+ * exactly what they say.
+ *
+ * `priority` is backed by {@link PowerPriorityQueue}. It exists because a
+ * bounded array with binary-search insertion is O(n) per publish and `maxQueue`
+ * is a caller-chosen number, not a small one — a subscriber configured with
+ * `maxQueue: 100000` would pay a 100000-element move on every message.
+ *
+ * @private
+ */
+class HubQueue {
+  /**
+   * @param {boolean} priority
+   */
+  constructor(priority) {
+    this._priority = priority;
+    /** @type {any[]} */
+    this._fifo = priority ? [] : [];
+    /** @type {PowerPriorityQueue|null} */
+    this._heap = priority ? new PowerPriorityQueue() : null;
+  }
+
+  get length() {
+    return this._priority ? /** @type {PowerPriorityQueue} */ (this._heap).size : this._fifo.length;
+  }
+
+  /**
+   * @param {any} message
+   * @param {number} [priority] - Ignored in fifo mode, which has no ordering
+   *   to apply. The hub rejects a `publish` that supplies one on a hub without
+   *   `messagePriority`, so this is unreachable rather than silently dropped.
+   */
+  push(message, priority = 0) {
+    if (this._priority) {
+      // Wrapped so the priority travels with the message without requiring the
+      // message itself to carry a `priority` field — a caller's payload shape
+      // is not the hub's to invent. The wrapper is also what keeps a payload
+      // that *does* carry `priority` from being reordered by accident: the heap
+      // reads the wrapper's field, never the message's.
+      /** @type {PowerPriorityQueue} */ (this._heap).push({ item: message, priority });
+      return;
+    }
+    this._fifo.push(message);
+  }
+
+  /**
+   * Unwrap one entry taken off the heap.
+   *
+   * The heap hands back the wrapper `push()` stored, and everything downstream
+   * of this class — the handler, the codec, the frame memo's identity key —
+   * expects the caller's message. Unwrapping here rather than at each call site
+   * is what keeps the ordering policy from leaking into the flush walk.
+   * @param {any} entry
+   * @returns {any}
+   */
+  _unwrap(entry) {
+    return this._priority ? entry.item : entry;
+  }
+
+  shift() {
+    if (this._priority) {
+      return this._unwrap(/** @type {PowerPriorityQueue} */ (this._heap).shift());
+    }
+    return this._fifo.shift();
+  }
+
+  /**
+   * Take up to `count` items off the front, in delivery order.
+   *
+   * `start` is always `0` at the one call site (`_flushSubscriber`), and saying
+   * so is cheaper than implementing a general splice the hub never asks for.
+   * @param {number} start
+   * @param {number} count
+   * @returns {any[]}
+   */
+  splice(start, count) {
+    if (!this._priority) return this._fifo.splice(start, count);
+    const heap = /** @type {PowerPriorityQueue} */ (this._heap);
+    // Bounded by `size`, not by a sentinel: a legitimate message can *be*
+    // `undefined`, and stopping on one would silently truncate the batch.
+    const n = Math.min(count, heap.size);
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) out[i] = this._unwrap(heap.shift());
+    return out;
+  }
+
+  /**
+   * Discard the item furthest from delivery.
+   *
+   * In fifo mode that is the head, which is what `drop-oldest` has always
+   * meant. In priority mode it is the lowest-priority item — and among equal
+   * priorities the most recently queued, because that is the one `shift()`
+   * reaches last. The policy name stays true of the *intent* (make room by
+   * discarding what is least worth keeping) rather than of the literal
+   * insertion order, and the guide says so.
+   * @returns {any}
+   */
+  dropOldest() {
+    if (this._priority) {
+      return this._unwrap(/** @type {PowerPriorityQueue} */ (this._heap).popLowest());
+    }
+    return this._fifo.shift();
+  }
+
+  clear() {
+    if (this._priority) {
+      /** @type {PowerPriorityQueue} */ (this._heap).clear();
+      return;
+    }
+    this._fifo.length = 0;
+  }
+}
 
 /**
  * What to do when a subscriber's queue is full.
@@ -59,11 +184,13 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  * @typedef {object} HubSubscriber
  * @property {string} id
  * @property {string} topic
- * @property {any[]} queue
- *   Bounded buffer for this subscriber. A plain array - the hub reads
+ * @property {HubQueue} queue
+ *   Bounded buffer for this subscriber. A {@link HubQueue} - the hub reads
  *   `.length`, `.push`, `.shift` and `.splice` off it, so a queue typed as an
  *   abstract buffer (the previous declaration) had no `.length` at any of the
- *   five places that check it before enqueueing.
+ *   five places that check it before enqueueing. It is a plain array in fifo
+ *   mode and a `PowerPriorityQueue` behind that surface in priority mode, which
+ *   is why the ordering policy never reaches the flush walk.
  * @property {number} dropped - Messages discarded by the slow-consumer policy.
  * @property {number} bytesSent - Bytes of framed payload handed to this
  *   subscriber's transport so far. Exact, and free: the frame was built for this
@@ -202,6 +329,17 @@ import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
  *   topic and increments `stats().rateLimited`. Composes with any helper that
  *   satisfies {@link RateLimiterLike} — `PowerThrottle`, `PowerGCRA`,
  *   `PowerRateLimit` with `keyFn`, etc.
+ * @property {boolean} [messagePriority=false] - Order each subscriber's queue
+ *   by the `priority` passed to `publish()` rather than by arrival. Off by
+ *   default, so the common case stays a plain array with FIFO delivery and pays
+ *   nothing. When on, every subscriber's queue is a `PowerPriorityQueue`, and
+ *   `publish(topic, message, { priority })` is accepted — passing `priority` on
+ *   a hub without this option throws, because a silently ignored ordering is
+ *   the misspelled-option failure this library refuses to have.
+ *
+ *   This is **message** priority and is independent of the per-subscriber
+ *   `priority` drain order: the first decides which message a subscriber
+ *   receives next, the second decides which subscriber is served first.
  */
 
 let _nextSubId = 0;
@@ -291,7 +429,17 @@ export class PowerRealtimeHub {
   constructor(options) {
     assertKnownOptions(
       options,
-      ['send', 'observability', 'close', 'batch', 'batchDelayMs', 'codec', 'onError', 'rateLimit'],
+      [
+        'send',
+        'observability',
+        'close',
+        'batch',
+        'batchDelayMs',
+        'codec',
+        'onError',
+        'rateLimit',
+        'messagePriority',
+      ],
       'PowerRealtimeHub'
     );
     const {
@@ -302,6 +450,7 @@ export class PowerRealtimeHub {
       codec = 'json',
       onError,
       rateLimit,
+      messagePriority = false,
     } = options || {};
 
     if (typeof send !== 'function') {
@@ -331,6 +480,11 @@ export class PowerRealtimeHub {
       fallback: 0,
     });
     this._codec = codec;
+    // RT-001: message-level ordering, off by default. Stored as a boolean rather
+    // than read from `options` at enqueue time because the queue shape is chosen
+    // once per subscriber in `subscribe()`, and a hub that changed its mind
+    // midway would leave two subscribers with incompatible queue types.
+    this._messagePriority = messagePriority === true;
     this._onError = typeof onError === 'function' ? onError : null;
     // RT-026: `options.now` is gone. It was documented as "Clock override, for
     // tests", accepted by `assertKnownOptions`, destructured, stored on
@@ -375,14 +529,29 @@ export class PowerRealtimeHub {
     // exists to remove.
     //
     // The key is `(length, first, last)` of the batch, compared **by identity**,
-    // and it is sound because of two properties of how a queue is filled:
+    // and it is sound because of a subset invariant over how a queue is filled:
     // `_enqueue` pushes the *same message object* into every subscriber of a
-    // topic, and `drop-oldest` removes only from the front. So two batches that
-    // agree on length and on both ends are the same batch — different subscribes
-    // differ at an end, and a different `maxBatch` differs in length. This is an
-    // identity check, not a value comparison, so a caller publishing the same
-    // value twice gets two encodes, which is correct: nothing has to assume the
-    // contents were compared.
+    // topic, and eviction removes the current worst entry, so at every moment the
+    // smaller-budget subscriber's queue is a **subset** of the larger-budget
+    // one's. Both queues are totally ordered by the same comparator, so a
+    // subsequence of the same length is the same sequence — which makes `length`
+    // alone sufficient, and the two ends a cheap confirmation of it.
+    //
+    // That invariant is **mode-independent**, and saying so matters: RT-001 added
+    // `messagePriority`, under which `drop-oldest` no longer removes from the
+    // front but from the middle. The original justification here ("`drop-oldest`
+    // removes only from the front") stopped being true at that point, and a
+    // comment whose stated reason has expired is worse than one that was never
+    // written — the next reader would either trust it or "fix" a memo that is
+    // sound. The subset argument holds in both modes because evicting the worst
+    // of a subset evicts something the superset also considers worst-or-worse.
+    // Verified by brute force over the priority space and by
+    // `test/powerRealtimeHub.messagePriority.test.js`, which drives two
+    // subscribers with different `maxQueue` through the real flush path.
+    //
+    // This is an identity check, not a value comparison, so a caller publishing
+    // the same value twice gets two encodes, which is correct: nothing has to
+    // assume the contents were compared.
     //
     // The memo holds a frame that several subscribers are handed, so **the frame
     // is shared and must be treated as read-only by the transport.** A `send`
@@ -498,7 +667,13 @@ export class PowerRealtimeHub {
       // subscriber rather than read from `options` at flush time because the
       // callback is per-subscriber and the flush walk already has the sub.
       bytesAcknowledged: validatedAcknowledged,
-      queue: [],
+      // RT-001: the queue shape is chosen here, once, from the hub-level flag.
+      // A per-subscriber override was considered and rejected: two subscribers
+      // on one topic with different queue types would make the frame memo's
+      // identity key unsound, because `drop-oldest` removes from a different end
+      // in each and two batches could then agree on `(length, first, last)`
+      // without being the same batch.
+      queue: new HubQueue(this._messagePriority),
       inFlight: 0,
       /** @type {?Promise<void>} */
       _inflightChain: null,
@@ -571,10 +746,31 @@ export class PowerRealtimeHub {
    *   that subscribes later. Intended for a small, fixed set of topics such as
    *   config changes; the retained log is not bounded per subscriber, so do not
    *   use it for an unbounded feed.
+   * @param {number} [options.priority] - Delivery order within each subscriber's
+   *   queue, higher first. Requires the hub's `messagePriority` option; passing
+   *   it without that throws, because an ordering that is silently ignored is
+   *   the misspelled-option failure this library refuses to have. Omitted means
+   *   `0`, which is indistinguishable from an explicit `0` — the same rule the
+   *   per-subscriber `priority` drain order follows.
    * @returns {number} The number of subscribers the message was queued for.
    */
   publish(topic, message, options = {}) {
     if (this._closed) return 0;
+    // RT-001: validated here rather than at the call site's convenience, because
+    // the two failure modes are both silent without it. A misspelled option
+    // (`prioroty`) would be ignored, and a `priority` on a hub without
+    // `messagePriority` would order nothing at all — the caller would believe
+    // they had asked for priority and get FIFO.
+    assertKnownOptions(options, ['retain', 'priority'], 'PowerRealtimeHub.publish');
+    const priority =
+      options?.priority === undefined ? 0 : PowerRealtimeHub._validatePriority(options.priority);
+    if (options?.priority !== undefined && !this._messagePriority) {
+      throw new TypeError(
+        'PowerRealtimeHub: `publish({ priority })` requires the hub option ' +
+          "`messagePriority: true`. Without it every subscriber's queue is FIFO, so the " +
+          'priority you passed would order nothing.'
+      );
+    }
     const bucket = this._topics.get(topic);
     this._counters.published += 1;
     // **Retain before the early return.** This used to sit below it, so
@@ -600,7 +796,7 @@ export class PowerRealtimeHub {
     let queued = 0;
     for (const sub of bucket.values()) {
       if (sub.closed) continue;
-      this._enqueue(sub, message);
+      this._enqueue(sub, message, priority);
       queued += 1;
     }
     if (queued > 0) this._scheduleFlush();
@@ -707,9 +903,12 @@ export class PowerRealtimeHub {
    */
 
   dispose() {
-    detach(this._metrics);
-    this._metrics = null;
-    this[Symbol.dispose]();
+    // Delegates rather than detaching first. `close()` already unregisters the
+    // metrics receipt at its head, so detaching here as well was a second
+    // `detach(null)` — harmless, because `detach` is null-safe, but it is the
+    // kind of duplication that drifts: the day `close()` stops detaching, this
+    // copy would keep the hub registered and sampled forever.
+    this.close();
   }
 
   [Symbol.dispose]() {
@@ -747,13 +946,20 @@ export class PowerRealtimeHub {
    * @private
    * @param {HubSubscriber} sub
    * @param {any} message
+   * @param {number} [priority] - Message ordering, higher first. Ignored unless
+   *   the hub was built with `messagePriority`; `publish()` refuses to supply one
+   *   on a hub that is not, so this is unreachable rather than silently dropped.
    * @returns {void}
    */
-  _enqueue(sub, message) {
+  _enqueue(sub, message, priority = 0) {
     // maxQueue 0 means no buffering: the policy is evaluated immediately.
     while (sub.queue.length >= sub.maxQueue) {
       if (sub.slowConsumer === 'drop-oldest' && sub.queue.length > 0) {
-        sub.queue.shift();
+        // RT-001: `dropOldest()`, not `shift()`. In fifo mode they are the same
+        // call. In priority mode `shift()` would discard the *best* queued
+        // message — the one the ordering existed to protect — so the eviction
+        // has to come off the other end.
+        sub.queue.dropOldest();
         this._counters.dropped += 1;
         sub.dropped += 1;
         continue;
@@ -778,7 +984,7 @@ export class PowerRealtimeHub {
       this._detach(sub, { close: true, reason: 'slow-consumer' });
       return;
     }
-    sub.queue.push(message);
+    sub.queue.push(message, priority);
   }
 
   /**

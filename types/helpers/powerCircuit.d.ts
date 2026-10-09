@@ -122,6 +122,11 @@ export class PowerCircuit {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerCircuit;
 export type PowerCircuitOptions = import("./jsdoc-types.js").PowerCircuitOptions;

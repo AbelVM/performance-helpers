@@ -158,6 +158,11 @@ export class PowerThrottle {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type PowerThrottleOptions = import("./jsdoc-types.js").PowerThrottleOptions;
 export type PowerThrottleToken = import("./jsdoc-types.js").PowerThrottleToken;

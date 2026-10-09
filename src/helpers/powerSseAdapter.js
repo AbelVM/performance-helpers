@@ -64,7 +64,6 @@ function frameToSseLine(frame) {
  * the hub detaches the subscriber.
  *
  * @param {SseAdapterOptions} [options]
- * @returns {{ send: function(object, Uint8Array): Promise<void>, close: function(object, string): void }}
  */
 export function createSseAdapter(options = {}) {
   assertKnownOptions(options, ['createResponse', 'onError'], 'createSseAdapter');
@@ -74,20 +73,20 @@ export function createSseAdapter(options = {}) {
   const subs = new Map();
 
   /**
-   * @param {HubSubscriber} sub
+   * @param {object} sub
    * @param {Uint8Array} frame
    * @returns {Promise<void>}
    */
   async function send(sub, frame) {
-    const sseSub = subs.get(sub.id);
-    if (!sseSub || sseSub.closed) return;
+    const sseSub = subs.get(/** @type {any} */ (sub).id);
+    if (!sseSub || /** @type {any} */ (sseSub).closed) return;
 
     const line = frameToSseLine(frame);
     try {
-      if (sseSub.writer) {
-        await sseSub.writer.write(line);
-      } else if (typeof sub.transport?.write === 'function') {
-        sub.transport.write(line);
+      if (/** @type {any} */ (sseSub).writer) {
+        await /** @type {any} */ (sseSub).writer.write(line);
+      } else if (typeof (/** @type {any} */ (sub).transport?.write) === 'function') {
+        /** @type {any} */ (sub).transport.write(line);
       }
     } catch (/** @type {any} */ err) {
       if (onError) onError(err, sub);
@@ -96,51 +95,87 @@ export function createSseAdapter(options = {}) {
   }
 
   /**
-   * @param {HubSubscriber} sub
+   * @param {object} sub
    */
   function close(sub) {
-    const sseSub = subs.get(sub.id);
-    if (!sseSub || sseSub.closed) return;
-    sseSub.closed = true;
+    const sseSub = subs.get(/** @type {any} */ (sub).id);
+    if (!sseSub || /** @type {any} */ (sseSub).closed) return;
+    /** @type {any} */ (sseSub).closed = true;
     try {
-      if (sseSub.writer) {
-        sseSub.writer.close().catch(() => {});
-      } else if (typeof sub.transport?.end === 'function') {
-        sub.transport.end();
+      if (/** @type {any} */ (sseSub).writer) {
+        /** @type {any} */ (sseSub).writer.close().catch(() => {});
+      } else if (typeof (/** @type {any} */ (sub).transport?.end) === 'function') {
+        /** @type {any} */ (sub).transport.end();
       }
     } catch {
       // ignore; subscriber stream is already closed
     }
-    subs.delete(sub.id);
+    subs.delete(/** @type {any} */ (sub).id);
   }
 
   /**
    * Register a subscriber with the adapter.
    *
-   * @param {HubSubscriber} sub
+   * @param {object} sub
+   * @returns {void}
+   */
+  /**
+   * @param {object} sub
    * @returns {void}
    */
   function register(sub) {
-    if (subs.has(sub.id)) return;
+    if (subs.has(/** @type {any} */ (sub).id)) return;
     let writer = null;
-    let abort = null;
+    /** @type {AbortController | null} */ let abort = null;
     if (createResponse) {
       try {
         const response = createResponse(sub);
-        if (response?.body?.getWriter) {
-          writer = response.body.getWriter();
-          abort = new AbortController();
+        const r = /** @type {any} */ (response);
+        if (r && r.body) {
+          const body = /** @type {any} */ (r.body);
+          if (typeof body.getWriter === 'function') {
+            writer = body.getWriter();
+            abort = new AbortController();
+          }
         }
       } catch (/** @type {any} */ error) {
         if (onError) onError(error, sub);
         return;
       }
-    } else if (sub.transport) {
-      writer = /** @type {WritableStreamDefaultWriter} */ (null);
+    } else if (/** @type {any} */ (sub).transport) {
+      writer = /** @type {any} */ (null);
       abort = new AbortController();
     }
-    subs.set(sub.id, { id: sub.id, writer, abort, closed: false });
+    subs.set(/** @type {any} */ (sub).id, {
+      id: /** @type {any} */ (sub).id,
+      writer,
+      abort: /** @type {any} */ (abort),
+      closed: false,
+    });
   }
 
-  return { send, close, register };
+  function dispose() {
+    if (subs.size === 0) return;
+    for (const sub of subs.values()) {
+      try {
+        if (sub.writer) sub.writer.close().catch(() => {});
+      } catch {
+        // Ignore cleanup errors when closing SSE writer; they are non-fatal.
+      }
+      subs.delete(/** @type {any} */ (sub).id);
+    }
+    subs.clear();
+  }
+
+  return {
+    send,
+    close,
+    register,
+    dispose,
+    [Symbol.dispose]: dispose,
+    [Symbol.asyncDispose]: async () => {
+      dispose();
+      return;
+    },
+  };
 }

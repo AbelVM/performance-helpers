@@ -85,6 +85,9 @@ for fallback guidance and the legacy compatibility option.
 - [PowerSlidingWindow: Sliding-window limiter](guides/powerSlidingWindow.md). A simple rolling-window limiter for quota-style rate limiting.
 - [PowerGCRA: Cell-based rate limiter](guides/powerGCRA.md). GCRA — the ATM Forum algorithm behind `redis-cell` and Go's `x/time/rate`. O(1) with a single number of state, and an **exact** `retryAfter()` rather than an estimate. Composes in `PowerRateLimit` alongside the other limiters.
 - [PowerQueue: O(1) ring-buffer queue](guides/powerQueue.md). A resizable, high-performance queue intended for use in `PowerPool` and other high-throughput scenarios.
+- [PowerPriorityQueue: Binary heap priority queue](guides/powerPriorityQueue.md). Higher priority first, FIFO on ties, O(log n) push/shift.
+- [PowerDeduplication: Time-windowed dedup](guides/powerDeduplication.md). Prevent replays/duplicates within a TTL window with max key cap.
+- [PowerHeartbeat: Jittered liveness detector](guides/powerHeartbeat.md). Declare a peer dead when no `beat()` arrives within `timeout`; jitter decorrelates a fleet so checks do not fire in lockstep.
 - [PowerSemaphore: Async concurrency gate](guides/powerSemaphore.md). Lightweight semaphore for limiting concurrent I/O and fan-out workloads.
 - [PowerCrossLock: Cross-worker mutex](guides/powerCrossLock.md). A fair mutex shared by every worker in the process, over the platform's Web Locks implementation. Use it when the thing you must exclude is running in _another_ thread — `PowerSemaphore` cannot do that, because every instance is local to its thread.
 - [PowerServo: Closed-loop transfer function](guides/powerServo.md). Hold a measured value at a setpoint — a queue depth, a byte ceiling, a pool size — with an optional feedforward path for a disturbance you can see before it shows up in the measurement. Supplies the arithmetic (PI, derivative on the measurement, an integral that cannot wind up) and takes both terms of the error from you, so the decision of _what to measure_ stays with the caller. The loop cannot diverge: the output is clamped every step and the integral is clamped within the same window.
@@ -254,6 +257,9 @@ import {
   PowerGCRA,
   PowerRateLimit,
   PowerQueue,
+  PowerPriorityQueue,
+  PowerDeduplication,
+  PowerHeartbeat,
   PowerSemaphore,
   PowerServo,
   PowerDefer,

@@ -62,6 +62,24 @@ Payload codec for outgoing frames.
 
 ***
 
+### messagePriority?
+
+> `optional` **messagePriority?**: `boolean`
+
+Order each subscriber's queue
+  by the `priority` passed to `publish()` rather than by arrival. Off by
+  default, so the common case stays a plain array with FIFO delivery and pays
+  nothing. When on, every subscriber's queue is a `PowerPriorityQueue`, and
+  `publish(topic, message, { priority })` is accepted — passing `priority` on
+  a hub without this option throws, because a silently ignored ordering is
+  the misspelled-option failure this library refuses to have.
+
+  This is **message** priority and is independent of the per-subscriber
+  `priority` drain order: the first decides which message a subscriber
+  receives next, the second decides which subscriber is served first.
+
+***
+
 ### observability?
 
 > `optional` **observability?**: `boolean` \| [`MetricsCollector`](../../helpers/metrics/classes/MetricsCollector.md)

@@ -110,6 +110,11 @@ export class PowerRetryBudget {
      */
     getStats(): import("./jsdoc-types.js").PowerRetryBudgetStats;
     [Symbol.dispose](): void;
+    /**
+     * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+     * @returns {Promise<void>}
+     */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 /**
  * PowerRetry

@@ -342,6 +342,12 @@ Re-exports [PowerDeadline](../helpers/powerDeadline/classes/PowerDeadline.md)
 
 ***
 
+### PowerDeduplication
+
+Re-exports [PowerDeduplication](../helpers/powerDeduplication/classes/PowerDeduplication.md)
+
+***
+
 ### PowerDefer
 
 Re-exports [PowerDefer](../helpers/powerDefer/classes/PowerDefer.md)
@@ -363,6 +369,12 @@ Re-exports [PowerEventLoopMonitor](../helpers/powerEventLoopMonitor/classes/Powe
 ### PowerGCRA
 
 Re-exports [PowerGCRA](../powerGCRA/classes/PowerGCRA.md)
+
+***
+
+### PowerHeartbeat
+
+Re-exports [PowerHeartbeat](../helpers/powerHeartbeat/classes/PowerHeartbeat.md)
 
 ***
 
@@ -417,6 +429,12 @@ Re-exports [PowerPermitGate](../helpers/powerPermitGate/classes/PowerPermitGate.
 ### PowerPool
 
 Re-exports [PowerPool](../helpers/powerPool/classes/PowerPool.md)
+
+***
+
+### PowerPriorityQueue
+
+Re-exports [PowerPriorityQueue](../helpers/powerPriorityQueue/classes/PowerPriorityQueue.md)
 
 ***
 

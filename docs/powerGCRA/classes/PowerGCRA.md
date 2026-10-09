@@ -128,6 +128,16 @@ consuming it. Same shape as `PowerThrottle.available()` for composition.
 
 ## Methods
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

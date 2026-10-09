@@ -1,0 +1,7 @@
+---
+'performance-helpers': minor
+---
+
+Fix two metrics leaks on the `await using` teardown path: `PowerCache`'s `[Symbol.asyncDispose]()` repeated `[Symbol.dispose]()`'s body and dropped the `detach`, and `PowerPool`'s called `terminate()` (which never detaches) instead of `dispose()`. Both left the series registered and sampled against an unreachable object. `PowerGCRA` and `PowerRateLimit` gain the `[Symbol.asyncDispose]()` their sibling limiters already had.
+
+Add `Symbol.asyncDispose` to classes missing it for `await using` support. Add `PowerPriorityQueue` (binary heap, higher priority first, FIFO on ties, plus `popLowest()` for bounded eviction), `PowerDeduplication` (time-windowed, TTL + max key cap) and `PowerHeartbeat` (jittered liveness detection). `PowerRealtimeHub` gains an opt-in `messagePriority` option that orders each subscriber's queue by the `priority` passed to `publish()`, with default FIFO behaviour unchanged. `createWebTransportAdapter`'s socket object now forwards `dispose`/`Symbol.dispose`/`Symbol.asyncDispose` to `close()`. The published types for `createBroadcastBus`, `createSseAdapter` and `createWebTransportAdapter` now include the disposal symbols; their hand-written `@returns` types had drifted and omitted them. `formatPrometheus` validation errors now name the offending label key and which half of the pair is wrong, and name the specific histogram field that is malformed rather than listing all three requirements. Update metadata and docs.

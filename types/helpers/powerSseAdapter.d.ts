@@ -6,11 +6,14 @@
  * the hub detaches the subscriber.
  *
  * @param {SseAdapterOptions} [options]
- * @returns {{ send: function(object, Uint8Array): Promise<void>, close: function(object, string): void }}
  */
 export function createSseAdapter(options?: SseAdapterOptions): {
-    send: (arg0: object, arg1: Uint8Array) => Promise<void>;
-    close: (arg0: object, arg1: string) => void;
+    send: (sub: object, frame: Uint8Array) => Promise<void>;
+    close: (sub: object) => void;
+    register: (sub: object) => void;
+    dispose: () => void;
+    [Symbol.dispose]: () => void;
+    [Symbol.asyncDispose]: () => Promise<void>;
 };
 export type SseSubscriber = {
     id: string;

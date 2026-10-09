@@ -314,6 +314,7 @@ export class PowerRateLimit {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export namespace PowerRateLimit {
     /**

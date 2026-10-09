@@ -87,10 +87,17 @@ export class PowerRealtimeHub {
      *   that subscribes later. Intended for a small, fixed set of topics such as
      *   config changes; the retained log is not bounded per subscriber, so do not
      *   use it for an unbounded feed.
+     * @param {number} [options.priority] - Delivery order within each subscriber's
+     *   queue, higher first. Requires the hub's `messagePriority` option; passing
+     *   it without that throws, because an ordering that is silently ignored is
+     *   the misspelled-option failure this library refuses to have. Omitted means
+     *   `0`, which is indistinguishable from an explicit `0` — the same rule the
+     *   per-subscriber `priority` drain order follows.
      * @returns {number} The number of subscribers the message was queued for.
      */
     publish(topic: string, message: any, options?: {
         retain?: boolean | undefined;
+        priority?: number | undefined;
     }): number;
     /**
      * Flush every pending message immediately, bypassing batching.
@@ -140,6 +147,9 @@ export class PowerRealtimeHub {
      * @private
      * @param {HubSubscriber} sub
      * @param {any} message
+     * @param {number} [priority] - Message ordering, higher first. Ignored unless
+     *   the hub was built with `messagePriority`; `publish()` refuses to supply one
+     *   on a hub that is not, so this is unreachable rather than silently dropped.
      * @returns {void}
      */
     /**
@@ -266,12 +276,14 @@ export type HubSubscriber = {
     id: string;
     topic: string;
     /**
-     *   Bounded buffer for this subscriber. A plain array - the hub reads
+     *   Bounded buffer for this subscriber. A {@link HubQueue} - the hub reads
      *   `.length`, `.push`, `.shift` and `.splice` off it, so a queue typed as an
      *   abstract buffer (the previous declaration) had no `.length` at any of the
-     *   five places that check it before enqueueing.
+     *   five places that check it before enqueueing. It is a plain array in fifo
+     *   mode and a `PowerPriorityQueue` behind that surface in priority mode, which
+     *   is why the ordering policy never reaches the flush walk.
      */
-    queue: any[];
+    queue: HubQueue;
     /**
      * - Messages discarded by the slow-consumer policy.
      */
@@ -506,4 +518,91 @@ export type HubOptions = {
      * `PowerRateLimit` with `keyFn`, etc.
      */
     rateLimit?: import("./jsdoc-types.js").RateLimiterLike | undefined;
+    /**
+     * - Order each subscriber's queue
+     * by the `priority` passed to `publish()` rather than by arrival. Off by
+     * default, so the common case stays a plain array with FIFO delivery and pays
+     * nothing. When on, every subscriber's queue is a `PowerPriorityQueue`, and
+     * `publish(topic, message, { priority })` is accepted — passing `priority` on
+     * a hub without this option throws, because a silently ignored ordering is
+     * the misspelled-option failure this library refuses to have.
+     *
+     * This is **message** priority and is independent of the per-subscriber
+     * `priority` drain order: the first decides which message a subscriber
+     * receives next, the second decides which subscriber is served first.
+     */
+    messagePriority?: boolean | undefined;
 };
+/**
+ * A subscriber's pending queue, in its two shapes.
+ *
+ * The hub reads `length`, `push`, `shift` and `splice(0, n)` off a subscriber's
+ * queue in five places, and every one of those is ordering-agnostic — so the
+ * ordering policy lives entirely behind this surface and `_enqueue`,
+ * `_flushSubscriber`, `_queuedSubscribers` and `stats()` never branch on it.
+ * That is the point: a policy that leaked into the flush walk would be a policy
+ * the two flush paths could disagree about.
+ *
+ * `fifo` is the default and is a plain array. Zero allocation per message, and
+ * the documented `drop-oldest` / `drop-newest` / `disconnect` policies mean
+ * exactly what they say.
+ *
+ * `priority` is backed by {@link PowerPriorityQueue}. It exists because a
+ * bounded array with binary-search insertion is O(n) per publish and `maxQueue`
+ * is a caller-chosen number, not a small one — a subscriber configured with
+ * `maxQueue: 100000` would pay a 100000-element move on every message.
+ *
+ * @private
+ */
+declare class HubQueue {
+    /**
+     * @param {boolean} priority
+     */
+    constructor(priority: boolean);
+    /** @type {any[]} */
+    /** @type {PowerPriorityQueue|null} */
+    get length(): number;
+    /**
+     * @param {any} message
+     * @param {number} [priority] - Ignored in fifo mode, which has no ordering
+     *   to apply. The hub rejects a `publish` that supplies one on a hub without
+     *   `messagePriority`, so this is unreachable rather than silently dropped.
+     */
+    push(message: any, priority?: number): void;
+    /**
+     * Unwrap one entry taken off the heap.
+     *
+     * The heap hands back the wrapper `push()` stored, and everything downstream
+     * of this class — the handler, the codec, the frame memo's identity key —
+     * expects the caller's message. Unwrapping here rather than at each call site
+     * is what keeps the ordering policy from leaking into the flush walk.
+     * @param {any} entry
+     * @returns {any}
+     */
+    _unwrap(entry: any): any;
+    shift(): any;
+    /**
+     * Take up to `count` items off the front, in delivery order.
+     *
+     * `start` is always `0` at the one call site (`_flushSubscriber`), and saying
+     * so is cheaper than implementing a general splice the hub never asks for.
+     * @param {number} start
+     * @param {number} count
+     * @returns {any[]}
+     */
+    splice(start: number, count: number): any[];
+    /**
+     * Discard the item furthest from delivery.
+     *
+     * In fifo mode that is the head, which is what `drop-oldest` has always
+     * meant. In priority mode it is the lowest-priority item — and among equal
+     * priorities the most recently queued, because that is the one `shift()`
+     * reaches last. The policy name stays true of the *intent* (make room by
+     * discarding what is least worth keeping) rather than of the literal
+     * insertion order, and the guide says so.
+     * @returns {any}
+     */
+    dropOldest(): any;
+    clear(): void;
+}
+import { PowerPriorityQueue } from './powerPriorityQueue.js';

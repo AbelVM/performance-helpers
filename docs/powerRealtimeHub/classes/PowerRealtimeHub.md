@@ -127,6 +127,12 @@ without it, so the parameter is not defaulted.
 
 ***
 
+### \_messagePriority
+
+> **\_messagePriority**: `boolean`
+
+***
+
 ### \_metrics
 
 > **\_metrics**: \{ `name`: `string`; `unregister`: () => `boolean`; \} \| `null`
@@ -292,6 +298,17 @@ through `onError` and does not affect other subscribers.
 `any`
 
 ##### options?
+
+###### priority?
+
+`number`
+
+Delivery order within each subscriber's
+  queue, higher first. Requires the hub's `messagePriority` option; passing
+  it without that throws, because an ordering that is silently ignored is
+  the misspelled-option failure this library refuses to have. Omitted means
+  `0`, which is indistinguishable from an explicit `0` — the same rule the
+  per-subscriber `priority` drain order follows.
 
 ###### retain?
 

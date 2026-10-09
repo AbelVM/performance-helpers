@@ -598,6 +598,15 @@ export class PowerRTCChannel {
   }
 
   /**
+   * Asynchronous disposal hook (thin wrapper). Forwards to sync disposal.
+   * @returns {Promise<void>}
+   */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
+  }
+
+  /**
    * Subscribe to the six events this class needs, and record how to undo it.
    *
    * `addEventListener` rather than the `onopen`/`onmessage` properties: the

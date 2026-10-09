@@ -26,49 +26,61 @@ the pending counter, not an invisible queue.
 
 `object`
 
-### close
+### \[asyncDispose\]()
 
-> **close**: (`sub`) => `void`
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+#### Returns
+
+`void`
+
+### close()
+
+> **close**(`sub`): `void`
 
 #### Parameters
 
 ##### sub
 
-###### id
-
-`string`
+`any`
 
 #### Returns
 
 `void`
 
-### dispose
+### dispose()
 
-> **dispose**: () => `void`
+> **dispose**(): `void`
 
 #### Returns
 
 `void`
 
-### getSlowConsumerIds
+### getSlowConsumerIds()
 
-> **getSlowConsumerIds**: () => `Set`\<`string`\>
+> **getSlowConsumerIds**(): `Set`\<`string`\>
 
 #### Returns
 
 `Set`\<`string`\>
 
-### send
+### send()
 
-> **send**: (`sub`, `frame`) => `boolean`
+> **send**(`sub`, `frame`): `boolean`
 
 #### Parameters
 
 ##### sub
 
-###### id
-
-`string`
+`any`
 
 ##### frame
 

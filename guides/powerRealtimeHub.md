@@ -124,15 +124,16 @@ What this does **not** do is know your socket's high-water mark. For a `WebSocke
 const hub = new PowerRealtimeHub({ send, close });
 ```
 
-| Option          |                         Type                          | Default  | What it means                                                                         |
-| --------------- | :---------------------------------------------------: | :------: | ------------------------------------------------------------------------------------- |
-| `send`          | `function(object, Uint8Array): void \| Promise<void>` |    —     | **Required.** Hands one frame to your transport. Awaited, so back-pressure is real.   |
-| `observability` |             `boolean \| MetricsCollector`             | `false`  | Register with the shared `MetricsCollector`, or with one you pass.                    |
-| `close`         |   `function(object, string): void \| Promise<void>`   |          | Called with a reason on teardown: `'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`. |
-| `batch`         |                       `boolean`                       |  `true`  | Coalesce messages published within the same tick into one frame.                      |
-| `batchDelayMs`  |                       `number`                        |   `0`    | Macrotask delay before sending, so a burst becomes one frame.                         |
-| `codec`         |                  `'json'` \| `'raw'`                  | `'json'` | Payload codec for outgoing frames.                                                    |
-| `onError`       |            `function(Error, object): void`            |          | Called when `send` rejects. Without it the rejection is silent.                       |
+| Option            |                         Type                          | Default  | What it means                                                                         |
+| ----------------- | :---------------------------------------------------: | :------: | ------------------------------------------------------------------------------------- |
+| `send`            | `function(object, Uint8Array): void \| Promise<void>` |    —     | **Required.** Hands one frame to your transport. Awaited, so back-pressure is real.   |
+| `observability`   |             `boolean \| MetricsCollector`             | `false`  | Register with the shared `MetricsCollector`, or with one you pass.                    |
+| `close`           |   `function(object, string): void \| Promise<void>`   |          | Called with a reason on teardown: `'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`. |
+| `batch`           |                       `boolean`                       |  `true`  | Coalesce messages published within the same tick into one frame.                      |
+| `batchDelayMs`    |                       `number`                        |   `0`    | Macrotask delay before sending, so a burst becomes one frame.                         |
+| `codec`           |                  `'json'` \| `'raw'`                  | `'json'` | Payload codec for outgoing frames.                                                    |
+| `onError`         |            `function(Error, object): void`            |          | Called when `send` rejects. Without it the rejection is silent.                       |
+| `messagePriority` |                       `boolean`                       | `false`  | Order each subscriber's queue by the `priority` given to `publish()`. See below.      |
 
 An unrecognised option throws — every helper in this library validates its
 options against this list.
@@ -140,7 +141,7 @@ options against this list.
 ## API
 
 - `subscribe(topic, handler, options)` → `unsubscribe()`. Options: `maxQueue` (default 64), `slowConsumer`, `maxBatch` (default 32), `id`, `transport`, `priority`, `bytesAcknowledged`.
-- `publish(topic, message, { retain })` → number of subscribers queued for. `retain: true` keeps the message for later subscribers, in a log bounded to 32 per topic.
+- `publish(topic, message, { retain, priority })` → number of subscribers queued for. `retain: true` keeps the message for later subscribers, in a log bounded to 32 per topic. `priority` orders the message within each subscriber's queue and requires the hub's `messagePriority` option — passing it without that throws.
 
   The replay is real and works whether or not anyone was listening when you published — publishing into a topic with no subscribers is the case this option exists for. A new subscriber receives the retained log in publish order, **through the same queue and the same slow-consumer policy as any live delivery**, so a subscriber whose `maxQueue` cannot hold the log drops it by the rules it chose rather than by a second, quieter mechanism. A replay does **not** increment `published`: it is not a publication, and counting it would make that counter jump by the length of every retained log on every `subscribe`. The log is released when the **last** subscriber on that topic leaves — one subscriber unsubscribing does not destroy the history the others still depend on — and `close()` releases the rest.
 
@@ -250,6 +251,60 @@ hub.subscribe('alerts', handler, { priority: 10 }); // served before priority-0 
 `stats().list` reflects `priority` back rather than re-deriving it: it is a value
 the caller supplied, so reporting it is honest and recomputing it would be
 inventing one.
+
+### `messagePriority` — message order
+
+`priority` above decides **which subscriber is served first**. `messagePriority`
+decides **which message a subscriber receives next**, and it is a separate,
+opt-in hub option:
+
+```javascript
+const hub = new PowerRealtimeHub({ send, messagePriority: true });
+
+hub.publish('alerts', { level: 'info' }, { priority: 1 });
+hub.publish('alerts', { level: 'critical' }, { priority: 10 });
+// the subscriber receives `critical` first
+```
+
+Off by default, so the common case stays a plain array with FIFO delivery and
+pays nothing. When on, every subscriber's queue is a `PowerPriorityQueue`, and
+`publish()` accepts a `priority` — higher first, ties broken by arrival order, so
+an omitted priority behaves exactly like an explicit `0`.
+
+Passing `priority` to `publish()` on a hub **without** `messagePriority` throws.
+That is deliberate: an ordering that is silently ignored is the misspelled-option
+failure this library refuses to have, and the caller would otherwise believe they
+had asked for priority and receive FIFO.
+
+The hub does not read ordering out of your payload. A message that happens to
+carry a `priority` field is not reordered unless you pass the option explicitly.
+
+#### What changes under `drop-oldest`
+
+This is the one place the two modes disagree, and it is worth being precise about.
+
+In fifo mode, `drop-oldest` discards the **head** of the queue — the message
+nearest to delivery. Under `messagePriority` it discards the message **furthest**
+from delivery: lowest priority, and among equal priorities the most recently
+queued.
+
+The two agree about which _priority class_ loses — the least valuable one — and
+disagree only about the tie. Evicting the best queued message instead, which is
+what a naive `shift()` in the eviction path would do, throws away exactly the
+traffic the ordering existed to protect: a slow consumer would lose the urgent
+messages and keep the junk.
+
+```javascript
+// maxQueue: 2, messagePriority: true
+hub.publish('t', { n: 'critical' }, { priority: 10 });
+hub.publish('t', { n: 'noise' }, { priority: 1 });
+hub.publish('t', { n: 'also-noise' }, { priority: 0 });
+// `noise` loses its slot; `critical` and `also-noise` are delivered
+```
+
+`drop-newest` and `disconnect` are unchanged: a high-priority arrival does not
+get to evict a lower-priority one under `drop-newest`, because that policy is
+about protecting what is already queued.
 
 ## Example
 

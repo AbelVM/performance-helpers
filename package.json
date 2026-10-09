@@ -299,7 +299,22 @@
       "import": "./src/utils/errors.js",
       "default": "./src/utils/errors.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./powerPriorityQueue": {
+      "types": "./types/helpers/powerPriorityQueue.d.ts",
+      "import": "./src/helpers/powerPriorityQueue.js",
+      "default": "./src/helpers/powerPriorityQueue.js"
+    },
+    "./powerDeduplication": {
+      "types": "./types/helpers/powerDeduplication.d.ts",
+      "import": "./src/helpers/powerDeduplication.js",
+      "default": "./src/helpers/powerDeduplication.js"
+    },
+    "./powerHeartbeat": {
+      "types": "./types/helpers/powerHeartbeat.d.ts",
+      "import": "./src/helpers/powerHeartbeat.js",
+      "default": "./src/helpers/powerHeartbeat.js"
+    }
   },
   "scripts": {
     "build": "vite build",
