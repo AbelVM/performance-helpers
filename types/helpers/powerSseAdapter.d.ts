@@ -11,15 +11,28 @@ export function createSseAdapter(options?: SseAdapterOptions): {
     send: (sub: object, frame: Uint8Array) => Promise<void>;
     close: (sub: object) => void;
     register: (sub: object) => void;
+    lastEventId: (sub: object) => string | null;
+    lastSentId: (sub: object) => number;
     dispose: () => void;
     [Symbol.dispose]: () => void;
     [Symbol.asyncDispose]: () => Promise<void>;
 };
 export type SseSubscriber = {
     id: string;
-    writer: WritableStreamDefaultWriter;
-    abort: AbortController;
+    writer: WritableStreamDefaultWriter | null;
+    abort: AbortController | null;
     closed: boolean;
+    /**
+     * - Monotonic per-subscriber event id, emitted as the
+     * SSE `id:` field. See {@link frameToSseLine}.
+     */
+    seq: number;
+    /**
+     * - The `Last-Event-ID` the client sent when
+     * it (re)connected, or `null` on a first connect. This is the resume point;
+     * replaying from it is the caller's job, because the adapter holds no buffer.
+     */
+    lastEventId: string | null;
 };
 export type SseAdapterOptions = {
     /**
