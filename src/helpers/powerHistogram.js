@@ -20,6 +20,14 @@ import { assertKnownOptions } from '../utils/options.js';
  * **unbounded** value range, at O(1) insertion cost. It also merges exactly,
  * so per-worker or per-shard sketches can be combined into a global histogram.
  *
+ * ## Non-negative values only
+ *
+ * `record()` refuses a negative with a `TypeError`. DDSketch's sign-magnitude
+ * bucket mapping would accept one, and this is a **scope decision rather than an
+ * omission** — see {@link PowerHistogram#record} for the three reasons, the
+ * loudness of the guard, and what to do instead. `PowerApdex.record()` carries
+ * the same guard, so the constraint is consistent across the library.
+ *
  * ## Why this replaced a fixed bucket range
  *
  * The previous implementation mapped values into a fixed, dense, log-spaced
@@ -410,14 +418,48 @@ export class PowerHistogram {
 
   /**
    * Record a numeric value into the histogram.
+   *
+   * **Non-negative only, and that is a deliberate scope decision rather than an
+   * oversight** (AUD-042). DDSketch's sign-magnitude bucket mapping would handle
+   * negatives, and the audit that raised this suggested adopting it. It was
+   * rejected, for three reasons:
+   *
+   * 1. **Every caller in this library records a non-negative quantity** — RTT in
+   *    `powerSocketAdapter`, `powerWebSocketClient` and `powerWebTransportClient`,
+   *    event-loop delay in `powerEventLoopMonitor`, latency in `PowerApdex`. There
+   *    is no internal need, so the change would be speculative surface.
+   * 2. **The class is scoped to latency.** `guides/metaGuide.md` lists it as
+   *    "In-process latency and percentile-style telemetry", and latency is
+   *    non-negative by definition. A signed delta is a different quantity.
+   * 3. **The cost lands on the quantile path.** Sign-magnitude indexing keeps the
+   *    bucket order monotonic, but the exact-zero bucket moves from "below
+   *    everything" to "between the negative and positive buckets" — and
+   *    `percentile()`, `countAtOrBelow()` and `snapshot()` all depend on where it
+   *    sits. Getting that wrong is a silent error in the one thing this class
+   *    exists to answer.
+   *
+   * The guard is also **loud**, which is the property that makes documenting it
+   * sufficient rather than a workaround: a caller who passes a negative gets an
+   * immediate `TypeError` naming the fix, not a bucket of nonsense.
+   *
+   * `PowerApdex.record()` carries the same guard for the same reason, so the
+   * constraint is consistent across the library rather than accidental here.
+   *
    * @param {number} value Latency or measurement value. Must be finite and
-   *   non-negative.
+   *   non-negative. For a signed quantity, offset it first — `record(v - baseline)`
+   *   for a delta against a known baseline, or `record(Math.abs(v))` for a
+   *   magnitude.
    * @returns {this}
    */
   record(value) {
     const n = Number(value);
     if (Number.isNaN(n) || n < 0) {
-      throw new TypeError('PowerHistogram.record() requires a finite non-negative number');
+      throw new TypeError(
+        'PowerHistogram.record() requires a finite non-negative number. ' +
+          'This class is scoped to latency and other non-negative measurements; ' +
+          'for a signed quantity, offset it first — record(v - baseline) for a ' +
+          'delta against a known baseline, or record(Math.abs(v)) for a magnitude.'
+      );
     }
     this._count += 1;
     if (n === 0) {

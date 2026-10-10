@@ -179,3 +179,47 @@ The realistic version of that case does not look adversarial. A service whose la
 - **A DDSketch bounds values, not ranks.** With a handful of samples, working out which rank a quantile lands on dominates and the effective value error approaches `2 x relativeAccuracy`. The bound tightens as the sample count grows.
 - **`countAtOrBelow()` is not an integer** when the threshold lands mid-bucket. Rounding it would bias every such threshold in the same direction, so it is left fractional; `Math.round()` is one call away if you need a whole number.
 - **`countAtOrBelow()` is O(log b)** over occupied buckets, not O(n): the bucket order and its cumulative counts are cached and rebuilt only when the bucket set changes. A dashboard can call it on every scrape without the cost scaling with the spread of the data.
+
+## Non-negative values only
+
+`record()` refuses a negative with a `TypeError` that names the fix:
+
+```javascript
+const h = new PowerHistogram();
+h.record(-5);
+// TypeError: PowerHistogram.record() requires a finite non-negative number.
+// This class is scoped to latency and other non-negative measurements; for a
+// signed quantity, offset it first — record(v - baseline) for a delta against a
+// known baseline, or record(Math.abs(v)) for a magnitude.
+```
+
+**This is a scope decision, not an omission.** DDSketch's sign-magnitude bucket
+mapping would accept a negative, and adopting it was considered and rejected:
+
+- **Every caller in this library records a non-negative quantity** — RTT in
+  `powerSocketAdapter`, `powerWebSocketClient` and `powerWebTransportClient`,
+  event-loop delay in `powerEventLoopMonitor`, latency in `PowerApdex`. There is
+  no internal need, so the change would be speculative surface.
+- **The class is scoped to latency**, which is non-negative by definition. A
+  signed delta is a different quantity with different semantics.
+- **The cost lands on the quantile path.** Sign-magnitude indexing keeps the
+  bucket order monotonic, but the exact-zero bucket moves from "below everything"
+  to "between the negative and positive buckets" — and `percentile()`,
+  `countAtOrBelow()` and `snapshot()` all depend on where it sits. Getting that
+  wrong is a silent error in the one thing this class exists to answer.
+
+The guard is **loud**, which is what makes documenting it sufficient rather than
+a workaround: a caller who passes a negative gets an immediate error naming the
+fix, not a bucket of nonsense. `PowerApdex.record()` carries the same guard for
+the same reason, so the constraint is consistent across the library.
+
+For a signed quantity, offset before recording:
+
+```javascript
+// Jitter against a known baseline
+const baseline = 50;
+h.record(sample - baseline);
+
+// Or a magnitude, if the sign carries no information
+h.record(Math.abs(sample - baseline));
+```

@@ -45,6 +45,8 @@
   a reconnect gap. See the SSE fix below.
 - `PowerRTCChannel`'s `lowWaterMarkBytes` and `queueBudget` options, and the
   `queuedBytes` / `queuedFrames` getters. See the back-pressure fix below.
+- `PowerHistogram.record()`'s error now names the fix rather than only the
+  constraint. See the non-negative scope note below.
 
 ### Changed
 
@@ -189,6 +191,23 @@
   cover this channel's own `bufferedAmount` and do **not** participate in the
   `RTCPeerConnection`'s shared congestion window, which RFC 8831 asks for and the
   platform exposes no API to join.
+
+- **`PowerHistogram.record()`'s rejection of a negative named the constraint but
+  not the fix.** The message read "requires a finite non-negative number", which
+  tells a caller what is wrong and nothing about what to do. It now names both
+  offsets: `record(v - baseline)` for a delta against a known baseline, or
+  `record(Math.abs(v))` for a magnitude.
+
+  Accepting negatives via DDSketch's sign-magnitude mapping was considered and
+  **rejected**, with the reasoning recorded in the `record()` docblock, the class
+  docblock and the guide. Every caller in this library records a non-negative
+  quantity, the class is scoped to latency, and the cost of the change lands on
+  the quantile path — the exact-zero bucket moves from "below everything" to
+  "between the negative and positive buckets", and `percentile()`,
+  `countAtOrBelow()` and `snapshot()` all depend on where it sits. The guard is
+  loud, which is what makes documenting the constraint sufficient rather than a
+  workaround. `PowerApdex.record()` carries the same guard, so the constraint is
+  consistent across the library.
 
 - **`PowerHistogram` lost small values recorded after a large one.** Naive `+=`
   on mixed magnitudes discards the small addends: recording `1e16` and then a

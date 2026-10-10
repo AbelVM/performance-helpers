@@ -446,3 +446,76 @@ describe('PowerHistogram sum precision (AUD-029)', () => {
     expect(h.mean).toBe(3);
   });
 });
+
+// --- AUD-042: the non-negative constraint, documented rather than removed -----
+
+describe('PowerHistogram non-negative scope (AUD-042)', () => {
+  it('refuses a negative with a message that names the fix', () => {
+    // The guard is loud, which is what makes documenting the constraint
+    // sufficient rather than a workaround: a caller who passes a negative gets an
+    // immediate error naming what to do, not a bucket of nonsense.
+    //
+    // The message is asserted, not just the throw. "requires a finite
+    // non-negative number" alone tells the caller what is wrong and nothing
+    // about what to do, which is the difference between an error and a dead end.
+    const h = new PowerHistogram();
+    expect(() => h.record(-5)).toThrow(TypeError);
+    expect(() => h.record(-5)).toThrow(/non-negative/);
+    expect(() => h.record(-5)).toThrow(/record\(v - baseline\)/);
+    expect(() => h.record(-5)).toThrow(/Math\.abs/);
+  });
+
+  it('still refuses NaN, and still accepts +Infinity', () => {
+    // The other half of the same guard, pinned so the message change cannot
+    // quietly widen or narrow what is accepted.
+    const h = new PowerHistogram();
+    expect(() => h.record(NaN)).toThrow(TypeError);
+    expect(() => h.record('not a number')).toThrow(TypeError);
+    expect(() => h.record(Number.POSITIVE_INFINITY)).not.toThrow();
+    expect(h.count).toBe(1);
+    // `infCount` has no getter of its own — unlike `outOfRangeCount` and
+    // `belowRangeCount`, which do. It is structural rather than advisory, so it
+    // travels in `toJSON()` and nowhere else.
+    expect(h.toJSON().infCount).toBe(1);
+  });
+
+  it('leaves the histogram untouched when a record is refused', () => {
+    // A refused record must not partially apply: `_count` is incremented after
+    // the guard, so a throw leaves every field as it was.
+    const h = new PowerHistogram();
+    h.record(10);
+    h.record(20);
+    const before = h.toJSON();
+
+    expect(() => h.record(-1)).toThrow();
+
+    expect(h.toJSON()).toEqual(before);
+    expect(h.count).toBe(2);
+  });
+
+  it('the offset the error message names is a real, working offset', () => {
+    // An error that names a fix which does not work is worse than no message, so
+    // the suggested offset is verified rather than asserted in prose.
+    //
+    // **The offset has to produce a non-negative number** — that is the whole
+    // constraint. `record(sample - baseline)` with a baseline above the sample is
+    // still negative and is still refused, which is the point: the caller chooses
+    // an offset that makes the quantity they care about non-negative, and the
+    // distribution of the *offset* values is what the sketch then answers for.
+    const baseline = 40; // below every sample, so every delta is non-negative
+    const jitter = new PowerHistogram();
+    for (const sample of [48, 52, 47, 53, 50]) jitter.record(sample - baseline);
+
+    expect(jitter.count).toBe(5);
+    expect(jitter.min).toBe(7);
+    expect(jitter.max).toBe(13);
+
+    // And the magnitude spelling, for a caller who only cares about the size.
+    const magnitude = new PowerHistogram();
+    for (const sample of [48, 52, 47, 53, 50]) magnitude.record(Math.abs(sample - baseline));
+
+    expect(magnitude.count).toBe(5);
+    expect(magnitude.min).toBe(7);
+    expect(magnitude.max).toBe(13);
+  });
+});
