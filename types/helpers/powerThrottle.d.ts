@@ -17,6 +17,7 @@ export class PowerThrottle {
      * @type {(() => number)}
      */
     /** @type {boolean} */
+    /** @type {number} */
     _metrics: {
         unregister: () => boolean;
         name: string;

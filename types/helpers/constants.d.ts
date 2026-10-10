@@ -203,6 +203,23 @@ export const DEFAULT_REFILL_INTERVAL_MS: 1000;
 export const DEFAULT_BACKPRESSURE_REFILL_INTERVAL_MS: 200;
 export const DEFAULT_QUEUE_CAPACITY: 100;
 export const DEFAULT_BACKPRESSURE_QUEUE_CAPACITY: 1000;
+/**
+ * Consecutive backwards clock observations before `PowerThrottle` accepts a
+ * regressed clock (AUD-037).
+ *
+ * A *transient* backwards step must be ignored — preserving the last valid
+ * reading is the safe direction, and crediting the jump would hand out tokens
+ * for time that did not pass. A *permanent* one must eventually be accepted, or
+ * `elapsedMs` stays `0` forever and the throttle never refills again.
+ *
+ * The threshold is a count of consecutive observations rather than a duration
+ * because the question is whether the regression is *sustained*: any forward
+ * step resets the counter, so a clock that jitters backwards once in a while
+ * never reaches it. Three is small enough that a genuinely stuck clock recovers
+ * within a handful of calls, and large enough that an NTP correction which
+ * corrects itself on the next observation never trips it.
+ */
+export const BACKWARD_CLOCK_TOLERANCE: 3;
 export const DEFAULT_HISTOGRAM_MAX_VALUE: 10000;
 export const DEFAULT_HISTOGRAM_BUCKET_COUNT: 128;
 /**

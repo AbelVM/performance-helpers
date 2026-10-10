@@ -161,6 +161,9 @@ describe('API surface', () => {
     // consumer-visible contract to snapshot, but it does have a naming
     // discipline, and the 2.0 work violated it once.
     expect(Object.keys(constants).sort()).toEqual([
+      // AUD-037. Consecutive backwards clock observations before `PowerThrottle`
+      // accepts a regressed clock. Sorts first, before the `CHUNKS_*` names.
+      'BACKWARD_CLOCK_TOLERANCE',
       'CHUNKS_PER_WORKER_TARGET',
       'CHUNK_WINDOW_MULTIPLIER',
       'DECORRELATED_JITTER_FACTOR',

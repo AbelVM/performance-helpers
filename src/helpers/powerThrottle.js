@@ -24,7 +24,7 @@ import { monoMs } from '../utils/now.js';
 import { attachLimiterClock, resolveLimiterNow } from '../utils/limiterClock.js';
 import { assertCount, assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { attach, detach } from './metrics.js';
-import { MS_PER_SEC } from './constants.js';
+import { MS_PER_SEC, BACKWARD_CLOCK_TOLERANCE } from './constants.js';
 
 export class PowerThrottle {
   /**
@@ -79,6 +79,12 @@ export class PowerThrottle {
     this._lastRefill = this._now();
     // accumulate fractional tokens between refills
     this._tokenRemainder = 0;
+    // AUD-037. Consecutive backwards clock observations, reset by any forward
+    // step. See `_refill` for why a *count* rather than a duration: the question
+    // is whether the regression is sustained, and a clock that jitters backwards
+    // once in a while never accumulates enough consecutive steps to matter.
+    /** @type {number} */
+    this._backwardSteps = 0;
     // Opt-in metrics. Off by default, so the common case allocates nothing and
     // creates no closure.
     this._metrics = attach(this, 'throttle', options);
@@ -96,7 +102,34 @@ export class PowerThrottle {
    */
   _refill(now) {
     if (this.refillRate <= 0) return;
-    const elapsedMs = Math.max(0, now - this._lastRefill);
+    // AUD-037. A backwards clock step.
+    //
+    // A *transient* one must be ignored, and that is the pinned behaviour:
+    // preserving `_lastRefill` at the last valid reading is the safe direction,
+    // because crediting the jump would hand out tokens for time that did not
+    // pass. `test/powerThrottle.refill.test.js` pins it deliberately.
+    //
+    // The residual is narrower and is what this fixes: a clock that steps back
+    // **and stays back** left `elapsedMs` at `0` on every subsequent call, so the
+    // throttle never refilled again — not "no credit for the jump" but "no refill
+    // ever", reached through a broken clock and unrecoverable without
+    // reconstructing the limiter.
+    //
+    // So the anomaly is counted, and after enough *consecutive* backwards
+    // observations the new clock is accepted by clamping `_lastRefill` to it. The
+    // cost is the refill credit for the jump, which is the correct trade. Any
+    // forward step resets the count, so a clock that jitters backwards
+    // occasionally never reaches the threshold — only a sustained regression does.
+    if (now < this._lastRefill) {
+      this._backwardSteps += 1;
+      if (this._backwardSteps >= BACKWARD_CLOCK_TOLERANCE) {
+        this._lastRefill = now;
+        this._backwardSteps = 0;
+      }
+      return;
+    }
+    this._backwardSteps = 0;
+    const elapsedMs = now - this._lastRefill;
     if (elapsedMs <= 0) return;
     const tokensToAdd = (elapsedMs / MS_PER_SEC) * this.refillRate + this._tokenRemainder;
     const whole = Math.floor(tokensToAdd);
@@ -213,6 +246,9 @@ export class PowerThrottle {
     else this.tokens = Math.max(0, Math.min(this.capacity, Number(count) || 0));
     this._lastRefill = this._now();
     this._tokenRemainder = 0;
+    // AUD-037. A reset re-seeds the clock baseline, so any accumulated backwards
+    // observations describe a clock the limiter is no longer measuring against.
+    this._backwardSteps = 0;
   }
 
   /**

@@ -28,6 +28,12 @@ the published type and the destructuring drift apart in the first place.
 
 ## Properties
 
+### \_backwardSteps
+
+> **\_backwardSteps**: `number`
+
+***
+
 ### \_lastRefill
 
 > **\_lastRefill**: `number`
