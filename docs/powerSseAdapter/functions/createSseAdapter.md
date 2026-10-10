@@ -86,7 +86,7 @@ got to; the caller replays from there.
 
 The id of the last event written to a subscriber, or `0` if none.
 
-The counterpart to lastEventId: where the *server* has got to, as
+The counterpart to `lastEventId()`: where the *server* has got to, as
 against where the *client* got to. The difference between the two is exactly
 the size of the gap a reconnect has to replay.
 
@@ -111,8 +111,9 @@ into a hub can replay from it. **The adapter deliberately does not replay.**
 It holds no buffer of past frames — it is a `send(sub, frame)` bridge, and a
 replay buffer is the message source's concern, not the transport's. What the
 adapter owes the caller is the resume *point*, exposed as `lastEventId` on
-the subscriber record and through lastEventId; without it the caller
-cannot know where the client got to, and the gap is unfixable from above.
+the subscriber record and through the `lastEventId()` accessor; without it
+the caller cannot know where the client got to, and the gap is unfixable from
+above.
 
 #### Parameters
 

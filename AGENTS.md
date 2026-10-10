@@ -127,12 +127,13 @@ node bench/claims.js apdex       # APDEX from a sketch against exact counters
 node bench/claims.js geoencode   # flat typed array vs object graph, four arms on one payload
 node bench/claims.js geocoalesce # a coalescer against PowerBatch + a Map
 node bench/claims.js geoprecision # what coordinate rounding actually saves, on two payload shapes
+node bench/claims.js geoprefetch  # what in-flight window a camera-movement prefetch should use
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all twenty-eight** modes, not the six this file used to list: eleven
+That is **all twenty-nine** modes, not the six this file used to list: eleven
 measurements were reachable only by reading `bench/claims.js`, and six of them
 were named in neither this file nor `bench/README.md`. Seven more (`defer`,
 `codec`, `envelopepool`, `sabring`, `keyshape`, `ratelimit`, `datagram`) landed

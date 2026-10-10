@@ -38,6 +38,10 @@
  *   reports `0`, because the replays have already accounted for them. Under `skip`
  *   and `run-once` the single run reports how many periods were dropped or folded
  *   into it.
+ * @property {() => number} [now] Injected clock, as the limiters take
+ *   (PERF-007). GEO-039: a cron's cadence is deadline arithmetic over `_nextAt`,
+ *   so a frozen clock has to reach it or the catch-up policy cannot be
+ *   exercised without real timers. Defaults to `nowMs()`.
  * @property {boolean} [unref=true] - Whether the pending timer is `unref`'d, so
  *   a running cron does not by itself keep a Node process alive.
  */
@@ -287,6 +291,13 @@ export type PowerCronOptions = {
      * into it.
      */
     onFire?: ((info: Object) => void) | undefined;
+    /**
+     * Injected clock, as the limiters take
+     * (PERF-007). GEO-039: a cron's cadence is deadline arithmetic over `_nextAt`,
+     * so a frozen clock has to reach it or the catch-up policy cannot be
+     * exercised without real timers. Defaults to `nowMs()`.
+     */
+    now?: (() => number) | undefined;
     /**
      * - Whether the pending timer is `unref`'d, so
      * a running cron does not by itself keep a Node process alive.

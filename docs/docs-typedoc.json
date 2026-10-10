@@ -90012,10 +90012,8 @@
 																		"text": " if none.\n\nThe counterpart to "
 																	},
 																	{
-																		"kind": "inline-tag",
-																		"tag": "@link",
-																		"text": "lastEventId",
-																		"target": 3778
+																		"kind": "code",
+																		"text": "`lastEventId()`"
 																	},
 																	{
 																		"kind": "text",
@@ -90100,17 +90098,15 @@
 																	},
 																	{
 																		"kind": "text",
-																		"text": " on\nthe subscriber record and through "
+																		"text": " on\nthe subscriber record and through the "
 																	},
 																	{
-																		"kind": "inline-tag",
-																		"tag": "@link",
-																		"text": "lastEventId",
-																		"target": 3778
+																		"kind": "code",
+																		"text": "`lastEventId()`"
 																	},
 																	{
 																		"kind": "text",
-																		"text": "; without it the caller\ncannot know where the client got to, and the gap is unfixable from above."
+																		"text": " accessor; without it\nthe caller cannot know where the client got to, and the gap is unfixable from\nabove."
 																	}
 																],
 																"blockTags": [
