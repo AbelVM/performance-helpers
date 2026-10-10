@@ -7,6 +7,7 @@ export class PowerHistogram {
      */
     constructor(options?: PowerHistogramOptions);
     /** @type {Map<number, number>} sparse bucket index -> count */
+    /** @type {{indices: number[], prefix: number[]}|null} */
     /** Number of records added. */
     get count(): number;
     /** Sum of all recorded values. */
@@ -82,6 +83,40 @@ export class PowerHistogram {
      */
     percentile(quantile: number): number | undefined;
     /**
+     * Estimated number of recorded samples whose value is **at or below**
+     * `value` — the inverse of {@link PowerHistogram#percentile}, which maps a
+     * rank to a value where this maps a value to a rank.
+     *
+     * The name is deliberately not `countBelow`. `belowRangeCount` already means
+     * *strictly* below in this class, and a method whose name says one thing
+     * while its boundary does another is how an off-by-one reaches an SLO. The
+     * boundary here is inclusive, which is the class APDEX calls "satisfied".
+     *
+     * ## What the estimate rests on
+     *
+     * Every occupied bucket below the one `value` falls into is counted in full,
+     * because such a bucket's entire multiplicative range lies at or below
+     * `value`. The boundary bucket is **interpolated**: the share of its
+     * log-range at or below `value` is applied to its count, which is the same
+     * uniform-in-log-space assumption the bucket layout already makes. The error
+     * is therefore bounded by the mass sitting in that one bucket, and it is
+     * worst exactly where a distribution concentrates near the threshold — the
+     * case `bench/claims.js apdex` measures rather than asserts.
+     *
+     * A `+Infinity` record is never at or below a finite `value`, so it is
+     * excluded; `countAtOrBelow(Infinity)` returns `count`.
+     *
+     * @param {number} value Threshold. `NaN` throws. A negative threshold
+     *   returns `0`, because `record()` refuses negative values so nothing
+     *   recorded can be at or below one. `0` returns the count of exact-zero
+     *   records.
+     * @returns {number} Estimated count in `[0, count]`. **Not an integer** when
+     *   the boundary bucket is interpolated — rounding it would bias every
+     *   threshold that lands mid-bucket in the same direction, and a caller who
+     *   needs a whole number is one `Math.round()` from one.
+     */
+    countAtOrBelow(value: number): number;
+    /**
      * Clamp an estimate into the exact observed `[min, max]` range.
      *
      * A bucket's representative value is the midpoint of its multiplicative
@@ -154,6 +189,21 @@ export class PowerHistogram {
      * Ascending list of occupied bucket indices, cached until the bucket set
      * changes.
      * @returns {number[]}
+     * @private
+     */
+    /**
+     * Ascending occupied bucket indices with their cumulative counts, cached
+     * until the bucket set changes.
+     *
+     * `prefix[i]` is the total count of every bucket *before* `indices[i]`, so
+     * `prefix[indices.length]` is the count of all indexed samples. That is what
+     * lets {@link PowerHistogram#countAtOrBelow} answer a rank query in
+     * O(log b) over occupied buckets instead of walking the range — a rank query
+     * is the kind of thing a dashboard calls on every scrape, and the walk would
+     * make the cost of a score scale with the spread of the data rather than with
+     * the number of queries.
+     *
+     * @returns {{indices: number[], prefix: number[]}}
      * @private
      */
 }

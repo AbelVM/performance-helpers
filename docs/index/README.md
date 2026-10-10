@@ -276,6 +276,12 @@ Re-exports [PowerAdaptiveProposal](../powerAdaptiveProposal/classes/PowerAdaptiv
 
 ***
 
+### PowerApdex
+
+Re-exports [PowerApdex](../helpers/powerApdex/classes/PowerApdex.md)
+
+***
+
 ### PowerBackpressure
 
 Re-exports [PowerBackpressure](../helpers/powerBackpressure/classes/PowerBackpressure.md)

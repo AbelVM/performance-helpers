@@ -12,6 +12,7 @@
 - [helpers/cache/timedCache](helpers/cache/timedCache/README.md)
 - [helpers/constants](helpers/constants/README.md)
 - [helpers/metrics](helpers/metrics/README.md)
+- [helpers/powerApdex](helpers/powerApdex/README.md)
 - [helpers/powerBackpressure](helpers/powerBackpressure/README.md)
 - [helpers/powerBatch](helpers/powerBatch/README.md)
 - [helpers/powerBroadcastBus](helpers/powerBroadcastBus/README.md)

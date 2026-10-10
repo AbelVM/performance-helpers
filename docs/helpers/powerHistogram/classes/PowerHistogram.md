@@ -96,15 +96,15 @@
 
 ***
 
-### \_outOfRangeCount
+### \_order
 
-> **\_outOfRangeCount**: `number`
+> **\_order**: \{ `indices`: `number`[]; `prefix`: `number`[]; \} \| `null`
 
 ***
 
-### \_sortedIndices
+### \_outOfRangeCount
 
-> **\_sortedIndices**: `number`[] \| `null`
+> **\_outOfRangeCount**: `number`
 
 ***
 
@@ -256,6 +256,55 @@ Sum of all recorded values.
 `number`
 
 ## Methods
+
+### countAtOrBelow()
+
+> **countAtOrBelow**(`value`): `number`
+
+Estimated number of recorded samples whose value is **at or below**
+`value` — the inverse of [PowerHistogram#percentile](#percentile), which maps a
+rank to a value where this maps a value to a rank.
+
+The name is deliberately not `countBelow`. `belowRangeCount` already means
+*strictly* below in this class, and a method whose name says one thing
+while its boundary does another is how an off-by-one reaches an SLO. The
+boundary here is inclusive, which is the class APDEX calls "satisfied".
+
+## What the estimate rests on
+
+Every occupied bucket below the one `value` falls into is counted in full,
+because such a bucket's entire multiplicative range lies at or below
+`value`. The boundary bucket is **interpolated**: the share of its
+log-range at or below `value` is applied to its count, which is the same
+uniform-in-log-space assumption the bucket layout already makes. The error
+is therefore bounded by the mass sitting in that one bucket, and it is
+worst exactly where a distribution concentrates near the threshold — the
+case `bench/claims.js apdex` measures rather than asserts.
+
+A `+Infinity` record is never at or below a finite `value`, so it is
+excluded; `countAtOrBelow(Infinity)` returns `count`.
+
+#### Parameters
+
+##### value
+
+`number`
+
+Threshold. `NaN` throws. A negative threshold
+  returns `0`, because `record()` refuses negative values so nothing
+  recorded can be at or below one. `0` returns the count of exact-zero
+  records.
+
+#### Returns
+
+`number`
+
+Estimated count in `[0, count]`. **Not an integer** when
+  the boundary bucket is interpolated — rounding it would bias every
+  threshold that lands mid-bucket in the same direction, and a caller who
+  needs a whole number is one `Math.round()` from one.
+
+***
 
 ### merge()
 

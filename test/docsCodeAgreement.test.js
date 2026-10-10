@@ -172,6 +172,14 @@ const CROSS_CLASS = new Set([
   // cannot distinguish from a method the cache does not have. Same category as
   // `memo` above: a local binding named in a runnable example.
   'asyncFactory',
+  // `PowerHistogram` methods, named from `guides/powerApdex.md` while explaining
+  // why APDEX is *not* derived from a sketch. The guide has to name the two
+  // rank queries the rejected design would have used, and they are members of
+  // `PowerHistogram` — nothing in `PowerApdex`. Same category as `memoize`
+  // above: a method of another class the guide is legitimately describing.
+  // Added with ADR-0014.
+  'percentile',
+  'countAtOrBelow',
   // powerMessageCodec, referenced from powerPool and powerChunking.
   'encodeMessage',
   'decodeMessage',

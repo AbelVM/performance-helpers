@@ -48,6 +48,7 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 | [0011](./0011-acknowledging-broadcast-channel.md)               | An acknowledging BroadcastChannel protocol is required before the hub can use it | Accepted |
 | [0012](./0012-sieve-eviction-is-measured-and-rejected.md)       | SIEVE eviction is measured and rejected                                          | Rejected |
 | [0013](./0013-envelope-pooling-is-measured-and-does-not-pay.md) | Envelope pooling is measured and does not pay                                    | Rejected |
+| [0014](./0014-apdex-counters-not-a-sketch.md)                   | APDEX keeps integer counters, not a score derived from a sketch                  | Accepted |
 
 ## Status values
 

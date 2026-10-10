@@ -36,6 +36,7 @@ That buys three things:
 
 - `record(value)` — Record a value. Throws `TypeError` for negative or `NaN`. `+Infinity` is accepted and tracked separately. `0` gets its own exact bucket.
 - `percentile(q)` — Estimated percentile for `q` in `0..100` or `0..1`. Returns `undefined` when empty.
+- `countAtOrBelow(value)` — Estimated number of samples **at or below** `value`. The inverse of `percentile()`. See [Rank queries](#rank-queries-countatorbelow).
 - `merge(other)` — Absorb another `PowerHistogram`. Throws if the two use different `relativeAccuracy` (bucket indices are not comparable), or if `other` is not a `PowerHistogram`.
 - `reset()` — Clear all recorded values and statistics.
 - `toJSON()` — Serializable `{ relativeAccuracy, count, sum, min, max, zeroCount, infCount, outOfRangeCount, belowRangeCount, buckets }` for shipping to a metrics backend or merging elsewhere.
@@ -103,6 +104,38 @@ for (const h of perWorker.values()) global.merge(h);
 console.log('fleet p99', global.percentile(99));
 ```
 
+## Rank queries: `countAtOrBelow()`
+
+`percentile()` answers "what value is at rank _q_". `countAtOrBelow()` answers the other direction — "how many samples were at or below _v_" — which is the question behind every SLO attainment figure:
+
+```javascript
+import { PowerHistogram } from 'performance-helpers/powerHistogram';
+
+const latency = new PowerHistogram({ relativeAccuracy: 0.01 });
+// ... record ...
+const under100 = latency.countAtOrBelow(100);
+console.log(`${((under100 / latency.count) * 100).toFixed(1)}% of requests under 100 ms`);
+```
+
+The boundary is **inclusive**, which is the class APDEX calls "satisfied". The name is `countAtOrBelow` rather than `countBelow` because `belowRangeCount` already means _strictly_ below in this class.
+
+### What the estimate rests on
+
+Every occupied bucket below the one `value` falls into is counted in full, because such a bucket's entire multiplicative range lies at or below `value`. The boundary bucket is **interpolated**: the share of its log-range at or below `value` is applied to its count. So the error is bounded by the mass sitting in that one bucket, and by nothing else.
+
+That bound is the whole guarantee, and it is worth knowing where it bites:
+
+| Distribution                               | Error, as a share of samples |
+| ------------------------------------------ | ---------------------------: |
+| lognormal, pareto, bimodal (spread)        |                    < 0.001 % |
+| mass concentrated inside one bucket at _v_ |                  up to 100 % |
+
+The second row is not a bug and no value of `relativeAccuracy` repairs it — the mass is always inside one bucket, and the error is not even monotonic in `alpha`, because it depends on where the threshold happens to fall inside that bucket. `bench/claims.js apdex` measures it: a derived APDEX of **0.625 against a truth of 0.950**.
+
+The realistic version of that case does not look adversarial. A service whose latency is a fixed cost, with the SLO set at that cost, puts a point mass exactly on the threshold — and a point mass at 100 ms is reported as roughly a quarter of itself, because the sketch cannot tell it from a spread across the bucket containing it.
+
+**So: use `countAtOrBelow()` for "what fraction of requests were under X" on a spread distribution, and use [`PowerApdex`](powerApdex.md) when the number is an SLO attainment figure.** APDEX keeps three integer counters for exactly this reason.
+
 ## Notes
 
 - `percentile` returns the **midpoint of the bucket**, not a stored sample. With `relativeAccuracy: 0.01` a sketch of only the value `42` reports `p50 ≈ 41.68` — that is the guarantee working, not drift. Assert on relative error, not exact equality.
@@ -112,3 +145,5 @@ console.log('fleet p99', global.percentile(99));
 - **Quantiles are clamped into `[min, max]`.** A bucket's representative value is the midpoint of its multiplicative range, so the lowest non-zero bucket can report slightly below the true `min`. Without the clamp `percentile(0)` (which returns the exact `min`) came out _above_ `percentile(5)` — a visible non-monotonic p0 > p5 curve. Clamping is safe because `min` and `max` are exact, so the relative bound still holds.
 - **`percentile(1)` is the maximum, not the 1st percentile.** Any argument in `(0, 1]` is read as a _fraction_, so `1` means `1.0` = p100. Use `0.5` for p50 or `50` for p50 — both work, but `1` is the one to watch.
 - **A DDSketch bounds values, not ranks.** With a handful of samples, working out which rank a quantile lands on dominates and the effective value error approaches `2 x relativeAccuracy`. The bound tightens as the sample count grows.
+- **`countAtOrBelow()` is not an integer** when the threshold lands mid-bucket. Rounding it would bias every such threshold in the same direction, so it is left fractional; `Math.round()` is one call away if you need a whole number.
+- **`countAtOrBelow()` is O(log b)** over occupied buckets, not O(n): the bucket order and its cumulative counts are cached and rebuilt only when the bucket set changes. A dashboard can call it on every scrape without the cost scaling with the spread of the data.

@@ -153,6 +153,7 @@ The transport helpers split into two roles: **client-side** helpers dial out and
 ## Observability
 
 - [PowerEventLoopMonitor: Event-loop delay and utilization](guides/powerEventLoopMonitor.md). Timer-drift histogram plus Node's `eventLoopUtilization()`, so a latency regression can be attributed to the host instead of guessed at. Zero dependencies, both runtimes; `utilization()` returns `null` where the runtime cannot measure it. `stats()` also reports the milliseconds blocked alongside the count of blocked ticks, the readings it refused, and the share of wall-clock time it actually sampled.
+- [PowerApdex: Exact SLO attainment scoring](guides/powerApdex.md). One number in `[0, 1]` from three integer counters — not derived from a histogram, because `bench/claims.js apdex` measures the derived version reading 0.625 where the truth is 0.950 when the mass sits at the threshold.
 - [Metrics: Stable observability snapshots](guides/metrics.md). Normalize helper measurements into versioned names, observations, deltas, or Prometheus text.
 - [Stats naming](guides/stats-naming.md). Use canonical `stats()` methods and the compatible `getStats()` alias where available.
 
@@ -275,6 +276,7 @@ import {
   PowerRetry,
   PowerDeadline,
   PowerHistogram,
+  PowerApdex,
   PowerBackpressure,
   PowerBatch,
   PowerBulkhead,

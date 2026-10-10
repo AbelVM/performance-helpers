@@ -19,6 +19,7 @@ export { PowerCron } from "./helpers/powerCron.js";
 export { createOperationContext } from "./helpers/powerOperationContext.js";
 export { PowerDeadline } from "./helpers/powerDeadline.js";
 export { PowerHistogram } from "./helpers/powerHistogram.js";
+export { PowerApdex } from "./helpers/powerApdex.js";
 export { PowerBackpressure } from "./helpers/powerBackpressure.js";
 export { PowerBulkhead } from "./helpers/powerBulkhead.js";
 export { PowerBatch } from "./helpers/powerBatch.js";

@@ -92,6 +92,7 @@ node bench/claims.js concurrency  # is `autoScale.policy` wired to anything
 node bench/claims.js stepsize     # does the autoscale step controller beat a fixed step
 node bench/claims.js ratelimit    # static versus adaptive refill under burst + steady load
 node bench/claims.js datagram     # bounded datagram queue saturation and flush
+node bench/claims.js apdex        # APDEX from a sketch against exact counters
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only

@@ -116,14 +116,25 @@ node bench/claims.js batchservo   # does a closed loop beat a fixed flush size
 node bench/claims.js concurrency # is `autoScale.policy` wired to anything
 node bench/claims.js stepsize    # does the autoscale step controller beat a fixed step
 node bench/claims.js bcfanout    # one BroadcastChannel against K explicit MessagePorts
+node bench/claims.js defer       # PowerDefer WeakMap overhead vs the closure form
+node bench/claims.js codec       # JSON.stringify cost vs a minimal binary encoding
+node bench/claims.js envelopepool # whether reusing an envelope pays on a message path
+node bench/claims.js sabring     # SharedArrayBuffer ring vs structured clone
+node bench/claims.js keyshape    # cache key-shape performance (int/string/object)
+node bench/claims.js ratelimit   # static versus adaptive refill under burst + steady load
+node bench/claims.js datagram    # bounded datagram queue saturation and flush
+node bench/claims.js apdex       # APDEX from a sketch against exact counters
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all seventeen** modes, not the six this file used to list: eleven
+That is **all twenty-five** modes, not the six this file used to list: eleven
 measurements were reachable only by reading `bench/claims.js`, and six of them
-were named in neither this file nor `bench/README.md`.
+were named in neither this file nor `bench/README.md`. Seven more (`defer`,
+`codec`, `envelopepool`, `sabring`, `keyshape`, `ratelimit`, `datagram`) landed
+without this list being updated, which is the drift the paragraph below warns
+about — so they are listed now rather than left for the next reader to discover.
 
 The list above is still hand-maintained and can drift, so treat
 `bench/claims.js` as the authority on what exists: its unknown-mode error is

@@ -82,6 +82,7 @@ admission over time. They are not interchangeable.
 | Batch near-synchronous calls into one flush                            | `PowerBatch`                                       | `PowerScheduler`, `PowerQueue`                             | `PowerQueue` alone                                                      |
 | Run something on a fixed cadence without drift                         | `PowerCron`                                        | `PowerScheduler` (one flush per turn, not a cadence)       | `setInterval`, which drifts and queues                                  |
 | Tell whether a latency regression is yours or the host's               | `PowerEventLoopMonitor`                            | `PowerHistogram`, `PowerLogger`                            | adding `performance.now()` deltas around the whole call site            |
+| Report whether requests met a latency SLO                              | `PowerApdex`                                       | `PowerHistogram`, `PowerEventLoopMonitor`                  | `PowerHistogram.countAtOrBelow()`, which is unsound at the threshold    |
 
 `PowerEventBus` is **intra-process**. It is not a cross-tab or cross-worker bus,
 and reaching for a platform broadcast primitive to extend it is slower, unbounded,
@@ -420,6 +421,20 @@ Use `PowerObserver` for one changing value with subscribers.
 
 Use `PowerHistogram` for latency distribution and percentile-style telemetry.
 
+Use `PowerApdex` when the number you need is a single SLO attainment figure —
+"what share of requests were fast enough" — rather than a distribution. It keeps
+three integer counters rather than deriving the score from a sketch, because
+`bench/claims.js apdex` measures the derived version reading 0.625 where the
+truth is 0.950 when the mass sits at the threshold. See
+[`guides/powerApdex.md`](powerApdex.md) for the measurement and
+[`adr/0014`](../adr/0014-apdex-counters-not-a-sketch.md) for the decision.
+
+Use it as a **gate**, not a control signal: it answers "should I act?", while
+`PowerServo`, `PowerFlowControl`, `PowerAdaptiveProposal` and the pool's
+autoscale all need a signed, unbounded signal that answers "how much should I
+adjust?". `guides/powerApdex.md` has the recipes for pairing it with
+`PowerBrownout`, windowing it, and scoring per route.
+
 Use `PowerLogger` for structured runtime diagnostics and test-friendly output sinks.
 
 Use `PowerEventLoopMonitor` when a latency number went up and you need to know whether the host was busy, rather than guessing.
@@ -665,6 +680,7 @@ In those cases, go straight to `PowerPool`.
 - Using `PowerSemaphore` when the real problem is workload isolation, not just total concurrency.
 - Using `PowerChunker` for scenarios that really need explicit worker control.
 - Building custom batching around arrays and timers when `PowerBatch` or `PowerScheduler` already matches the problem.
+- Feeding an APDEX score to an adaptive controller. It is a bounded ratio that saturates at `1.0`, so it goes blind exactly when you are meeting the SLO — use it as a gate ("should I act?") and feed a latency percentile or a queue depth to the loop ("how much should I adjust?"). See [`guides/powerApdex.md`](powerApdex.md#do-not-use-it-as-a-control-signal).
 
 ---
 
@@ -741,6 +757,7 @@ reliable way to mislead yourself.
 - `PowerObserver`: Reactive container for one changing value.
 - `PowerLogger`: Structured runtime logging.
 - `PowerHistogram`: In-process latency and percentile-style telemetry.
+- `PowerApdex`: Exact SLO attainment scoring over three integer counters.
 - `PowerEventLoopMonitor`: Event-loop delay histogram and `utilization()`.
 
 ### Coordination and async building blocks

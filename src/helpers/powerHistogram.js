@@ -91,8 +91,12 @@ export class PowerHistogram {
     this._max = -Infinity;
     this._outOfRangeCount = 0;
     this._belowRangeCount = 0;
-    // Cached sorted index list, rebuilt only when the bucket set changes.
-    this._sortedIndices = null;
+    // Cached bucket order plus its cumulative counts, rebuilt only when the
+    // bucket set changes. One cache rather than two: `percentile()` needs the
+    // order and `countAtOrBelow()` needs the running totals, and two caches
+    // invalidated at the same four sites are two chances to forget one.
+    /** @type {{indices: number[], prefix: number[]}|null} */
+    this._order = null;
   }
 
   /** Number of records added. */
@@ -178,7 +182,7 @@ export class PowerHistogram {
     this._max = -Infinity;
     this._outOfRangeCount = 0;
     this._belowRangeCount = 0;
-    this._sortedIndices = null;
+    this._order = null;
   }
 
   /**
@@ -217,7 +221,7 @@ export class PowerHistogram {
 
     const index = this._index(n);
     this._buckets.set(index, (this._buckets.get(index) || 0) + 1);
-    this._sortedIndices = null;
+    this._order = null;
     return this;
   }
 
@@ -267,6 +271,75 @@ export class PowerHistogram {
     if (this._infCount > 0) return Number.POSITIVE_INFINITY;
     // Unreachable for a target <= count, but keep a defined return.
     return this._max;
+  }
+
+  /**
+   * Estimated number of recorded samples whose value is **at or below**
+   * `value` — the inverse of {@link PowerHistogram#percentile}, which maps a
+   * rank to a value where this maps a value to a rank.
+   *
+   * The name is deliberately not `countBelow`. `belowRangeCount` already means
+   * *strictly* below in this class, and a method whose name says one thing
+   * while its boundary does another is how an off-by-one reaches an SLO. The
+   * boundary here is inclusive, which is the class APDEX calls "satisfied".
+   *
+   * ## What the estimate rests on
+   *
+   * Every occupied bucket below the one `value` falls into is counted in full,
+   * because such a bucket's entire multiplicative range lies at or below
+   * `value`. The boundary bucket is **interpolated**: the share of its
+   * log-range at or below `value` is applied to its count, which is the same
+   * uniform-in-log-space assumption the bucket layout already makes. The error
+   * is therefore bounded by the mass sitting in that one bucket, and it is
+   * worst exactly where a distribution concentrates near the threshold — the
+   * case `bench/claims.js apdex` measures rather than asserts.
+   *
+   * A `+Infinity` record is never at or below a finite `value`, so it is
+   * excluded; `countAtOrBelow(Infinity)` returns `count`.
+   *
+   * @param {number} value Threshold. `NaN` throws. A negative threshold
+   *   returns `0`, because `record()` refuses negative values so nothing
+   *   recorded can be at or below one. `0` returns the count of exact-zero
+   *   records.
+   * @returns {number} Estimated count in `[0, count]`. **Not an integer** when
+   *   the boundary bucket is interpolated — rounding it would bias every
+   *   threshold that lands mid-bucket in the same direction, and a caller who
+   *   needs a whole number is one `Math.round()` from one.
+   */
+  countAtOrBelow(value) {
+    const t = Number(value);
+    if (Number.isNaN(t)) {
+      throw new TypeError('PowerHistogram.countAtOrBelow() requires a number');
+    }
+    if (this._count === 0) return 0;
+    if (t < 0) return 0;
+    // Exact zeros are at or below every non-negative threshold, and they are
+    // the one class with no bucket of their own in the index space.
+    if (t === 0) return this._zeroCount;
+    if (t === Number.POSITIVE_INFINITY) return this._count;
+
+    const { indices, prefix } = this._bucketOrder();
+    // The bucket a sample of exactly `t` would land in. Every occupied bucket
+    // with a lower index has a maximum of `gamma^index <= gamma^(k-1) < t`, so
+    // all of it is at or below `t` and counts whole.
+    const k = Math.ceil(Math.log(t) / this._logGamma);
+    let lo = 0;
+    let hi = indices.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (indices[mid] < k) lo = mid + 1;
+      else hi = mid;
+    }
+    let total = this._zeroCount + prefix[lo];
+    if (lo < indices.length && indices[lo] === k) {
+      // `?? 0` rather than a bare `get()`: the guard above proves the bucket is
+      // occupied, but it proves it through an array index TypeScript cannot
+      // narrow through, and an unoccupied bucket's count *is* zero.
+      const inBucket = this._buckets.get(k) ?? 0;
+      const share = (Math.log(t) - (k - 1) * this._logGamma) / this._logGamma;
+      total += inBucket * Math.min(1, Math.max(0, share));
+    }
+    return total;
   }
 
   /**
@@ -327,7 +400,7 @@ export class PowerHistogram {
       if (other._min < this._min) this._min = other._min;
       if (other._max > this._max) this._max = other._max;
     }
-    this._sortedIndices = null;
+    this._order = null;
     return this;
   }
 
@@ -399,10 +472,35 @@ export class PowerHistogram {
    * @private
    */
   _sortedIndexList() {
-    if (this._sortedIndices === null) {
-      this._sortedIndices = Array.from(this._buckets.keys()).sort((a, b) => a - b);
+    return this._bucketOrder().indices;
+  }
+
+  /**
+   * Ascending occupied bucket indices with their cumulative counts, cached
+   * until the bucket set changes.
+   *
+   * `prefix[i]` is the total count of every bucket *before* `indices[i]`, so
+   * `prefix[indices.length]` is the count of all indexed samples. That is what
+   * lets {@link PowerHistogram#countAtOrBelow} answer a rank query in
+   * O(log b) over occupied buckets instead of walking the range — a rank query
+   * is the kind of thing a dashboard calls on every scrape, and the walk would
+   * make the cost of a score scale with the spread of the data rather than with
+   * the number of queries.
+   *
+   * @returns {{indices: number[], prefix: number[]}}
+   * @private
+   */
+  _bucketOrder() {
+    if (this._order === null) {
+      const indices = Array.from(this._buckets.keys()).sort((a, b) => a - b);
+      const prefix = new Array(indices.length + 1);
+      prefix[0] = 0;
+      for (let i = 0; i < indices.length; i += 1) {
+        prefix[i + 1] = prefix[i] + this._buckets.get(indices[i]);
+      }
+      this._order = { indices, prefix };
     }
-    return this._sortedIndices;
+    return this._order;
   }
 }
 

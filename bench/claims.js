@@ -4408,6 +4408,252 @@ function runRateLimitWorkload() {
   return { results, config: { durationMs: DURATION_MS, capacity: CAPACITY, repeats: REPEATS } };
 }
 
+// ─── Workload: APDEX from a DDSketch against exact counters ────────────────
+//
+// APDEX is the one latency score this library does not have, and the question
+// that decides its shape is not whether the formula is hard — it is three lines
+// — but whether it can be *derived* from the sketch we already ship or needs
+// counters of its own.
+//
+// The derivation looks free. `PowerHistogram` answers `percentile(q)`, a value
+// at a rank; APDEX needs the inverse, a rank at a value, and `countAtOrBelow()`
+// is that inverse. So `apdex(histogram)` is two rank queries and a division,
+// with no new state at all.
+//
+// It is not free, and the reason is the shape of the guarantee. DDSketch bounds
+// the *value* of a quantile to a relative error of `alpha` — BENCH-002b measures
+// exactly that, and it holds. It says nothing about the *rank* of a given
+// value, and APDEX is a ratio of ranks taken at a threshold. Every sample in
+// the bucket the threshold lands in is split by linear interpolation in log
+// space, which is right when the mass is spread across that bucket and
+// arbitrary when it is not.
+//
+// So this mode scores the two against each other on four distributions. Three
+// are spread, and the sketch is excellent on all three. The fourth puts 90% of
+// the mass just below the threshold and 10% just above, both inside the *same*
+// bucket — which is what a service sitting on its own SLO boundary actually
+// produces, and the case where the number matters most. It is reported last on
+// purpose, and it is the one that decides the design.
+
+/**
+ * Score exact three-counter APDEX against the same score derived from a
+ * DDSketch, over four latency distributions and three accuracies.
+ *
+ * @returns {object} Per-case exact and sketch scores with their delta.
+ */
+function runApdexWorkload() {
+  const n = Number(process.env.CLAIM_APDEX_SAMPLES || 100_000);
+  const target = Number(process.env.CLAIM_APDEX_TARGET || 100);
+  const accuracies = (process.env.CLAIM_APDEX_ACCURACY || '0.05,0.01,0.001').split(',').map(Number);
+  const tolerance = target * 4;
+  const rng = makeRng(SEED);
+
+  console.log('BENCH-002m — APDEX from a DDSketch against exact counters\n');
+  console.log(
+    `  samples ${n.toLocaleString()}, target ${target} ms, tolerance ${tolerance} ms (4T)`
+  );
+  console.log(`  relativeAccuracy ${accuracies.join(', ')}\n`);
+  console.log('  exact  = three integer counters, incremented per sample');
+  console.log('  sketch = two countAtOrBelow() queries over one PowerHistogram');
+  console.log('  delta  = |sketch - exact| in APDEX points (0.001 is one unit of the');
+  console.log('           third decimal APDEX is quoted to)\n');
+
+  /** @returns {Float64Array} */
+  const buildLognormal = () => {
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const u1 = rng() || 1e-12;
+      const u2 = rng();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      // Median at the target, spread over decades either side of it.
+      out[i] = target * 10 ** z;
+    }
+    return out;
+  };
+
+  /** @returns {Float64Array} */
+  const buildBimodal = () => {
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i++) out[i] = i % 5 === 0 ? target * 10 : target / 10;
+    return out;
+  };
+
+  /** @returns {Float64Array} */
+  const buildPareto = () => {
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const u = rng() || 1e-12;
+      out[i] = (target / 10) * u ** (-1 / 1.2);
+    }
+    return out;
+  };
+
+  /**
+   * The adversarial family: mass concentrated inside a *single* bucket that
+   * straddles the threshold. The offsets are scaled by `alpha`, so the values
+   * stay inside one bucket at *every* accuracy under test — a fixed ±0.5% would
+   * drift into separate buckets once `alpha` is small enough, and the case
+   * would quietly stop being adversarial.
+   *
+   * @param {number} alpha
+   * @returns {Float64Array}
+   */
+  const buildStraddle = (alpha) => {
+    const out = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      out[i] = i < n * 0.9 ? target * (1 - alpha / 2) : target * (1 + alpha / 2);
+    }
+    return out;
+  };
+
+  /**
+   * The same idea without the point masses: a tight gaussian centred on the
+   * threshold, narrow enough to sit inside one bucket. This is the realistic
+   * version — a fixed-cost operation whose SLO was set at that cost — and it is
+   * here so the two-point case above cannot be dismissed as artificial.
+   *
+   * @param {number} alpha
+   * @returns {Float64Array}
+   */
+  const buildCluster = (alpha) => {
+    const out = new Float64Array(n);
+    const sigma = alpha / 4;
+    for (let i = 0; i < n; i++) {
+      const u1 = rng() || 1e-12;
+      const u2 = rng();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      out[i] = target * (1 + sigma * z);
+    }
+    return out;
+  };
+
+  const shared = {
+    'lognormal, median at target': buildLognormal(),
+    'bimodal, modes 10x apart': buildBimodal(),
+    'pareto, heavy tail': buildPareto(),
+  };
+
+  /** @type {Array<{alpha:number, label:string, exact:number, sketch:number, delta:number}>} */
+  const rows = [];
+  for (const alpha of accuracies) {
+    const cases = {
+      ...shared,
+      'two-point, 90/10 in one bucket': buildStraddle(alpha),
+      'gaussian cluster in one bucket': buildCluster(alpha),
+    };
+    for (const [label, values] of Object.entries(cases)) {
+      const hist = new PowerHistogram({ relativeAccuracy: alpha });
+      let satisfied = 0;
+      let tolerating = 0;
+      for (let i = 0; i < n; i++) {
+        const v = values[i];
+        hist.record(v);
+        if (v <= target) satisfied += 1;
+        else if (v <= tolerance) tolerating += 1;
+      }
+      const exact = (satisfied + tolerating / 2) / n;
+      const below = hist.countAtOrBelow(target);
+      const belowTol = hist.countAtOrBelow(tolerance);
+      const sketch = (below + (belowTol - below) / 2) / n;
+      rows.push({ alpha, label, exact, sketch, delta: Math.abs(sketch - exact) * 1000 });
+    }
+  }
+
+  console.log(
+    `  ${'alpha'.padEnd(7)}${'distribution'.padEnd(30)}${'exact'.padStart(9)}${'sketch'.padStart(9)}${'delta'.padStart(9)}`
+  );
+  console.log(`  ${'-'.repeat(64)}`);
+  for (const r of rows) {
+    console.log(
+      `  ${String(r.alpha).padEnd(7)}${r.label.padEnd(30)}` +
+        `${r.exact.toFixed(4).padStart(9)}${r.sketch.toFixed(4).padStart(9)}` +
+        `${r.delta.toFixed(3).padStart(9)}`
+    );
+  }
+
+  const clustered = rows.filter((r) => r.label.includes('one bucket'));
+  const spread = rows.filter((r) => !r.label.includes('one bucket'));
+  const worstSpread = spread.reduce((a, b) => (b.delta > a.delta ? b : a));
+  const worstCluster = clustered.reduce((a, b) => (b.delta > a.delta ? b : a));
+
+  console.log(
+    `\n  Spread distributions: worst delta ${worstSpread.delta.toFixed(3)} points ` +
+      `(${worstSpread.label}, alpha ${worstSpread.alpha}).`
+  );
+  console.log(
+    `  Mass inside one bucket: worst delta ${worstCluster.delta.toFixed(3)} points ` +
+      `(${worstCluster.label}, alpha ${worstCluster.alpha}) — the sketch reports ` +
+      `${worstCluster.sketch.toFixed(3)} where the truth is ${worstCluster.exact.toFixed(3)}.`
+  );
+  console.log(
+    '\n  The spread rows answer "is the sketch good enough in general", and they say yes:'
+  );
+  console.log('  under a twentieth of a point, which is below the resolution APDEX is quoted at.');
+  console.log('  The clustered rows answer "is it good enough for the number APDEX exists to');
+  console.log(
+    '  report", and they say no. A single bucket cannot be split 90/10 by an interpolation'
+  );
+  console.log('  that assumes the mass is even in log space, and no value of `alpha` repairs it,');
+  console.log('  because the mass is always placed inside one bucket. Note that the error is not');
+  console.log('  even monotonic in `alpha` — it depends on where the threshold happens to fall');
+  console.log('  inside the bucket, which is arbitrary, so a finer sketch is not a safer one. A');
+  console.log('  service operating at its own SLO boundary is exactly this distribution, which');
+  console.log('  makes the derived score worst precisely where it is being watched.');
+
+  // ─── Cost ───────────────────────────────────────────────────────────────
+  //
+  // The accuracy half decides the design; this half decides whether the exact
+  // alternative is affordable. Three integer counters against a sketch insert
+  // is not a close contest, but it is worth having the number rather than
+  // asserting it.
+
+  const ops = Number(process.env.CLAIM_APDEX_OPS || 2_000_000);
+  const time = (fn) => {
+    for (let i = 0; i < 50_000; i += 1) fn(i);
+    const s = [];
+    for (let r = 0; r < 7; r += 1) {
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < ops; i += 1) fn(i);
+      s.push(Number(process.hrtime.bigint() - t0) / ops);
+    }
+    s.sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+
+  const costHist = new PowerHistogram({ relativeAccuracy: 0.01 });
+  const probe = new Float64Array(4096);
+  for (let i = 0; i < probe.length; i++) probe[i] = target * 10 ** ((i % 97) / 97);
+  let sink = 0;
+  const recordNs = time((i) => {
+    costHist.record(probe[i & 4095]);
+  });
+  const counterNs = time((i) => {
+    const v = probe[i & 4095];
+    if (v <= target) sink += 1;
+    else if (v <= tolerance) sink += 2;
+    else sink += 3;
+  });
+  const rankNs = time(() => {
+    sink += costHist.countAtOrBelow(target) > 0 ? 1 : 0;
+  });
+
+  console.log(`\n  cost, ${ops.toLocaleString()} ops, median of 7:`);
+  console.log(`    histogram.record()          ${recordNs.toFixed(2).padStart(8)} ns/op`);
+  console.log(`    three-counter classify      ${counterNs.toFixed(2).padStart(8)} ns/op`);
+  console.log(`    countAtOrBelow()            ${rankNs.toFixed(2).padStart(8)} ns/op`);
+  console.log(
+    '\n  A score is two rank queries, so the derived path costs ' +
+      `${(recordNs + 2 * rankNs).toFixed(2)} ns per sample`
+  );
+  console.log(
+    `  against ${counterNs.toFixed(2)} ns for the exact one, and the exact one is also ` +
+      'O(1) in memory.'
+  );
+  console.log(`  (sink ${sink === 0 ? 'unused' : 'consumed'})`);
+
+  return { rows, config: { n, target, tolerance, accuracies, seed: SEED } };
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -4433,6 +4679,7 @@ const MODES = {
   keyshape: runKeyShapeWorkload,
   ratelimit: runRateLimitWorkload,
   datagram: runDatagramWorkload,
+  apdex: runApdexWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
