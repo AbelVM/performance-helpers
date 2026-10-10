@@ -97,6 +97,10 @@ wakeup for it.
 
 > **closed**: `number` = `0`
 
+#### droppedFrames
+
+> **droppedFrames**: `number` = `0`
+
 #### handled
 
 > **handled**: `number` = `0`
@@ -116,6 +120,14 @@ wakeup for it.
 #### oversizeFrames
 
 > **oversizeFrames**: `number` = `0`
+
+#### queuedBytes
+
+> **queuedBytes**: `number` = `0`
+
+#### queuedFrames
+
+> **queuedFrames**: `number` = `0`
 
 #### sendFailures
 
@@ -155,6 +167,12 @@ in, which is what makes a seventh addition a deliberate edit.
 
 ***
 
+### \_lowWaterMark
+
+> **\_lowWaterMark**: `number`
+
+***
+
 ### \_maxMessageSizeBytes
 
 > **\_maxMessageSizeBytes**: `number`
@@ -188,6 +206,33 @@ in, which is what makes a seventh addition a deliberate edit.
 ### \_onOpen
 
 > **\_onOpen**: ((`arg0`) => `void`) \| `null`
+
+***
+
+### \_queue
+
+> **\_queue**: `any`[]
+
+Frames held while the channel is paused, and the bytes they occupy.
+
+**A queue, not a buffer of last resort.** It exists so a producer that
+outruns the SCTP congestion window is slowed rather than broken: the
+platform's own `bufferedAmount` keeps growing until the browser kills the
+connection, which is the failure this prevents. It is bounded by
+`queueBudget`, and over budget `send()` refuses — the producer's signal to
+slow down, which is what a watermark is for.
+
+***
+
+### \_queueBudget
+
+> **\_queueBudget**: `number`
+
+***
+
+### \_queuedBytes
+
+> **\_queuedBytes**: `number`
 
 ***
 
@@ -287,6 +332,42 @@ Whether the channel is open and this class has not been disposed.
 ##### Returns
 
 `boolean`
+
+***
+
+### queuedBytes
+
+#### Get Signature
+
+> **get** **queuedBytes**(): `number`
+
+Bytes held in the JS-side queue while the channel is paused.
+
+AUD-024. The number that says how far behind the producer is, as against
+`bufferedAmount`, which says how far behind the *platform* is. A channel can
+be paused with an empty platform buffer and a full queue — that is the whole
+point of holding frames locally — so the two answer different questions and
+neither implies the other.
+
+Bounded by `queueBudget`; `send()` refuses once it would be exceeded.
+
+##### Returns
+
+`number`
+
+***
+
+### queuedFrames
+
+#### Get Signature
+
+> **get** **queuedFrames**(): `number`
+
+Frames held in the JS-side queue while the channel is paused.
+
+##### Returns
+
+`number`
 
 ***
 

@@ -56,6 +56,18 @@ export class PowerRTCChannel {
      * @type {Array<[string, (any: any) => void]>}
      */
     /**
+     * Frames held while the channel is paused, and the bytes they occupy.
+     *
+     * **A queue, not a buffer of last resort.** It exists so a producer that
+     * outruns the SCTP congestion window is slowed rather than broken: the
+     * platform's own `bufferedAmount` keeps growing until the browser kills the
+     * connection, which is the failure this prevents. It is bounded by
+     * `queueBudget`, and over budget `send()` refuses — the producer's signal to
+     * slow down, which is what a watermark is for.
+     * @type {any[]}
+     */
+    /** @type {number} */
+    /**
      * Whether the outgoing buffer is above the high-water mark.
      *
      * **Set from the send path, cleared from the event**, which is what makes it
@@ -121,6 +133,26 @@ export class PowerRTCChannel {
      */
     get isBackpressured(): boolean;
     /**
+     * Bytes held in the JS-side queue while the channel is paused.
+     *
+     * AUD-024. The number that says how far behind the producer is, as against
+     * `bufferedAmount`, which says how far behind the *platform* is. A channel can
+     * be paused with an empty platform buffer and a full queue — that is the whole
+     * point of holding frames locally — so the two answer different questions and
+     * neither implies the other.
+     *
+     * Bounded by `queueBudget`; `send()` refuses once it would be exceeded.
+     *
+     * @returns {number}
+     */
+    get queuedBytes(): number;
+    /**
+     * Frames held in the JS-side queue while the channel is paused.
+     *
+     * @returns {number}
+     */
+    get queuedFrames(): number;
+    /**
      * Whether the transport exposes a usable probe.
      *
      * Always `false`, and reported rather than omitted. There is no protocol-level
@@ -174,6 +206,25 @@ export class PowerRTCChannel {
      *   frame this channel can never carry.
      */
     send(frame: string | ArrayBuffer | ArrayBufferView): boolean;
+    /**
+     * Hand the queued frames to the platform, in order, until the channel is
+     * paused again or the queue is empty.
+     *
+     * AUD-024. The resume half of the two-watermark scheme, driven by
+     * `bufferedamountlow` — which the platform delivers once `bufferedAmount` is
+     * back at or below `bufferedAmountLowThreshold`, i.e. the **low** mark. No
+     * timer: the event is pushed, and polling would answer the same question later
+     * for a wakeup.
+     *
+     * Drains in a loop rather than one frame per event, because a single event
+     * covers a whole window's worth of backlog and one-frame-per-event would take
+     * as many round trips as there are queued frames. The loop re-checks
+     * `_backpressured` each iteration, so it stops the moment the channel backs up
+     * again rather than pushing the whole queue into a buffer that is already full.
+     *
+     * @returns {void}
+     * @private
+     */
     /**
      * Close the channel.
      *

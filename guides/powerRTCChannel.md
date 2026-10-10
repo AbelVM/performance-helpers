@@ -122,13 +122,13 @@ Bound oversized payloads at the peer that produces them. `oversizeFrames` is a c
 
 `PowerWebSocketClient` needs four options — `highWaterMarkBytes`, `lowWaterMarkBytes`, `pollIntervalMs`, `maxPollIntervalMs` — plus a timer that backs off, all to _approximate_ a low-water mark, because `WebSocket` has no event for it. A producer that stops polling stops noticing the socket drain.
 
-A data channel has the event. Setting `bufferedAmountLowThreshold` makes the platform **push** `bufferedamountlow` when the buffer falls back to it, so this class has exactly **one** watermark option and no timer at all:
+A data channel has the event. Setting `bufferedAmountLowThreshold` makes the platform **push** `bufferedamountlow` when the buffer falls back to it, so this class needs **no poll interval and no timer at all**:
 
 ```js
 const channel = new PowerRTCChannel(dc, { highWaterMarkBytes: 64 * 1024 });
 
-// The platform threshold is armed for you:
-dc.bufferedAmountLowThreshold; // 65536
+// The platform threshold is armed for you, at the LOW mark:
+dc.bufferedAmountLowThreshold; // 4096 — a sixteenth of the high mark
 
 while (queue.length && !channel.isBackpressured) channel.send(queue.shift());
 ```
@@ -138,6 +138,34 @@ The flag is raised by `send()` and cleared by the event, so it stays accurate wi
 `highWaterMarkBytes: 0` disables the watermark. It does **not** write `0` to the platform property: the default of `0` makes `bufferedamountlow` fire whenever the buffer reaches empty, which would turn the push signal into a metronome.
 
 Note the option is **also a mutation of your channel** — it overwrites any `bufferedAmountLowThreshold` you had set.
+
+### Two watermarks, because one cannot pause and resume
+
+**New in 2.0.** Above the high mark the channel stops calling the platform's `send()` and holds frames in a bounded JS-side queue; it resumes when `bufferedamountlow` fires, which the platform delivers once `bufferedAmount` is back at or below the **low** mark.
+
+```js
+const channel = new PowerRTCChannel(dc, {
+  highWaterMarkBytes: 16 * 1024 * 1024, // pause here
+  lowWaterMarkBytes: 1 * 1024 * 1024, // resume here
+  queueBudget: 1 * 1024 * 1024, // most the JS-side queue may hold
+});
+
+channel.send(bigFrame); // accepted — held, not pushed
+channel.queuedFrames; // 1
+channel.queuedBytes; // bigFrame.byteLength
+```
+
+**Why the threshold moved to the low mark.** It used to be set to the high mark, which made `bufferedamountlow` fire the moment the buffer returned to the level the channel had paused at — so it resumed at the same level it paused at and oscillated, moving roughly one frame per drain cycle. The event is the _resume_ signal, so it belongs at the resume point. The default is a sixteenth of the high mark, the 1:16 ratio RFC 8831 and the `rtc.io` backpressure guide both recommend; **tune the ratio before the absolute numbers.**
+
+**Why the queue is bounded.** Back-pressure without a bound is not back-pressure, it is a moved leak: frames the platform would have refused are held in an array that grows for as long as the producer keeps calling, which is the same unbounded growth with extra steps. Over `queueBudget`, `send()` returns `false` and counts the frame in `stats().droppedFrames` — the producer's signal to slow down, which is what a watermark is for.
+
+`send()` returning `true` while paused therefore means **"accepted"**, not "on the wire". `queuedFrames` and `queuedBytes` are the numbers that say how far behind the producer is, as against `bufferedAmount`, which says how far behind the _platform_ is. A channel can be paused with an empty platform buffer and a full queue — that is the whole point of holding frames locally.
+
+The queue is dropped on `dispose()`. Those frames can never be delivered — the channel is closed and the listeners that would resume it are gone — so keeping them would be retention with no path to release.
+
+### Known limitation: the shared congestion window
+
+RFC 8831 requires data channels to be congestion-controlled _as a class or in conjunction with SRTP media streams_. `PowerRTCChannel` watermarks its **own** channel's `bufferedAmount`; it does not participate in the `RTCPeerConnection`'s shared congestion window, and it cannot — the platform exposes no API for a data channel to join it. A peer connection carrying both media and data can therefore still congest at the SCTP layer in a way these watermarks do not see. Measure `RTCSctpTransport.bufferedAmount` on the transport if you need that number.
 
 ## ⚠️ `bufferedAmount` does not come back down after a close
 
@@ -197,16 +225,18 @@ Two things follow from the transfer:
 
 ## Options
 
-| Option                |                            Type |     Default | Description                                                                                                                                                                                                                                                                                              |
-| --------------------- | ------------------------------: | ----------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onMessage`           |                      `Function` | `undefined` | Called per inbound message as `{ data, channel }`, with the raw `MessageEvent.data` — **not decoded**, since `binaryType` is `arraybuffer` by default.                                                                                                                                                   |
-| `onOpen`              |                      `Function` | `undefined` | The channel is open and `send()` will be served. **Fires for a channel that was already open at construction**, not only from the `open` event: a transferred channel never fires it again.                                                                                                              |
-| `onClose`             |                      `Function` | `undefined` | The channel closed, as `{ reason, channel }`. `reason` is `'local'` if this class called `close()`, otherwise `'remote'` — the platform carries no code and no reason, so that is all it can say.                                                                                                        |
-| `onError`             |                      `Function` | `undefined` | A transport, listener-registration, or `send()` error, as `(err, channel)`. A throwing `onError` is swallowed.                                                                                                                                                                                           |
-| `highWaterMarkBytes`  |                        `number` |     `65536` | Above this `bufferedAmount`, `isBackpressured` is `true`. Written to the channel's `bufferedAmountLowThreshold`, so it **overwrites** any threshold already there. `0` disables the watermark and does not write the property.                                                                           |
-| `maxMessageSizeBytes` |                        `number` |  negotiated | Largest frame this channel may be asked to send. Defaults to `RTCSctpTransport.maxMessageSize`, and to 256 KiB where the platform exposes none. **Enforced, not reported** — see [Two refusals](#two-refusals-and-only-one-of-them-is-seen). `Infinity` delegates the check to the platform's own throw. |
-| `expectUnreliable`    |                       `boolean` |     `false` | Assert at construction that the channel is `ordered: false` and `maxRetransmits: 0`, and throw `TypeError` if not. Those are fixed by `createDataChannel()`, so this class cannot set them — only check them.                                                                                            |
-| `observability`       | `boolean` \| `MetricsCollector` |     `false` | Opt in to metrics: `true` registers under the prefix `rtc`, or pass a collector of your own. See `guides/metrics.md`.                                                                                                                                                                                    |
+| Option                |                            Type |     Default | Description                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------- | ------------------------------: | ----------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onMessage`           |                      `Function` | `undefined` | Called per inbound message as `{ data, channel }`, with the raw `MessageEvent.data` — **not decoded**, since `binaryType` is `arraybuffer` by default.                                                                                                                                                                                                                       |
+| `onOpen`              |                      `Function` | `undefined` | The channel is open and `send()` will be served. **Fires for a channel that was already open at construction**, not only from the `open` event: a transferred channel never fires it again.                                                                                                                                                                                  |
+| `onClose`             |                      `Function` | `undefined` | The channel closed, as `{ reason, channel }`. `reason` is `'local'` if this class called `close()`, otherwise `'remote'` — the platform carries no code and no reason, so that is all it can say.                                                                                                                                                                            |
+| `onError`             |                      `Function` | `undefined` | A transport, listener-registration, or `send()` error, as `(err, channel)`. A throwing `onError` is swallowed.                                                                                                                                                                                                                                                               |
+| `highWaterMarkBytes`  |                        `number` |     `65536` | Above this `bufferedAmount`, `isBackpressured` is `true`. Written to the channel's `bufferedAmountLowThreshold`, so it **overwrites** any threshold already there. `0` disables the watermark and does not write the property.                                                                                                                                               |
+| `lowWaterMarkBytes`   |                        `number` | `high / 16` | The resume point. Above the high mark the channel stops calling the platform's `send()` and holds frames in a bounded queue; it resumes when `bufferedamountlow` fires, which the platform delivers once `bufferedAmount` is back at or below **this**. Clamped to the high mark if set above it. See [Two watermarks](#two-watermarks-because-one-cannot-pause-and-resume). |
+| `queueBudget`         |                        `number` |   `1048576` | The most bytes the JS-side queue may hold while paused. Over budget `send()` refuses and counts the frame in `stats().droppedFrames`. See [Two watermarks](#two-watermarks-because-one-cannot-pause-and-resume).                                                                                                                                                             |
+| `maxMessageSizeBytes` |                        `number` |  negotiated | Largest frame this channel may be asked to send. Defaults to `RTCSctpTransport.maxMessageSize`, and to 256 KiB where the platform exposes none. **Enforced, not reported** — see [Two refusals](#two-refusals-and-only-one-of-them-is-seen). `Infinity` delegates the check to the platform's own throw.                                                                     |
+| `expectUnreliable`    |                       `boolean` |     `false` | Assert at construction that the channel is `ordered: false` and `maxRetransmits: 0`, and throw `TypeError` if not. Those are fixed by `createDataChannel()`, so this class cannot set them — only check them.                                                                                                                                                                |
+| `observability`       | `boolean` \| `MetricsCollector` |     `false` | Opt in to metrics: `true` registers under the prefix `rtc`, or pass a collector of your own. See `guides/metrics.md`.                                                                                                                                                                                                                                                        |
 
 An unrecognised option **throws** rather than being ignored — an option that was silently inert is the failure RT-016's `initialBuffer` was.
 

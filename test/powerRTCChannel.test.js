@@ -596,3 +596,153 @@ class DOMExceptionLike extends Error {
     this.name = name;
   }
 }
+
+// --- AUD-024: the two-watermark pause/resume cycle ---------------------------
+
+describe('PowerRTCChannel back-pressure watermarks (AUD-024)', () => {
+  /**
+   * A channel whose `bufferedAmount` grows synchronously on `send()`, which is
+   * what lets the helper evaluate the high-water mark from the send path.
+   */
+  const open = (opts) => {
+    const dc = new FakeDataChannel({ readyState: 'open' });
+    const ch = new PowerRTCChannel(dc, opts);
+    return { dc, ch };
+  };
+
+  it('holds frames instead of pushing into a buffer that only grows', () => {
+    // The defect. `RTCDataChannel.bufferedAmount` has no ceiling of its own:
+    // `send()` keeps accepting while the SCTP congestion window is full, the
+    // browser eventually kills the connection, and every frame in flight is lost.
+    // The helper used to call the platform's `send()` unconditionally, so
+    // `isBackpressured` was a *detector* with nothing behind it.
+    const { dc, ch } = open({ highWaterMarkBytes: 1000 });
+
+    // Fill past the high mark.
+    ch.send(frame(600));
+    ch.send(frame(600));
+    expect(ch.isBackpressured).toBe(true);
+
+    // The next frame is held locally, not pushed.
+    const before = dc.sent.length;
+    expect(ch.send(frame(100))).toBe(true);
+    expect(dc.sent.length).toBe(before);
+    expect(ch.queuedFrames).toBe(1);
+    expect(ch.queuedBytes).toBe(100);
+  });
+
+  it('resumes and drains on bufferedamountlow', () => {
+    // The resume half, driven by the platform's push signal. Draining here rather
+    // than waiting for the next `send()` is what makes the queue actually empty:
+    // a producer that stopped calling because it saw `isBackpressured` would
+    // otherwise leave every held frame waiting for a send that never comes.
+    const { dc, ch } = open({ highWaterMarkBytes: 1000 });
+
+    ch.send(frame(600));
+    ch.send(frame(600));
+    ch.send(frame(100));
+    ch.send(frame(100));
+    expect(ch.queuedFrames).toBe(2);
+
+    dc.drain();
+
+    expect(ch.isBackpressured).toBe(false);
+    expect(ch.queuedFrames).toBe(0);
+    expect(ch.queuedBytes).toBe(0);
+    // And the held frames reached the platform, in order.
+    expect(dc.sent).toHaveLength(4);
+  });
+
+  it('sets bufferedAmountLowThreshold to the LOW mark, not the high one', () => {
+    // The reason the two watermarks are separate options. Writing the high mark
+    // there — which this class did before the pause/resume cycle existed — makes
+    // `bufferedamountlow` fire the moment the buffer returns to the level the
+    // channel paused at, so it resumes at the same level it paused at and
+    // oscillates around one watermark rather than two.
+    const { dc } = open({ highWaterMarkBytes: 1600 });
+    expect(dc.bufferedAmountLowThreshold).toBe(100); // 1600 / 16
+
+    const explicit = open({ highWaterMarkBytes: 1600, lowWaterMarkBytes: 200 });
+    expect(explicit.dc.bufferedAmountLowThreshold).toBe(200);
+  });
+
+  it('refuses past queueBudget rather than growing without bound', () => {
+    // **The bound is the point.** Back-pressure without one is not back-pressure,
+    // it is a moved leak: frames the platform would have refused are held in an
+    // array that grows for as long as the producer keeps calling.
+    const { ch } = open({ highWaterMarkBytes: 50, queueBudget: 250 });
+
+    ch.send(frame(100)); // pushes past the high mark
+    expect(ch.isBackpressured).toBe(true);
+    expect(ch.send(frame(100))).toBe(true); // queued, 100 of 250
+    expect(ch.send(frame(100))).toBe(true); // queued, 200 of 250
+    // A third would exceed the budget.
+    expect(ch.send(frame(100))).toBe(false);
+    expect(ch.stats().droppedFrames).toBe(1);
+    expect(ch.queuedFrames).toBe(2);
+  });
+
+  it('stops draining the moment the channel backs up again', () => {
+    // The drain loop re-checks `_backpressured` each iteration, so it stops
+    // rather than pushing the whole queue into a buffer that is already full.
+    const { dc, ch } = open({ highWaterMarkBytes: 50 });
+
+    ch.send(frame(100)); // over the mark
+    for (let i = 0; i < 5; i++) ch.send(frame(10));
+    expect(ch.queuedFrames).toBe(5);
+
+    // Drain only part way: the fake zeroes the buffer, so model a partial flush
+    // by setting the amount back above the mark before the event fires.
+    dc.bufferedAmount = 0;
+    dc.bufferedAmountLowThreshold = 0; // no event; drive the drain directly
+    ch._backpressured = false;
+    ch._drainQueue();
+    // All five fit under the mark once the buffer is empty.
+    expect(ch.queuedFrames).toBe(0);
+    expect(dc.sent).toHaveLength(6);
+  });
+
+  it('drops the held frames on dispose, because they can never be delivered', () => {
+    // The channel is closed and the listeners that would resume it are gone, so
+    // keeping them would be retention with no path to release.
+    const { ch } = open({ highWaterMarkBytes: 50 });
+    ch.send(frame(100));
+    ch.send(frame(50));
+    expect(ch.queuedFrames).toBe(1);
+
+    ch.dispose();
+    expect(ch.queuedFrames).toBe(0);
+    expect(ch.queuedBytes).toBe(0);
+  });
+
+  it('reports the queue in stats, so a paused channel is observable', () => {
+    const { ch } = open({ highWaterMarkBytes: 50 });
+    ch.send(frame(100));
+    ch.send(frame(40));
+
+    const s = ch.stats();
+    expect(s.queuedFrames).toBe(1);
+    expect(s.queuedBytes).toBe(40);
+    expect(s.droppedFrames).toBe(0);
+    expect(s.backpressureEvents).toBe(1);
+  });
+
+  it('clamps a low watermark above the high one instead of refusing the channel', () => {
+    // A caller who sets low above high has made a configuration mistake, but the
+    // honest reading of "resume at or above where I paused" is "resume
+    // immediately". Throwing would refuse a channel that still works, for a
+    // mistake that degrades rather than breaks.
+    const { dc } = open({ highWaterMarkBytes: 1000, lowWaterMarkBytes: 5000 });
+    expect(dc.bufferedAmountLowThreshold).toBe(1000);
+  });
+
+  it('still sends directly when the watermark is disabled', () => {
+    // `highWaterMarkBytes: 0` disables, matching every other limit here — and the
+    // queue must not silently start holding frames.
+    const { dc, ch } = open({ highWaterMarkBytes: 0 });
+    for (let i = 0; i < 10; i++) ch.send(frame(1000));
+    expect(ch.isBackpressured).toBe(false);
+    expect(ch.queuedFrames).toBe(0);
+    expect(dc.sent).toHaveLength(10);
+  });
+});

@@ -86,12 +86,28 @@ class DrainyDataChannel {
 const frame = (n) => new Uint8Array(n);
 
 describe('the push signal replaces the poll timer', () => {
-  it('arms the platform threshold from one option', () => {
+  it('arms the platform threshold at the LOW mark, not the high one', () => {
+    // **Rewritten for AUD-024, and the expectation moved rather than loosened.**
+    // This used to assert the threshold equals `highWaterMarkBytes` exactly, on
+    // the reasoning that the platform compares against it itself and a poll
+    // timer is therefore unnecessary. Both halves of that were true, and the
+    // conclusion did not follow: with the threshold at the *high* mark,
+    // `bufferedamountlow` fires the moment the buffer returns to the level the
+    // channel paused at, so it resumes at the same level it paused at and
+    // oscillates — one frame per drain cycle.
+    //
+    // The event is the **resume** signal, so it belongs at the resume point. The
+    // default is a sixteenth of the high mark, the 1:16 ratio RFC 8831 and the
+    // `rtc.io` guide both recommend.
     const dc = new DrainyDataChannel();
     new PowerRTCChannel(dc, { highWaterMarkBytes: 4096 });
-    // **The whole mechanism.** The platform compares against this itself; the
-    // client had to run a timer to notice the same thing.
-    expect(dc.bufferedAmountLowThreshold).toBe(4096);
+    expect(dc.bufferedAmountLowThreshold).toBe(256);
+
+    // And an explicit low mark is honoured, which is the whole point of it being
+    // a separate option.
+    const explicit = new DrainyDataChannel();
+    new PowerRTCChannel(explicit, { highWaterMarkBytes: 4096, lowWaterMarkBytes: 512 });
+    expect(explicit.bufferedAmountLowThreshold).toBe(512);
   });
 
   it('raises the flag on send and clears it from the event, with no timer', () => {
@@ -121,7 +137,18 @@ describe('the push signal replaces the poll timer', () => {
     // over-the-mark would report 5 and make the number agree with `sent` for no
     // reason; "how often did this channel back up" is the question a dashboard
     // asks, and it is 1.
-    expect(channel.stats()).toMatchObject({ backpressureEvents: 1, sent: 5 });
+    //
+    // **Rewritten for AUD-024, and `sent` moved rather than being loosened.** The
+    // first frame crosses the mark and reaches the platform; the other four are
+    // *held* in the JS-side queue rather than pushed into a `bufferedAmount` that
+    // only grows. So `sent` is 1 and the held four are counted in `queuedFrames`
+    // — which is the number that says how far behind the producer is, and the
+    // reason the two are separate.
+    expect(channel.stats()).toMatchObject({
+      backpressureEvents: 1,
+      sent: 1,
+      queuedFrames: 4,
+    });
   });
 
   it('stops serving a producer loop the way the client does', () => {
@@ -165,14 +192,29 @@ describe('the push signal replaces the poll timer', () => {
     expect(channel.isBackpressured).toBe(false);
   });
 
-  it('uses exactly one watermark option, where the client needs four', () => {
-    // A structural claim, asserted structurally. If this helper ever grows
-    // `lowWaterMarkBytes` or a poll interval, the push signal stopped being
-    // usable and this is the test that says so.
+  it('needs two watermark options and no poll interval, where the client needs four', () => {
+    // **Rewritten for AUD-024, and the structural claim narrowed rather than
+    // dropped.** This used to assert that `lowWaterMarkBytes` was *absent*, with
+    // the reasoning that the platform pushes the signal so a second watermark is
+    // unnecessary. That inference was wrong, and it was wrong in the direction
+    // that mattered: the push signal is what makes a second watermark *cheap*,
+    // not what makes it unnecessary.
+    //
+    // A single watermark cannot express pause-and-resume. Pause above the high
+    // mark and resume *at* it means resuming at the level you paused at, so the
+    // channel oscillates — one frame per drain cycle. The two marks are the pause
+    // point and the resume point, and they have to be different numbers.
+    //
+    // What still holds is the part the original claim was really about: **no poll
+    // interval.** The platform pushes `bufferedamountlow`, so there is nothing to
+    // poll for, and `PowerWebSocketClient` had to run a backing-off timer for
+    // exactly this. Those two options stay absent, and that is the assertion.
     const dc = new DrainyDataChannel();
     const channel = new PowerRTCChannel(dc, { highWaterMarkBytes: 4096 });
     expect(channel.stats().highWaterMarkBytes).toBe(4096);
-    for (const absent of ['lowWaterMarkBytes', 'pollIntervalMs', 'maxPollIntervalMs']) {
+    expect(channel.stats().lowWaterMarkBytes).toBe(256);
+
+    for (const absent of ['pollIntervalMs', 'maxPollIntervalMs']) {
       expect(channel.stats(), absent).not.toHaveProperty(absent);
       expect(() => new PowerRTCChannel(new DrainyDataChannel(), { [absent]: 20 })).toThrow(
         /absent|unknown|not/i

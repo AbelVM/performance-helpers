@@ -43,6 +43,8 @@
   per the cross-realm rule.
 - `createSseAdapter`'s `lastEventId(sub)` and `lastSentId(sub)`, the two ends of
   a reconnect gap. See the SSE fix below.
+- `PowerRTCChannel`'s `lowWaterMarkBytes` and `queueBudget` options, and the
+  `queuedBytes` / `queuedFrames` getters. See the back-pressure fix below.
 
 ### Changed
 
@@ -156,6 +158,38 @@
   difference between them is exactly what a reconnect must replay. The adapter
   deliberately does not replay — it holds no buffer of past frames, and a replay
   buffer is the message source's concern.
+- **`PowerRTCChannel` had back-pressure detection with nothing behind it.**
+  `isBackpressured` was observable but gated nothing: `send()` called the
+  platform unconditionally, so `RTCDataChannel.bufferedAmount` grew without
+  ceiling while the SCTP congestion window was full, the browser eventually
+  killed the connection, and every frame in flight was lost. The helper is now
+  unsafe-free above a few hundred KB, which is most real uses.
+
+  It now implements the two-watermark scheme RFC 8831 and the `rtc.io` guide
+  describe: above `highWaterMarkBytes` it stops calling the platform and holds
+  frames in a JS-side queue bounded by `queueBudget` (1 MiB default), resuming
+  when `bufferedamountlow` fires. **The bound is the point** — back-pressure
+  without one is a moved leak, frames held in an array that grows for as long as
+  the producer keeps calling. Over budget `send()` refuses and counts the frame
+  in `stats().droppedFrames`, which is the producer's signal to slow down.
+
+  `bufferedAmountLowThreshold` is now set to the **low** mark rather than the
+  high one. It was the high mark, which made the event fire the moment the buffer
+  returned to the level the channel had paused at — so it resumed at the same
+  level it paused at and oscillated, moving roughly one frame per drain cycle. A
+  two-watermark scheme with one watermark is a detector, not a controller. The
+  default ratio is 1:16, and the guidance is to tune the ratio before the
+  absolute numbers.
+
+  `send()` returning `true` while paused means **"accepted"**, not "on the wire";
+  `queuedFrames` and `queuedBytes` say how far behind the producer is, as against
+  `bufferedAmount`, which says how far behind the platform is.
+
+  Known limitation, now documented rather than left to discover: the watermarks
+  cover this channel's own `bufferedAmount` and do **not** participate in the
+  `RTCPeerConnection`'s shared congestion window, which RFC 8831 asks for and the
+  platform exposes no API to join.
+
 - **`PowerHistogram` lost small values recorded after a large one.** Naive `+=`
   on mixed magnitudes discards the small addends: recording `1e16` and then a
   thousand `1`s gave a `sum` of `1e16`, an absolute error of -1000, because

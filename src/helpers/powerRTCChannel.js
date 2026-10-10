@@ -178,6 +178,8 @@ export class PowerRTCChannel {
         'onClose',
         'onError',
         'highWaterMarkBytes',
+        'lowWaterMarkBytes',
+        'queueBudget',
         'maxMessageSizeBytes',
         'expectUnreliable',
       ],
@@ -189,6 +191,8 @@ export class PowerRTCChannel {
       onClose,
       onError,
       highWaterMarkBytes = 64 * 1024,
+      lowWaterMarkBytes,
+      queueBudget = 1024 * 1024,
       maxMessageSizeBytes,
       expectUnreliable = false,
     } = options || {};
@@ -267,6 +271,54 @@ export class PowerRTCChannel {
       fallback: 64 * 1024,
     });
 
+    // AUD-024. The resume point, and the reason the two watermarks are separate
+    // options. Defaults to a sixteenth of the high mark — the 1:16 ratio RFC 8831
+    // and the `rtc.io` backpressure guide both recommend, and the guidance is to
+    // tune the *ratio* before the absolute numbers.
+    //
+    // Clamped to the high mark rather than rejected when it exceeds it: a caller
+    // who sets low above high has made a configuration mistake, but the honest
+    // reading of "resume at or above where I paused" is "resume immediately",
+    // which is what clamping gives. Throwing would refuse a channel that still
+    // works, for a mistake that degrades rather than breaks.
+    this._lowWaterMark =
+      lowWaterMarkBytes === undefined
+        ? Math.floor(this._highWaterMark / 16)
+        : Math.min(
+            assertLimitRequired(lowWaterMarkBytes, {
+              name: 'lowWaterMarkBytes',
+              className: 'PowerRTCChannel',
+              min: 0,
+              fallback: Math.floor(this._highWaterMark / 16),
+            }),
+            this._highWaterMark
+          );
+
+    // AUD-024. The bound on the JS-side queue. Without it, pausing is not
+    // back-pressure — it is a moved leak: frames the platform would have refused
+    // are held in an array that grows for as long as the producer keeps calling.
+    this._queueBudget = assertLimitRequired(queueBudget, {
+      name: 'queueBudget',
+      className: 'PowerRTCChannel',
+      min: 0,
+      fallback: 1024 * 1024,
+    });
+
+    /**
+     * Frames held while the channel is paused, and the bytes they occupy.
+     *
+     * **A queue, not a buffer of last resort.** It exists so a producer that
+     * outruns the SCTP congestion window is slowed rather than broken: the
+     * platform's own `bufferedAmount` keeps growing until the browser kills the
+     * connection, which is the failure this prevents. It is bounded by
+     * `queueBudget`, and over budget `send()` refuses — the producer's signal to
+     * slow down, which is what a watermark is for.
+     * @type {any[]}
+     */
+    this._queue = [];
+    /** @type {number} */
+    this._queuedBytes = 0;
+
     /**
      * Whether the outgoing buffer is above the high-water mark.
      *
@@ -303,6 +355,13 @@ export class PowerRTCChannel {
       // The push signal firing. Exposed because a producer that never checks
       // `isBackpressured` should still be able to see that the signal works.
       lowBufferEvents: 0,
+      // AUD-024. Frames held in the JS-side queue while paused, and frames
+      // refused because the queue was over `queueBudget`. The pair is the whole
+      // picture of a paused channel: how much is waiting, and how much was
+      // turned away.
+      queuedFrames: 0,
+      queuedBytes: 0,
+      droppedFrames: 0,
       opened: 0,
       closed: 0,
     };
@@ -314,9 +373,15 @@ export class PowerRTCChannel {
     // buffer reaches 0 — so "disable the watermark" implemented as "write 0" would
     // turn the event into a metronome. `highWaterMarkBytes: 0` disables, matching
     // every other limit in this library.
+    //
+    // AUD-024. **The threshold is the LOW mark, not the high one.** This used to
+    // write the high mark, which made `bufferedamountlow` fire the moment the
+    // buffer returned to the level the channel had paused at — so a two-watermark
+    // scheme had one watermark and oscillated around it. The event is the resume
+    // signal, so it belongs at the resume point.
     if (this._highWaterMark > 0) {
       try {
-        channel.bufferedAmountLowThreshold = this._highWaterMark;
+        channel.bufferedAmountLowThreshold = this._lowWaterMark;
       } catch (e) {
         this._emitError(e);
       }
@@ -402,6 +467,32 @@ export class PowerRTCChannel {
   }
 
   /**
+   * Bytes held in the JS-side queue while the channel is paused.
+   *
+   * AUD-024. The number that says how far behind the producer is, as against
+   * `bufferedAmount`, which says how far behind the *platform* is. A channel can
+   * be paused with an empty platform buffer and a full queue — that is the whole
+   * point of holding frames locally — so the two answer different questions and
+   * neither implies the other.
+   *
+   * Bounded by `queueBudget`; `send()` refuses once it would be exceeded.
+   *
+   * @returns {number}
+   */
+  get queuedBytes() {
+    return this._queuedBytes;
+  }
+
+  /**
+   * Frames held in the JS-side queue while the channel is paused.
+   *
+   * @returns {number}
+   */
+  get queuedFrames() {
+    return this._queue.length;
+  }
+
+  /**
    * Whether the transport exposes a usable probe.
    *
    * Always `false`, and reported rather than omitted. There is no protocol-level
@@ -471,6 +562,34 @@ export class PowerRTCChannel {
       this._counters.oversizeFrames += 1;
       throw unsendableFrameError('PowerRTCChannel', size, this._maxMessageSizeBytes);
     }
+    // AUD-024. **Pause instead of pushing into a buffer that only grows.**
+    //
+    // `RTCDataChannel.bufferedAmount` has no ceiling of its own: `send()` keeps
+    // accepting while the SCTP congestion window is full, the browser eventually
+    // kills the connection, and every frame in flight is lost. The standard fix
+    // is a two-watermark scheme — stop at the high mark, resume at the low one —
+    // and the "stop" half is this branch.
+    //
+    // The frame is held here rather than refused, because a producer that
+    // outruns the network is *slow*, not *wrong*: refusing would make the caller
+    // retry a frame it has already handed over, and a hub adapter would count it
+    // undelivered. `true` therefore means "accepted", not "on the wire" — which
+    // is what `queuedFrames` and `isBackpressured` are for.
+    if (this._backpressured) {
+      // **Over budget, refuse.** This is the bound that makes the pause
+      // back-pressure rather than a moved leak: without it the array grows for as
+      // long as the producer keeps calling, which is the same unbounded growth
+      // with extra steps. The refusal is the producer's signal to slow down.
+      if (this._queuedBytes + size > this._queueBudget) {
+        this._counters.droppedFrames += 1;
+        return false;
+      }
+      this._queue.push(frame);
+      this._queuedBytes += size;
+      this._counters.queuedFrames += 1;
+      this._counters.queuedBytes = this._queuedBytes;
+      return true;
+    }
     try {
       this.channel.send(frame);
     } catch (e) {
@@ -482,6 +601,47 @@ export class PowerRTCChannel {
     this._counters.bytesOut += size;
     this._refreshBackpressure();
     return true;
+  }
+
+  /**
+   * Hand the queued frames to the platform, in order, until the channel is
+   * paused again or the queue is empty.
+   *
+   * AUD-024. The resume half of the two-watermark scheme, driven by
+   * `bufferedamountlow` — which the platform delivers once `bufferedAmount` is
+   * back at or below `bufferedAmountLowThreshold`, i.e. the **low** mark. No
+   * timer: the event is pushed, and polling would answer the same question later
+   * for a wakeup.
+   *
+   * Drains in a loop rather than one frame per event, because a single event
+   * covers a whole window's worth of backlog and one-frame-per-event would take
+   * as many round trips as there are queued frames. The loop re-checks
+   * `_backpressured` each iteration, so it stops the moment the channel backs up
+   * again rather than pushing the whole queue into a buffer that is already full.
+   *
+   * @returns {void}
+   * @private
+   */
+  _drainQueue() {
+    while (this._queue.length > 0 && !this._backpressured) {
+      if (this._state !== READY_STATE.OPEN) return;
+      const frame = this._queue.shift();
+      const size = frameByteLength(frame);
+      this._queuedBytes -= size;
+      this._counters.queuedBytes = this._queuedBytes;
+      try {
+        this.channel.send(frame);
+      } catch (e) {
+        // A frame that fails on the way out is lost either way; counting it as a
+        // send failure rather than silently dropping it keeps the number honest.
+        this._counters.sendFailures += 1;
+        this._emitError(e);
+        continue;
+      }
+      this._counters.sent += 1;
+      this._counters.bytesOut += size;
+      this._refreshBackpressure();
+    }
   }
 
   /**
@@ -545,6 +705,12 @@ export class PowerRTCChannel {
       binaryType: this.channel?.binaryType ?? null,
       maxMessageSizeBytes: this._maxMessageSizeBytes,
       highWaterMarkBytes: this._highWaterMark,
+      // AUD-024. The resume point, reported next to the pause point because the
+      // pair is the configuration and either number alone is meaningless: a
+      // channel paused at 4 KiB and resuming at 4 KiB is a channel that moves one
+      // frame per drain cycle.
+      lowWaterMarkBytes: this._lowWaterMark,
+      queueBudget: this._queueBudget,
       canPing: this.canPing,
     };
   }
@@ -583,6 +749,12 @@ export class PowerRTCChannel {
     this._detachListeners();
     this._state = READY_STATE.CLOSED;
     this._backpressured = false;
+    // AUD-024. Drop the held frames with the rest. They can never be delivered
+    // now — the channel is closed and the listeners that would resume it are
+    // gone — so keeping them would be retention with no path to release, which is
+    // the shape `dispose()` exists to prevent.
+    this._queue.length = 0;
+    this._queuedBytes = 0;
     this._onMessage = null;
     this._onOpen = null;
     this._onClose = null;
@@ -658,6 +830,12 @@ export class PowerRTCChannel {
     const onBufferLow = () => {
       this._counters.lowBufferEvents += 1;
       this._backpressured = false;
+      // AUD-024. The resume signal, so resume. Draining here rather than leaving
+      // it to the next `send()` is what makes the queue actually empty: a
+      // producer that has stopped calling — because it saw `isBackpressured` —
+      // would otherwise leave every held frame waiting for a send that never
+      // comes.
+      this._drainQueue();
     };
     /** @type {Array<[string, (any: any) => void]>} */
     const listeners = [

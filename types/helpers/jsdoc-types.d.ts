@@ -1089,6 +1089,36 @@ export type PowerRTCChannelOptions = {
      */
     highWaterMarkBytes?: number | undefined;
     /**
+     * - The resume point. Above
+     * `highWaterMarkBytes` the channel stops calling the platform's `send()` and
+     * holds frames in a bounded JS-side queue; it resumes when `bufferedamountlow`
+     * fires, which the platform delivers once `bufferedAmount` is back at or below
+     * **this** value. Defaults to `highWaterMarkBytes / 16`, the 1:16 ratio RFC 8831
+     * and the `rtc.io` guide both recommend — tune the ratio before the absolute
+     * numbers.
+     *
+     * **This is what `bufferedAmountLowThreshold` is set to**, and that is the
+     * reason it exists as a separate option. Writing the *high* mark there instead
+     * — which is what this class did before the pause/resume cycle existed — makes
+     * the event fire the moment the buffer returns to the high mark, so the channel
+     * resumes at the same level it paused at and oscillates around one watermark
+     * rather than two. A two-watermark scheme with one watermark is a detector, not
+     * a controller.
+     */
+    lowWaterMarkBytes?: number | undefined;
+    /**
+     * - The most bytes the JS-side queue may
+     * hold while the channel is paused. 1 MiB by default.
+     *
+     * **The bound is the point.** Back-pressure without one is not back-pressure,
+     * it is a moved leak: frames the platform would have refused are held in an
+     * array that grows for as long as the producer keeps calling, which is the same
+     * unbounded growth with extra steps. Over budget, `send()` refuses and counts
+     * the frame in `stats().droppedFrames` — the producer's signal to slow down,
+     * which is what a watermark is for.
+     */
+    queueBudget?: number | undefined;
+    /**
      * - Largest frame this channel may be
      * asked to send. Defaults to `RTCSctpTransport.maxMessageSize` — the real
      * negotiated ceiling — and to 256 KiB where the platform does not expose one.
