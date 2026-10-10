@@ -12,8 +12,11 @@ example/
 *.zip
 *.cpuprofile
 .kilo/
-review.md
-review2.md
+# Working plans. Gitignored deliberately: a test depending on an untracked file
+# passes locally and has nothing to fail against in CI (AGENTS.md §1), so the
+# plan table's discipline is human, not automated. `review*.md` rather than a
+# list, so the next variant does not have to be remembered.
+review*.md
 .zvec-grep/
 .vitest/
 tmp/
