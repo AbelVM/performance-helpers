@@ -1283,13 +1283,6 @@ export type EventLoopMonitorOptions = {
         idle: number;
         utilization: number;
     })) | null | undefined;
-    /**
-     * Injected clock, as the limiters take
-     * (PERF-007). GEO-039: this helper's whole job is comparing *scheduled* time
-     * against *observed* time, so a frozen clock has to reach both sides or
-     * `coverage` cannot be exercised without real timers. Defaults to `nowMs()`.
-     */
-    now?: (() => number) | undefined;
 };
 /**
  * The idempotent release callback handed out by the permit-gate family
@@ -1436,15 +1429,6 @@ export type PowerCircuitOptions = {
      * given, transitions are also emitted on it as `stateChange`.
      */
     eventBus?: import("./powerEventBus.js").PowerEventBus<Record<string, any>> | undefined;
-    /**
-     * Injected clock, as the limiters take
-     * (PERF-007). GEO-039: this was the one clock-driven helper with no injection
-     * point at all, so a caller freezing time — MapLibre's `setNow()`, or a
-     * suite's fake timers — could not drive an open window. Defaults to
-     * `monoMs()`, which `utils/now.js` documents as deliberately unmovable;
-     * injecting a clock is the only way past that for this class.
-     */
-    now?: (() => number) | undefined;
 };
 /**
  * The three states a `PowerCircuit` moves between.
@@ -1679,13 +1663,6 @@ export type PowerDeadlineOptions = {
     baseDelay?: number | undefined;
     maxDelay?: number | undefined;
     jitter?: boolean | undefined;
-    /**
-     * Injected clock, as the limiters take
-     * (PERF-007). GEO-039: a deadline is arithmetic over `startedAt`, so a frozen
-     * clock has to reach it or `totalTimeout` cannot be exercised without real
-     * timers. Defaults to `nowMs()`.
-     */
-    now?: (() => number) | undefined;
 };
 /**
  * Permit-gate options, for `PowerPermitGate` and everything built on it.

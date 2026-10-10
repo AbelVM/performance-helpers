@@ -53,21 +53,6 @@ Cap on how many missed periods
 
 ***
 
-### now?
-
-> `optional` **now?**: () => `number`
-
-Injected clock, as the limiters take
-  (PERF-007). GEO-039: a cron's cadence is deadline arithmetic over `_nextAt`,
-  so a frozen clock has to reach it or the catch-up policy cannot be
-  exercised without real timers. Defaults to `nowMs()`.
-
-#### Returns
-
-`number`
-
-***
-
 ### onError?
 
 > `optional` **onError?**: (`err`) => `void`
