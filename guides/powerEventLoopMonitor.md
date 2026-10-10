@@ -117,11 +117,17 @@ see what is happening to this process?_ — and a low figure is the honest answe
 What it is _for_ is the blind spot above, and there it is a drop rather than a ratio:
 
 ```js
+import { PowerEventLoopMonitor } from 'performance-helpers/powerEventLoopMonitor';
+import { MetricsCollector } from 'performance-helpers/metrics';
+
+const monitor = new PowerEventLoopMonitor({ intervalMs: 20 });
+const metrics = new MetricsCollector();
+
 const s = monitor.stats();
 if (s.coverage !== null && s.coverage < 0.5) {
   // A quarter of the wall clock went unsampled. Nothing else in this object can
   // tell you that: the sample count and the maximum are both unchanged.
-  metrics.gauge('eventloop.coverage', s.coverage);
+  metrics.register('eventloop.coverage', () => s.coverage);
 }
 ```
 
@@ -194,22 +200,26 @@ enough to starve the timer is precisely the case only one of the two can see.
 
 ```js
 import { PowerEventLoopMonitor } from 'performance-helpers/powerEventLoopMonitor';
+import { MetricsCollector } from 'performance-helpers/metrics';
+
+let lastBlockedMs = 0;
 
 const monitor = new PowerEventLoopMonitor({
   intervalMs: 20,
   onDrift: (drift) => {
-    if (drift > 100) metrics.increment('eventloop.blocked', { ms: Math.round(drift) });
+    if (drift > 100) lastBlockedMs = Math.round(drift);
   },
 });
 
+const metrics = new MetricsCollector();
+metrics.register('eventloop.blocked', () => ({ ms: lastBlockedMs }));
+
 monitor.start();
 
-// elsewhere, on a metrics scrape interval
-setInterval(() => {
-  const s = monitor.stats();
-  metrics.gauge('eventloop.p99', s.p99 ?? 0);
-  metrics.gauge('eventloop.max', s.max);
-}, 15_000);
+// `register` takes a read function, so the series is pulled on each scrape
+// rather than pushed on a timer of your own.
+metrics.register('eventloop.p99', () => monitor.stats().p99 ?? 0);
+metrics.register('eventloop.max', () => monitor.stats().max);
 ```
 
 ## Using it with `using`

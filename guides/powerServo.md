@@ -76,7 +76,7 @@ const servo = new PowerServo({
 setInterval(() => {
   // dt is real elapsed time, and the gains are tuned for that unit.
   const consumers = servo.step(queue.size, elapsedSinceLastTickMs);
-  pool.setConcurrency(consumers);
+  pool.resize(consumers);
 }, 100);
 ```
 

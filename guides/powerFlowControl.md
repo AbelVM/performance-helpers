@@ -97,7 +97,7 @@ const flow = new PowerFlowControl({
   setpoint: 8,
   kp: 0.4,
   ki: 0.1,
-  onRateChange: (rate) => pool.setConcurrency(Math.ceil(rate)),
+  onRateChange: (rate) => pool.resize(Math.ceil(rate)),
 });
 
 setInterval(() => {

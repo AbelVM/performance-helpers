@@ -608,3 +608,302 @@ describe('a cross-cutting guide only names calls that exist somewhere (GATE-005)
     expect([...CROSS_CUTTING_NOT_CALLS].filter((n) => !used.has(n)).sort()).toEqual([]);
   });
 });
+
+/**
+ * GATE-010: a runnable example only calls methods that exist.
+ *
+ * GATE-002 and GATE-005 both scan **inline** backticked calls — `` `name(` `` —
+ * and neither can see a fenced code block, because a code block holds raw
+ * `obj.method(` rather than a backticked name. That is precisely the shape of
+ * the bug GATE-002 was written for: `guides/powerPool.md` documented
+ * `prepareBuffer(obj, { clone })` in its API list *and called it in a runnable
+ * example*. The inline scan caught the API list. The example was invisible to
+ * every check in the repository.
+ *
+ * Measured before this was written, because a gate whose noise floor is unknown
+ * is a gate nobody can keep green:
+ *
+ * - Literal `` `name(` `` inside a fence: **4** names across 318 blocks. Not
+ *   worth a rule, which is why this scans calls rather than backticked names.
+ * - Member calls `recv.method(` inside fences: **132** distinct names.
+ * - Resolving the receiver to a class constructed in the same block
+ *   (`const pool = new PowerPool(`) checks **274 call sites with 0 mismatches**.
+ *   That is the precise layer, and it is the one that would have caught
+ *   `pool.setConcurrency(` — `PowerPool` has `resize`, and nothing named
+ *   `setConcurrency` exists anywhere under `src/`.
+ * - The remaining receivers are platform objects and the guide's own example
+ *   objects, which is what the three lists below are for.
+ *
+ * What this gate found on its first run, all of it now fixed:
+ * `pool.setConcurrency(` in `powerServo.md` and `powerFlowControl.md`, and
+ * `metrics.gauge(` / `metrics.increment(` in `powerEventLoopMonitor.md` —
+ * `MetricsCollector` declares `register`, `unregister`, `snapshot` and `names`,
+ * and nothing else. The `metrics` fixes also had to add the
+ * `import { MetricsCollector }` and the `const metrics = new MetricsCollector()`
+ * the examples were missing: the method name was wrong *and* the receiver was
+ * never bound, so a reader got a `ReferenceError` before the `TypeError`.
+ *
+ * **The floor, stated because it is real.** The union layer accepts a name that
+ * exists *anywhere* under `src/`, so a wrong method on a library object passes
+ * if an unrelated class happens to declare it. `metrics.increment(` was exactly
+ * that: `src/utils/smallLfu.js` declares an `increment`, so the union layer
+ * would have accepted a call `MetricsCollector` does not have. It was found by
+ * reading the guide, not by this gate. The precise layer closes that hole for
+ * every receiver it can resolve; for the rest a reader is still the backstop,
+ * and this comment is the record that the hole exists.
+ */
+
+/**
+ * The body of every fenced code block in a markdown document.
+ *
+ * Line-based rather than one regex over the whole document: a fence closes on a
+ * line of the same marker character, at least as long, with nothing after it,
+ * and a single regex cannot express "at least as long" without also treating
+ * the opening line of a longer fence nested inside a shorter one as a close.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function fencedBlocks(text) {
+  const lines = text.split('\n');
+  /** @type {string[]} */
+  const blocks = [];
+  let open = null;
+  for (const line of lines) {
+    const m = /^[ \t]{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!open) {
+      if (m) open = { marker: m[1][0], len: m[1].length, lines: [] };
+      continue;
+    }
+    if (m && m[1][0] === open.marker && m[1].length >= open.len && m[2].trim() === '') {
+      blocks.push(open.lines.join('\n'));
+      open = null;
+      continue;
+    }
+    open.lines.push(line);
+  }
+  // An unterminated fence still has a body. Dropping it would let a guide hide a
+  // whole example behind one missing closing line.
+  if (open) blocks.push(open.lines.join('\n'));
+  return blocks;
+}
+
+/**
+ * class name -> the members that class declares.
+ *
+ * Sliced from one `class` declaration to the next rather than brace-matched.
+ * Four files under `src/` declare more than one class — `powerPool.js` has
+ * three — so a per-file set would merge them and accept a sibling's method.
+ * Brace matching is not safe either: JSDoc here is full of `@param {{a: number}}`,
+ * and one unbalanced brace inside a comment would end the class early. Slicing
+ * to the next declaration over-approximates at the end of a file, which is the
+ * safe direction — it accepts a name rather than inventing a failure.
+ */
+const classMembers = (() => {
+  /** @type {Map<string, Set<string>>} */
+  const map = new Map();
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!entry.name.endsWith('.js')) continue;
+      const source = readFileSync(full, 'utf8');
+      const starts = [
+        ...source.matchAll(/(?:^|\n)[ \t]*(?:export[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)/g),
+      ];
+      for (let i = 0; i < starts.length; i++) {
+        const from = starts[i].index;
+        const to = i + 1 < starts.length ? starts[i + 1].index : source.length;
+        map.set(starts[i][1], declaredNames(source.slice(from, to)));
+      }
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  return map;
+})();
+
+/**
+ * Constructors that hand back an instance of a *different* class.
+ *
+ * `PowerChunker` is constructed but returns a `PowerPool` — its guide says so
+ * ("Returns a `PowerPool` instance managing chunked work"), and every method the
+ * examples call on the result (`drain()`, `terminate()`) is a `PowerPool`
+ * method. Without this mapping the precise layer reports three false
+ * mismatches, all of them `pool.drain(`.
+ */
+const FACTORY_RETURNS = new Map([['PowerChunker', 'PowerPool']]);
+
+/**
+ * Library singletons a guide can name without constructing them.
+ *
+ * `guides/metrics.md` binds `const metrics = new MetricsCollector()` locally, so
+ * the precise layer resolves that one from the constructor. `defaultMetrics` is
+ * the exported instance, named in `guides/metrics.md` and `guides/powerApdex.md`
+ * as `defaultMetrics.snapshot()`, and it is a `MetricsCollector` — which is how
+ * the precise layer checks `snapshot` against the class that actually has it.
+ *
+ * Matched with `includes` rather than a word-boundary regex: the name is
+ * distinctive enough that a substring hit is the same hit, and it keeps this
+ * file free of a dynamically built `RegExp`.
+ */
+const SINGLETON_CLASSES = new Map([['defaultMetrics', 'MetricsCollector']]);
+
+/**
+ * Receivers whose methods are the platform's business, not this library's.
+ *
+ * `Promise.all(`, `JSON.stringify(`, `Math.ceil(` and `crypto.randomUUID(` are
+ * all correct and all undeclared under `src/`, so the union layer would report
+ * every one of them. `BUILTIN_GLOBALS` is reused rather than a second list of
+ * the same globals; the three additions are the ones this project's guides
+ * actually call statically and that list does not carry.
+ */
+const PLATFORM_RECEIVERS = new Set([...BUILTIN_GLOBALS, 'performance', 'crypto', 'URL']);
+
+/**
+ * Platform methods called on an *instance* the example holds, so the receiver is
+ * a local name and the skip above cannot see it.
+ *
+ * `res.json()` on a fetch `Response`, `p.catch()` on a promise, `res.writeHead()`
+ * on a Node response, `storage.getStore()` on an `AsyncLocalStorage`. Each is a
+ * real method on a real platform object; none is declared under `src/`.
+ */
+const PLATFORM_METHODS = new Set([
+  'json', // Response.json(), in the fetch examples of seven guides
+  'catch', // Promise.prototype.catch(), in powerLatch
+  'writeHead', // ServerResponse.writeHead(), in powerLogger
+  'toFixed', // Number.prototype.toFixed(), in powerEventLoopMonitor and powerHistogram
+  'bind', // Function.prototype.bind(), in powerObserver
+  'subarray', // TypedArray.prototype.subarray(), in powerRealtimeHub
+  'reduce', // Array.prototype.reduce(), in powerRealtimeHub
+  'getStore', // AsyncLocalStorage.prototype.getStore(), in traceContext
+]);
+
+/**
+ * Methods on the guide's *own example objects*, which are the reader's code and
+ * not this library's API.
+ *
+ * `db.bulkUpsert(` in powerBatch, `redis.incrBy(` in powerRateLimit,
+ * `obj.double(` in powerCache, `value.asReadonly(` and `destroyRef.onDestroy(`
+ * in powerObserver. A guide is entitled to call anything on an object it
+ * invented to make the example run; the point of the check is the library's own
+ * receivers, and these are not them.
+ */
+const EXAMPLE_OBJECT_METHODS = new Set([
+  'bulkUpsert',
+  'incrBy',
+  'double',
+  'asReadonly',
+  'onDestroy',
+]);
+
+const fenceScan = (() => {
+  /** @type {Array<{guide: string, call: string, why: string}>} */
+  const preciseProblems = [];
+  /** @type {Array<{guide: string, call: string}>} */
+  const unionProblems = [];
+  /** Method names the union layer actually saw, for the dead-entry check. */
+  const unionMethods = new Set();
+  let blocks = 0;
+  let precise = 0;
+  let union = 0;
+
+  for (const guide of ALL_GUIDES) {
+    const text = readFileSync(path.join(ROOT, 'guides', guide), 'utf8');
+    for (const block of fencedBlocks(text)) {
+      blocks += 1;
+      // Receivers this block binds to a class we can name.
+      const receivers = new Map();
+      for (const m of block.matchAll(
+        /(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)[ \t]*=[ \t]*new[ \t]+([A-Za-z_$][\w$]*)[ \t]*\(/g
+      )) {
+        receivers.set(m[1], FACTORY_RETURNS.get(m[2]) ?? m[2]);
+      }
+      for (const name of SINGLETON_CLASSES.keys()) {
+        if (block.includes(name)) receivers.set(name, SINGLETON_CLASSES.get(name));
+      }
+      // `[ \t]*` and never `\s*`. The first draft of this pattern used `\s*`,
+      // which spans a newline, so a `.` at the end of a comment line reached the
+      // call on the next one: `// …centralized pipeline.` followed by
+      // `sendToLogPipeline(payload)` matched as `pipeline.sendToLogPipeline(`.
+      // That is a comment describing a call, not a call, and it cost three
+      // false positives before the character class was narrowed.
+      for (const m of block.matchAll(
+        /([A-Za-z_$][\w$]*)[ \t]*\.[ \t]*([A-Za-z_$][\w$]*)[ \t]*\(/g
+      )) {
+        const recv = m[1];
+        const method = m[2];
+        const cls = receivers.get(recv);
+        const members = cls && classMembers.get(cls);
+        if (members) {
+          precise += 1;
+          if (!members.has(method)) {
+            preciseProblems.push({
+              guide,
+              call: `${recv}.${method}(`,
+              why: `\`${cls}\` declares no \`${method}\``,
+            });
+          }
+          continue;
+        }
+        union += 1;
+        unionMethods.add(method);
+        if (PLATFORM_RECEIVERS.has(recv)) continue;
+        if (everythingDeclared.has(method) || STOP_LIST.has(method)) continue;
+        if (PLATFORM_METHODS.has(method) || EXAMPLE_OBJECT_METHODS.has(method)) continue;
+        unionProblems.push({ guide, call: `${recv}.${method}(` });
+      }
+    }
+  }
+
+  return { preciseProblems, unionProblems, unionMethods, blocks, precise, union };
+})();
+
+describe('a runnable example only calls methods that exist (GATE-010)', () => {
+  it('scans a real number of blocks and call sites', () => {
+    // The failure mode this project has hit three times: a gate that scans
+    // nothing and reports nothing. These are the measured figures, pinned so a
+    // change to the fence scanner or the receiver resolver cannot silently
+    // reduce what is checked.
+    expect(fenceScan.blocks).toBeGreaterThan(250);
+    expect(fenceScan.precise).toBeGreaterThan(200);
+    expect(fenceScan.union).toBeGreaterThan(300);
+  });
+
+  it('has no call on a resolved receiver that its class does not declare', () => {
+    expect(
+      fenceScan.preciseProblems.map((p) => `${p.guide}: \`${p.call}\` — ${p.why}`),
+      'a runnable example calling a method its own class does not have is a\n' +
+        'TypeError for the reader, and it is invisible to every inline scan in\n' +
+        'this file. `pool.setConcurrency(` was in two guides; `PowerPool` has\n' +
+        '`resize`. If the constructor really does return another class, add it to\n' +
+        'FACTORY_RETURNS above rather than loosening the check.'
+    ).toEqual([]);
+  });
+
+  it('has no call on an unresolved receiver that nothing declares', () => {
+    expect(
+      fenceScan.unionProblems.map((p) => `${p.guide}: \`${p.call}\``),
+      'a method name that exists nowhere under `src/` is either a typo or a\n' +
+        'platform method. `metrics.gauge(` was the former — `MetricsCollector`\n' +
+        'has `register`, not `gauge`. Add a platform method to PLATFORM_METHODS,\n' +
+        "a method on the guide's own example object to EXAMPLE_OBJECT_METHODS,\n" +
+        'or fix the guide. Not to a general escape hatch.'
+    ).toEqual([]);
+  });
+
+  it('keeps no dead entries in the two new stop-list groups', () => {
+    // A list that is only ever added to stops saying what it is for. Both
+    // groups exist because of specific call sites in specific guides, so an
+    // entry that matches nothing is a name that has quietly lost its reason.
+    const deadMethods = [...PLATFORM_METHODS, ...EXAMPLE_OBJECT_METHODS]
+      .filter((n) => !fenceScan.unionMethods.has(n))
+      .sort();
+    expect(
+      deadMethods,
+      'these stop-list entries match no call the union layer saw. Remove them.'
+    ).toEqual([]);
+  });
+});
