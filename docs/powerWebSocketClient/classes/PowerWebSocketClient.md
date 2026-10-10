@@ -272,14 +272,6 @@
 
 ***
 
-### \_reconnectDelay
-
-> **\_reconnectDelay**: `any`
-
-decorrelated-jitter backoff cursor, in ms
-
-***
-
 ### \_reconnectExhaustedBy
 
 > **\_reconnectExhaustedBy**: `string` \| `null`
@@ -295,6 +287,23 @@ decorrelated-jitter backoff cursor, in ms
 ### \_reconnectOnHeartbeatTimeout
 
 > **\_reconnectOnHeartbeatTimeout**: `boolean`
+
+***
+
+### \_reconnectPolicy
+
+> **\_reconnectPolicy**: [`ReconnectPolicy`](../../utils/reconnectPolicy/classes/ReconnectPolicy.md)
+
+The shared backoff curve. AUD-023: this was a private `_reconnectDelay`
+cursor plus a `_nextReconnectDelay()` that was character-for-character
+identical to `powerWebTransportClient`'s. The curve now lives in
+`utils/reconnectPolicy.js`, where it has unit tests of its own — it was
+previously only ever exercised through a live transport, so a regression
+in it surfaced as a flaky integration test rather than a red unit.
+
+The attempt cap, the elapsed bound and the timer lifecycle deliberately
+stay here: they differ between the two transports on purpose, and
+unifying them would be a behaviour change dressed as a refactor.
 
 ***
 

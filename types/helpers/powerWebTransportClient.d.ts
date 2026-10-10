@@ -325,4 +325,5 @@ export type WebTransportClientOptions = {
      */
     observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
 };
+import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { PowerHistogram } from './powerHistogram.js';

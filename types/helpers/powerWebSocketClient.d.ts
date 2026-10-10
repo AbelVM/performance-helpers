@@ -19,7 +19,18 @@ export class PowerWebSocketClient {
     /** @type {ReadableStreamDefaultReader|null} */
     /** @type {Promise<void>|null} */
     /** @type {0|1|2|3} */
-    /** decorrelated-jitter backoff cursor, in ms */
+    /**
+     * The shared backoff curve. AUD-023: this was a private `_reconnectDelay`
+     * cursor plus a `_nextReconnectDelay()` that was character-for-character
+     * identical to `powerWebTransportClient`'s. The curve now lives in
+     * `utils/reconnectPolicy.js`, where it has unit tests of its own — it was
+     * previously only ever exercised through a live transport, so a regression
+     * in it surfaced as a flaky integration test rather than a red unit.
+     *
+     * The attempt cap, the elapsed bound and the timer lifecycle deliberately
+     * stay here: they differ between the two transports on purpose, and
+     * unifying them would be a behaviour change dressed as a refactor.
+     */
     rtt: PowerHistogram;
     _metrics: {
         unregister: () => boolean;
@@ -595,4 +606,5 @@ export type WebSocketClientOptions = {
 };
 export type WebSocketReadyState = "connecting" | "open" | "closing" | "closed";
 import { READY_STATE } from './constants.js';
+import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { PowerHistogram } from './powerHistogram.js';

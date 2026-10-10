@@ -38,6 +38,7 @@
 import { decodeMessage, encodeMessage } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
+import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { nowMs } from '../utils/now.js';
 import { sendHeartbeatProbe, settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
@@ -668,8 +669,22 @@ export class PowerWebSocketClient {
     this._lastPollInterval = this._pollBase;
     this._lastPongAt = 0;
     this._pingSentAt = 0;
-    /** decorrelated-jitter backoff cursor, in ms */
-    this._reconnectDelay = null;
+    /**
+     * The shared backoff curve. AUD-023: this was a private `_reconnectDelay`
+     * cursor plus a `_nextReconnectDelay()` that was character-for-character
+     * identical to `powerWebTransportClient`'s. The curve now lives in
+     * `utils/reconnectPolicy.js`, where it has unit tests of its own — it was
+     * previously only ever exercised through a live transport, so a regression
+     * in it surfaced as a flaky integration test rather than a red unit.
+     *
+     * The attempt cap, the elapsed bound and the timer lifecycle deliberately
+     * stay here: they differ between the two transports on purpose, and
+     * unifying them would be a behaviour change dressed as a refactor.
+     */
+    this._reconnectPolicy = new ReconnectPolicy({
+      baseMs: this._reconnectBaseMs,
+      maxMs: this._reconnectMaxMs,
+    });
 
     this.rtt = rtt instanceof PowerHistogram ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
     this._counters = {
@@ -1248,7 +1263,7 @@ export class PowerWebSocketClient {
     // long enough and the first retry of every subsequent outage waits the full
     // 30 s ceiling. `guides/powerWebSocketClient.md` has claimed a successful open
     // resets the backoff; this is what makes that true rather than aspirational.
-    this._reconnectDelay = null;
+    this._reconnectPolicy.reset();
     // The elapsed budget covers one outage, so a fresh connection clears it —
     // and clears the reason with it, since nothing is exhausted any more.
     this._reconnectStartedAt = null;
@@ -1796,11 +1811,9 @@ export class PowerWebSocketClient {
    * @returns {number} Delay in ms.
    */
   _nextReconnectDelay() {
-    if (this._reconnectDelay == null) this._reconnectDelay = this._reconnectBaseMs;
-    const half = this._reconnectDelay / 2;
-    const delay = Math.min(this._reconnectMaxMs, half + Math.random() * half);
-    this._reconnectDelay = Math.min(this._reconnectMaxMs, this._reconnectDelay * 3);
-    return Math.floor(delay);
+    // AUD-023. Delegates to the shared policy. The docblock that was here moved
+    // with the code, to `utils/reconnectPolicy.js`.
+    return this._reconnectPolicy.next();
   }
 
   /**
@@ -1869,7 +1882,7 @@ export class PowerWebSocketClient {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
-    this._reconnectDelay = null;
+    this._reconnectPolicy.reset();
   }
 
   /**

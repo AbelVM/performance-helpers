@@ -225,12 +225,6 @@ client.connect();
 
 ***
 
-### \_reconnectDelay
-
-> **\_reconnectDelay**: `any`
-
-***
-
 ### \_reconnectMaxMs
 
 > **\_reconnectMaxMs**: `number`
@@ -240,6 +234,12 @@ client.connect();
 ### \_reconnectOnHeartbeatTimeout
 
 > **\_reconnectOnHeartbeatTimeout**: `boolean`
+
+***
+
+### \_reconnectPolicy
+
+> **\_reconnectPolicy**: [`ReconnectPolicy`](../../utils/reconnectPolicy/classes/ReconnectPolicy.md)
 
 ***
 

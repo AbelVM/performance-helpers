@@ -64,16 +64,24 @@ describe('RT-012: a successful open resets the backoff', () => {
   // Asserted on the internal rather than on a timer: `Date.now()` is stubbed in
   // this file, so the jitter in `_nextReconnectDelay` is deterministic, but the
   // property is *which* delay the next outage starts from, not how long it is.
+  //
+  // **Rewritten for AUD-023, and the field moved rather than the assertion being
+  // loosened.** The backoff cursor used to live on the client as
+  // `_reconnectDelay`; it now lives in the shared `ReconnectPolicy` as
+  // `_reconnectPolicy.cursorMs`. The property under test is unchanged — the
+  // cursor grows while retrying and returns to the base on a successful open —
+  // and it is now asserted through the policy's own accessor rather than on a
+  // private number the client no longer owns.
   it('clears the grown backoff so the next outage starts from the base', () => {
     const c = client({ reconnectBaseMs: 10_000, reconnectMaxMs: 30_000 });
     const grown = [c._nextReconnectDelay(), c._nextReconnectDelay(), c._nextReconnectDelay()];
-    expect(c._reconnectDelay, 'the backoff grew while retrying').toBeGreaterThan(
+    expect(c._reconnectPolicy.cursorMs, 'the backoff grew while retrying').toBeGreaterThan(
       Math.max(...grown.map(Number))
     );
 
     c._handleOpen(() => {});
 
-    expect(c._reconnectDelay, 'a successful open resets the backoff').toBe(null);
+    expect(c._reconnectPolicy.cursorMs, 'a successful open resets the backoff').toBe(10_000);
     // And the next outage really does start from the base again, rather than
     // from whatever the previous one grew to.
     expect(c._nextReconnectDelay()).toBeLessThanOrEqual(10_000);

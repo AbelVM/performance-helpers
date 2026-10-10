@@ -26,6 +26,7 @@
 import { encodeMessage, createFrameDecoder } from './powerMessageCodec.js';
 import { PowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
+import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { nowMs } from '../utils/now.js';
 import { settleHeartbeatProbe } from '../utils/liveness.js';
 import { attach, detach } from './metrics.js';
@@ -257,7 +258,14 @@ export class PowerWebTransportClient {
     this._heartbeatDeadline = null;
     this._heartbeatSentAt = 0;
     this._reconnectTimer = null;
-    this._reconnectDelay = null;
+    // AUD-023. The shared backoff curve, replacing a private cursor and a
+    // `_nextReconnectDelay()` that was character-for-character identical to
+    // `powerWebSocketClient`'s. See `utils/reconnectPolicy.js` for why the curve
+    // moved and what deliberately did not.
+    this._reconnectPolicy = new ReconnectPolicy({
+      baseMs: this._reconnectBaseMs,
+      maxMs: this._reconnectMaxMs,
+    });
     this._connectionGeneration = 0;
 
     this.rtt = rtt instanceof PowerHistogram ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
@@ -541,7 +549,7 @@ export class PowerWebTransportClient {
       return;
     }
     this._reconnectAttempts = 0;
-    this._reconnectDelay = null;
+    this._reconnectPolicy.reset();
     this._reconnectStartedAt = null;
     await this._startStreamPump(generation);
     if (generation !== this._connectionGeneration) return;
@@ -820,11 +828,8 @@ export class PowerWebTransportClient {
    * @returns {number}
    */
   _nextReconnectDelay() {
-    if (this._reconnectDelay == null) this._reconnectDelay = this._reconnectBaseMs;
-    const half = this._reconnectDelay / 2;
-    const delay = Math.min(this._reconnectMaxMs, half + Math.random() * half);
-    this._reconnectDelay = Math.min(this._reconnectMaxMs, this._reconnectDelay * 3);
-    return Math.floor(delay);
+    // AUD-023. Delegates to the shared policy; the docblock moved with the code.
+    return this._reconnectPolicy.next();
   }
 
   /**
@@ -850,7 +855,7 @@ export class PowerWebTransportClient {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
     }
-    this._reconnectDelay = null;
+    this._reconnectPolicy.reset();
   }
 
   /**

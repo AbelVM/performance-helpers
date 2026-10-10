@@ -47,6 +47,9 @@
   `queuedBytes` / `queuedFrames` getters. See the back-pressure fix below.
 - `PowerHistogram.record()`'s error now names the fix rather than only the
   constraint. See the non-negative scope note below.
+- `ReconnectPolicy` in `src/utils/`, the shared decorrelated-jitter backoff curve
+  the reconnecting transports compose. Not a breaking change: both transports
+  already used this exact curve, and the extraction is behaviour-preserving.
 
 ### Changed
 
