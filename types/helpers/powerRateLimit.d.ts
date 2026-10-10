@@ -22,6 +22,7 @@ export class PowerRateLimit {
     /** @type {RateLimiterLike[]} */
     limiters: RateLimiterLike[];
     atomicDefault: boolean;
+    /** @type {number} */
     /** @type {'shared'|'shared-denied'|'local'|'fail-closed'|null} */
     keyFn: ((arg0: any) => string) | null;
     buckets: number;

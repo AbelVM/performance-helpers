@@ -103,6 +103,13 @@ export class PowerRateLimit {
     this.atomicDefault = Boolean(options.atomic);
     this._requests = 0;
     this._rejected = 0;
+    // AUD-021. Legs whose `available()` threw during a pre-flight. A throw here
+    // used to be indistinguishable from "no capacity" — both returned `false` —
+    // so a broken custom clock or a throwing third-party leg looked exactly like
+    // a rate limit, and an operator watching `rejectionRate` saw a busy limiter
+    // rather than a broken one.
+    /** @type {number} */
+    this._legErrors = 0;
 
     // ── Distributed rate limiting (GAP-015) ─────────────────────────────────
     //
@@ -420,6 +427,27 @@ export class PowerRateLimit {
         try {
           if (l.available(legOptions) < want) return false;
         } catch (e) {
+          // AUD-021. **Counted, not swallowed.** A throw from a leg's
+          // `available()` used to be indistinguishable from "no capacity" — both
+          // returned `false` — so a broken custom clock or a throwing
+          // third-party leg looked exactly like a rate limit, and
+          // `rejectionRate` reported a busy limiter rather than a broken one.
+          //
+          // Re-throwing was the audit's first preference and was **rejected**,
+          // for two reasons. The commit path below (`l.tryConsume(...)`) has no
+          // `try/catch` and already propagates, so re-throwing here would make
+          // the *same* fault surface differently depending on whether the leg
+          // happened to expose `available()` — which is a property of the
+          // limiter, not of the fault. And `tryConsume`'s documented contract is
+          // a boolean; a caller composing limiters has no reason to wrap every
+          // call in a `try`.
+          //
+          // So the fault is counted and the pre-flight still refuses, which is
+          // the safe direction: a leg that cannot answer "can I afford this" is
+          // not a leg that should be charged. `stats().legErrors` is what makes
+          // it visible, and it is the number an operator should alert on —
+          // non-zero means the limiter is broken, not busy.
+          this._legErrors += 1;
           return false;
         }
       } else {
@@ -718,6 +746,12 @@ export class PowerRateLimit {
         }
       }
     }
+    // AUD-021. The counters describe the *current* window of traffic, and a reset
+    // is the caller saying "start measuring again" — so a fault observed before
+    // the reset must not keep the limiter looking broken afterwards. The legs are
+    // reset above, which is what would clear the underlying fault; leaving the
+    // count behind would report a problem the reset just fixed.
+    this._legErrors = 0;
   }
 
   /**
@@ -770,6 +804,12 @@ export class PowerRateLimit {
       builtSlots,
       available: keyed ? null : this.available(),
       rejectionRate: this._requests > 0 ? this._rejected / this._requests : 0,
+      // AUD-021. Legs whose `available()` threw during a pre-flight. **Non-zero
+      // means the limiter is broken, not busy** — a throwing custom clock or a
+      // third-party leg that cannot answer "can I afford this". It is separate
+      // from `rejectionRate` precisely because the two look identical from the
+      // outside: both refuse the request, and only this counter says why.
+      legErrors: this._legErrors,
       path: this._lastPath,
     };
   }

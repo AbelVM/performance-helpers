@@ -57,6 +57,12 @@ Limiter instances to compose. Each
 
 ***
 
+### \_legErrors
+
+> **\_legErrors**: `number`
+
+***
+
 ### \_localOnly
 
 > **\_localOnly**: `boolean`
