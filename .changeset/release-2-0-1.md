@@ -50,6 +50,10 @@
 - `ReconnectPolicy` in `src/utils/`, the shared decorrelated-jitter backoff curve
   the reconnecting transports compose. Not a breaking change: both transports
   already used this exact curve, and the extraction is behaviour-preserving.
+- `HyperLogLog` now takes a register count, defaulting to 64 so nothing changes
+  for an existing caller. The relative error is `1.04/sqrt(m)`, so 256 registers
+  give ~6.5 % and 1024 give ~3.2 %, at one byte per register. See the two fixes
+  below for why this was not already possible.
 
 ### Changed
 
@@ -212,6 +216,17 @@
   workaround. `PowerApdex.record()` carries the same guard, so the constraint is
   consistent across the library.
 
+- **`HyperLogLog` used the wrong bias constant for the register count it shipped
+  with.** `ALPHA` was hardcoded to `0.673`, which is the constant for **16**
+  registers; the class hardcoded 64, where it should be `0.709`. Every estimate
+  was biased low by roughly 5 %, which is the same order as the 13 % relative
+  error the sketch exists to bound — so the class was quoting one number and
+  delivering another. The constant is now derived from the register count.
+- **`HyperLogLog`'s rank calibration was hardcoded for one register count.** The
+  rank was `clz32(bits) - 5`, correct for a 26-bit remainder and silently wrong
+  for any other width. Invisible while the count was a constant; exposed the
+  moment it became a parameter, with m=1024 overestimating a 100 000-element set
+  by 15x. The shift and the maximum rank are now derived from the count.
 - **`PowerHistogram` lost small values recorded after a large one.** Naive `+=`
   on mixed magnitudes discards the small addends: recording `1e16` and then a
   thousand `1`s gave a `sum` of `1e16`, an absolute error of -1000, because

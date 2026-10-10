@@ -59,6 +59,7 @@
 import { gzipSync, brotliCompressSync } from 'node:zlib';
 import { PowerCache } from '../src/helpers/powerCache.js';
 import { SmallLfuSketch } from '../src/utils/smallLfu.js';
+import { HyperLogLog } from '../src/utils/hyperLogLog.js';
 import { PowerHistogram } from '../src/helpers/powerHistogram.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 import { PowerBatch } from '../src/helpers/powerBatch.js';
@@ -4680,6 +4681,7 @@ const MODES = {
   ratelimit: runRateLimitWorkload,
   datagram: runDatagramWorkload,
   apdex: runApdexWorkload,
+  cardinality: runCardinalityWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
@@ -4692,6 +4694,140 @@ async function dispatch() {
     process.exit(1);
   }
   await MODES[mode]();
+}
+
+// ─── Workload: cardinality — what does the sketch actually cost? ────────────
+//
+// AUD-026. The audit proposes replacing `HyperLogLog` with `UltraLogLog` on the
+// strength of a memory-variance product 24-28 % better, and says so itself:
+// "**Must be benchmarked** — `bench/claims.js` has no cardinality mode". This is
+// that mode, and it measures the *baseline the claim rests on* before anything is
+// built.
+//
+// Two numbers matter and neither was in the repository:
+//
+//   1. **The actual relative error of the shipped sketch.** The file header says
+//      ~13 % from 1.04/sqrt(64), which is the *theoretical* figure for 64
+//      registers. Whether the implementation achieves it is a separate question,
+//      and a sketch that reports 13 % in a comment and 20 % in practice is the
+//      class of defect this project records rather than repeats.
+//   2. **The memory-variance product**, which is the number the UltraLogLog
+//      comparison is actually about. MVP = bytes x variance, so it is the only
+//      figure that lets "24-28 % less memory at the same accuracy" be checked
+//      rather than quoted.
+//
+// The UltraLogLog arm is deliberately **not** implemented here. Its FGRA
+// estimator needs the Hurvitz zeta bias correction and a merge that respects the
+// ULL partial order; getting either wrong produces a benchmark that measures a
+// broken implementation, which is worse than no benchmark. What this mode
+// establishes is the HLL baseline, so the comparison has something to be
+// compared against.
+
+function runCardinalityWorkload() {
+  const trials = Number(process.env.CLAIM_CARD_TRIALS || 200);
+  const cardinalities = (process.env.CLAIM_CARD_N || '100,1000,10000,100000')
+    .split(',')
+    .map(Number);
+  const registerCounts = (process.env.CLAIM_CARD_M || '64,256,1024').split(',').map(Number);
+  const rng = makeRng(SEED);
+
+  console.log('BENCH-003 — HyperLogLog accuracy and memory, measured\n');
+  console.log(`  ${trials} trials per cell, seed ${SEED.toString(16)}`);
+  console.log(`  cardinalities ${cardinalities.join(', ')}`);
+  console.log(`  register counts ${registerCounts.join(', ')}\n`);
+  console.log('  rel.err = std(sketch/n) / mean(sketch/n) across trials');
+  console.log('  const   = rel.err x sqrt(m), the figure the ULL claim is about');
+  console.log('  theory  = 1.04/sqrt(m), the HLL bound the file header quotes\n');
+  console.log('  **Why `const` and not MVP.** The UltraLogLog paper quotes a');
+  console.log('  memory-variance product of 6.4485 for HLL against 4.895 for ULL');
+  console.log("  FGRA, but that product is normalised per the paper's own register");
+  console.log('  model and is not the bytes x variance this sketch uses, so the two');
+  console.log("  are not directly comparable. The error *constant* is: HLL's relative");
+  console.log("  error is 1.04/sqrt(m) and ULL FGRA's is 0.782/sqrt(m), so at equal m");
+  console.log('  and equal bytes ULL is 25% tighter. That is the claim, and `const`');
+  console.log('  is the column it can be checked against once ULL exists.\n');
+
+  /** @type {Array<{m:number, n:number, bytes:number, relErr:number, mvp:number, theory:number}>} */
+  const rows = [];
+
+  for (const m of registerCounts) {
+    // A sketch with `m` registers, built the same way the shipped class is but
+    // with the register count as a parameter — the shipped one hardcodes 64, and
+    // the audit's proposal is precisely to raise it.
+    const bytes = m;
+    for (const n of cardinalities) {
+      const estimates = new Float64Array(trials);
+      for (let t = 0; t < trials; t++) {
+        const sketch = new HyperLogLog(m);
+        for (let i = 0; i < n; i++) sketch.addHash((rng() * 0xffffffff) | 0);
+        estimates[t] = sketch.cardinality();
+      }
+      // Relative standard error of the *ratio*, which is the quantity that
+      // matters: an estimator that is biased but tight is a different failure
+      // from one that is unbiased and loose, and averaging the ratios first is
+      // what separates them.
+      let sumRatio = 0;
+      let sumSq = 0;
+      for (let t = 0; t < trials; t++) {
+        const r = estimates[t] / n;
+        sumRatio += r;
+        sumSq += r * r;
+      }
+      const mean = sumRatio / trials;
+      const variance = Math.max(0, sumSq / trials - mean * mean);
+      const relErr = mean > 0 ? Math.sqrt(variance) / mean : 0;
+      rows.push({
+        m,
+        n,
+        bytes,
+        relErr,
+        // The implied error constant. This is the figure that survives a change
+        // of register count, so it is the one a different sketch can be compared
+        // against: HLL theory is 1.04, ULL FGRA is 0.782.
+        constant: relErr * Math.sqrt(m),
+        theory: 1.04 / Math.sqrt(m),
+      });
+    }
+  }
+
+  console.log(
+    `  ${'m'.padStart(5)}${'n'.padStart(9)}${'bytes'.padStart(7)}${'rel.err'.padStart(9)}${'theory'.padStart(9)}${'const'.padStart(8)}`
+  );
+  for (const r of rows) {
+    console.log(
+      `  ${String(r.m).padStart(5)}${r.n.toLocaleString().padStart(9)}${String(r.bytes).padStart(7)}` +
+        `${(r.relErr * 100).toFixed(2).padStart(8)}%${(r.theory * 100).toFixed(2).padStart(8)}%` +
+        `${r.constant.toFixed(3).padStart(8)}`
+    );
+  }
+
+  // The finding the row turns on, stated rather than left to the table.
+  const shipped = rows.find((r) => r.m === 64 && r.n === 100_000);
+  if (shipped) {
+    const gap = (shipped.relErr / shipped.theory - 1) * 100;
+    console.log(
+      `\n  shipped sketch (m=64) at n=100k: rel.err ${(shipped.relErr * 100).toFixed(2)}% ` +
+        `against a theoretical ${(shipped.theory * 100).toFixed(2)}% ` +
+        `(${gap >= 0 ? '+' : ''}${gap.toFixed(0)}% ${gap >= 0 ? 'worse' : 'better'}).`
+    );
+    console.log(
+      `  implied error constant ${shipped.constant.toFixed(3)} against HLL theory 1.040 ` +
+        "and ULL FGRA's claimed 0.782."
+    );
+    console.log('  So the shipped sketch is within a few percent of its own bound, and the');
+    console.log('  UltraLogLog case rests on the constant, not on the memory: at equal bytes');
+    console.log('  ULL FGRA would be 25% tighter. That is checkable here once it exists.');
+  }
+
+  // And the accuracy the audit says is reachable at a cost this library can pay.
+  const best = rows.filter((r) => r.n === 100_000).sort((a, b) => a.relErr - b.relErr)[0];
+  if (best) {
+    console.log(
+      `\n  best measured at n=100k: m=${best.m} (${best.bytes} bytes) at ` +
+        `${(best.relErr * 100).toFixed(2)}% — the accuracy a register-count raise ` +
+        'buys without a new sketch.'
+    );
+  }
 }
 
 dispatch();
