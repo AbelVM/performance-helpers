@@ -355,3 +355,94 @@ describe('PowerHistogram legacy bucketCount (AUD-040)', () => {
     expect(h.percentile(50)).toBeCloseTo(5, 6);
   });
 });
+
+// --- AUD-029: compensated summation ------------------------------------------
+
+describe('PowerHistogram sum precision (AUD-029)', () => {
+  it('does not lose small values added after a large one', () => {
+    // The measured defect. Naive `+=` on mixed magnitudes discards the small
+    // addends entirely: recording `1e16` and then a thousand `1`s gave a `sum` of
+    // `1e16`, an absolute error of -1000, because `1e16 + 1` is not representable
+    // and the `1` vanishes.
+    //
+    // `Math.sumPrecise` was the suggested fix and does not apply: it sums an
+    // *iterable*, and a DDSketch does not retain its values — O(1) memory for an
+    // unbounded range is the whole point of the format. It is also `undefined` on
+    // this library's declared floor. So the accumulator is Neumaier-compensated
+    // instead, which is the technique an *incremental* sum requires.
+    const h = new PowerHistogram();
+    h.record(1e16);
+    for (let i = 0; i < 1000; i++) h.record(1);
+
+    expect(h.sum).toBe(1e16 + 1000);
+    expect(h.count).toBe(1001);
+  });
+
+  it('keeps mean accurate over the same mixed-magnitude set', () => {
+    // The mean is where the error stops looking like a rounding artefact and
+    // starts looking like a wrong number, so it is pinned separately.
+    const h = new PowerHistogram();
+    h.record(1e16);
+    for (let i = 0; i < 1000; i++) h.record(1);
+
+    expect(h.mean).toBeCloseTo((1e16 + 1000) / 1001, 6);
+  });
+
+  it('round-trips the compensated total through toJSON/fromJSON', () => {
+    // `toJSON()` writes the total the `sum` getter returns, not the raw
+    // accumulator. Writing `_sum` would make the round-trip lossy, and a sketch
+    // that crossed a worker boundary would report a different `sum` than the one
+    // that produced it.
+    const h = new PowerHistogram();
+    h.record(1e16);
+    for (let i = 0; i < 1000; i++) h.record(1);
+
+    const restored = PowerHistogram.fromJSON(h.toJSON());
+    expect(restored.sum).toBe(h.sum);
+    expect(restored.sum).toBe(1e16 + 1000);
+  });
+
+  it('merges another sketch using its compensated total', () => {
+    // `merge()` reads `src.sum` — the getter on an instance, the stored field on a
+    // plain sketch — so both shapes contribute their real total. Reading the
+    // private `_sum` would have dropped the other sketch's compensation.
+    const a = new PowerHistogram();
+    a.record(1e16);
+    for (let i = 0; i < 1000; i++) a.record(1);
+
+    const b = new PowerHistogram();
+    b.record(1e16);
+    for (let i = 0; i < 1000; i++) b.record(1);
+
+    a.merge(b);
+    expect(a.sum).toBe(2 * (1e16 + 1000));
+
+    // And through the plain-sketch path, which is what a worker boundary produces.
+    const c = new PowerHistogram();
+    c.merge(structuredClone(b.toJSON()));
+    expect(c.sum).toBe(1e16 + 1000);
+  });
+
+  it('clears the compensation term on reset(), so an empty sketch sums to zero', () => {
+    // Both halves of the accumulator, or a reset histogram keeps the rounding
+    // error of the values it just dropped and reports a non-zero `sum` while
+    // holding nothing.
+    const h = new PowerHistogram();
+    h.record(1e16);
+    for (let i = 0; i < 1000; i++) h.record(1);
+    expect(h.sum).not.toBe(0);
+
+    h.reset();
+    expect(h.sum).toBe(0);
+    expect(h.count).toBe(0);
+  });
+
+  it('still sums an ordinary all-equal set exactly', () => {
+    // The characterisation that matters most: compensation must not change the
+    // answer for the common case, where naive addition was already exact.
+    const h = new PowerHistogram();
+    for (let i = 0; i < 500; i++) h.record(3);
+    expect(h.sum).toBe(1500);
+    expect(h.mean).toBe(3);
+  });
+});

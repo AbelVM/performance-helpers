@@ -114,6 +114,12 @@
 
 ***
 
+### \_sumCompensation
+
+> **\_sumCompensation**: `number`
+
+***
+
 ### \_zeroCount
 
 > **\_zeroCount**: `number`

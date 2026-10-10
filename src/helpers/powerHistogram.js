@@ -130,7 +130,12 @@ function sketchFields(v) {
     return {
       alpha: v._alpha,
       count: v._count,
-      sum: v._sum,
+      // AUD-029. `v.sum`, the getter, not `v._sum`. On an instance the getter
+      // returns the compensated pair while `_sum` is only the raw accumulator, so
+      // reading the private field would drop the other sketch's compensation
+      // during a merge. On a `toJSON()` result `sum` is the stored total, which
+      // is the same thing — so one expression serves both shapes.
+      sum: v.sum,
       min: v._min,
       max: v._max,
       zeroCount: v._zeroCount,
@@ -255,6 +260,9 @@ export class PowerHistogram {
     this._infCount = 0;
     this._count = 0;
     this._sum = 0;
+    // AUD-029. The rounding error `_sum` could not represent, kept separately so
+    // the `sum` getter can return the pair. See `_addToSum`.
+    this._sumCompensation = 0;
     this._min = Infinity;
     this._max = -Infinity;
     this._outOfRangeCount = 0;
@@ -267,6 +275,44 @@ export class PowerHistogram {
     this._order = null;
   }
 
+  /**
+   * Add `n` to the running sum with Neumaier compensation.
+   *
+   * **AUD-029, and the ES2026 feature the row named does not apply.**
+   * `Math.sumPrecise` was the suggested fix for "naive `+=`, which loses
+   * precision on mixed magnitudes" — and the loss is real: recording `1e16` and
+   * then a thousand `1`s gives a `sum` of `1e16`, discarding all thousand
+   * (measured, absolute error -1000). But `sumPrecise` sums an **iterable**, and
+   * a DDSketch does not retain its values — that is the whole point of the
+   * format, O(1) memory for an unbounded range. It is also `undefined` on this
+   * library's declared floor (`engines.node` is `>=22.12`), so it would need a
+   * capability probe and a fallback, which is the "partly negates the benefit"
+   * case the audit itself warns about.
+   *
+   * So the problem is solved the way an *incremental* accumulator has to be
+   * solved: Neumaier compensated summation. Each add keeps the rounding error it
+   * could not represent in `_sumCompensation`, and the `sum` getter returns the
+   * pair. The cost is one extra field and a few flops per record, on a path that
+   * already does a `Math.log` and a `Map` operation — so it is not free, but it
+   * is not the bottleneck either.
+   *
+   * @param {number} n
+   * @returns {void}
+   * @private
+   */
+  _addToSum(n) {
+    const t = this._sum + n;
+    // The branch is which operand was larger, because that is the one whose
+    // low bits the addition could not represent. Written out rather than using
+    // `Math.abs` twice, since the comparison is the whole algorithm.
+    if (Math.abs(this._sum) >= Math.abs(n)) {
+      this._sumCompensation += this._sum - t + n;
+    } else {
+      this._sumCompensation += n - t + this._sum;
+    }
+    this._sum = t;
+  }
+
   /** Number of records added. */
   get count() {
     return this._count;
@@ -274,7 +320,9 @@ export class PowerHistogram {
 
   /** Sum of all recorded values. */
   get sum() {
-    return this._sum;
+    // AUD-029. The compensated total, not the raw accumulator. See
+    // `_addToSum` for why the two differ and why the naive `+=` was wrong.
+    return this._sum + this._sumCompensation;
   }
 
   /**
@@ -290,7 +338,11 @@ export class PowerHistogram {
   get mean() {
     const valued = this._count - this._infCount;
     if (valued <= 0) return this._infCount > 0 ? Infinity : 0;
-    return this._sum / valued;
+    // The compensated total, for the same reason the `sum` getter returns it: a
+    // mean over a set with mixed magnitudes is exactly where the naive
+    // accumulator's error shows up as a wrong number rather than a rounding
+    // artefact.
+    return this.sum / valued;
   }
 
   /** Minimum recorded value, or `undefined` when empty. */
@@ -346,6 +398,9 @@ export class PowerHistogram {
     this._infCount = 0;
     this._count = 0;
     this._sum = 0;
+    // AUD-029. Both halves, or a cleared histogram keeps the rounding error of
+    // the values it just dropped and reports a non-zero `sum` while empty.
+    this._sumCompensation = 0;
     this._min = Infinity;
     this._max = -Infinity;
     this._outOfRangeCount = 0;
@@ -367,7 +422,12 @@ export class PowerHistogram {
     this._count += 1;
     if (n === 0) {
       this._zeroCount += 1;
-      this._sum += 0;
+      // AUD-029. Routed through the compensated add rather than a bare `+= 0`.
+      // Adding zero is a genuine no-op for Neumaier — `t` equals `_sum` and the
+      // compensation term gains nothing — so this is not a correctness fix, it is
+      // keeping one accumulation path so a future change to `_addToSum` cannot
+      // miss this branch.
+      this._addToSum(0);
       if (0 < this._min) this._min = 0;
       // `_max` is initialised to -Infinity and values are non-negative, so a
       // histogram whose every record is 0 used to keep reporting `max` of
@@ -381,7 +441,7 @@ export class PowerHistogram {
       this._infCount += 1;
       return this;
     }
-    this._sum += n;
+    this._addToSum(n);
     if (n < this._min) this._min = n;
     if (n > this._max) this._max = n;
     if (n > this._maxValue) this._outOfRangeCount += 1;
@@ -577,6 +637,11 @@ export class PowerHistogram {
     const f = sketchFields(obj);
     const h = new PowerHistogram({ relativeAccuracy: f.alpha });
     h._count = f.count;
+    // AUD-029. `f.sum` is the *total* — the compensated pair on an instance, the
+    // stored field on a `toJSON()` result. It lands in `_sum` with the
+    // compensation term left at zero, which is exact: the total is already the
+    // answer, and re-deriving a split between accumulator and error from a single
+    // number would be guesswork.
     h._sum = f.sum;
     h._min = f.min;
     h._max = f.max;
@@ -632,7 +697,13 @@ export class PowerHistogram {
     this._zeroCount += src.zeroCount;
     this._infCount += src.infCount;
     this._count += src.count;
-    this._sum += src.sum;
+    // AUD-029. The other sketch's *total*, through the compensated add. Reading
+    // `src.sum` rather than `src._sum` is what makes this correct for an instance
+    // as well as a plain sketch: `sum` is the getter returning the compensated
+    // pair on an instance and the stored field on a `toJSON()` result, so both
+    // shapes contribute their real total. `src._sum` would have contributed the
+    // raw accumulator and silently dropped the other sketch's compensation.
+    this._addToSum(src.sum);
     this._outOfRangeCount += src.outOfRangeCount;
     this._belowRangeCount += src.belowRangeCount;
     if (src.count > 0) {
@@ -671,7 +742,12 @@ export class PowerHistogram {
     return {
       relativeAccuracy: this._alpha,
       count: this._count,
-      sum: this._sum,
+      // AUD-029. The compensated total, not the raw accumulator — the same value
+      // the `sum` getter returns. Writing `_sum` here would make the round-trip
+      // lossy: `fromJSON` would restore a total that had already lost the
+      // compensation, and a sketch that crossed a worker boundary would report a
+      // different `sum` than the one that produced it.
+      sum: this.sum,
       min: this._count === 0 ? null : this._min,
       max: this._count === 0 ? null : this._max,
       zeroCount: this._zeroCount,

@@ -28,6 +28,31 @@ export class PowerHistogram {
     constructor(options?: PowerHistogramOptions);
     /** @type {Map<number, number>} sparse bucket index -> count */
     /** @type {{indices: number[], prefix: number[]}|null} */
+    /**
+     * Add `n` to the running sum with Neumaier compensation.
+     *
+     * **AUD-029, and the ES2026 feature the row named does not apply.**
+     * `Math.sumPrecise` was the suggested fix for "naive `+=`, which loses
+     * precision on mixed magnitudes" — and the loss is real: recording `1e16` and
+     * then a thousand `1`s gives a `sum` of `1e16`, discarding all thousand
+     * (measured, absolute error -1000). But `sumPrecise` sums an **iterable**, and
+     * a DDSketch does not retain its values — that is the whole point of the
+     * format, O(1) memory for an unbounded range. It is also `undefined` on this
+     * library's declared floor (`engines.node` is `>=22.12`), so it would need a
+     * capability probe and a fallback, which is the "partly negates the benefit"
+     * case the audit itself warns about.
+     *
+     * So the problem is solved the way an *incremental* accumulator has to be
+     * solved: Neumaier compensated summation. Each add keeps the rounding error it
+     * could not represent in `_sumCompensation`, and the `sum` getter returns the
+     * pair. The cost is one extra field and a few flops per record, on a path that
+     * already does a `Math.log` and a `Map` operation — so it is not free, but it
+     * is not the bottleneck either.
+     *
+     * @param {number} n
+     * @returns {void}
+     * @private
+     */
     /** Number of records added. */
     get count(): number;
     /** Sum of all recorded values. */

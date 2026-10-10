@@ -79,8 +79,23 @@ describe('verify.mjs', () => {
     expect(steps.indexOf('types:generate')).toBeLessThan(steps.indexOf('docs:drift'));
   });
 
-  it('puts docs:drift last, since it is the slowest and the least informative failure', () => {
-    expect(steps.at(-1)).toBe('docs:drift');
+  it('puts docs:drift last among the generated-tree steps, since it is the slowest', () => {
+    // **Rewritten for AUD-033, and the expectation narrowed rather than loosened.**
+    // This used to assert `steps.at(-1)` is `docs:drift`, on the reasoning that it
+    // is the slowest step and therefore the least interesting failure to wait for.
+    //
+    // `check:bench-list` now runs after it, and that is deliberate: the new step's
+    // subject is a *hand-written* file rather than generated output, and it is the
+    // cheapest step in the list — one subprocess and two file reads. Putting it
+    // before `docs:drift` would mean waiting on a 1.7 MB typedoc regeneration to
+    // learn that a benchmark mode is undocumented.
+    //
+    // What still has to hold is the property the original assertion was really
+    // about: `docs:drift` is the last of the steps that *regenerate* a committed
+    // tree, so nothing after it can invalidate what it just compared.
+    const generatedTreeSteps = steps.filter((s) => s.endsWith(':drift') || s === 'types:generate');
+    expect(generatedTreeSteps.at(-1)).toBe('docs:drift');
+    expect(steps.indexOf('docs:drift')).toBeLessThan(steps.indexOf('check:bench-list'));
   });
 
   it('does not hardcode its own step count in the failure message', () => {
