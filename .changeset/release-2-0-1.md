@@ -32,6 +32,17 @@
   pending-ack counts in the same shape as the existing `getSlowConsumerIds()`.
   It exists because the `close()` fix below is pure retention with no behavioural
   symptom, so without it there was no way to observe the fix working at all.
+- `PowerHistogram.fromJSON()`, and a `merge()` that accepts a `PowerHistogram`, a
+  cross-realm `PowerHistogram`, **or** a `toJSON()` result. The class doc has
+  always advertised exact merging of per-worker sketches and `toJSON()` has always
+  existed, but `structuredClone` does not preserve the class — so a sketch
+  arriving from a worker is a plain object, and `merge()` rejected it with
+  "expects a PowerHistogram". The headline distributed use case was unreachable
+  without hand-rolling reconstruction, which is exactly the kind of thing that
+  gets the bucket indices wrong. The check is structural rather than `instanceof`,
+  per the cross-realm rule.
+- `createSseAdapter`'s `lastEventId(sub)` and `lastSentId(sub)`, the two ends of
+  a reconnect gap. See the SSE fix below.
 
 ### Changed
 
@@ -122,3 +133,35 @@
   and nothing else — enough for a limiter whose `dispose()` is only a state reset,
   but not for a slot whose caller-supplied factory returned something owning a
   timer, a listener registry or a `FinalizationRegistry`.
+- **A throwing rate-limit leg was indistinguishable from "no capacity".** A leg
+  whose `available()` threw during the pre-flight returned `false`, exactly as a
+  full bucket does, so a broken custom clock or a throwing third-party leg looked
+  like load and `rejectionRate` reported a busy limiter rather than a broken one.
+  The fault is now counted in `stats().legErrors`, cleared by `reset()`, and kept
+  out of `rejectionRate` so the two are distinguishable. Re-throwing was
+  considered and rejected: the commit path has no `try/catch` and already
+  propagates, so re-throwing would make the _same_ fault surface differently
+  depending on whether the leg happened to expose `available()` — a property of
+  the limiter, not of the fault. The pre-flight still refuses, which is the safe
+  direction.
+- **`createSseAdapter` dropped every event emitted during a reconnect gap.** The
+  adapter is server-side — the browser's `EventSource` does the reconnecting — so
+  the defect was a missing `id:` field, not missing reconnect logic. An
+  `EventSource` that loses its connection reconnects on its own and sends
+  `Last-Event-ID` carrying the last `id:` the server emitted; with only `data:`
+  lines there was never an `id:` to remember, the header was never sent, and the
+  gap was silently lost. It now emits a per-subscriber monotonic `id:` before
+  every `data:` line, in one write, and reads `Last-Event-ID` on register.
+  `lastEventId(sub)` and `lastSentId(sub)` expose both ends of the gap; the
+  difference between them is exactly what a reconnect must replay. The adapter
+  deliberately does not replay — it holds no buffer of past frames, and a replay
+  buffer is the message source's concern.
+- **`PowerHistogram` lost small values recorded after a large one.** Naive `+=`
+  on mixed magnitudes discards the small addends: recording `1e16` and then a
+  thousand `1`s gave a `sum` of `1e16`, an absolute error of -1000, because
+  `1e16 + 1` is not representable. `Math.sumPrecise` was the obvious fix and does
+  not apply — it sums an _iterable_, and a DDSketch does not retain its values,
+  which is the whole point of the format; it is also `undefined` on this
+  library's declared floor. The accumulator is Neumaier-compensated instead,
+  which is the technique an incremental sum requires. Measured after: absolute
+  error 0.
