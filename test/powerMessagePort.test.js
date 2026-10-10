@@ -281,3 +281,77 @@ describe('PowerMessagePort', () => {
     expect(() => new PowerMessagePort({})).toThrow(TypeError);
   });
 });
+
+// --- AUD-010: the wrapper must not clobber a caller's handler ----------------
+
+describe('PowerMessagePort listener coexistence (AUD-010)', () => {
+  it('does not clobber a handler the caller installed first', () => {
+    // `_attach()` assigned `port.onmessage = …`, and the `on*` property is a
+    // **single slot** — assigning it replaces whatever was already there. A
+    // caller who installed their own handler before constructing the wrapper had
+    // it silently discarded: no error, no way to notice, and their messages
+    // simply stopped arriving.
+    const port = new FakePort();
+    const seen = [];
+    port.addEventListener('message', (e) => seen.push(['caller', e.data]));
+
+    const viaAdapter = [];
+    // Constructing is the whole action — the constructor is what registers the
+    // listener — so the instance itself is not bound.
+    new PowerMessagePort(port, { onMessage: (v) => viaAdapter.push(v) });
+
+    // Both must fire. The listener form is a list; the property form is a slot.
+    port.fire('message', { data: encodeNativeEnvelope({ n: 1 }) });
+
+    expect(seen).toHaveLength(1);
+    expect(viaAdapter).toEqual([{ n: 1 }]);
+  });
+
+  it('does not clobber a second wrapper over the same port', () => {
+    // The shape a hub fan-out produces: two adapters, one port. With the property
+    // form the second construction silently disconnected the first.
+    const port = new FakePort();
+    const a = [];
+    const b = [];
+    // Both constructions are the action; neither instance is needed afterwards.
+    new PowerMessagePort(port, { onMessage: (v) => a.push(v) });
+    new PowerMessagePort(port, { onMessage: (v) => b.push(v) });
+
+    port.fire('message', { data: encodeNativeEnvelope({ n: 7 }) });
+
+    expect(a).toEqual([{ n: 7 }]);
+    expect(b).toEqual([{ n: 7 }]);
+  });
+
+  it("removes only its own listeners on dispose, leaving the caller's intact", () => {
+    // The other half of the same property: `port.onmessage = null` in `_detach()`
+    // cleared a caller's handler along with ours. Removing exactly the functions
+    // registered here is what makes coexistence safe in both directions.
+    const port = new FakePort();
+    const seen = [];
+    const callerHandler = (e) => seen.push(e.data);
+    port.addEventListener('message', callerHandler);
+
+    const adapter = new PowerMessagePort(port);
+    adapter.dispose();
+
+    // The caller's handler is still registered and still fires.
+    expect(port._listeners.get('message')).toContain(callerHandler);
+    port.fire('message', { data: 'still-here' });
+    expect(seen).toEqual(['still-here']);
+  });
+
+  it('still detaches its own listeners on dispose', () => {
+    // The characterisation the existing test pins through the `on*` accessors,
+    // restated for the listener form: after dispose the wrapper's own handlers are
+    // gone, so a late message is not decoded into a disposed adapter.
+    const port = new FakePort();
+    const viaAdapter = [];
+    const adapter = new PowerMessagePort(port, { onMessage: (v) => viaAdapter.push(v) });
+
+    adapter.dispose();
+    port.fire('message', { data: encodeNativeEnvelope({ n: 1 }) });
+
+    expect(viaAdapter).toEqual([]);
+  });
+});

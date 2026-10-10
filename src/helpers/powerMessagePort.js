@@ -226,10 +226,20 @@ export class PowerMessagePort {
       this._emitError(e.error ?? new Error('MessagePort message error'));
     };
 
-    port.onmessage = this._onMessageHandler;
-    port.onmessageerror = this._onMessageErrorHandler;
-    /** @type {any} */
-    port.onclose = this._onCloseHandler;
+    // AUD-010. `addEventListener` rather than the `on*` properties.
+    //
+    // The property form is a single slot: assigning `port.onmessage` **replaces**
+    // whatever was already there. A caller who installed their own handler before
+    // constructing this wrapper — or a second wrapper over the same port, which is
+    // the shape a hub fan-out produces — had it silently discarded, with no error
+    // and no way to notice. The listener form is a list, so both survive.
+    //
+    // `_detach()` removes exactly the functions registered here, which is the
+    // other half of the same property: `port.onmessage = null` would clear a
+    // caller's handler along with ours.
+    port.addEventListener('message', this._onMessageHandler);
+    port.addEventListener('messageerror', this._onMessageErrorHandler);
+    port.addEventListener('close', this._onCloseHandler);
   }
 
   /**
@@ -238,9 +248,20 @@ export class PowerMessagePort {
   _detach() {
     const port = this._port;
     if (!port) return;
-    port.onmessage = null;
-    port.onmessageerror = null;
-    /** @type {any} */ (port).onclose = null;
+    // AUD-010. Remove *our* listeners rather than nulling the `on*` slots, which
+    // would take a caller's handler with them. Guarded because a port is free to
+    // expose only the property form, and a teardown must not throw on the way out.
+    if (typeof port.removeEventListener === 'function') {
+      port.removeEventListener('message', this._onMessageHandler);
+      port.removeEventListener('messageerror', this._onMessageErrorHandler);
+      port.removeEventListener('close', this._onCloseHandler);
+      return;
+    }
+    /** @type {any} */
+    const fallback = port;
+    fallback.onmessage = null;
+    fallback.onmessageerror = null;
+    fallback.onclose = null;
   }
 
   /**
