@@ -72,6 +72,17 @@ import { spawnSync } from 'node:child_process';
  *   It is last rather than earlier for a second reason: it is the slowest step
  *   by an order of magnitude, and when it fails it is never the interesting
  *   failure.
+ * - `check:bench-list` is **last**, and it is the only step whose subject is a
+ *   hand-written file rather than generated output. `AGENTS.md` carries a
+ *   hand-maintained list of the `bench/claims.js` modes and said so itself —
+ *   "the list above is still hand-maintained and can drift" — which is an
+ *   admission that it is wrong sometimes with no way for a reader to tell when.
+ *   It was wrong when this was written: 25 documented against 28 in the table.
+ *   A stale list is worse than a missing one, because it reads as complete, and
+ *   seven modes were once reachable only by reading the harness source.
+ *   It reads the mode list out of the harness's own generated unknown-mode error
+ *   rather than parsing `MODES`, because a regex over an object literal stops
+ *   matching the day someone reformats it. See `scripts/check-bench-list.mjs`.
  * - `check:barrel` is **first**, before `lock:sync`, and it is the one step whose
  *   failure makes every later step meaningless. `src/index.js` once carried four
  *   duplicate `export { default as … }` lines from a concurrent edit; the build
@@ -111,6 +122,14 @@ const STEPS = [
   'types:drift',
   'docs:claims',
   'docs:drift',
+  // AUD-033. Last, and deliberately so: it is the one step whose subject is a
+  // *hand-written* file rather than generated output, and it is the cheapest
+  // step in the list — one subprocess and two file reads. It goes after
+  // `docs:drift` because a benchmark mode that exists but is undocumented is a
+  // documentation defect, and this is the step that notices. It reads the mode
+  // list out of `bench/claims.js`'s own generated unknown-mode error rather than
+  // parsing `MODES`, so it cannot silently stop matching.
+  'check:bench-list',
 ];
 
 const label = process.env.VERIFY_TEST ? `verify (test: ${process.env.VERIFY_TEST})` : 'verify';

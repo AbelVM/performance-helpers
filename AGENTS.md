@@ -124,23 +124,34 @@ node bench/claims.js keyshape    # cache key-shape performance (int/string/objec
 node bench/claims.js ratelimit   # static versus adaptive refill under burst + steady load
 node bench/claims.js datagram    # bounded datagram queue saturation and flush
 node bench/claims.js apdex       # APDEX from a sketch against exact counters
+node bench/claims.js geoencode   # flat typed array vs object graph, four arms on one payload
+node bench/claims.js geocoalesce # a coalescer against PowerBatch + a Map
+node bench/claims.js geoprecision # what coordinate rounding actually saves, on two payload shapes
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all twenty-five** modes, not the six this file used to list: eleven
+That is **all twenty-eight** modes, not the six this file used to list: eleven
 measurements were reachable only by reading `bench/claims.js`, and six of them
 were named in neither this file nor `bench/README.md`. Seven more (`defer`,
 `codec`, `envelopepool`, `sabring`, `keyshape`, `ratelimit`, `datagram`) landed
 without this list being updated, which is the drift the paragraph below warns
 about — so they are listed now rather than left for the next reader to discover.
+Three more (`geoencode`, `geocoalesce`, `geoprecision`) landed the same way and
+were caught by `npm run check:bench-list`, which is now step 12 of `verify` and
+compares this list against the harness's own mode table.
 
-The list above is still hand-maintained and can drift, so treat
-`bench/claims.js` as the authority on what exists: its unknown-mode error is
-now generated from the mode table, so running it with a nonsense mode prints
-every mode that actually works. If that list and this one disagree, this one is
-wrong.
+The list above is still hand-maintained, so it is now **checked rather than
+trusted**: `npm run check:bench-list` (step 12 of `verify`) runs the harness with
+a nonsense mode, reads the mode list out of its own generated error, and fails if
+this file disagrees in either direction — a mode that exists but is undocumented,
+or one that is documented but no longer runs. It uses that error as its source of
+truth rather than parsing `MODES` out of the source, because a regex over an
+object literal stops matching the day someone reformats it, and a gate that
+silently stops matching is the failure this project has already recorded several
+times. If that list and this one disagree, this one is wrong — and now something
+says so.
 
 ## Working rules, and where they came from
 
