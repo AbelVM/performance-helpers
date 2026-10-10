@@ -65,6 +65,7 @@ admission over time. They are not interchangeable.
 | Detect a dead peer instead of waiting for the transport to notice      | `PowerHeartbeat`                                   | `PowerRealtimeHub`, `PowerCircuit`                         | a bare `setInterval` with no jitter, which fires a fleet in lockstep    |
 | Reassemble datagrams that arrive out of order                          | `PowerSequencer`                                   | `PowerDatagramChannel`, `PowerHeartbeat`                   | buffering everything and hoping, which grows without bound              |
 | Retune a rate limit instead of re-measuring it                         | `PowerFlowControl`                                 | `PowerServo`, `PowerPool`                                  | a fixed `refillRate`, which is right for one load only                  |
+| Hold a latency SLO by moving the admission rate                        | `PowerFlowController`                              | `PowerGCRA`, `PowerHistogram`, `PowerServo`, `PowerQueue`  | a fixed rate plus a queue that grows until it drops                     |
 | Find out whether this build supports `WebTransport` at all             | `detectWebTransportSupport()`                      | `createWebTransportAdapter`                                | `if (typeof WebTransport !== 'undefined')` then branching on `getStats` |
 | Process a very large iterable in parallel                              | `PowerChunker`                                     | `PowerLogger`, `PowerHistogram`                            | `PowerPool` unless you need custom worker lifecycle                     |
 | Smooth bursts from producers                                           | `PowerQueue`                                       | `PowerPriorityQueue`, `PowerBackpressure`, `PowerBatch`    | `PowerSemaphore` alone                                                  |
@@ -126,6 +127,8 @@ Use `PowerHeartbeat` when a peer is expected to check in on a schedule and you n
 Use `PowerSequencer` when a datagram transport can deliver out of order and ordered state matters. It buffers what arrives early, releases only when the gap in front is filled, and reports the gap rather than waiting on it forever.
 
 Use `PowerFlowControl` when a fixed token-bucket rate is a guess you keep having to re-tune. Its refill rate is the output of a `PowerServo` you feed a measurement of, so the limit retunes itself. Read the sign convention in the guide first — observe the headroom, not the depth.
+
+Use `PowerFlowController` when the thing you are actually holding to is a **latency SLO** rather than a queue depth. It composes admission (`PowerGCRA`), a bounded queue (`PowerQueue`) and tail-latency measurement (`PowerHistogram`) into one loop, and the p99 of each window sets the next window's rate. Unlike `PowerFlowControl` it needs no sign inversion — latency above the target is a negative error and drives the rate down on its own. Start from the default gains; the measured band is narrow and the defaults sit inside it.
 
 Use `PowerBackpressure` when producers must slow down before queues or memory grow unbounded.
 
@@ -719,6 +722,7 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `PowerChunker`: Chunked iterable processing built on pool semantics.
 - `PowerQueue`: Fast FIFO queue for burst absorption.
 - `PowerBackpressure`: Producer-facing admission control.
+- `PowerFlowController`: Admission + bounded queue + latency feedback in one closed loop. Use it when the SLO is a tail latency rather than a depth.
 - `PowerBatch`: Coalesce many calls into one flush.
 - `PowerSemaphore`: Global async concurrency gate.
 - `PowerCrossLock`: Cross-worker mutex. Use it when the thing you must exclude is running in _another_ thread — `PowerSemaphore` cannot do that, because every instance is local to its thread.

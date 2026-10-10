@@ -291,6 +291,43 @@ Milliseconds to wait; `0` when the call would succeed now.
 
 ***
 
+### setRate()
+
+> **setRate**(`rate`): `number`
+
+Change the sustained rate at runtime, keeping the accumulated state.
+
+This exists because a closed loop needs a rate it can move, and the
+alternative — assigning to the public `rate` field — is a trap: `rate` is
+stored, but `_emission` and `_delayTolerance` are derived from it once in
+the constructor, so `limiter.rate = 500` changes the number `stats()`
+reports and nothing the limiter does. A composition that retunes a GCRA
+therefore has to come through here.
+
+The theoretical arrival time is **kept, not rescaled**, and that is the
+conservative direction. The TAT is an absolute instant, so the debt it
+represents is debt in *time*; re-spacing it onto the new emission interval
+would invent capacity the old rate never granted. Lowering the rate
+therefore makes the limiter refuse for longer — the tolerance shrank around
+an unchanged TAT — and raising it admits up to the new burst at once.
+
+#### Parameters
+
+##### rate
+
+`number`
+
+Sustained rate in operations per `per` unit. Must be
+  finite and `> 0`, exactly as the constructor requires.
+
+#### Returns
+
+`number`
+
+The new rate.
+
+***
+
 ### stats()
 
 > **stats**(): `object`

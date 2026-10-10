@@ -256,6 +256,15 @@ const CROSS_CLASS = new Set([
   // helper, not of `PowerWebTransportAdapter`, so the per-guide rule cannot
   // resolve it.
   '_handleMessage',
+  // `PowerHistogram.snapshot()` and `PowerHistogram.toJSON()`, named in the
+  // AUD-031 guide while explaining what the `latency` getter hands back. The
+  // controller composes a histogram and exposes it rather than re-declaring its
+  // inspection surface, so the guide has to name the two methods a caller would
+  // reach for on it — and they are members of `PowerHistogram`, nothing in
+  // `PowerFlowController`. Same category as `percentile` above: a method of
+  // another class the guide is legitimately describing.
+  'snapshot',
+  'toJSON',
 ]);
 
 /** Everything this test is willing to accept without it being a method. */

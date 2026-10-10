@@ -66,6 +66,7 @@ describe('API surface', () => {
         'PowerDefer',
         'PowerEventBus',
         'PowerFlowControl',
+        'PowerFlowController',
         'PowerEventLoopMonitor',
         'PowerGCRA',
         'PowerHeartbeat',
@@ -268,11 +269,12 @@ describe('API surface', () => {
     // (WT-002). 41 after `./powerMessagePort` (RT-019). 40 after `./powerCrossLock`
     // (GAP-008). 39 was after `./powerRTCChannel` (RT-017). 38 was after `./powerServo`,
     // which is the subpath the gate above could not ask for; 37 was after `./metrics`
-    // (FEAT-007). 55 after `./powerApdex` (ADR-0014). The comment above is the
+    // (FEAT-007). 55 after `./powerApdex` (ADR-0014). 56 after
+    // `./powerFlowController` (AUD-031). The comment above is the
     // point: this number is here so a subpath cannot be added or removed by
     // accident, and the only legitimate way past it is to edit this line on
     // purpose.
-    expect(subpaths.length).toBe(55);
+    expect(subpaths.length).toBe(56);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

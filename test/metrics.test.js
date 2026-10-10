@@ -35,6 +35,7 @@ import { PowerMessagePort } from '../src/helpers/powerMessagePort.js';
 import { PowerDatagramChannel } from '../src/helpers/powerDatagramChannel.js';
 import { PowerSequencer } from '../src/helpers/powerSequencer.js';
 import { PowerFlowControl } from '../src/helpers/powerFlowControl.js';
+import { PowerFlowController } from '../src/helpers/powerFlowController.js';
 import { PowerApdex } from '../src/helpers/powerApdex.js';
 
 /**
@@ -491,6 +492,14 @@ describe('observability: true on the helpers', () => {
     // constructor refuses to invent one — which is the same reason this row
     // could not be one of the "no constructor argument at all" cheap ones.
     ['PowerApdex', () => new PowerApdex({ target: 100, observability: true }), 'apdex'],
+    // AUD-031. Needs `rate` and `minRate`, both required and both validated,
+    // which is the same reason as the Apdex row: the constructor refuses to
+    // invent a starting rate or a floor.
+    [
+      'PowerFlowController',
+      () => new PowerFlowController({ rate: 100, minRate: 1, observability: true }),
+      'flowController',
+    ],
   ];
 
   // Every prefix this describe block mutates, torn down after each test.

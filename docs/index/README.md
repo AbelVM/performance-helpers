@@ -378,6 +378,12 @@ Re-exports [PowerFlowControl](../helpers/powerFlowControl/classes/PowerFlowContr
 
 ***
 
+### PowerFlowController
+
+Re-exports [PowerFlowController](../powerFlowController/classes/PowerFlowController.md)
+
+***
+
 ### PowerGCRA
 
 Re-exports [PowerGCRA](../powerGCRA/classes/PowerGCRA.md)

@@ -329,6 +329,11 @@
       "types": "./types/helpers/powerFlowControl.d.ts",
       "import": "./src/helpers/powerFlowControl.js",
       "default": "./src/helpers/powerFlowControl.js"
+    },
+    "./powerFlowController": {
+      "types": "./types/helpers/powerFlowController.d.ts",
+      "import": "./src/helpers/powerFlowController.js",
+      "default": "./src/helpers/powerFlowController.js"
     }
   },
   "scripts": {

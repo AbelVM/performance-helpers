@@ -124,6 +124,7 @@ node bench/claims.js keyshape    # cache key-shape performance (int/string/objec
 node bench/claims.js ratelimit   # static versus adaptive refill under burst + steady load
 node bench/claims.js datagram    # bounded datagram queue saturation and flush
 node bench/claims.js apdex       # APDEX from a sketch against exact counters
+node bench/claims.js cardinality # what the HLL sketch actually costs, and its bias
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it

@@ -123,10 +123,37 @@ export class PowerGCRA {
   }
 
   /**
-   * Try to consume one operation.
-   * @param {number} [n=1] - Number of operations to consume.
-   * @returns {boolean} `true` when the request fits inside the current budget.
+   * Change the sustained rate at runtime, keeping the accumulated state.
+   *
+   * This exists because a closed loop needs a rate it can move, and the
+   * alternative — assigning to the public `rate` field — is a trap: `rate` is
+   * stored, but `_emission` and `_delayTolerance` are derived from it once in
+   * the constructor, so `limiter.rate = 500` changes the number `stats()`
+   * reports and nothing the limiter does. A composition that retunes a GCRA
+   * therefore has to come through here.
+   *
+   * The theoretical arrival time is **kept, not rescaled**, and that is the
+   * conservative direction. The TAT is an absolute instant, so the debt it
+   * represents is debt in *time*; re-spacing it onto the new emission interval
+   * would invent capacity the old rate never granted. Lowering the rate
+   * therefore makes the limiter refuse for longer — the tolerance shrank around
+   * an unchanged TAT — and raising it admits up to the new burst at once.
+   *
+   * @param {number} rate - Sustained rate in operations per `per` unit. Must be
+   *   finite and `> 0`, exactly as the constructor requires.
+   * @returns {number} The new rate.
    */
+  setRate(rate) {
+    const r = Number(rate);
+    if (!Number.isFinite(r) || r <= 0) {
+      throw new TypeError('PowerGCRA: `rate` must be a finite number greater than 0');
+    }
+    this.rate = r;
+    this._emission = this.per / r;
+    this._delayTolerance = this.burst * this._emission;
+    return this.rate;
+  }
+
   /**
    * Report a backwards clock, without ever letting the report break admission.
    *
