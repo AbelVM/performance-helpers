@@ -251,10 +251,20 @@ export class PowerMessagePort {
     // AUD-010. Remove *our* listeners rather than nulling the `on*` slots, which
     // would take a caller's handler with them. Guarded because a port is free to
     // expose only the property form, and a teardown must not throw on the way out.
+    //
+    // The `any` cast is the same one the previous line used for `onclose`, and for
+    // the same reason: the DOM `MessagePort` type declares `message` and
+    // `messageerror` but **no `close` event**, so `removeEventListener('close', …)`
+    // matches no overload. This class never required a DOM `MessagePort` — it
+    // requires `postMessage` and treats everything else structurally, which is why
+    // the tests pass a plain object — so the DOM type is the wrong constraint here
+    // and casting past it is honest rather than a workaround.
     if (typeof port.removeEventListener === 'function') {
-      port.removeEventListener('message', this._onMessageHandler);
-      port.removeEventListener('messageerror', this._onMessageErrorHandler);
-      port.removeEventListener('close', this._onCloseHandler);
+      /** @type {any} */
+      const p = port;
+      p.removeEventListener('message', this._onMessageHandler);
+      p.removeEventListener('messageerror', this._onMessageErrorHandler);
+      p.removeEventListener('close', this._onCloseHandler);
       return;
     }
     /** @type {any} */

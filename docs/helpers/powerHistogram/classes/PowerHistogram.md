@@ -317,15 +317,22 @@ up to the same relative bound - unlike rank-error sketches (t-digest,
 GK, KLL) which are only one-way mergeable. This is what makes it safe to
 keep a per-worker histogram and fold them into a pool-level one.
 
+**Accepts a plain sketch as well as a `PowerHistogram`** (AUD-012). A sketch
+that crossed a worker boundary arrives as a plain object, because
+`structuredClone` does not preserve the class, and rejecting it made the
+distributed path this docblock advertises unreachable. The check is
+structural rather than `instanceof` for the same reason — see
+[PowerHistogram.fromJSON](#fromjson).
+
 #### Parameters
 
 ##### other
 
-`PowerHistogram`
+`object` \| `PowerHistogram`
 
-Sketch to absorb. Must use the same
-  `relativeAccuracy`; a mismatch is a configuration error because the
-  bucket indices are not comparable.
+Sketch to absorb, either an instance
+  or a `toJSON()` result. Must use the same `relativeAccuracy`; a mismatch
+  is a configuration error because the bucket indices are not comparable.
 
 #### Returns
 
@@ -469,3 +476,41 @@ a metrics backend.
 ##### zeroCount
 
 > **zeroCount**: `number`
+
+***
+
+### fromJSON()
+
+> `static` **fromJSON**(`obj`): `PowerHistogram`
+
+Rebuild a sketch from its [PowerHistogram#toJSON](#tojson) representation.
+
+**This is the missing half of the documented distributed path.** The class
+doc advertises that the sketch "merges exactly, so per-worker or per-shard
+sketches can be combined into a global histogram", and `toJSON()` has always
+existed — but `structuredClone` does not preserve the class, so a sketch
+arriving from a worker is a *plain object*, and `merge()` rejected it with
+"expects a PowerHistogram". The headline use case was unreachable, and a
+caller had to hand-roll reconstruction, which is exactly the kind of thing
+that gets the bucket indices wrong.
+
+Accepts the output of `toJSON()` and nothing else: a plain object with the
+same shape. The check is **structural**, not `instanceof`, per the
+cross-realm rule — `instanceof` is false for a value from another realm, and
+this method exists precisely to consume values that crossed a boundary.
+
+#### Parameters
+
+##### obj
+
+`object`
+
+A `toJSON()` result. `relativeAccuracy` must match the
+  sketch it will be merged into, because bucket indices are only comparable
+  within the same accuracy.
+
+#### Returns
+
+`PowerHistogram`
+
+A new sketch; `obj` is not retained.

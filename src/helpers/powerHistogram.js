@@ -46,6 +46,153 @@ import {
  * @typedef {import('./jsdoc-types.js').PowerHistogramOptions} PowerHistogramOptions
  */
 
+/**
+ * Whether `v` is a histogram sketch in either of its two shapes.
+ *
+ * **Structural, not `instanceof`, and that is the whole point** (AUD-012).
+ * `instanceof` compares against *this realm's* prototype, so it is `false` for a
+ * value from another `vm` context, an iframe, or a `worker_threads` sandbox —
+ * and `structuredClone` does not preserve the class at all, so a sketch that
+ * crossed a worker boundary is a plain object that was never an instance of
+ * anything. Both are legitimate inputs, so the test is on the fields.
+ *
+ * There are **two shapes**, and confusing them is the bug this replaces: an
+ * instance carries the private field names (`_alpha`, `_count`) with `buckets` as
+ * a `Map`, while a `toJSON()` result carries the public names
+ * (`relativeAccuracy`, `count`) with `buckets` as an array of pairs. Checking
+ * only one shape silently rejects the other.
+ *
+ * A `Symbol.toStringTag` spoof is not accepted, because the check reads real
+ * properties rather than a tag — the same reason `powerBuffer.isArrayBuffer`
+ * uses the spec's own accessor.
+ *
+ * @param {unknown} v
+ * @returns {boolean}
+ */
+function isHistogramSketch(v) {
+  if (!v || typeof v !== 'object') return false;
+  const s = /** @type {any} */ (v);
+  const instanceShape =
+    typeof s._alpha === 'number' &&
+    typeof s._count === 'number' &&
+    typeof s._zeroCount === 'number' &&
+    typeof s._infCount === 'number' &&
+    typeof s._sum === 'number' &&
+    isBucketIterable(s._buckets);
+  const jsonShape =
+    typeof s.relativeAccuracy === 'number' &&
+    typeof s.count === 'number' &&
+    typeof s.zeroCount === 'number' &&
+    typeof s.infCount === 'number' &&
+    typeof s.sum === 'number' &&
+    isBucketIterable(s.buckets);
+  return instanceShape || jsonShape;
+}
+
+/**
+ * Whether `b` can be iterated as `[index, count]` pairs.
+ *
+ * **Iterability, not `instanceof Map` or `Array.isArray`** — and that is the
+ * cross-realm rule applied to a container rather than to a buffer. A `Map` from
+ * another `vm` context is not an instance of *this* realm's `Map`, so
+ * `instanceof Map` rejects a genuinely cross-realm instance, which is one of the
+ * two shapes this whole path exists to accept. `Symbol.iterator` is a well-known
+ * symbol shared by every realm, so testing for it is realm-independent.
+ *
+ * It is also exactly the property the merge loop needs: both a `Map` and an array
+ * of pairs yield `[index, count]`, and nothing else about the container is read.
+ *
+ * @param {unknown} b
+ * @returns {boolean}
+ */
+function isBucketIterable(b) {
+  return (
+    !!b && typeof b === 'object' && typeof (/** @type {any} */ (b)[Symbol.iterator]) === 'function'
+  );
+}
+
+/**
+ * Normalise either sketch shape into the field names {@link
+ * PowerHistogram#merge} reads.
+ *
+ * One mapping rather than two, because the alternative is a `merge()` that
+ * branches on shape at every field — and a branch that is wrong once is wrong
+ * everywhere. `buckets` is passed through as-is: both a `Map` and an array of
+ * pairs are iterable of `[index, count]`, which is all the merge loop needs.
+ *
+ * @param {any} v - Already validated by {@link isHistogramSketch}.
+ * @returns {{alpha:number, count:number, sum:number, min:number, max:number,
+ *   zeroCount:number, infCount:number, outOfRangeCount:number,
+ *   belowRangeCount:number, buckets:Iterable<[number, number]>}}
+ */
+function sketchFields(v) {
+  if (typeof v._alpha === 'number') {
+    return {
+      alpha: v._alpha,
+      count: v._count,
+      sum: v._sum,
+      min: v._min,
+      max: v._max,
+      zeroCount: v._zeroCount,
+      infCount: v._infCount,
+      outOfRangeCount: v._outOfRangeCount,
+      belowRangeCount: v._belowRangeCount,
+      buckets: v._buckets,
+    };
+  }
+  return {
+    alpha: v.relativeAccuracy,
+    count: v.count,
+    sum: v.sum,
+    // `toJSON()` writes `null` for an empty sketch's bounds, where the internal
+    // representation uses the infinities. Round-tripping must not turn an empty
+    // min into `null` and then compare `null < this._min` as true.
+    min: v.min === null ? Number.POSITIVE_INFINITY : v.min,
+    max: v.max === null ? Number.NEGATIVE_INFINITY : v.max,
+    zeroCount: v.zeroCount,
+    infCount: v.infCount,
+    outOfRangeCount: v.outOfRangeCount,
+    belowRangeCount: v.belowRangeCount,
+    buckets: v.buckets,
+  };
+}
+
+/**
+ * Whether the legacy-`bucketCount` warning has already been emitted.
+ *
+ * Module-level rather than per-instance, and deliberately so: the warning is
+ * about the *option*, which does not change between instances, so a caller
+ * constructing a histogram per request would otherwise fill stderr with the same
+ * sentence. One per process is the right dose — enough to be seen, not enough to
+ * be noise.
+ *
+ * @type {boolean}
+ */
+let _warnedLegacyBucketCount = false;
+
+/**
+ * Emit the legacy-`bucketCount` warning through whichever channel exists.
+ *
+ * `console.warn` when there is one, and nothing when there is not — a library
+ * must not throw for a deprecated option it has already accepted, and must not
+ * crash in an environment without a console. The message names the option that
+ * *does* control precision, because a warning that says only "ignored" leaves the
+ * caller to guess.
+ *
+ * @param {number} value The value the caller passed.
+ * @returns {void}
+ */
+function warnLegacyBucketCount(value) {
+  const message =
+    `PowerHistogram: \`bucketCount: ${value}\` is accepted for backwards compatibility ` +
+    'and ignored. Precision is controlled by `relativeAccuracy` (default ' +
+    `${DEFAULT_HISTOGRAM_RELATIVE_ACCURACY}); a smaller value means more buckets. ` +
+    'Setting both would make `relativeAccuracy` win, so `bucketCount` is not mapped to it.';
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(message);
+  }
+}
+
 export class PowerHistogram {
   /**
    * @param {PowerHistogramOptions} [options]
@@ -80,6 +227,27 @@ export class PowerHistogram {
     this._legacyBucketCount = Number.isFinite(Number(bucketCount))
       ? Math.max(MIN_HISTOGRAM_BUCKETS, Math.floor(Number(bucketCount)))
       : null;
+    // AUD-040. **Warn once, on first use, rather than silently ignoring it.**
+    //
+    // A caller who sets `bucketCount: 1000` believing it controls precision was
+    // ignored without a word: the option is stored, read back faithfully, and
+    // does nothing. That is the worst shape a dead option can take, because
+    // reading it back *confirms* the caller's belief — the value round-trips, so
+    // it looks honoured.
+    //
+    // Honouring it was the alternative, and it was rejected: `bucketCount` and
+    // `relativeAccuracy` are two spellings of the same knob (alpha fixes the
+    // relative error, which fixes the bucket density), so mapping one to the
+    // other would silently override an explicitly-passed `relativeAccuracy`
+    // whenever both were set. A warning changes nothing and tells the truth.
+    //
+    // Once per process, not per instance: a caller constructing a histogram per
+    // request would otherwise fill stderr, and the message is about the *option*,
+    // which does not change between instances.
+    if (this._legacyBucketCount !== null && !_warnedLegacyBucketCount) {
+      _warnedLegacyBucketCount = true;
+      warnLegacyBucketCount(this._legacyBucketCount);
+    }
 
     /** @type {Map<number, number>} sparse bucket index -> count */
     this._buckets = new Map();
@@ -257,17 +425,33 @@ export class PowerHistogram {
     if (q === 0) return this.min;
 
     const target = (q / 100) * this._count;
-    const sorted = this._sortedIndexList();
 
     // Zero bucket first, then indexed buckets in ascending order, then +Inf.
     if (this._zeroCount > 0) {
       if (target <= this._zeroCount) return 0;
     }
-    let cumulative = this._zeroCount;
-    for (let i = 0; i < sorted.length; i += 1) {
-      cumulative += this._buckets.get(sorted[i]);
-      if (cumulative >= target) return this._clamp(this._value(sorted[i]));
+    // AUD-015. Binary search over the cumulative counts rather than a linear
+    // walk. `_bucketOrder()` already builds `prefix`, where `prefix[i]` is the
+    // total count of every bucket *before* `indices[i]` — so the first bucket
+    // whose cumulative count reaches `target` is the first `i` with
+    // `zeroCount + prefix[i + 1] >= target`, and that is a monotone predicate
+    // over a sorted array. O(log b) in occupied buckets instead of O(b), which
+    // matters because a dashboard calls this on every scrape and the old cost
+    // scaled with the *spread* of the data rather than with the number of
+    // queries.
+    //
+    // The predicate is monotone because `prefix` is non-decreasing, so the
+    // standard lower-bound search finds the *first* index satisfying it — the
+    // same bucket the linear walk would have stopped at.
+    const { indices, prefix } = this._bucketOrder();
+    let lo = 0;
+    let hi = indices.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this._zeroCount + prefix[mid + 1] >= target) hi = mid;
+      else lo = mid + 1;
     }
+    if (lo < indices.length) return this._clamp(this._value(indices[lo]));
     if (this._infCount > 0) return Number.POSITIVE_INFINITY;
     // Unreachable for a target <= count, but keep a defined return.
     return this._max;
@@ -365,6 +549,47 @@ export class PowerHistogram {
   }
 
   /**
+   * Rebuild a sketch from its {@link PowerHistogram#toJSON} representation.
+   *
+   * **This is the missing half of the documented distributed path.** The class
+   * doc advertises that the sketch "merges exactly, so per-worker or per-shard
+   * sketches can be combined into a global histogram", and `toJSON()` has always
+   * existed — but `structuredClone` does not preserve the class, so a sketch
+   * arriving from a worker is a *plain object*, and `merge()` rejected it with
+   * "expects a PowerHistogram". The headline use case was unreachable, and a
+   * caller had to hand-roll reconstruction, which is exactly the kind of thing
+   * that gets the bucket indices wrong.
+   *
+   * Accepts the output of `toJSON()` and nothing else: a plain object with the
+   * same shape. The check is **structural**, not `instanceof`, per the
+   * cross-realm rule — `instanceof` is false for a value from another realm, and
+   * this method exists precisely to consume values that crossed a boundary.
+   *
+   * @param {object} obj - A `toJSON()` result. `relativeAccuracy` must match the
+   *   sketch it will be merged into, because bucket indices are only comparable
+   *   within the same accuracy.
+   * @returns {PowerHistogram} A new sketch; `obj` is not retained.
+   */
+  static fromJSON(obj) {
+    if (!isHistogramSketch(obj)) {
+      throw new TypeError('PowerHistogram.fromJSON() expects a toJSON() result');
+    }
+    const f = sketchFields(obj);
+    const h = new PowerHistogram({ relativeAccuracy: f.alpha });
+    h._count = f.count;
+    h._sum = f.sum;
+    h._min = f.min;
+    h._max = f.max;
+    h._zeroCount = f.zeroCount;
+    h._infCount = f.infCount;
+    h._outOfRangeCount = f.outOfRangeCount;
+    h._belowRangeCount = f.belowRangeCount;
+    for (const [index, n] of f.buckets) h._buckets.set(index, n);
+    h._order = null;
+    return h;
+  }
+
+  /**
    * Merge another sketch into this one.
    *
    * DDSketch buckets are exact multiplicative ranges, so the merge is exact
@@ -372,33 +597,47 @@ export class PowerHistogram {
    * GK, KLL) which are only one-way mergeable. This is what makes it safe to
    * keep a per-worker histogram and fold them into a pool-level one.
    *
-   * @param {PowerHistogram} other - Sketch to absorb. Must use the same
-   *   `relativeAccuracy`; a mismatch is a configuration error because the
-   *   bucket indices are not comparable.
+   * **Accepts a plain sketch as well as a `PowerHistogram`** (AUD-012). A sketch
+   * that crossed a worker boundary arrives as a plain object, because
+   * `structuredClone` does not preserve the class, and rejecting it made the
+   * distributed path this docblock advertises unreachable. The check is
+   * structural rather than `instanceof` for the same reason — see
+   * {@link PowerHistogram.fromJSON}.
+   *
+   * @param {PowerHistogram|object} other - Sketch to absorb, either an instance
+   *   or a `toJSON()` result. Must use the same `relativeAccuracy`; a mismatch
+   *   is a configuration error because the bucket indices are not comparable.
    * @returns {this}
    */
   merge(other) {
-    if (!(other instanceof PowerHistogram)) {
-      throw new TypeError('PowerHistogram.merge() expects a PowerHistogram');
+    // AUD-012. Structural, not `instanceof`: a cross-realm `PowerHistogram` is
+    // not an instance of *this* realm's class, and a plain sketch from
+    // `structuredClone` never was. Both are legitimate inputs, so the test is on
+    // the fields — and both shapes are normalised to one set of names, because a
+    // `merge()` that branches per field is a branch that is wrong once and wrong
+    // everywhere.
+    if (!isHistogramSketch(other)) {
+      throw new TypeError('PowerHistogram.merge() expects a PowerHistogram or a toJSON() result');
     }
-    if (other._alpha !== this._alpha) {
+    const src = sketchFields(other);
+    if (src.alpha !== this._alpha) {
       throw new TypeError(
-        `PowerHistogram.merge(): relativeAccuracy mismatch (${this._alpha} vs ${other._alpha}). ` +
+        `PowerHistogram.merge(): relativeAccuracy mismatch (${this._alpha} vs ${src.alpha}). ` +
           'Bucket indices are only comparable within the same accuracy.'
       );
     }
-    for (const [index, n] of other._buckets) {
+    for (const [index, n] of src.buckets) {
       this._buckets.set(index, (this._buckets.get(index) || 0) + n);
     }
-    this._zeroCount += other._zeroCount;
-    this._infCount += other._infCount;
-    this._count += other._count;
-    this._sum += other._sum;
-    this._outOfRangeCount += other._outOfRangeCount;
-    this._belowRangeCount += other._belowRangeCount;
-    if (other._count > 0) {
-      if (other._min < this._min) this._min = other._min;
-      if (other._max > this._max) this._max = other._max;
+    this._zeroCount += src.zeroCount;
+    this._infCount += src.infCount;
+    this._count += src.count;
+    this._sum += src.sum;
+    this._outOfRangeCount += src.outOfRangeCount;
+    this._belowRangeCount += src.belowRangeCount;
+    if (src.count > 0) {
+      if (src.min < this._min) this._min = src.min;
+      if (src.max > this._max) this._max = src.max;
     }
     this._order = null;
     return this;
