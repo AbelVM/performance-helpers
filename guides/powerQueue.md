@@ -37,6 +37,31 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 - `shrink(minimum = 16)` — Give back the memory a burst grew, and return the
   capacity afterwards.
 
+- `dispose()` — **New in 2.0.** Release the backing buffer and drop every
+  reference the queue holds. Also exposed as `[Symbol.dispose]` and
+  `[Symbol.asyncDispose]`, so a queue takes part in `using` / `await using` and a
+  DI container's teardown like every other long-lived helper here.
+
+  ```js
+  {
+    using q = new PowerQueue(16);
+    q.push(work);
+    // q.dispose() runs here, releasing the ring
+  }
+  ```
+
+  **Why this is separate from `clear()`.** `clear()` empties the slots but
+  deliberately keeps the array, which is right for a container whose purpose is
+  bounding memory — a queue that drains and refills should not reallocate on
+  every cycle. The ring only ever _grows_, though, so a queue that took 5 000
+  items once keeps an 8 192-slot buffer for the rest of its life. `dispose()` is
+  the one moment the caller is finished with the queue, and that is where the
+  array goes.
+
+  The queue is still usable afterwards — `dispose()` is a teardown, not a
+  poisoning — and calling it twice is a no-op. If you want a smaller _live_
+  queue rather than a released one, that is `shrink()`.
+
 ### Weighted queues
 
 **New in 2.0.** `PowerQueue` bounds **items**; `totalWeight` reports the sum of

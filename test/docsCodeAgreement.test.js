@@ -283,6 +283,26 @@ function declaredNames(source) {
   // Also count anything assigned to `this.<name>` in the constructor, for
   // arrow-function properties the line-anchored pattern above would miss.
   for (const m of source.matchAll(/this\.([A-Za-z_$][\w$]*)[ ]*=/g)) names.add(m[1]);
+  // **And `function <name>(` declarations, which is the shape every
+  // factory-returning helper in this library uses.** `createSseAdapter`,
+  // `createBroadcastBus` and `createWebTransportAdapter` all build an object
+  // literal of inner `function` declarations and return it, so their public API
+  // is spelled exactly this way — and the two patterns above see none of it.
+  //
+  // This was found by the gate itself: documenting `lastEventId()` and
+  // `lastSentId()` in `guides/powerSseAdapter.md` failed GATE-002 with
+  // "a guide naming a method the helper does not have is a `TypeError` for the
+  // reader", for two methods that exist and work. The gate was right that the
+  // name was unresolvable and wrong about why — the resolver did not understand
+  // the factory shape, so the honest fix was here rather than in a stop-list.
+  //
+  // Anchored on the `function` keyword rather than on indentation, because these
+  // are nested one level inside the factory and their indent is not fixed.
+  for (const m of source.matchAll(
+    /(?:^|[;{}\n])[ \t]*(?:async[ \t]+)?function[ \t]+([A-Za-z_$][\w$]*)[ \t]*\(/g
+  )) {
+    names.add(m[1]);
+  }
   return names;
 }
 
@@ -525,6 +545,7 @@ const everythingDeclared = (() => {
 const CROSS_CUTTING_NOT_CALLS = new Set([
   'fn', // a parameter name: `measureSync(fn)` in guides/now.md
   'createBidirectionalStream', // WebTransport API method, named in metaGuide and webTransportSupport
+  'prewarm', // maplibre-gl-js `prewarm()`, named in guides/geo.md's worker-ordering trap
 ]);
 
 const crossCuttingMismatches = (() => {
@@ -554,14 +575,19 @@ describe('a cross-cutting guide only names calls that exist somewhere (GATE-005)
     // scans one file. Before this existed these guides and their distinct call
     // names were invisible to every check in the repository.
     //
-    // The count moved 6 -> 7 when `webTransportSupport.md` was added, and 7 -> 8
-    // when `stats-naming.md` was added. That is the pin doing its job rather than
-    // failing: the set is derived, not listed, and a guide whose name does not
-    // match a `src/helpers/<name>.js` is exactly what this rule is for. Its
+    // The count moved 6 -> 7 when `webTransportSupport.md` was added, 7 -> 8
+    // when `stats-naming.md` was added, and 8 -> 9 when `geo.md` was added.
+    // That is the pin doing its job rather than failing: the set is derived,
+    // not listed, and a guide whose name does not match a
+    // `src/helpers/<name>.js` is exactly what this rule is for. Its
     // implementation lives at `src/helpers/metrics.js` and `src/helpers/powerCache.js`
     // etc., so the per-guide loop cannot reach it by name — which is why its
     // backticked calls are only checked because it is counted in here.
-    expect(CROSS_CUTTING.length).toBe(8);
+    //
+    // `geo.md` is cross-cutting for the same reason and one more: it documents
+    // integration with libraries this repository does not own, so it names
+    // their calls (`prewarm(`, `updateData(`) alongside ours.
+    expect(CROSS_CUTTING.length).toBe(9);
     expect(crossCuttingMismatches.checked).toBeGreaterThan(15);
     // And it is a strict complement: nothing is checked by both rules, which is
     // what makes this additive rather than a second copy.
@@ -799,6 +825,21 @@ const EXAMPLE_OBJECT_METHODS = new Set([
   'onDestroy',
 ]);
 
+/**
+ * Methods on a *named third-party receiver* — an object from a library this
+ * repository deliberately integrates with and does not own.
+ *
+ * `guides/geo.md` documents how to feed maplibre-gl-js, so its examples call
+ * `source.updateData(diff)`. That is the whole point of the guide, and it is not
+ * a typo, a platform method, or an object the guide invented. It is also not a
+ * general escape hatch: every entry names a method on a specific external API
+ * that the guide is documenting integration with, and the dead-entry check
+ * below applies to this list exactly as it does to the other two.
+ */
+const THIRD_PARTY_METHODS = new Set([
+  'updateData', // GeoJSONSource.updateData(diff), maplibre-gl-js — guides/geo.md
+]);
+
 const fenceScan = (() => {
   /** @type {Array<{guide: string, call: string, why: string}>} */
   const preciseProblems = [];
@@ -852,7 +893,13 @@ const fenceScan = (() => {
         unionMethods.add(method);
         if (PLATFORM_RECEIVERS.has(recv)) continue;
         if (everythingDeclared.has(method) || STOP_LIST.has(method)) continue;
-        if (PLATFORM_METHODS.has(method) || EXAMPLE_OBJECT_METHODS.has(method)) continue;
+        if (
+          PLATFORM_METHODS.has(method) ||
+          EXAMPLE_OBJECT_METHODS.has(method) ||
+          THIRD_PARTY_METHODS.has(method)
+        ) {
+          continue;
+        }
         unionProblems.push({ guide, call: `${recv}.${method}(` });
       }
     }
@@ -898,7 +945,7 @@ describe('a runnable example only calls methods that exist (GATE-010)', () => {
     // A list that is only ever added to stops saying what it is for. Both
     // groups exist because of specific call sites in specific guides, so an
     // entry that matches nothing is a name that has quietly lost its reason.
-    const deadMethods = [...PLATFORM_METHODS, ...EXAMPLE_OBJECT_METHODS]
+    const deadMethods = [...PLATFORM_METHODS, ...EXAMPLE_OBJECT_METHODS, ...THIRD_PARTY_METHODS]
       .filter((n) => !fenceScan.unionMethods.has(n))
       .sort();
     expect(

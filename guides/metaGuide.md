@@ -211,6 +211,7 @@ by the caller.
 | `PowerPool`            | Workers, queues, pending responses, and timers   | `shutdown()` / `terminate()` clears state and rejects pending responses. |
 | `WorkerAgnostic`       | Event handlers attached to a caller-owned worker | `dispose()` detaches handlers; the worker remains running.               |
 | `PowerMessagePort`     | Port listeners and the wrapped message port      | `close()` closes the port; `dispose()` is idempotent cleanup.            |
+| `PowerQueue`           | A ring buffer that only ever grows               | `dispose()` releases the buffer; `clear()` empties but keeps it.         |
 | `PowerRealtimeHub`     | Subscriber state and pending outbound batches    | `close()` is immediate; `asyncDispose` flushes, then closes.             |
 | `PowerWebSocketClient` | Connection readers, writers, and reconnect work  | `close()` cancels transport work and prevents reconnect.                 |
 

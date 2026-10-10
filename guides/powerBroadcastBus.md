@@ -54,6 +54,19 @@ options against this list.
   counter for `sub.id`. A no-op if `sub.id` is missing.
 - `getSlowConsumerIds()` → `Set<string>`. A snapshot of receivers currently
   marked slow.
+- `getPendingCounts()` → `Map<string, number>`. **New in 2.0.** A snapshot of the
+  per-receiver pending-ack counts, in the same shape as `getSlowConsumerIds()`.
+  A copy — mutating it does not affect the bus.
+
+  This exists because of a defect it makes observable. `close(sub)` used to write
+  a `0` into the pending-count map rather than deleting the key, and nothing
+  decrements a zero — the timers that would have were cleared — so the entry
+  outlived the subscriber and the map grew one key per closed subscriber. That is
+  pure retention with no behavioural symptom, which made it invisible to every
+  test written against the rest of the surface. "What is the bus still tracking"
+  is the question an operator debugging that leak actually asks, and this is the
+  accessor that answers it.
+
 - `dispose()` → `void`. Removes the message listener, clears all timers and
   state. Idempotent.
 

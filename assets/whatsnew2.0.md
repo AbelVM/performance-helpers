@@ -44,6 +44,20 @@ the migration-relevant detail.
   error routing, and framework-neutral React, Vue, and Angular recipes.
 - **Safer lifecycles:** Resource-owning helpers support `dispose()` and
   `[Symbol.dispose]()`, and waiting APIs accept `AbortSignal` cancellation.
+  `PowerQueue` joins them, so a burst-grown ring is released on teardown rather
+  than held for the life of the process.
+- **Resumable SSE:** `createSseAdapter` emits an `id:` field with every frame, so
+  a browser `EventSource` sends `Last-Event-ID` on reconnect instead of silently
+  dropping the gap. `lastEventId(sub)` and `lastSentId(sub)` expose both ends of
+  it; replaying is the caller's, because the adapter holds no buffer.
+- **Mergeable histograms:** `PowerHistogram.fromJSON()` and a `merge()` that
+  accepts a plain `toJSON()` result close the distributed path — a sketch from a
+  worker merges directly, with no reconstruction step to get the bucket indices
+  wrong. The running sum is Neumaier-compensated, so a large value no longer
+  swallows the small ones recorded after it.
+- **Visible limiter faults:** `PowerRateLimit.stats().legErrors` counts legs whose
+  `available()` threw, which used to be indistinguishable from "rate limited".
+  Non-zero means the limiter is broken, not busy.
 
 ### Performance and reliability
 

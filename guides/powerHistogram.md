@@ -38,6 +38,7 @@ That buys three things:
 - `percentile(q)` — Estimated percentile for `q` in `0..100` or `0..1`. Returns `undefined` when empty.
 - `countAtOrBelow(value)` — Estimated number of samples **at or below** `value`. The inverse of `percentile()`. See [Rank queries](#rank-queries-countatorbelow).
 - `merge(other)` — Absorb another `PowerHistogram`. Throws if the two use different `relativeAccuracy` (bucket indices are not comparable), or if `other` is not a `PowerHistogram`.
+- `PowerHistogram.fromJSON(obj)` — **New in 2.0.** Static. Rebuild a sketch from a `toJSON()` result. This is the missing half of the distributed path: `toJSON()` has always existed, but `structuredClone` does not preserve the class, so a sketch arriving from a worker is a _plain object_ — and `merge()` used to reject it with "expects a PowerHistogram". The headline use case was unreachable without hand-rolling reconstruction, which is exactly the kind of thing that gets the bucket indices wrong.
 - `reset()` — Clear all recorded values and statistics.
 - `toJSON()` — Serializable `{ relativeAccuracy, count, sum, min, max, zeroCount, infCount, outOfRangeCount, belowRangeCount, buckets }` for shipping to a metrics backend or merging elsewhere.
 - `count`, `sum`, `mean` — Exact. `count` is every record recorded; `mean` averages the records that carry a value, so a `+Infinity` is counted in `count` and in `infCount` but left out of the average. A histogram of nothing but `+Infinity` reports `mean` of `Infinity`.
@@ -103,6 +104,37 @@ const global = new PowerHistogram();
 for (const h of perWorker.values()) global.merge(h);
 console.log('fleet p99', global.percentile(99));
 ```
+
+### Shipping a sketch across a worker boundary
+
+`merge()` accepts a `PowerHistogram`, a cross-realm `PowerHistogram`, **or** a
+`toJSON()` result — so the plain object a worker hands back after
+`structuredClone` merges directly, with no reconstruction step:
+
+```javascript
+// in the worker
+postMessage(histogram.toJSON());
+
+// on the main thread
+worker.addEventListener('message', (e) => {
+  // e.data is a plain object, not a PowerHistogram — and that is fine
+  global.merge(e.data);
+});
+```
+
+`PowerHistogram.fromJSON()` is there for when you want the sketch back as an
+instance rather than folded into an existing one:
+
+```javascript
+const restored = PowerHistogram.fromJSON(e.data);
+console.log('worker p99', restored.percentile(99));
+```
+
+The check is **structural** rather than `instanceof`, because `instanceof` is
+`false` for a value from another realm and `structuredClone` does not preserve
+the class at all. Both shapes carry the same fields, so the test is on the
+fields — and a `Symbol.toStringTag` spoof is rejected, because the check reads
+real properties rather than a tag.
 
 ## Rank queries: `countAtOrBelow()`
 

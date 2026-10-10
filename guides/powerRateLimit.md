@@ -26,7 +26,7 @@ Options:
 - `tryConsume(n?)` — returns `true` only when every underlying limiter permits consuming `n` tokens.
 - `reset()` — calls `reset()` on underlying limiters where present.
 - `dispose()` — releases what the composer built, and supports `using`. See [Disposal](#disposal).
-- `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available, rejectionRate }`. `rejectionRate` is the fraction of composed consume calls refused so far. See [Metrics](#metrics).
+- `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available, rejectionRate, legErrors }`. `rejectionRate` is the fraction of composed consume calls refused so far. `legErrors` is **new in 2.0** and counts legs whose `available()` threw during a pre-flight — see [When a leg throws](#when-a-leg-throws). See [Metrics](#metrics).
 - `getStats()` — Alias for `stats()`.
 - `limitersFor(key)` — with `keyFn`, the limiter set for one key, so you can inspect or drive that key directly (for a `Retry-After` header, say). Returns `null` without `keyFn`.
 
@@ -295,6 +295,31 @@ touched and further tenants share budgets with existing ones.
 There are no allow/refuse counters, for the same reason as on every other helper
 here: a field increment on `tryConsume` is cost paid on the hot synchronous path
 by a feature that is off by default.
+
+### When a leg throws
+
+A leg whose `available()` throws during the pre-flight is counted in
+`stats().legErrors` and the request is refused. **Non-zero means the limiter is
+broken, not busy** — a throwing custom clock, or a third-party leg that cannot
+answer "can I afford this".
+
+```javascript
+const s = limiter.stats();
+if (s.legErrors > 0) {
+  // A leg is throwing. rejectionRate alone would have reported this as load.
+  alert('rate limiter is broken, not saturated');
+}
+```
+
+The two numbers are deliberately separate. A refusal caused by a fault and a
+refusal caused by a full bucket are the same `false` to the caller, and only
+`legErrors` says which one happened — so a limiter whose every request is refused
+is distinguishable from one whose every request is refused _and_ which is broken.
+
+The pre-flight still refuses rather than charging, which is the safe direction: a
+leg that cannot say whether it can afford the request is not a leg that should be
+charged. `reset()` clears the count, because resetting the legs is what would fix
+the underlying fault.
 
 ## Clocks
 
