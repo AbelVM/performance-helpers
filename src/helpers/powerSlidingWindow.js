@@ -70,6 +70,7 @@ export class PowerSlidingWindow {
    */
   _prune(now) {
     const threshold = now - this.windowMs;
+    const before = this._timestamps.length;
     // remove from head while timestamps are older than the threshold
     while (this._timestamps.length > 0) {
       const t = this._timestamps.peek();
@@ -84,10 +85,36 @@ export class PowerSlidingWindow {
     // this is one comparison per prune, and a prune is a window boundary rather
     // than a per-item event.
     //
-    // The default floor is the queue's own initial capacity, so a limiter doing
-    // steady traffic settles at that rather than reallocating on every window
-    // that empties. Only a genuine drop below it reallocates.
-    this._timestamps.shrink();
+    // **AUD-016: shrink on a significant drop, not on an empty queue.** The
+    // condition used to be unconditional, which meant every prune that found the
+    // queue empty shrank it to the initial capacity — and a sliding window is
+    // empty at *every* boundary. Measured on the real class: steady
+    // 100-per-window traffic reallocated **4× per window** (shrink to 16, then
+    // grow 16→32→64→128), and 400-per-window **6×**, for the lifetime of the
+    // limiter. Traffic at or below the initial capacity does not thrash, which is
+    // why this went unnoticed.
+    //
+    // Two conditions, and both are load-bearing:
+    //
+    // 1. **The prune must have removed something.** A mid-window prune removes
+    //    nothing, and shrinking on one would measure a half-filled window as
+    //    "demand has collapsed". The first version of this fix recorded the
+    //    demand on every `tryConsume` and made the thrash *worse* — 7 per window
+    //    instead of 4 — because the second consume of a window saw a demand of 1
+    //    and shrank to 2.
+    // 2. **The window that just ended must have needed less than half of what the
+    //    ring holds.** That is hysteresis rather than a threshold: after shrinking
+    //    to cover the previous window's demand, the same traffic no longer trips
+    //    the condition, so the ring settles instead of oscillating. A genuine drop
+    //    — a burst that has passed — still releases, one window later.
+    //
+    // `before` is passed as the floor rather than left at the default, so the
+    // ring shrinks to *cover recent demand* instead of to the initial capacity.
+    // `shrink()` rounds up to a power of two and never below the current length,
+    // so a partially-pruned queue is safe.
+    if (before > this._timestamps.length && before * 2 < this._timestamps.capacity) {
+      this._timestamps.shrink(before);
+    }
   }
 
   /**

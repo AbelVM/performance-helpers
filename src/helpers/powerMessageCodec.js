@@ -53,7 +53,7 @@
  * @module powerMessageCodec
  * @public
  */
-import { isArrayBuffer, o2u8, u82o } from './powerBuffer.js';
+import { isArrayBuffer, isSharedArrayBuffer, o2u8, u82o } from './powerBuffer.js';
 import { assertLimitRequired } from '../utils/options.js';
 
 /** Current protocol version written into every frame. */
@@ -679,7 +679,15 @@ export function encodeNative(value) {
  * @throws {RangeError} When `frame` is a view into part of a larger buffer.
  */
 export function frameTransferList(frame) {
-  if (typeof SharedArrayBuffer !== 'undefined' && frame.buffer instanceof SharedArrayBuffer) {
+  // AUD-011. `isSharedArrayBuffer()` rather than `instanceof SharedArrayBuffer`.
+  // A cross-realm SAB-backed frame failed the `instanceof` and fell through to
+  // the transfer-list branch, which names a `SharedArrayBuffer` in a transfer
+  // list — `postMessage` then throws `DOMException: Found invalid value in
+  // transferList` rather than posting. Lower risk than the `collectTransferables`
+  // site below, because `frameTransferList` is normally fed frames this codec
+  // allocated in-realm, but it is an exported function and the hazard is real
+  // for a caller who passes their own frame.
+  if (isSharedArrayBuffer(frame.buffer)) {
     return [];
   }
   if (frame.byteOffset !== 0 || frame.byteLength !== frame.buffer.byteLength) {
@@ -843,7 +851,13 @@ export function collectTransferables(value, maxDepth = 8) {
   const seen = new Set();
   const walk = (/** @type {any} */ v, /** @type {number} */ depth) => {
     if (!v || depth > maxDepth) return;
-    if (v instanceof ArrayBuffer) {
+    // AUD-011. `isArrayBuffer()` rather than `instanceof ArrayBuffer`. This walk
+    // visits **arbitrary user values**, so a cross-realm `ArrayBuffer` was
+    // silently *copied* instead of transferred — a performance loss rather than
+    // corruption, but on the one path whose entire job is finding buffers to
+    // transfer. `ArrayBuffer.isView` below is already realm-independent and is
+    // correct for views; the gap was the bare `ArrayBuffer` only.
+    if (isArrayBuffer(v)) {
       if (!seen.has(v)) {
         seen.add(v);
         found.push(v);

@@ -947,6 +947,28 @@ export class PowerCache {
       // S3-FIFO: check Small and Ghost queues.
       if (this._policy === 's3fifo') {
         node = this._smallMap.get(key) || this._ghostMap.get(key);
+        // **A ghost hit is a miss, not a hit.** The ghost queue exists to record
+        // *which keys were recently evicted*, so that a re-insert of one can be
+        // admitted straight to Main instead of through Small. It holds keys, not
+        // values — `_s3fifoAppendGhost` nulls the value precisely so a ghost node
+        // has nothing servable to give.
+        //
+        // This used to fall through and return the ghost node, so `get()` served
+        // the evicted value: a caller that evicted-and-refetched got the *old*
+        // value, silently. Worse, `_moveToTail` then promoted the ghost to Main,
+        // re-admitting the stale value as if it were live. That is data
+        // corruption, not a performance issue, and it is why the miss is explicit
+        // here rather than left to the value being `undefined`.
+        //
+        // Re-admission still happens, on the write path: `set()` finds the ghost
+        // node, `_updateExisting` writes the fresh value into it, and
+        // `_moveToTail` moves it to Main. A read that misses is the signal that
+        // triggers the refetch; serving the ghost would remove the need to
+        // refetch and therefore the correctness of the whole scheme.
+        if (node && node.queue === 'ghost') {
+          if (countMiss) this._misses++;
+          return null;
+        }
       }
       if (!node) {
         if (countMiss) this._misses++;
@@ -1301,6 +1323,21 @@ export class PowerCache {
 
   /** @param {CacheNode} node */
   _s3fifoAppendGhost(node) {
+    // **A ghost holds a key, not a value.** This is the whole point of the ghost
+    // queue in S3-FIFO: it is an admission *hint* — "this key was evicted
+    // recently" — and nothing else. Retaining the evicted value here kept up to
+    // `_ghostMaxSize` (20 % of `maxEntries`) evicted objects reachable
+    // indefinitely, which is the memory an eviction was supposed to free, and it
+    // is what let `_fetchValidNode` serve a stale value off the ghost queue.
+    //
+    // `weight` and `expiresAt` go too: the node is no longer an entry, so
+    // carrying either would make `_currentWeight` and the expiry sweep account
+    // for something that is not resident. `_unlinkNode` subtracts
+    // `node.weight || 0` on the way out, so zeroing it here is what keeps that
+    // arithmetic balanced.
+    node.value = undefined;
+    node.weight = 0;
+    node.expiresAt = 0;
     if (!this._ghostTail) {
       this._ghostHead = this._ghostTail = node;
     } else {
@@ -1752,9 +1789,26 @@ export class PowerCache {
       if (!node) break;
       // Move to Ghost if there is room, otherwise drop.
       if (this._ghostSize < this._ghostMaxSize) {
+        // The weight leaves the resident set with the value. The Main path below
+        // gets this for free from `_unlinkNode`, which subtracts
+        // `node.weight || 0`; this path bypasses `_unlinkNode` entirely, so it
+        // has to say so. Without it `_currentWeight` only ever grew, and a cache
+        // under `maxWeight` evicted on the strength of weight it was no longer
+        // holding. `_s3fifoAppendGhost` then zeroes the field, which is what
+        // keeps a later `_unlinkNode` of this same node (via `delete()`) from
+        // subtracting it a second time.
+        this._currentWeight -= node.weight || 0;
         this._s3fifoRemoveFromSmall(node);
         this._s3fifoAppendGhost(node);
       } else {
+        // Ghost is full, so this key is dropped outright rather than kept as a
+        // hint. The weight leaves with it — this branch bypasses `_unlinkNode`,
+        // which is where the Main path below gets its subtraction, so it has to
+        // be said here too. Without it every Small entry dropped because Ghost
+        // was full leaked its weight into `_currentWeight` permanently: measured
+        // at 58 against 10 resident entries after 60 inserts, which under
+        // `maxWeight` evicts on the strength of weight the cache is not holding.
+        this._currentWeight -= node.weight || 0;
         this._s3fifoRemoveFromSmall(node);
         this._evictions++;
         const k = node.key;
@@ -1769,7 +1823,22 @@ export class PowerCache {
       }
     }
     // Evict from Main if over capacity.
-    while (this._map.size >= this.maxEntries || this._currentWeight > this.maxWeight) {
+    //
+    // **`maxEntries` bounds the whole live set, not Main alone.** Small is 10 % of
+    // it by construction, so Main's share is what is left: bounding Main at
+    // `maxEntries` on its own let the *total* reach `maxEntries + 10 %` — 109
+    // live entries against a declared limit of 100, measured. The comparison is
+    // against `_map.size + _smallSize` rather than a precomputed
+    // `_mainMaxSize` because `resize()` can move `maxEntries` at runtime and the
+    // queue sizing is documented as fixed at construction.
+    //
+    // The Small loop above has already run, so `_smallSize` is at or below its
+    // own cap here and Main's effective ceiling is never below
+    // `maxEntries - _smallMaxSize`.
+    while (
+      this._map.size + this._smallSize > this.maxEntries ||
+      this._currentWeight > this.maxWeight
+    ) {
       const node = this._evictionCandidate || this._head;
       if (!node) break;
       // Move to Ghost if there is room, otherwise drop.
@@ -2908,13 +2977,37 @@ export class PowerCache {
 
   /**
    * Current number of entries in cache.
+   *
+   * **Ghost entries are not entries.** Under `policy: 's3fifo'` the ghost queue
+   * holds recently evicted *keys* as an admission hint — no value, no weight, no
+   * expiry — so counting it here reported a `size` above `maxEntries` (119
+   * against a limit of 100, measured) for a cache holding 99 values. It is
+   * exposed separately as {@link ghostSize} for diagnostics, which is the only
+   * thing it is good for.
+   *
    * @returns {number}
    */
   get size() {
     if (this._policy === 's3fifo') {
-      return this._map.size + this._smallSize + this._ghostSize;
+      return this._map.size + this._smallSize;
     }
     return this._map.size;
+  }
+
+  /**
+   * Entries in the S3-FIFO ghost queue: recently evicted keys kept only as an
+   * admission hint. Always `0` under every other policy.
+   *
+   * Diagnostics only. A ghost hit is a **miss** on the read path — the ghost
+   * holds no value to serve — so a non-zero count is not capacity in use and
+   * must not be read as one. It is useful for exactly one question: is the
+   * admission hint being populated at all, which is what tells you whether a
+   * re-admission you expected could have happened.
+   *
+   * @returns {number}
+   */
+  get ghostSize() {
+    return this._policy === 's3fifo' ? this._ghostSize : 0;
   }
 
   /**
@@ -2948,7 +3041,7 @@ export class PowerCache {
    * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
    *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
    *   weightErrors:number, refreshesSkipped:number, refreshesFailed:number,
-   *   refreshesAborted:number, poolSize:number}}
+   *   refreshesAborted:number, poolSize:number, ghostSize:number}}
    */
   stats() {
     return {
@@ -2976,6 +3069,11 @@ export class PowerCache {
       refreshesFailed: this._refreshesFailed,
       refreshesAborted: this._refreshesAborted,
       poolSize: this._pool.length,
+      // S3-FIFO ghost occupancy, and `0` under every other policy. Not capacity:
+      // a ghost holds a key and no value, so it is excluded from `size` above.
+      // It is here because it is the only reading that says whether the
+      // admission hint is being populated at all.
+      ghostSize: this.ghostSize,
     };
   }
 

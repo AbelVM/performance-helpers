@@ -986,9 +986,30 @@ export class PowerCache {
     private _cleanupTick;
     /**
      * Current number of entries in cache.
+     *
+     * **Ghost entries are not entries.** Under `policy: 's3fifo'` the ghost queue
+     * holds recently evicted *keys* as an admission hint — no value, no weight, no
+     * expiry — so counting it here reported a `size` above `maxEntries` (119
+     * against a limit of 100, measured) for a cache holding 99 values. It is
+     * exposed separately as {@link ghostSize} for diagnostics, which is the only
+     * thing it is good for.
+     *
      * @returns {number}
      */
     get size(): number;
+    /**
+     * Entries in the S3-FIFO ghost queue: recently evicted keys kept only as an
+     * admission hint. Always `0` under every other policy.
+     *
+     * Diagnostics only. A ghost hit is a **miss** on the read path — the ghost
+     * holds no value to serve — so a non-zero count is not capacity in use and
+     * must not be read as one. It is useful for exactly one question: is the
+     * admission hint being populated at all, which is what tells you whether a
+     * re-admission you expected could have happened.
+     *
+     * @returns {number}
+     */
+    get ghostSize(): number;
     /**
      * Hit rate as a fraction (hits / (hits + misses)).
      * @returns {number}
@@ -1016,7 +1037,7 @@ export class PowerCache {
      * @returns {{size:number, weight:number, hits:number, misses:number, staleServes:number,
      *   evictions:number, expirations:number, rejected:number, rejectedAdmission:number,
      *   weightErrors:number, refreshesSkipped:number, refreshesFailed:number,
-     *   refreshesAborted:number, poolSize:number}}
+     *   refreshesAborted:number, poolSize:number, ghostSize:number}}
      */
     stats(): {
         size: number;
@@ -1033,6 +1054,7 @@ export class PowerCache {
         refreshesFailed: number;
         refreshesAborted: number;
         poolSize: number;
+        ghostSize: number;
     };
     /**
      * Alias for {@link stats}.
@@ -1055,6 +1077,7 @@ export class PowerCache {
         refreshesFailed: number;
         refreshesAborted: number;
         poolSize: number;
+        ghostSize: number;
     };
     /**
      * Resize the cache limits and evict if necessary.

@@ -316,6 +316,10 @@ method is written out per class.
 
 > **expirations**: `number`
 
+##### ghostSize
+
+> **ghostSize**: `number`
+
 ##### hits
 
 > **hits**: `number`
@@ -597,6 +601,10 @@ Ignored when this instance has a constructor TTL.
 ##### expirations
 
 > **expirations**: `number`
+
+##### ghostSize
+
+> **ghostSize**: `number`
 
 ##### hits
 

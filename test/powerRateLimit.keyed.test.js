@@ -262,3 +262,129 @@ describe('per-key limiting: validation', () => {
     expect(first).not.toBe(l.limitersFor('b')); // per key
   });
 });
+
+// --- AUD-022: dispose() must dispose the built slots, not just drop them ------
+
+describe('per-key limiting: dispose() releases the built slots (AUD-022)', () => {
+  it('calls dispose() on every built slot limiter', () => {
+    // `dispose()` used to `fill(null)` the slot array, which releases the
+    // *references* and nothing else. That is enough for a limiter whose
+    // `dispose()` is only a state reset — `PowerThrottle`, `PowerSlidingWindow`
+    // and `PowerGCRA` own no timer and refill lazily, so garbage collection
+    // reclaims everything and skipping their `dispose()` costs nothing.
+    //
+    // It is **not** enough for a slot whose factory returned something that owns
+    // a resource. The factories are caller-supplied and this class has no idea
+    // what they build, so a factory returning a limiter with a timer, a listener
+    // registry or a `FinalizationRegistry` would have that resource leaked by a
+    // teardown whose entire job is releasing it.
+    const disposed = [];
+    const factory = () => ({
+      tryConsume: () => true,
+      dispose() {
+        disposed.push(this);
+      },
+    });
+    const l = new PowerRateLimit([factory], { keyFn: (ctx) => ctx.tenant, buckets: 8 });
+
+    // Build three slots by consuming for three distinct tenants.
+    for (const t of ['alice', 'bob', 'carol']) l.tryConsume(1, { context: { tenant: t } });
+    const built = l._liveLimiters();
+    expect(built).toHaveLength(3);
+    expect(disposed).toHaveLength(0);
+
+    l.dispose();
+
+    expect(disposed).toHaveLength(3);
+    // Every built limiter, not a subset — a partial teardown is the failure mode
+    // where the first slot is released and the rest are not.
+    for (const limiter of built) expect(disposed).toContain(limiter);
+    // And the slots are gone, so the graph is not merely reset.
+    expect(l._liveLimiters()).toHaveLength(0);
+  });
+
+  it("does not dispose the caller's own limiters, which belong to the caller", () => {
+    // The documented decision, pinned so the slot fix cannot overreach. With
+    // `keyFn` every entry must be a *factory*, so the caller's own instances only
+    // exist on the **unkeyed** path — and that is the path the docblock is about:
+    // the `limiters` array was passed in, so it belongs to the caller and is
+    // reset rather than disposed. Disposing it would leave a caller's own object
+    // unusable after a teardown they did not ask for.
+    const mine = new PowerGCRA({ rate: 10, per: 1000 });
+    const disposeSpy = vi.spyOn(mine, 'dispose');
+    const resetSpy = vi.spyOn(mine, 'reset');
+
+    const l = new PowerRateLimit([mine]);
+    l.tryConsume(1);
+    l.dispose();
+
+    expect(disposeSpy).not.toHaveBeenCalled();
+    expect(resetSpy).toHaveBeenCalled();
+    // And the caller's limiter still works afterwards.
+    expect(mine.tryConsume(1)).toBe(true);
+  });
+
+  it('survives a slot limiter whose dispose() throws', () => {
+    // A throwing `dispose()` must not abort the teardown of the slots after it.
+    // The same swallow `reset()` uses, for the same reason: one bad slot must not
+    // strand the rest.
+    const disposed = [];
+    const throwing = () => ({
+      tryConsume: () => true,
+      dispose() {
+        throw new Error('slot teardown failed');
+      },
+    });
+    const good = () => ({
+      tryConsume: () => true,
+      dispose() {
+        disposed.push('good');
+      },
+    });
+    const l = new PowerRateLimit([throwing, good], { keyFn: (ctx) => ctx.tenant, buckets: 8 });
+    l.tryConsume(1, { context: { tenant: 'alice' } });
+
+    expect(() => l.dispose()).not.toThrow();
+    // The good leg of the same slot was still disposed.
+    expect(disposed).toEqual(['good']);
+    expect(l._liveLimiters()).toHaveLength(0);
+  });
+
+  it('tolerates a factory returning a limiter with no dispose()', () => {
+    // A factory is free to return a plain object with only `tryConsume`. The
+    // guard is `typeof === 'function'`, so a slot without `dispose` is dropped
+    // rather than crashing the teardown.
+    const l = new PowerRateLimit([() => ({ tryConsume: () => true })], {
+      keyFn: (ctx) => ctx.tenant,
+      buckets: 8,
+    });
+    l.tryConsume(1, { context: { tenant: 'alice' } });
+    expect(() => l.dispose()).not.toThrow();
+    expect(l._liveLimiters()).toHaveLength(0);
+  });
+
+  it('releases the slots through `using` teardown as well', () => {
+    // The reason the row exists: a `using` teardown has to release the same
+    // graph an explicit `dispose()` does, or the deterministic path is the one
+    // that leaks.
+    const disposed = [];
+    let held;
+    {
+      using l = new PowerRateLimit(
+        [
+          () => ({
+            tryConsume: () => true,
+            dispose() {
+              disposed.push('slot');
+            },
+          }),
+        ],
+        { keyFn: (ctx) => ctx.tenant, buckets: 8 }
+      );
+      l.tryConsume(1, { context: { tenant: 'alice' } });
+      held = l;
+    }
+    expect(disposed).toEqual(['slot']);
+    expect(held._liveLimiters()).toHaveLength(0);
+  });
+});

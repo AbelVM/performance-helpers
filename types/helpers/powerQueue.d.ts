@@ -95,6 +95,25 @@ export class PowerQueue {
      */
     fill(item: any, count?: number): number;
     /**
+     * Release the queue's buffer and drop every reference it holds.
+     *
+     * **Why this exists.** `PowerQueue` owns a ring buffer that only ever grows —
+     * `_grow()` doubles it and nothing halves it — so a queue that took 5 000 items
+     * once keeps an 8 192-slot buffer for the rest of its life. `clear()` empties
+     * the slots but deliberately does not release them, which is right for a
+     * container whose purpose is bounding memory and wrong for one being torn down.
+     * Without this, `PowerQueue` could not take part in `using` / `await using` or
+     * a DI teardown, which every other long-lived helper here supports — and its
+     * sibling `PowerPriorityQueue` has had `dispose()` all along.
+     *
+     * The buffer is dropped rather than shrunk to the initial capacity: the point
+     * of teardown is that the caller is finished with the queue, and a caller who
+     * wants a smaller live queue has `shrink()`.
+     *
+     * @returns {void}
+     */
+    dispose(): void;
+    /**
      * Internal buffer capacity (always a power-of-two).
      * @returns {number}
      */
@@ -196,6 +215,8 @@ export class PowerQueue {
      * @returns {number} New queue length after all unshifts.
      */
     unshiftMany(items: Array<any>): number;
+    [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
     /**
      * Iterator (non-destructive) yielding items in FIFO order.
      * Allows `for...of` and spread (`[...queue]`) without consuming the queue.

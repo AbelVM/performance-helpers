@@ -829,6 +829,40 @@ export class PowerRateLimit {
     this._metrics = null;
     this._lastPath = null;
     if (this.keyFn) {
+      // AUD-022. Dispose the built slots **before** dropping them.
+      //
+      // `fill(null)` below releases the references, which is enough for a limiter
+      // whose `dispose()` is only a state reset — `PowerThrottle`,
+      // `PowerSlidingWindow` and `PowerGCRA` own no timer and refill lazily, so
+      // garbage collection reclaims everything and skipping their `dispose()`
+      // costs nothing.
+      //
+      // It is **not** enough for a slot whose factory returned something that
+      // owns a resource. The factories are caller-supplied and this class has no
+      // idea what they build, so a factory returning a limiter with a timer, a
+      // listener registry or a `FinalizationRegistry` would have that resource
+      // leaked by a teardown that was supposed to release it. Guarded on
+      // `typeof === 'function'` because a factory is free to return a plain
+      // object with only `tryConsume`, and wrapped because a throwing `dispose()`
+      // must not abort the teardown of the slots after it — the same swallow
+      // `reset()` uses, for the same reason.
+      for (const slot of this._slots) {
+        if (!slot) continue;
+        for (const l of slot) {
+          if (l && typeof l.dispose === 'function') {
+            try {
+              l.dispose();
+            } catch {
+              // A slot whose `dispose()` throws must not abort the teardown of the
+              // slots after it, so the error stops here rather than propagating —
+              // the same judgement `reset()` makes, for the same reason. The
+              // throwing slot is already dropped by the `fill(null)` below, so
+              // nothing is left half-released by continuing.
+              /* one bad slot must not abort the rest of the teardown */
+            }
+          }
+        }
+      }
       // In place, rather than `this._slots = []`. **These are equivalent, and
       // that was measured rather than assumed**: `_slotFor` reads and writes by
       // index and nothing in this class inspects `_slots.length`, so emptying and

@@ -158,6 +158,12 @@ loop from accumulating listeners without limit. See
 
 ***
 
+### \_idempotencyCursor
+
+> **\_idempotencyCursor**: `any`
+
+***
+
 ### \_idempotencyDuplicatesInFlight
 
 > **\_idempotencyDuplicatesInFlight**: `number`

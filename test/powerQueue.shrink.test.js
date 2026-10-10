@@ -204,6 +204,60 @@ describe('RES-029: PowerQueue.fill', () => {
     expect(() => queue.fill('x', -1)).toThrow(TypeError);
     expect(() => queue.fill('x', 'three')).toThrow(TypeError);
   });
+
+  it('wraps correctly when a fill spans the end of the ring (AUD-018)', () => {
+    // **A characterisation, not a regression test — and it says so because the
+    // distinction matters.** AUD-018 replaced `fill`'s per-item loop with
+    // `pushMany`'s bulk block-writing path. The old loop was *correct*; it was
+    // only slower. So no behavioural test can fail on the change, and one that
+    // claimed to would be decoration.
+    //
+    // What this pins is the thing the refactor could plausibly have broken: the
+    // bulk path writes in contiguous blocks and wraps between them, so a fill
+    // starting near the end of the ring is the case to get wrong. None of the
+    // tests above reach it — the grow test starts from an empty queue at index 0,
+    // and the append test is far too small to wrap.
+    //
+    // The evidence that the change is *worth* anything is the benchmark, not
+    // this file: 13–18 % faster on the real class across four runs, same
+    // direction every time.
+    //
+    // Built by draining rather than by growing, so the capacity stays at 8 and
+    // `_tail` sits at 6 with room for only two more before the wrap.
+    const queue = new PowerQueue(8);
+    expect(queue.capacity).toBe(8);
+    for (let i = 0; i < 6; i++) queue.push(`pre-${i}`);
+    for (let i = 0; i < 4; i++) queue.shift(); // head advances to 4, tail stays 6
+    expect(queue.length).toBe(2);
+
+    // 2 resident + 4 filled = 6, which fits in 8, so no grow happens and the
+    // fill has to wrap: two slots at 6–7, then two more at 0–1.
+    queue.fill('x', 4);
+
+    expect(queue.length).toBe(6);
+    expect(queue.toArray()).toEqual(['pre-4', 'pre-5', 'x', 'x', 'x', 'x']);
+    // And the ring is still consistent afterwards — a botched wrap shows up as a
+    // corrupted read on the *next* operation, not on this one.
+    queue.push('after');
+    expect(queue.toArray()).toEqual(['pre-4', 'pre-5', 'x', 'x', 'x', 'x', 'after']);
+    expect(queue.shift()).toBe('pre-4');
+    expect(queue.toArray()).toEqual(['pre-5', 'x', 'x', 'x', 'x', 'after']);
+  });
+
+  it('accounts weight once for the whole batch, not per copy (AUD-018)', () => {
+    // Also a characterisation. The old loop already computed the weight once
+    // (`itemWeight(item) * n`) and added it once, so this cannot fail on the
+    // change either — it pins that the bulk path kept the same arithmetic,
+    // which is the part of the refactor with no test of its own.
+    const queue = new PowerQueue(4);
+    queue.fill({ weight: 3 }, 5);
+    expect(queue.totalWeight).toBe(15);
+    queue.fill({ weight: 2 }, 3);
+    expect(queue.totalWeight).toBe(21);
+    // Draining releases it again, so the total tracks the live contents.
+    for (let i = 0; i < 8; i++) queue.shift();
+    expect(queue.totalWeight).toBe(0);
+  });
 });
 
 describe('RES-029: PowerSlidingWindow releases its ring', () => {
@@ -211,6 +265,22 @@ describe('RES-029: PowerSlidingWindow releases its ring', () => {
     // The integration case, and the reason this was more than a caller-facing
     // sharp edge: the window's timestamps live in a `PowerQueue`, so the leak was
     // inside the library rather than in the caller's code.
+    //
+    // **Rewritten for AUD-016, and the expectation moved rather than loosened.**
+    // This used to assert that a 5 000-timestamp burst into a capacity-8 192
+    // window released its ring on the next prune. It does not any more, and the
+    // reason is that the old expectation *was* the thrash: 5 000 timestamps need
+    // 8 192 slots, so a ring at 8 192 is correctly sized for the demand that grew
+    // it, not oversized. Releasing it to the initial 16 meant the next 5 000-burst
+    // regrew it immediately — which is the reallocation-per-window AUD-016
+    // measured at 4–6 per window under steady load.
+    //
+    // What is pinned now is the property that actually matters, in both
+    // directions: a ring sized for demand that has *genuinely* dropped is
+    // released, and a ring sized for the demand that grew it is retained. The
+    // release half is covered below by "still releases the ring after a burst has
+    // passed"; this test covers the retain half, and the bound that makes
+    // retention safe.
     let clock = 1_000_000;
     const window = new PowerSlidingWindow({ windowMs: 1_000, capacity: 8_192, now: () => clock });
 
@@ -220,7 +290,18 @@ describe('RES-029: PowerSlidingWindow releases its ring', () => {
     // Let the whole window age out, then read availability — which prunes.
     clock += 5_000;
     expect(window.available(), 'the window is empty again').toBe(8_192);
-    expect(window._timestamps.capacity, 'and the ring gave the memory back').toBeLessThan(8_192);
+    // 5 000 timestamps need 8 192 slots, so the ring is the right size for the
+    // demand that grew it. Retaining it is not a leak: it is bounded by the
+    // configured capacity, which `tryConsume` enforces.
+    expect(window._timestamps.capacity, 'a correctly-sized ring is retained').toBe(8_192);
+
+    // And the bound that makes retention safe — the ring can never exceed what
+    // the limiter was configured for, however hard it is pushed.
+    const pushed = new PowerSlidingWindow({ windowMs: 1_000, capacity: 8_192, now: () => 1 });
+    let admitted = 0;
+    for (let i = 0; i < 20_000; i++) if (pushed.tryConsume(1)) admitted += 1;
+    expect(admitted).toBe(8_192);
+    expect(pushed._timestamps.capacity).toBe(8_192);
   });
 
   it('does not reallocate on every window boundary', () => {

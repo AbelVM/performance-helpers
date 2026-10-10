@@ -1507,6 +1507,17 @@ export {};
  *   limiter.
  * @property {function():void} [reset] Clear the limiter's state, when it has a
  *   reset at all. Called by `PowerRateLimit.reset()`.
+ * @property {function():void} [dispose] Release whatever the limiter owns.
+ *   Optional, and called only on the **built slots** of a keyed composer — the
+ *   caller's own `limiters` are reset, never disposed, because they were passed
+ *   in and belong to the caller (AUD-022).
+ *
+ *   It is optional because a factory is free to return a plain object with only
+ *   `tryConsume`, and the call site guards on `typeof === 'function'` for exactly
+ *   that reason. It is *declared* because `PowerRateLimit.dispose()` now calls it,
+ *   and an undeclared member is a type error at the one place the contract is
+ *   exercised — which is how the two `TS2339`s that added this property were
+ *   found.
  */
 
 /**

@@ -91,6 +91,60 @@ describe('createBroadcastBus', () => {
     expect(bus.getSlowConsumerIds().has('r1')).toBe(false);
   });
 
+  it('close leaves no zero entry behind for the receiver (AUD-014)', () => {
+    // `close()` used to `set(receiverId, 0)` when the count was positive. Every
+    // pending send for the receiver is cleared by the loop just above, so the
+    // count *is* zero — but a zero entry is not a state, it is a leftover.
+    // Nothing decrements it, because the timers that would have were cleared, so
+    // it survives until the bus is disposed and the map grows one key per closed
+    // subscriber.
+    //
+    // Asserted through `getPendingCounts()`, which exists for this: the defect is
+    // pure retention with no behavioural symptom, so a test written against the
+    // rest of the public surface passes either way — which is exactly what the
+    // `close` test above did before this one was added.
+    const channel = mockChannel();
+    const bus = createBroadcastBus({ channel, ackTimeoutMs: 1000 });
+    const sub = { id: 'r1' };
+
+    bus.send(sub, 1);
+    bus.send(sub, 2);
+    expect(bus.getPendingCounts().get('r1')).toBe(2);
+
+    bus.close(sub);
+
+    // Absent, not zero. `has` rather than `get(...) === 0`, because a leftover
+    // `0` and a correct absence are the same value and only differ in whether
+    // the key is still there.
+    expect(bus.getPendingCounts().has('r1')).toBe(false);
+    expect(bus.getPendingCounts().size).toBe(0);
+  });
+
+  it('close leaves no entry for a receiver with no pending sends (AUD-014)', () => {
+    // The other arm of the old branch, pinned so the unconditional delete cannot
+    // regress it: a receiver that never sent has nothing to clean up.
+    const channel = mockChannel();
+    const bus = createBroadcastBus({ channel });
+    bus.close({ id: 'never-sent' });
+    expect(bus.getPendingCounts().has('never-sent')).toBe(false);
+  });
+
+  it('getPendingCounts returns a copy, so a caller cannot corrupt the bus', () => {
+    // Same contract as `getSlowConsumerIds()`, and for the same reason: a
+    // diagnostic that hands out the live map lets a caller delete a receiver's
+    // bookkeeping and silently disable its slow-consumer detection.
+    const channel = mockChannel();
+    const bus = createBroadcastBus({ channel, ackTimeoutMs: 1000 });
+    bus.send({ id: 'r1' }, 1);
+
+    const snapshot = bus.getPendingCounts();
+    expect(snapshot).not.toBe(bus.getPendingCounts());
+    snapshot.set('r1', 999);
+    snapshot.delete('r1');
+
+    expect(bus.getPendingCounts().get('r1')).toBe(1);
+  });
+
   it('close is a no-op when sub.id is missing', () => {
     const channel = mockChannel();
     const bus = createBroadcastBus({ channel });
@@ -181,5 +235,48 @@ describe('createBroadcastBus', () => {
     await new Promise((r) => setTimeout(r, 150));
 
     expect(bus.getSlowConsumerIds().has('r1')).toBe(true);
+  });
+
+  it('reuses one TextDecoder across acks instead of building one per ack (AUD-020)', async () => {
+    // The ack path used to do `new TextDecoder().decode(...)` **per ack**. A
+    // `TextDecoder` is not free to construct, and an ack arrives once per frame
+    // per receiver, so this sat on the bus's hottest path for no reason a caller
+    // could observe.
+    //
+    // A pure performance change has no behavioural symptom, so the only honest
+    // test is the one that counts constructions: revert to a per-ack `new` and
+    // this goes red. The decoder is module-level and lazily created, so the
+    // count is asserted as "at most one" rather than "exactly one" — a test that
+    // required exactly one would fail for a caller who never sent a frame, which
+    // is the lazy path working correctly.
+    const RealDecoder = globalThis.TextDecoder;
+    let constructions = 0;
+    class CountingDecoder extends RealDecoder {
+      constructor(...args) {
+        super(...args);
+        constructions += 1;
+      }
+    }
+    globalThis.TextDecoder = CountingDecoder;
+
+    try {
+      const channel = mockChannel();
+      const bus = createBroadcastBus({ channel, ackTimeoutMs: 1000 });
+
+      // Three frames, three acks — the shape that used to cost three decoders.
+      for (let seq = 1; seq <= 3; seq++) {
+        bus.send({ id: 'r1' }, seq);
+        const payload = new TextEncoder().encode(JSON.stringify({ seq, receiverId: 'r1' }));
+        channel.dispatch(encodeNativeEnvelope({ type: 'ack', payload }));
+      }
+
+      expect(constructions).toBeLessThanOrEqual(1);
+      // And the acks were genuinely processed, so the shared decoder is not a
+      // decoder that silently fails: no receiver is left marked slow.
+      expect(bus.getSlowConsumerIds().size).toBe(0);
+      expect(bus.getPendingCounts().size).toBe(0);
+    } finally {
+      globalThis.TextDecoder = RealDecoder;
+    }
   });
 });

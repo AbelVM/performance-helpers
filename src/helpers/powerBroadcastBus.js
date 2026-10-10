@@ -18,6 +18,32 @@ import { assertKnownOptions } from '../utils/options.js';
  */
 
 /**
+ * One decoder for every ack, created on first use.
+ *
+ * AUD-020. The ack path used to do `new TextDecoder().decode(...)` **per ack**.
+ * A `TextDecoder` is not free to construct — it allocates the decode state and,
+ * on the first construction in a process, the implementation's own tables — and
+ * an ack arrives once per frame per receiver, so this sat directly on the
+ * bus's hottest path for no reason a caller could observe.
+ *
+ * Lazy rather than a module-level `new TextDecoder()` because the global is
+ * absent from some environments this library still supports, and a top-level
+ * construction would throw at *import* time for a caller who never sends a
+ * frame. `powerBuffer.getDecoder()` caches the same way, including the "there is
+ * none" answer.
+ *
+ * @type {TextDecoder|null|undefined}
+ */
+let _ackDecoder;
+
+/** @returns {TextDecoder|null} */
+function getAckDecoder() {
+  if (_ackDecoder !== undefined) return _ackDecoder;
+  _ackDecoder = typeof TextDecoder === 'function' ? new TextDecoder() : null;
+  return _ackDecoder;
+}
+
+/**
  * Creates a BroadcastChannel bus with per-frame ack, pending counter with
  * timeout, and slow-consumer detection.
  *
@@ -63,7 +89,10 @@ export function createBroadcastBus(options) {
         const decoded = decodeInbound(data);
         const ackData = decoded && decoded.value;
         if (ackData && ackData.type === 'ack' && ackData.payload) {
-          const ack = JSON.parse(new TextDecoder().decode(ackData.payload));
+          // AUD-020: the shared decoder, not a fresh one per ack.
+          const decoder = getAckDecoder();
+          if (!decoder) return;
+          const ack = JSON.parse(decoder.decode(ackData.payload));
           if (ack && typeof ack.seq === 'number') {
             const entry = pending.get(ack.seq);
             if (entry && entry.receiverId === ack.receiverId) {
@@ -145,23 +174,54 @@ export function createBroadcastBus(options) {
 
       const receiverId = sub.id;
 
-      const count = receiverPendingCount.get(receiverId) || 0;
+      // AUD-014. Every pending send for this receiver is cleared by the loop
+      // below, so the count is zero by the time we get here — and a zero entry is
+      // not a state, it is a leftover. This used to `set(receiverId, 0)` when the
+      // count was positive, which left the key in the map until the *next*
+      // decrement happened to run. For a subscriber that closed while holding
+      // pending sends that was never, so the entry outlived the subscriber and
+      // the map grew one key per closed subscriber.
+      //
+      // The count is no longer read at all: both arms of the old branch reached
+      // the same conclusion, and reading a value only to discard it is how a
+      // second thing to keep correct gets introduced.
       for (const [seq, entry] of pending) {
         if (entry.receiverId === receiverId) {
           clearTimeout(entry.timer);
           pending.delete(seq);
         }
       }
-      if (count <= 0) {
-        receiverPendingCount.delete(receiverId);
-      } else {
-        receiverPendingCount.set(receiverId, 0);
-      }
+      receiverPendingCount.delete(receiverId);
       slowConsumers.delete(receiverId);
     },
 
     getSlowConsumerIds() {
       return new Set(slowConsumers);
+    },
+
+    /**
+     * A snapshot of the per-receiver pending-ack counts.
+     *
+     * Exists because of AUD-014. `close()` used to write a `0` into
+     * `receiverPendingCount` for a receiver whose pending sends it had just
+     * cleared, on the reasoning that the count was zero either way — which is
+     * true of the *value* and false of the *entry*. A zero entry is not a state,
+     * it is a leftover: nothing decrements it, because the timers that would
+     * have were cleared, so it survives until the bus is disposed and the map
+     * grows one key per closed subscriber.
+     *
+     * That is a pure retention bug with no behavioural symptom, which makes it
+     * invisible to every test written against the public surface — the existing
+     * `close` test asserted only `getSlowConsumerIds()` and passed either way.
+     * This accessor is the smallest thing that makes the retention observable,
+     * and it is the same shape as `getSlowConsumerIds()` for the same reason:
+     * "what is the bus still tracking" is a question an operator debugging a leak
+     * actually asks.
+     *
+     * @returns {Map<string, number>} A copy — mutating it does not affect the bus.
+     */
+    getPendingCounts() {
+      return new Map(receiverPendingCount);
     },
 
     dispose() {

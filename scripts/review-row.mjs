@@ -168,7 +168,7 @@ function spec_missing(key, values) {
  */
 export function checkTable(text) {
   const lines = text.split('\n');
-  const start = lines.findIndex((l) => l.startsWith('| ID |'));
+  const start = lines.findIndex((l) => l.startsWith('| ID |') || l.startsWith('| Task ID |'));
   if (start === -1) return { rows: 0, problems: ['review.md: no `| ID |` header found'] };
 
   const headerCells = splitRow(lines[start]);

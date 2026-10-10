@@ -72,10 +72,22 @@ import { spawnSync } from 'node:child_process';
  *   It is last rather than earlier for a second reason: it is the slowest step
  *   by an order of magnitude, and when it fails it is never the interesting
  *   failure.
+ * - `check:barrel` is **first**, before `lock:sync`, and it is the one step whose
+ *   failure makes every later step meaningless. `src/index.js` once carried four
+ *   duplicate `export { default as … }` lines from a concurrent edit; the build
+ *   failed, `test/globalSetup.js` shells out to the build, so it failed, so every
+ *   test file that imports the barrel failed to load — ~300 confusing per-file
+ *   errors instead of one clear one, at the cost of a full suite run to discover.
+ *   It imports the module rather than parsing it, because a duplicate export is
+ *   syntactically valid and only fails at link time. See `scripts/check-barrel.mjs`.
  *
  * @type {string[]}
  */
 const STEPS = [
+  // A barrel that does not load is the one failure that makes every other gate
+  // meaningless, so it goes before everything — including `lock:sync`, which is
+  // about the installed tree rather than the source.
+  'check:barrel',
   // The lock file and `package.json` agreeing is the one thing `verify` cannot
   // assume, because everything below runs against an already-installed tree.
   //

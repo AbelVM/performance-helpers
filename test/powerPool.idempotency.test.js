@@ -24,6 +24,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { PowerPool } from '../src/index.js';
+import { DEFAULT_IDEMPOTENCY_SWEEP_BATCH } from '../src/helpers/constants.js';
 
 /**
  * A worker that records what it was handed and never responds.
@@ -277,6 +278,131 @@ describe('PowerPool idempotency: the ledger does not outlive its usefulness', ()
     expect(stats.expired).toBe(1);
     expect(pool._idempotency.has('settled-key')).toBe(false);
     expect(pool._idempotency.has('in-flight-key')).toBe(true);
+    pool.shutdown();
+  });
+
+  it('reaches settled keys parked behind more in-flight keys than one batch (AUD-008)', async () => {
+    // **The rotating cursor, and the reason it is not optional.**
+    //
+    // The sweep examines a bounded slice per call, and it used to always take
+    // that slice from the *head* of the ledger. That drains fine while entries
+    // are being deleted — a deletion moves the rest up, so the next slice is the
+    // next keys. It stops draining the moment the head is occupied by entries
+    // that are never deleted, and in-flight entries are exactly that: they are
+    // released by their post's own outcome, never by the sweep.
+    //
+    // So a ledger whose first `DEFAULT_IDEMPOTENCY_SWEEP_BATCH` (32) entries are
+    // in-flight never reaches *any* settled key, and every settled key behind
+    // them is retained past its TTL forever. That is the leak the TTL exists to
+    // prevent, reached through the one state the sweep is documented not to
+    // touch.
+    //
+    // Asserted on the ledger directly for the same reason as the test above: the
+    // in-flight state has no window outside the synchronous post that owns it,
+    // so the public path cannot be used to build this shape.
+    const { pool } = makePool({ idempotencyTtlMs: 1 });
+    const ledger = pool._idempotency;
+    // 40 in-flight keys — more than one batch — then 10 settled keys past TTL.
+    for (let i = 0; i < 40; i++) ledger.set(`busy-${i}`, { settledAt: null });
+    for (let i = 0; i < 10; i++) ledger.set(`done-${i}`, { settledAt: 0 });
+
+    // Three sweeps is 96 slots of budget against 50 entries, so a cursor that
+    // rotates reaches everything. A head-only scan spends all 96 re-examining
+    // the same 32 in-flight keys.
+    const now = pool._createdAt + 10_000;
+    for (let i = 0; i < 3; i++) pool._idempotencySweep(now);
+
+    expect(pool.getStats().idempotency.expired).toBe(10);
+    for (let i = 0; i < 10; i++) expect(ledger.has(`done-${i}`)).toBe(false);
+    // And the in-flight keys are untouched — the cursor rotates *past* them, it
+    // does not start expiring them.
+    for (let i = 0; i < 40; i++) expect(ledger.has(`busy-${i}`)).toBe(true);
+    pool.shutdown();
+  });
+
+  it('examines a bounded slice without materialising the ledger (AUD-008)', () => {
+    // **The allocation, which is what the row is actually about.**
+    //
+    // The sweep used to open with `const keys = [...ledger.keys()]`. The spread
+    // drains the *entire* iterator to build an array before the bounded slice is
+    // taken, so the cost of opting into idempotency was an O(n) allocation on
+    // every `postMessage`, where `n` is the number of in-flight keys — the exact
+    // opposite of what a bounded sweep is for. The comment above the loop
+    // claimed "a bounded slice per call", which was true of the examination and
+    // false of the cost.
+    //
+    // Counting iterator yields is the deterministic way to see the difference:
+    // a spread drains every key, a lazy `for…of` with a `break` stops at the
+    // batch. Timing would be noise at this size, and asserting on the source
+    // would be asserting on spelling.
+    const { pool } = makePool({ idempotencyTtlMs: 1 });
+    const ledger = pool._idempotency;
+    // Far more entries than one batch, all in-flight so none are deleted and
+    // the cursor cannot rotate past them — the sweep's budget is the only thing
+    // bounding the work.
+    const total = 5000;
+    for (let i = 0; i < total; i++) ledger.set(`busy-${i}`, { settledAt: null });
+
+    const realKeys = ledger.keys.bind(ledger);
+    let yielded = 0;
+    ledger.keys = () => {
+      const it = realKeys();
+      return {
+        next() {
+          const r = it.next();
+          if (!r.done) yielded += 1;
+          return r;
+        },
+        [Symbol.iterator]() {
+          return this;
+        },
+      };
+    };
+
+    try {
+      pool._idempotencySweep(pool._createdAt + 10_000);
+    } finally {
+      ledger.keys = realKeys;
+    }
+
+    // One batch, not the whole ledger. The old code yielded all 5000.
+    //
+    // `BATCH + 1` rather than `BATCH`: a `for…of` calls `next()` to *get* the key
+    // and only then tests the budget, so the yield that pushes `examined` to the
+    // limit has already happened by the time the `break` runs. That one extra
+    // yield is the loop's own, not a second entry examined.
+    expect(yielded).toBeLessThanOrEqual(DEFAULT_IDEMPOTENCY_SWEEP_BATCH + 1);
+    expect(yielded).toBeGreaterThan(0);
+    // And nothing was expired, because every entry examined was in-flight.
+    expect(pool.getStats().idempotency.expired).toBe(0);
+    expect(ledger.size).toBe(total);
+    pool.shutdown();
+  });
+
+  it('does not resume from a cursor whose key was deleted (AUD-008)', () => {
+    // The cursor is only safe to resume from if it still names a live entry. A
+    // sweep that expires the key it was about to resume from would leave the
+    // next sweep skipping the entire ledger looking for a key that is gone,
+    // examining nothing — a silent stall that looks exactly like an empty
+    // ledger. The implementation guards this two ways: it resumes from the last
+    // key that *survived*, and it treats a cursor missing from the ledger as
+    // "start from the head".
+    const { pool } = makePool({ idempotencyTtlMs: 1 });
+    const ledger = pool._idempotency;
+    for (let i = 0; i < 5; i++) ledger.set(`k-${i}`, { settledAt: 0 });
+    const now = pool._createdAt + 10_000;
+
+    pool._idempotencySweep(now);
+    // Every entry was expired, so there is nothing live to resume from.
+    expect(ledger.size).toBe(0);
+    expect(pool._idempotencyCursor).toBeNull();
+
+    // A fresh batch must still be swept: the stall would show up here as a
+    // ledger that never drains again.
+    for (let i = 0; i < 5; i++) ledger.set(`fresh-${i}`, { settledAt: 0 });
+    pool._idempotencySweep(now);
+    expect(ledger.size).toBe(0);
+    expect(pool.getStats().idempotency.expired).toBe(10);
     pool.shutdown();
   });
 });

@@ -24,8 +24,6 @@ the pending counter, not an invisible queue.
 
 ## Returns
 
-`object`
-
 ### \[asyncDispose\]()
 
 > **\[asyncDispose\]**(): `Promise`\<`void`\>
@@ -63,6 +61,34 @@ the pending counter, not an invisible queue.
 #### Returns
 
 `void`
+
+### getPendingCounts()
+
+> **getPendingCounts**(): `Map`\<`string`, `number`\>
+
+A snapshot of the per-receiver pending-ack counts.
+
+Exists because of AUD-014. `close()` used to write a `0` into
+`receiverPendingCount` for a receiver whose pending sends it had just
+cleared, on the reasoning that the count was zero either way — which is
+true of the *value* and false of the *entry*. A zero entry is not a state,
+it is a leftover: nothing decrements it, because the timers that would
+have were cleared, so it survives until the bus is disposed and the map
+grows one key per closed subscriber.
+
+That is a pure retention bug with no behavioural symptom, which makes it
+invisible to every test written against the public surface — the existing
+`close` test asserted only `getSlowConsumerIds()` and passed either way.
+This accessor is the smallest thing that makes the retention observable,
+and it is the same shape as `getSlowConsumerIds()` for the same reason:
+"what is the bus still tracking" is a question an operator debugging a leak
+actually asks.
+
+#### Returns
+
+`Map`\<`string`, `number`\>
+
+A copy — mutating it does not affect the bus.
 
 ### getSlowConsumerIds()
 

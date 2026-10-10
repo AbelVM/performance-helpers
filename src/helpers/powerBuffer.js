@@ -105,11 +105,16 @@ export function isArrayBuffer(value) {
  * expression outright (PERF-005). Routing every use through here fixes that once
  * instead of casting at each site.
  *
- * @private
- * @param {ArrayBufferLike} buf
+ * Exported for `powerMessageCodec`, which had two bare `instanceof` sites of its
+ * own (AUD-011) — one of them walking **arbitrary user values**, where a
+ * cross-realm `SharedArrayBuffer` was silently *copied* instead of transferred.
+ * The same-realm fast path is first, so the common case still costs one
+ * comparison; only a value that fails it pays for `Reflect.get` and the `try`.
+ *
+ * @param {unknown} buf
  * @returns {boolean}
  */
-function isSharedBuffer(buf) {
+export function isSharedArrayBuffer(buf) {
   // `instanceof` for the same-realm fast path, then the internal-slot check for a
   // buffer from another realm — see `isArrayBuffer` for why `Symbol.toStringTag`
   // is not an option. A cross-realm `SharedArrayBuffer` missed both spellings
@@ -188,7 +193,7 @@ export const o2u8 = (obj, preStringified) => {
   // to `JSON.stringify` it became the two bytes `{}`, so a value the caller
   // certainly did not mean travelled the wire and came back as an empty object
   // with nothing to say so (PERF-005).
-  if (isSharedBuffer(/** @type {ArrayBufferLike} */ (obj))) {
+  if (isSharedArrayBuffer(/** @type {ArrayBufferLike} */ (obj))) {
     return new Uint8Array(/** @type {ArrayBuffer} */ (/** @type {unknown} */ (obj)));
   }
   // Allow callers to pass a pre-computed JSON string (e.g. when the same
@@ -244,7 +249,7 @@ export const u82o = (buf) => {
   // Its own branch for the same reason as `o2u8`: a `SharedArrayBuffer` is not an
   // `ArrayBuffer`, so without this a SAB was rejected as an unsupported input
   // rather than decoded (PERF-005).
-  else if (isSharedBuffer(buf)) {
+  else if (isSharedArrayBuffer(buf)) {
     u8 = new Uint8Array(/** @type {ArrayBuffer} */ (/** @type {unknown} */ (buf)));
   } else if (
     typeof Buffer !== 'undefined' &&
@@ -299,7 +304,7 @@ export const o2b = (obj) => {
   // a signature promising an **owning** `ArrayBuffer`. `Uint8Array.prototype.slice`
   // allocates through the species constructor, so this yields a plain one. Only the SAB
   // path copies; every other input keeps its zero-copy promise (PERF-005).
-  if (isSharedBuffer(u8.buffer)) return u8.slice().buffer;
+  if (isSharedArrayBuffer(u8.buffer)) return u8.slice().buffer;
   // Not shared, so `u8.buffer` really is an `ArrayBuffer`; the cast is only here
   // because `Uint8Array#buffer` is typed `ArrayBufferLike` and TS cannot narrow it.
   const buf = /** @type {ArrayBuffer} */ (/** @type {unknown} */ (u8.buffer));

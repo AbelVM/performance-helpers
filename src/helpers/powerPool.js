@@ -736,6 +736,10 @@ export class PowerPool {
     this._idempotencyDuplicatesSettled = 0;
     this._idempotencyExpired = 0;
     this._idempotencySize = 0;
+    // AUD-008. Resume point for the sweep's rotating cursor: the last key the
+    // previous sweep examined that is still in the ledger. `null` means "start
+    // from the head", which is also the state after `clear()`.
+    this._idempotencyCursor = null;
 
     // configure optional autoscaling
     if (options?.autoScale) {
@@ -2915,19 +2919,58 @@ export class PowerPool {
    */
   _idempotencySweep(now) {
     const ledger = this._idempotency;
-    if (!ledger || ledger.size === 0) return;
+    if (!ledger || ledger.size === 0) {
+      // Nothing to resume from, and a stale cursor would make the next sweep
+      // skip the whole ledger looking for a key that is no longer there.
+      this._idempotencyCursor = null;
+      return;
+    }
     const ttl = this._idempotencyTtlMs;
+    // AUD-008. This used to open with `const keys = [...ledger.keys()]`, which
+    // materialised **every** key in the ledger before the bounded slice was
+    // taken — an O(n) allocation on every `postMessage`, where `n` is the number
+    // of in-flight idempotency keys. The comment above claimed "a bounded slice
+    // per call", which was true of the *examination* and false of the *cost*.
+    //
+    // Iterating `ledger.keys()` directly is lazy: the iterator yields one key at
+    // a time and `break` abandons it, so the work is proportional to the batch
+    // and the allocation is zero. The Map is not mutated in a way that
+    // invalidates the iterator either — `Map.prototype.delete` during iteration
+    // is well defined, and the only mutation here is a delete of the entry just
+    // read.
+    //
+    // The cursor is what makes "every entry is eventually reached" true, which
+    // the comment above already claimed and the code did not do: examining the
+    // first N keys every time means an in-flight entry parked at the head blocks
+    // every settled key behind it forever. Resuming past the last examined key
+    // walks the whole ledger over successive calls.
+    let cursor = this._idempotencyCursor;
+    // A cursor whose key has been deleted or released is stale. Detecting that
+    // up front is O(1) and keeps the sweep from burning its whole budget
+    // skipping ahead to a key that is not there.
+    if (cursor !== null && !ledger.has(cursor)) cursor = null;
+    let seenCursor = cursor === null;
+    // The last key examined that is still in the ledger, which is the only safe
+    // thing to resume from: resuming at a key this sweep deleted would make the
+    // next sweep's skip-ahead run off the end and examine nothing.
+    let resume = null;
     let examined = 0;
-    for (const k of [...ledger.keys()]) {
+    for (const k of ledger.keys()) {
+      if (!seenCursor) {
+        if (k === cursor) seenCursor = true;
+        else continue;
+      }
       if (examined >= DEFAULT_IDEMPOTENCY_SWEEP_BATCH) break;
       examined += 1;
       const entry = ledger.get(k);
       if (entry && entry.settledAt !== null && now - entry.settledAt >= ttl) {
         ledger.delete(k);
         this._idempotencyExpired += 1;
+      } else {
+        resume = k;
       }
-      if (examined >= ledger.size) break;
     }
+    this._idempotencyCursor = resume;
     this._idempotencySize = ledger.size;
   }
 
@@ -4689,6 +4732,31 @@ export class PowerPool {
           this.removeEventListener('idle', onIdle);
         } catch (e) {
           this._debugLog?.(e, 'drain: removeEventListener failed');
+        }
+        // **The abort listener too.** `{ once: true }` auto-removes a listener
+        // only when it *fires*; when the wait ends via `idle` or `timeout` the
+        // listener stayed attached, and each retained one closes over `resolve`,
+        // `reject`, `timer` and `this` — the whole pool. Reproduced at 5 retained
+        // listeners after 5 timed-out drains against a busy pool, which with a
+        // long-lived signal (a server-lifetime `AbortSignal`, or a framework that
+        // reuses one across requests) grows without bound and eventually trips
+        // Node's max-listeners warning.
+        //
+        // `onAbort` is referenced before its `const` below, which is safe only
+        // because `release` is never *called* during this synchronous block —
+        // every caller is an event handler that runs after the whole promise
+        // executor has returned.
+        //
+        // The fast path above returns before any listener is registered when the
+        // pool is already idle, which is why a regression test against an idle
+        // pool shows zero listeners and misses the bug entirely. The pool has to
+        // be kept busy for the wait to be abandoned rather than resolved.
+        if (signal) {
+          try {
+            signal.removeEventListener('abort', onAbort);
+          } catch (e) {
+            this._debugLog?.(e, 'drain: removeEventListener(abort) failed');
+          }
         }
       };
 

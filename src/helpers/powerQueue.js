@@ -223,15 +223,69 @@ export class PowerQueue {
       integer: true,
       fallback: 0,
     });
+    if (n === 0) return this._size;
     const w = itemWeight(item) * n;
-    for (let i = 0; i < n; i++) {
-      if (this._size === this._capacity) this._grow();
-      this._buffer[this._tail] = item;
-      this._tail = (this._tail + 1) & this._mask;
-      this._size++;
+    const need = this._size + n;
+    // AUD-018. Grow **once** for the whole batch instead of testing capacity on
+    // every iteration. The old loop did `if (this._size === this._capacity)
+    // this._grow()` per item, which is a comparison and a branch per copy for a
+    // grow that can only happen a handful of times — and `_grow()` itself
+    // rebuilds the ring, so the per-item check was guarding the one operation
+    // that is already amortised.
+    //
+    // The writes then go in contiguous blocks, wrapping at most once per block,
+    // which is the same shape `pushMany` uses. Every value is identical here, so
+    // there is no per-item source index to track and the inner loop is a plain
+    // store.
+    while (this._capacity < need) this._grow();
+    let remaining = n;
+    while (remaining > 0) {
+      // `_tail` is always masked into `[0, _capacity)`, so this is at least 1
+      // and the loop cannot spin.
+      const block = Math.min(remaining, this._capacity - this._tail);
+      for (let i = 0; i < block; i++) this._buffer[this._tail + i] = item;
+      this._tail = (this._tail + block) & this._mask;
+      remaining -= block;
     }
+    this._size = need;
     this._totalWeight += w;
     return this._size;
+  }
+
+  /**
+   * Release the queue's buffer and drop every reference it holds.
+   *
+   * **Why this exists.** `PowerQueue` owns a ring buffer that only ever grows —
+   * `_grow()` doubles it and nothing halves it — so a queue that took 5 000 items
+   * once keeps an 8 192-slot buffer for the rest of its life. `clear()` empties
+   * the slots but deliberately does not release them, which is right for a
+   * container whose purpose is bounding memory and wrong for one being torn down.
+   * Without this, `PowerQueue` could not take part in `using` / `await using` or
+   * a DI teardown, which every other long-lived helper here supports — and its
+   * sibling `PowerPriorityQueue` has had `dispose()` all along.
+   *
+   * The buffer is dropped rather than shrunk to the initial capacity: the point
+   * of teardown is that the caller is finished with the queue, and a caller who
+   * wants a smaller live queue has `shrink()`.
+   *
+   * @returns {void}
+   */
+  dispose() {
+    this.clear();
+    // `clear()` nulls the occupied slots; this releases the array itself, which
+    // is the part that survives a `clear()` and is what a burst leaves behind.
+    this._buffer = new Array(this._capacity);
+    this._head = 0;
+    this._tail = 0;
+  }
+
+  [Symbol.dispose]() {
+    this.dispose();
+  }
+
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+    return;
   }
 
   /**

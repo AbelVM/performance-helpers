@@ -71,6 +71,7 @@ export class PowerTimedCache {
         refreshesFailed: number;
         refreshesAborted: number;
         poolSize: number;
+        ghostSize: number;
     };
     /**
      * Read a value **without** promoting it to most-recently-used, and without
@@ -197,6 +198,7 @@ export class PowerTimedCache {
         refreshesFailed: number;
         refreshesAborted: number;
         poolSize: number;
+        ghostSize: number;
     };
     startCleanup(intervalOrOptions?: undefined): void;
     stopCleanup(): void;

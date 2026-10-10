@@ -145,6 +145,26 @@ cost in reasoning.
 
 ## Methods
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+#### Returns
+
+`void`
+
+***
+
 ### \[iterator\]()
 
 > **\[iterator\]**(): `Iterator`\<`any`, `any`, `any`\>
@@ -161,6 +181,31 @@ Allows `for...of` and spread (`[...queue]`) without consuming the queue.
 ### clear()
 
 > **clear**(): `void`
+
+#### Returns
+
+`void`
+
+***
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release the queue's buffer and drop every reference it holds.
+
+**Why this exists.** `PowerQueue` owns a ring buffer that only ever grows —
+`_grow()` doubles it and nothing halves it — so a queue that took 5 000 items
+once keeps an 8 192-slot buffer for the rest of its life. `clear()` empties
+the slots but deliberately does not release them, which is right for a
+container whose purpose is bounding memory and wrong for one being torn down.
+Without this, `PowerQueue` could not take part in `using` / `await using` or
+a DI teardown, which every other long-lived helper here supports — and its
+sibling `PowerPriorityQueue` has had `dispose()` all along.
+
+The buffer is dropped rather than shrunk to the initial capacity: the point
+of teardown is that the caller is finished with the queue, and a caller who
+wants a smaller live queue has `shrink()`.
 
 #### Returns
 
