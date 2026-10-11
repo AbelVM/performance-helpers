@@ -4,9 +4,14 @@ Counting barrier primitive. Resolves pending waiters when the internal count rea
 
 ## Constructor
 
-| Option  |     Type | Default | Description                                          |
-| ------- | -------: | ------: | ---------------------------------------------------- |
-| `count` | `number` |     `1` | Initial count required before the latch is released. |
+`count` is the **leading positional argument**, not a field of the options object —
+`new PowerLatch(3)` and `new PowerLatch(3, { onAbort })`. The table below is
+therefore an argument table, which is also why `docs:claims` does not read it as
+an options table.
+
+| Argument |     Type | Default | Description                                          |
+| -------- | -------: | ------: | ---------------------------------------------------- |
+| `count`  | `number` |     `1` | Initial count required before the latch is released. |
 
 ## API
 

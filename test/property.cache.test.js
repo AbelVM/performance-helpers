@@ -164,13 +164,39 @@ describe('PowerHistogram invariants', () => {
           for (const v of values) h.record(v);
 
           expect(h.count).toBe(values.length);
-          expect(h.sum).toBeCloseTo(
-            values.reduce((a, b) => a + b, 0),
-            6
+          // **Relative, not `toBeCloseTo`, and the reason is a measured flake.**
+          // `toBeCloseTo(x, 6)` is an *absolute* tolerance of 5e-7. One ULP of
+          // float64 at 5.9e9 — which this generator produces, spanning 1e-6 to
+          // 1e9 — is 1.3e-6, already 2.6x the tolerance. So the assertion
+          // demanded agreement tighter than a single unit in the last place of
+          // the quantity being summed, and it failed whenever fast-check
+          // happened to draw values large enough. Reproduced with seed 711822998
+          // on an 11-value array; the sum was right to within one ULP and the
+          // test still went red.
+          //
+          // The bound below is the honest one: naive summation of n values
+          // accumulates at most about (n-1) ULPs of the running total.
+          //
+          // **What this can and cannot see.** Verified by mutation, not assumed:
+          // a 1e-7 relative error in the sum fails this and the merge test, and
+          // a 1e-15 one fails this. What it *cannot* distinguish is compensated
+          // from naive summation — dropping `_sumCompensation` from the getter
+          // leaves the test green, because the naive reference carries the same
+          // error the compensation exists to remove. Verifying AUD-029's Kahan
+          // pair needs a higher-precision reference than `Array.reduce`, which
+          // is separate work and is not what this row is for.
+          const expectedSum = values.reduce((a, b) => a + b, 0);
+          expect(Math.abs(h.sum - expectedSum)).toBeLessThanOrEqual(
+            Math.max(Math.abs(expectedSum), 1) * values.length * Number.EPSILON
           );
           expect(h.min).toBe(Math.min(...values));
           expect(h.max).toBe(Math.max(...values));
-          expect(h.mean).toBeCloseTo(h.sum / h.count, 9);
+          // Same defect, same fix: `toBeCloseTo(_, 9)` on a mean of ~5.3e8 is
+          // 60x tighter than one ULP.
+          const expectedMean = h.sum / h.count;
+          expect(Math.abs(h.mean - expectedMean)).toBeLessThanOrEqual(
+            Math.max(Math.abs(expectedMean), 1) * Number.EPSILON
+          );
 
           const sorted = values.slice().sort((a, b) => a - b);
           for (const q of [0, 25, 50, 75, 99, 99.9, 100]) {

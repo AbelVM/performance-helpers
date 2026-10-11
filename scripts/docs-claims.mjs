@@ -138,12 +138,51 @@ const sharedTypes = existsSync(path.join(TYPES_DIR, 'jsdoc-types.d.ts'))
  * @param {string} guideName
  * @returns {string|null}
  */
+/**
+ * Guide names whose class is not the capitalised guide name.
+ *
+ * `powerChunking.md` documents `PowerChunker`. The mapping is explicit rather
+ * than derived — strip a trailing "ing", try both spellings — because a
+ * heuristic that fails fails *silently*, in the exact direction this gate
+ * exists to close.
+ *
+ * @type {Readonly<Record<string, string>>}
+ */
+const GUIDE_CLASS_ALIASES = Object.freeze({
+  powerChunking: 'PowerChunker',
+});
+
+/**
+ * Every `.d.ts` under `types/helpers`, **recursively**.
+ *
+ * The flat `readdirSync` this replaces never saw `types/helpers/cache/`, so
+ * `PowerCache`, `PowerMemoizer` and `PowerTimedCache` had no resolvable
+ * declaration and their three guides were skipped without a word. That is how
+ * 17 of 62 guides came to be unchecked while the report claimed coverage — the
+ * same failure shape as the heading-based table search this file already
+ * records, and found the same way: by noticing the count did not add up.
+ *
+ * @param {string} dir
+ * @returns {string[]} Absolute paths, sorted for a stable report.
+ */
+function listDeclarations(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  )) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listDeclarations(full));
+    else if (entry.name.endsWith('.d.ts')) out.push(full);
+  }
+  return out;
+}
+
 function declarationForGuide(guideName) {
-  const candidates = readdirSync(TYPES_DIR).filter((f) => f.endsWith('.d.ts'));
-  const cls = guideName.replace(/^(power|worker)/, (m) => m).replace(/\.md$/, '');
+  const candidates = listDeclarations(TYPES_DIR);
+  const cls = GUIDE_CLASS_ALIASES[guideName] ?? guideName;
   const wanted = `class ${cls[0].toUpperCase()}${cls.slice(1)}`;
   for (const file of candidates) {
-    const src = readFileSync(path.join(TYPES_DIR, file), 'utf8');
+    const src = readFileSync(file, 'utf8');
     if (src.includes(wanted)) return src;
   }
   return null;
@@ -153,12 +192,26 @@ function declarationForGuide(guideName) {
 const GUIDES_WITH_OPTION_TABLES = readdirSync(GUIDES_DIR).filter((f) => f.endsWith('.md'));
 /** Typedefs referenced by a constructor but not resolvable in the shared declarations. */
 const unresolvedTypedefs = [];
+/**
+ * Guides with no resolvable class declaration, so no option names were checked.
+ * Reported at the end rather than dropped, so the coverage is visible.
+ * @type {string[]}
+ */
+const skipped = [];
 
 for (const guide of GUIDES_WITH_OPTION_TABLES) {
   const guidePath = path.join(GUIDES_DIR, guide);
   const text = readFileSync(guidePath, 'utf8');
   const decl = declarationForGuide(guide.replace(/\.md$/, ''));
-  if (!decl) continue;
+  if (!decl) {
+    // Recorded rather than dropped. `continue` on its own is what let 17 guides
+    // go unchecked while the summary line counted only the ones that ran, so the
+    // report read as full coverage of a directory it had mostly skipped. A skip
+    // is legitimate for a topic guide with no helper behind it; it is a defect
+    // for anything else, and the only way to tell them apart is to see the list.
+    skipped.push(guide);
+    continue;
+  }
   const known = optionNamesFromDeclaration(decl, sharedTypes, unresolvedTypedefs);
 
   let checked = 0;
@@ -236,11 +289,14 @@ for (const guide of GUIDES_WITH_OPTION_TABLES) {
 
   for (const raw of candidates) {
     const option = raw.replace(/^options\./, '');
-    if (
-      ['option', 'options', 'input', 'kind', 'type', 'argument', 'name'].includes(
-        option.toLowerCase()
-      )
-    ) {
+    // Column-header words, not option names. **`name` is deliberately absent**
+    // from this list: it was here, and it silently discarded
+    // `powerCrossLock.md`'s only documented option — a real option called
+    // `name` — leaving the guide with nothing checked and nothing reported,
+    // which read exactly like a clean pass. `skipFirst` above already handles
+    // the leading-positional case this list was reaching for, and it does so by
+    // asking the declaration rather than by guessing at a word.
+    if (['option', 'options', 'input', 'kind', 'type', 'argument'].includes(option.toLowerCase())) {
       continue;
     }
     checked += 1;
@@ -255,6 +311,22 @@ for (const guide of GUIDES_WITH_OPTION_TABLES) {
     );
   } else if (checked > 0) {
     notes.push(`${guide}: ${checked} documented option name(s) all present`);
+  } else {
+    // **Nothing was checked and nothing was wrong, and that is not a pass.**
+    // This branch is the third silent drop in this file, and the other two are
+    // recorded above it. `powerCrossLock.md` lost its only option to a `name`
+    // entry in the header-word skip list; `powerLatch.md` lost its only option
+    // to `skipFirst`, which discards the first row when the declaration
+    // resolved no options to compare it against. Both produced zero checked and
+    // zero unknown, so neither the `ok` note nor the failure fired, and the
+    // summary line counted 46 checks over 62 guides with no visible gap.
+    //
+    // Reported rather than fixed silently, because the two causes are different
+    // and only one of them is a defect in this script.
+    notes.push(
+      `${guide}: no option name could be checked \u2014 every table row was ` +
+        'filtered out, or the declaration resolved no options to compare against'
+    );
   }
 }
 
@@ -334,6 +406,17 @@ if (existsSync(llmsPath)) {
 }
 
 for (const note of notes) console.log(`  ok  ${note}`);
+
+// The skip list, printed before the verdict so a reader sees the coverage
+// boundary rather than inferring it from a count. A topic guide with no helper
+// behind it belongs here; a helper guide does not, and the list is how the
+// difference stays visible.
+if (skipped.length > 0) {
+  console.log(
+    `\n  --  ${skipped.length} guide(s) with no resolvable class declaration, so no option names checked:`
+  );
+  for (const g of skipped) console.log(`      ${g}`);
+}
 
 if (problems.length > 0) {
   console.error('\ndocs:claims FAILED\n');
