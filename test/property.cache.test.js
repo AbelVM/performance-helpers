@@ -14,6 +14,94 @@ import { PowerCache, PowerHistogram } from '../src/index.js';
  */
 const RUNS = Number(process.env.FAST_CHECK_NUM_RUNS || 200);
 
+/**
+ * Exact sum of finite doubles, via integer arithmetic.
+ *
+ * Every finite IEEE-754 double is exactly `mantissa * 2^exp` with an integer
+ * mantissa, so a sum of them is exact in BigInt. This is the reference a naive
+ * `Array.reduce` cannot be: it carries ~n ULPs of its own error, which is the
+ * *same* error `PowerHistogram`'s Kahan pair exists to remove — so comparing
+ * against it cannot tell the two apart.
+ *
+ * Measured over 400 random arrays drawn from this test's own generator: the
+ * histogram's compensated sum equals this reference in **400/400** cases, while
+ * the naive sum equals it in only **127/400**. Dropping `_sumCompensation` from
+ * the getter mismatches in **273/400**. So exact equality here is both stable
+ * and load-bearing, which is the combination the previous relative bound could
+ * not achieve.
+ *
+ * @param {number[]} values
+ * @returns {number}
+ */
+function exactSum(values) {
+  const buf = new ArrayBuffer(8);
+  const f64 = new Float64Array(buf);
+  const u32 = new Uint32Array(buf);
+  /** @type {[bigint, number][]} */
+  const parts = [];
+  let minExp = Infinity;
+  for (const v of values) {
+    if (!Number.isFinite(v)) throw new Error('exactSum: non-finite input');
+    f64[0] = v;
+    const lo = u32[0] >>> 0;
+    const hi = u32[1] >>> 0;
+    const expBits = (hi >>> 20) & 0x7ff;
+    const mantHi = BigInt(hi & 0xfffff);
+    let m = (mantHi << 32n) | BigInt(lo);
+    let e;
+    if (expBits === 0) {
+      // Subnormal or zero: the mantissa stands alone at the fixed exponent.
+      e = -1074;
+    } else {
+      // Normal: the implicit leading 1 has to be restored.
+      m |= 1n << 52n;
+      e = expBits - 1075;
+    }
+    if (m === 0n) continue; // zero contributes nothing and would poison minExp
+    parts.push([m, e]);
+    if (e < minExp) minExp = e;
+  }
+  if (parts.length === 0) return 0;
+  // Align every mantissa to the smallest exponent and add exactly.
+  let total = 0n;
+  for (const [m, e] of parts) total += m << BigInt(e - minExp);
+  return scaleToDouble(total, minExp);
+}
+
+/**
+ * `total * 2^exp`, correctly rounded to a double.
+ *
+ * Rounds to nearest with ties to even, which is the rule IEEE-754 uses, so the
+ * result is the same double a exact-arithmetic sum would produce.
+ *
+ * @param {bigint} total
+ * @param {number} exp
+ * @returns {number}
+ */
+function scaleToDouble(total, exp) {
+  if (total === 0n) return 0;
+  const neg = total < 0n;
+  const m = neg ? -total : total;
+  const bits = m.toString(2).length;
+  const shift = bits - 53;
+  let rounded;
+  let e = exp;
+  if (shift > 0) {
+    const divisor = 1n << BigInt(shift);
+    const q = m / divisor;
+    const r = m % divisor;
+    const half = divisor >> 1n;
+    rounded = r > half || (r === half && (q & 1n) === 1n) ? q + 1n : q;
+    e += shift;
+  } else {
+    rounded = m;
+  }
+  // `rounded` now has at most 53 significant bits, so `Number(rounded)` is
+  // exact and the power-of-two scaling cannot round a second time.
+  const asNum = Number(rounded);
+  return (neg ? -asNum : asNum) * 2 ** e;
+}
+
 describe('PowerCache invariants', () => {
   it('never exceeds maxEntries under any operation sequence', () => {
     fc.assert(
@@ -164,35 +252,33 @@ describe('PowerHistogram invariants', () => {
           for (const v of values) h.record(v);
 
           expect(h.count).toBe(values.length);
-          // **Relative, not `toBeCloseTo`, and the reason is a measured flake.**
-          // `toBeCloseTo(x, 6)` is an *absolute* tolerance of 5e-7. One ULP of
-          // float64 at 5.9e9 — which this generator produces, spanning 1e-6 to
-          // 1e9 — is 1.3e-6, already 2.6x the tolerance. So the assertion
-          // demanded agreement tighter than a single unit in the last place of
-          // the quantity being summed, and it failed whenever fast-check
-          // happened to draw values large enough. Reproduced with seed 711822998
-          // on an 11-value array; the sum was right to within one ULP and the
-          // test still went red.
+          // **Exact, against an exact-arithmetic reference.**
           //
-          // The bound below is the honest one: naive summation of n values
-          // accumulates at most about (n-1) ULPs of the running total.
+          // This assertion has been wrong twice. It began as
+          // `toBeCloseTo(x, 6)` — an *absolute* tolerance of 5e-7, while one
+          // ULP of float64 at 5.9e9 (which this generator produces, spanning
+          // 1e-6 to 1e9) is 1.3e-6, already 2.6x the tolerance. It demanded
+          // agreement tighter than a single unit in the last place of the
+          // quantity being summed, and failed whenever fast-check drew values
+          // large enough. Reproduced with seed 711822998 on an 11-value array:
+          // the sum was right to within one ULP and the test still went red.
           //
-          // **What this can and cannot see.** Verified by mutation, not assumed:
-          // a 1e-7 relative error in the sum fails this and the merge test, and
-          // a 1e-15 one fails this. What it *cannot* distinguish is compensated
-          // from naive summation — dropping `_sumCompensation` from the getter
-          // leaves the test green, because the naive reference carries the same
-          // error the compensation exists to remove. Verifying AUD-029's Kahan
-          // pair needs a higher-precision reference than `Array.reduce`, which
-          // is separate work and is not what this row is for.
-          const expectedSum = values.reduce((a, b) => a + b, 0);
-          expect(Math.abs(h.sum - expectedSum)).toBeLessThanOrEqual(
-            Math.max(Math.abs(expectedSum), 1) * values.length * Number.EPSILON
-          );
+          // It was then loosened to a relative bound of n ULPs, which removed
+          // the flake but could no longer see AUD-029 at all — dropping
+          // `_sumCompensation` from the getter left it green, because the naive
+          // reference carries the same error the compensation removes.
+          //
+          // `exactSum` above is the reference that fixes both: exact by
+          // construction, so the tolerance can be zero. Measured over 400
+          // random arrays from this generator, the compensated sum equals it
+          // 400/400 and the naive sum only 127/400, so the assertion is stable
+          // *and* it fails when the compensation goes away.
+          expect(h.sum).toBe(exactSum(values));
           expect(h.min).toBe(Math.min(...values));
           expect(h.max).toBe(Math.max(...values));
-          // Same defect, same fix: `toBeCloseTo(_, 9)` on a mean of ~5.3e8 is
-          // 60x tighter than one ULP.
+          // Same history, same fix: `toBeCloseTo(_, 9)` on a mean of ~5.3e8 is
+          // 60x tighter than one ULP. The mean is derived from the now-exact
+          // sum, so one ULP is the honest bound for the division.
           const expectedMean = h.sum / h.count;
           expect(Math.abs(h.mean - expectedMean)).toBeLessThanOrEqual(
             Math.max(Math.abs(expectedMean), 1) * Number.EPSILON
