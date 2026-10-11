@@ -32,6 +32,8 @@
  * unaffected. It makes one specific mistake loud: listing the buffer for transfer.
  */
 
+import { isSharedArrayBuffer } from '../helpers/powerBuffer.js';
+
 /**
  * Whether the platform provides `markAsUntransferable`.
  *
@@ -62,8 +64,12 @@ let probed = false;
 export function markUntransferable(buffer) {
   if (!buffer || typeof buffer !== 'object') return false;
   // A SharedArrayBuffer cannot be transferred in the first place, so there is nothing to
-  // protect and `markAsUntransferable` would throw a TypeError on it.
-  if (typeof SharedArrayBuffer === 'function' && buffer instanceof SharedArrayBuffer) {
+  // protect and `markAsUntransferable` would throw a TypeError on it. The check is
+  // realm-independent: `instanceof SharedArrayBuffer` is false for a buffer from another
+  // realm, and a foreign SAB that fell through to the marker below was reported as
+  // marked — the one case where this function's answer is wrong rather than merely
+  // conservative.
+  if (isSharedArrayBuffer(buffer)) {
     return false;
   }
   if (!probed) {

@@ -19,6 +19,7 @@
  * operation, never about how long anything took.
  */
 import { describe, it, expect } from 'vitest';
+import vm from 'node:vm';
 import { markUntransferable, canMarkUntransferable } from '../src/utils/transferable.js';
 import { PowerPool } from '../src/helpers/powerPool.js';
 
@@ -77,6 +78,53 @@ describe('markUntransferable', () => {
     // Node floor is >=22.12.0 so this is true here; in a browser it is false and the
     // pool falls back to the pre-check it always had.
     expect(canMarkUntransferable()).toBe(true);
+  });
+
+  it('refuses a SharedArrayBuffer from another realm', () => {
+    // The guard was `buffer instanceof SharedArrayBuffer`, which is false for a
+    // foreign SAB — so a cross-realm one fell through to the marker and was
+    // reported as **marked**. Measured before the fix: `true`, where a same-realm
+    // SAB correctly returned `false`. The answer is not merely conservative in
+    // that case, it is wrong: the caller is told a buffer is protected when the
+    // platform never marked it.
+    //
+    // A real `node:vm` realm, not a `{ byteLength: n }` stand-in — see
+    // `test/powerCache.crossRealm.test.js` for why a stand-in passes for the
+    // wrong reason.
+    const realm = vm.createContext({});
+    const foreignSAB = vm.runInContext('new SharedArrayBuffer(8)', realm);
+    expect(foreignSAB instanceof SharedArrayBuffer, 'the fixture is genuinely foreign').toBe(false);
+    expect(markUntransferable(foreignSAB)).toBe(false);
+
+    // And the same-realm control, so the assertion above is not vacuous.
+    expect(markUntransferable(new SharedArrayBuffer(8))).toBe(false);
+  });
+
+  it('still marks an ArrayBuffer from another realm', () => {
+    // The other half of the same fix: routing the check through
+    // `isSharedArrayBuffer()` must not start rejecting foreign **ArrayBuffers**,
+    // which are markable and are the whole point of the function.
+    const realm = vm.createContext({});
+    const foreignAB = vm.runInContext('new ArrayBuffer(8)', realm);
+    expect(markUntransferable(foreignAB)).toBe(true);
+    expect(() => structuredClone({ b: foreignAB }, { transfer: [foreignAB] })).toThrow();
+  });
+
+  it('does not mistake a toStringTag spoof for a SharedArrayBuffer', () => {
+    // `AGENTS.md` records this exact trap: `Object.prototype.toString.call(v) ===
+    // '[object SharedArrayBuffer]'` is realm-independent **and spoofable**, and a
+    // `{ [Symbol.toStringTag]: 'SharedArrayBuffer' }` impostor is accepted by
+    // `new Uint8Array()`. A guard written that way would refuse to mark it.
+    //
+    // Refusing is the wrong answer here, and that is what makes this a test rather
+    // than a note: the platform really does accept the marker for such an object,
+    // so `true` is the truthful reply and `false` would be a lie about what the
+    // platform did. The mutation harness killed the `instanceof` revert and the
+    // `isArrayBuffer` substitution with the tests above; this one is what killed
+    // the `toStringTag` spelling.
+    const spoof = { [Symbol.toStringTag]: 'SharedArrayBuffer', byteLength: 8 };
+    expect(Object.prototype.toString.call(spoof)).toBe('[object SharedArrayBuffer]');
+    expect(markUntransferable(spoof)).toBe(true);
   });
 });
 
