@@ -3653,13 +3653,24 @@ function deepEqual(a, b, state, depth = 0) {
       }
     };
 
-    // Build signature -> indices map for bItems when possible
+    // Build signature -> indices map for bItems when possible.
+    //
+    // A member whose signature is `null` — `trySignature` threw, or the value has no
+    // stable encoding — is simply left out of the map. It is still found by the
+    // structural fallback below, which scans every unmatched index, so nothing needs
+    // to remember which ones were skipped.
+    //
+    // An earlier version collected them into an `unsigIndices` array that was pushed
+    // to and never read. It was dead on arrival: the fallback already covers those
+    // members, so the array could not have changed the answer. It is recorded here
+    // rather than silently dropped, because a variable that looks like it is
+    // load-bearing and is not is the same trap as the neighbouring `instanceof`
+    // defects — and the coverage report showed its `push` branch was never even
+    // taken, so no test could have observed its absence.
     const sigMap = new Map();
-    const unsigIndices = [];
     for (let i = 0; i < bItems.length; i++) {
       const s = trySignature(bItems[i]);
-      if (s == null) unsigIndices.push(i);
-      else {
+      if (s != null) {
         const arr = sigMap.get(s);
         if (arr) arr.push(i);
         else sigMap.set(s, [i]);
