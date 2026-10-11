@@ -546,3 +546,81 @@ describe('PowerPool: awaitResponse refuses a cross-realm ArrayBuffer', () => {
     pending.catch(() => {});
   });
 });
+
+describe('PowerPool: the dispatch bypass refuses a cross-realm buffer', () => {
+  // The last two gates, and the two that survived the first mutation run.
+  //
+  // `_postToWorkerObj` has a fast path that posts straight to the underlying worker,
+  // skipping the `WorkerWrapper`'s transfer-list normalisation. It is guarded by
+  // `canBypassWrapper`, which requires a plain-object message, a non-empty transfer
+  // list, and `isTransferListLive(transfer)` — the pre-check that refuses a detached
+  // buffer *before* the post rather than after.
+  //
+  // **Why these are called directly rather than through `postMessage`.** Going
+  // through the public API cannot isolate either condition: it encodes a bare
+  // `ArrayBuffer` into a `Uint8Array`, so `ArrayBuffer.isView` blocks the bypass for a
+  // reason unrelated to the site under test, and the assertion would pass with the
+  // defect present. Constructing the prepared item isolates one condition at a time.
+  //
+  // **The observable is which path ran.** The bypass calls the underlying worker
+  // directly and never reaches `_dispatchToWorker`; the wrapper path always does. So
+  // spying on `_dispatchToWorker` distinguishes them without needing the fake worker
+  // to throw — which matters, because a no-op fake cannot tell a detached buffer from
+  // a live one, and that is exactly what defeated the first attempt at these two.
+
+  /** Build a pool and return it with `_dispatchToWorker` counting calls. */
+  function makeCountingPool() {
+    const pool = makePool();
+    const state = { dispatch: 0 };
+    const real = pool._dispatchToWorker.bind(pool);
+    pool._dispatchToWorker = (...args) => {
+      state.dispatch++;
+      return real(...args);
+    };
+    return { pool, state };
+  }
+
+  it('refuses to bypass when the message is a cross-realm ArrayBuffer', () => {
+    // G5. `canBypassWrapper` requires `!isArrayBuffer(prepared.message)`. With
+    // `instanceof` a foreign buffer passed that test, so the bypass fired and the
+    // buffer was posted straight to the underlying worker — skipping the wrapper's
+    // transfer-list normalisation, which is the thing that decides the list at all.
+    const { pool, state } = makeCountingPool();
+    const foreign = foreignBuffer([1, 2, 3, 4]);
+
+    pool._postToWorkerObj(pool.workers[0], { message: foreign, transfer: [foreign] }, {});
+    expect(state.dispatch, 'the wrapper path, not the bypass').toBe(1);
+
+    // The same-realm control, so the assertion above is not vacuous: a same-realm
+    // buffer is refused by the same condition, and must stay refused.
+    const local = new ArrayBuffer(4);
+    pool._postToWorkerObj(pool.workers[0], { message: local, transfer: [local] }, {});
+    expect(state.dispatch).toBe(2);
+  });
+
+  it('refuses to bypass when the transfer list holds a detached cross-realm buffer', () => {
+    // G8, and the cleanest pair in the file: the only difference between the two
+    // calls below is whether the buffer is detached, so `isTransferListLive` is
+    // unambiguously the deciding condition.
+    //
+    // A cross-realm `ArrayBuffer` matched none of `isTransferListLive`'s three
+    // branches — not `instanceof ArrayBuffer`, not `isView`, and it *is* an object so
+    // the third was false too — so it was silently skipped and a detached one was
+    // never detected. The pre-check exists to fail *before* the post.
+    const { pool, state } = makeCountingPool();
+
+    const dead = foreignBuffer([1, 2, 3, 4]);
+    structuredClone({}, { transfer: [dead] });
+    expect(dead.byteLength, 'the fixture is genuinely detached').toBe(0);
+
+    pool._postToWorkerObj(pool.workers[0], { message: { a: 1 }, transfer: [dead] }, {});
+    expect(state.dispatch, 'a detached buffer must not reach the bypass').toBe(1);
+
+    // The control: the same shape with a live buffer MUST take the bypass, or the
+    // assertion above is satisfied by a bypass that never fires at all.
+    const live = foreignBuffer([1, 2, 3, 4]);
+    const before = state.dispatch;
+    pool._postToWorkerObj(pool.workers[0], { message: { a: 1 }, transfer: [live] }, {});
+    expect(state.dispatch, 'a live buffer still takes the fast path').toBe(before);
+  });
+});

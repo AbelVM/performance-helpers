@@ -43,20 +43,29 @@ same-realm one.
 
 ### Tests
 
-27 tests in `test/powerPool.prepareBuffers.test.js`, all driven by a real `node:vm`
+29 tests in `test/powerPool.prepareBuffers.test.js`, all driven by a real `node:vm`
 second realm. They pin that a foreign buffer is transferred rather than encoded through
 each reachable gate, that views remain correct, that plain objects are still encoded (the
 branch the fix must not break), and that `awaitResponse` refuses a foreign buffer.
 
-Mutation-checked **7 of 9** reverts killed by a named test. The two survivors are
-`canBypassWrapper` and `isTransferListLive`, both on the bypass path, and both are a
-limitation of the test fake rather than of the fix: the fake worker's `postMessage` is a
-no-op that never throws, so a detached buffer is indistinguishable from a live one. The
-path is reachable — `workers[0].worker` is a genuine `WorkerWrapper` with an
-`_underlying`, and `_prepareForTransfer({ a: 1 }, [buf], {})` yields a plain-object
-message with a two-element transfer list — so what is missing is a fake that reproduces
-structured clone's throw-on-detached. Those two sites are fixed by the same substitution
-as the other thirteen and verified by reasoning, not by an observed failure.
+Mutation-checked **9 of 9** reverts killed by a named test.
+
+The last two needed a different approach, and the reason is worth recording.
+`canBypassWrapper` and `isTransferListLive` both guard the dispatch fast path that posts
+straight to the underlying worker, skipping the `WorkerWrapper`'s transfer-list
+normalisation. The first attempt at testing them failed for a reason that had nothing to
+do with the defect: a no-op fake worker cannot tell a detached buffer from a live one, so
+the two paths were indistinguishable. The observable that works is **which path ran** —
+the bypass never reaches `_dispatchToWorker`, the wrapper path always does — so a spy on
+`_dispatchToWorker` separates them without needing the fake to throw.
+
+Those two are also called directly rather than through `postMessage`, because the public
+API cannot isolate either condition: it encodes a bare `ArrayBuffer` into a `Uint8Array`,
+so `ArrayBuffer.isView` blocks the bypass for a reason unrelated to the site under test,
+and the assertion would pass with the defect present. Constructing the prepared item
+isolates one condition at a time. The `isTransferListLive` case has the cleanest control
+pair in the file — the same shape with a live buffer takes the bypass, with a detached one
+does not, so the detached state is unambiguously the deciding condition.
 
 Lint is clean. The warning count went from 14 at `HEAD` to 13, because the `postMessage`
 complexity warning disappeared when its body shrank.
