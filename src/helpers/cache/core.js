@@ -107,6 +107,7 @@ function sketchWidthFor(maxEntries) {
  */
 import { nowMs } from '../../utils/now.js';
 import { attach, detach } from '../metrics.js';
+import { isArrayBuffer } from '../powerBuffer.js';
 import {
   assertFunction,
   assertLimitRequired,
@@ -3467,11 +3468,37 @@ function deepEqual(a, b, state, depth = 0) {
   }
   mapForA.add(b);
 
-  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false;
+  // **Realm-tolerant, and the reason is a measured defect.**
+  //
+  // Prototype *identity* rejects a pair from two different realms, because each
+  // realm has its own `ArrayBuffer.prototype`. Measured with a real `node:vm`
+  // second realm: a cache holding a same-realm buffer compared `false` against a
+  // byte-identical cross-realm one, while two cross-realm buffers from the *same*
+  // foreign realm compared `true`. The realistic shape is the first — the cache
+  // holds what this realm produced and the caller passes what a sandbox, an
+  // iframe or a worker produced — so the defect fired exactly when it mattered.
+  //
+  // The check is load-bearing and cannot simply be dropped: without it `{}` and
+  // `new Date()` both reach the generic own-enumerable-property comparison, find
+  // nothing on either side, and report `true`.
+  //
+  // So the relaxation is narrow. `Object.prototype.toString` reads the internal
+  // builtin slot rather than this realm's prototype chain, which is what makes it
+  // realm-independent — but `[object Object]` is the one tag that does *not*
+  // identify a builtin, because every plain class instance carries it. Two
+  // same-realm classes must still be rejected, so that tag is excluded and only a
+  // named builtin may match across differing prototypes.
+  if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) {
+    const tag = Object.prototype.toString.call(a);
+    if (tag !== Object.prototype.toString.call(b) || tag === '[object Object]') return false;
+  }
+  // The tag is now known to match, so every branch below tests `a` alone. That is
+  // what lets them be realm-independent: `b instanceof Date` is `false` for a
+  // `Date` from another realm, which is the same defect one branch down.
+  const tag = Object.prototype.toString.call(a);
 
   // Uint8Array fast-path
-  if (typeof Uint8Array !== 'undefined' && a instanceof Uint8Array) {
-    if (!(b instanceof Uint8Array)) return false;
+  if (tag === '[object Uint8Array]') {
     if (a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
     return true;
@@ -3494,8 +3521,25 @@ function deepEqual(a, b, state, depth = 0) {
   }
 
   // ArrayBuffer
-  if (a instanceof ArrayBuffer) {
-    if (!(b instanceof ArrayBuffer) || a.byteLength !== b.byteLength) return false;
+  //
+  // **`isArrayBuffer()`, not `instanceof ArrayBuffer`.** This is the fourth site
+  // of a defect class `AGENTS.md` records and warns about grepping for the class
+  // rather than the site: `instanceof` compares against *this* realm's prototype,
+  // so a buffer from another realm — a `node:vm` sandbox, an iframe, a worker
+  // round-trip — failed here, fell through to the generic object comparison,
+  // found no own enumerable properties, and returned `false`. Two byte-identical
+  // cross-realm buffers compared as unequal.
+  //
+  // Measured, not assumed: with a real `node:vm` second realm, same-realm equal
+  // buffers compared `true` and cross-realm equal buffers compared `false`,
+  // while cross-realm *views* compared `true` — because `ArrayBuffer.isView` is
+  // already realm-independent. That asymmetry is exactly why this survived:
+  // the views were covered, and the file read as covered.
+  //
+  // `powerBuffer.js` already exports the realm-independent check, so this calls
+  // it rather than re-spelling the internal-slot test a fourth time.
+  if (isArrayBuffer(a)) {
+    if (!isArrayBuffer(b) || a.byteLength !== b.byteLength) return false;
     const ua = new Uint8Array(a),
       ub = new Uint8Array(b);
     for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false;
@@ -3503,20 +3547,18 @@ function deepEqual(a, b, state, depth = 0) {
   }
 
   // Date
-  if (a instanceof Date) {
-    if (!(b instanceof Date)) return false;
+  if (tag === '[object Date]') {
     return a.getTime() === b.getTime();
   }
 
   // RegExp
-  if (a instanceof RegExp) {
-    if (!(b instanceof RegExp)) return false;
+  if (tag === '[object RegExp]') {
     return a.toString() === b.toString();
   }
 
   // Map
-  if (a instanceof Map) {
-    if (!(b instanceof Map) || a.size !== b.size) return false;
+  if (tag === '[object Map]') {
+    if (a.size !== b.size) return false;
     for (const [k, v] of a) {
       if (!b.has(k)) return false;
       if (!deepEqual(v, b.get(k), state, depth + 1)) return false;
@@ -3525,8 +3567,8 @@ function deepEqual(a, b, state, depth = 0) {
   }
 
   // Set
-  if (a instanceof Set) {
-    if (!(b instanceof Set) || a.size !== b.size) return false;
+  if (tag === '[object Set]') {
+    if (a.size !== b.size) return false;
     let allPrimitive = true;
     for (const item of a) {
       if (item !== null && typeof item === 'object') {
