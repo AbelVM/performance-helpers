@@ -1,6 +1,7 @@
 import { assertKnownOptions } from '../../utils/options.js';
 import { PowerCache } from './core.js';
 import { isError } from '../../utils/errors.js';
+import { isDate, isRegExp } from '../powerBuffer.js';
 
 /**
  * @typedef {import('../jsdoc-types.js').PowerMemoizerOptions} PowerMemoizerOptions
@@ -518,10 +519,35 @@ function encodeArg(v, seen) {
       }
       return out + ']';
     }
-    if (v instanceof Date) return 'D:' + v.getTime();
-    if (v instanceof RegExp) return 'R:' + v.source + '/' + v.flags;
+    // **Every type test below is realm-independent, and the reason is a measured
+    // collision.** `instanceof` compares against *this* realm's prototype, so a
+    // `Date`, `RegExp`, `Map` or `Set` from a `node:vm` sandbox, an iframe or a
+    // worker failed all four branches, fell through to the plain-object branch,
+    // and `Object.keys()` returned `[]` — so every one of them encoded as
+    // `'O:{}'`, the same key as an empty object *and as each other*.
+    //
+    // Measured: `simpleArgsKey([foreignDate(1)])` and `simpleArgsKey([foreignDate(2)])`
+    // produced the identical key, so the second call was served the first call's
+    // memoized result. That is worse than a missed cache entry — it is a wrong
+    // value returned from a public API.
+    //
+    // `isError` was already routed through a realm-independent predicate on the
+    // line below, which is exactly why this read as covered: the file had the
+    // right idea for one type and not for the four beside it.
+    //
+    // `Date` and `RegExp` use the internal-slot predicates from `powerBuffer.js`.
+    // `Map` and `Set` use the builtin tag, because neither has an accessor that
+    // performs a slot check and the house precedent for containers
+    // (`isBucketIterable` in `powerHistogram.js`) is likewise a structural test.
+    // The tag is spoofable via `Symbol.toStringTag`, and that is acceptable here
+    // in a way it is not for a buffer: a spoof yields a *stable, distinct* key
+    // rather than a collision, so the failure mode is a cache miss, not a wrong
+    // value — and a spoof that is not iterable throws rather than encoding
+    // silently.
+    if (isDate(v)) return 'D:' + v.getTime();
+    if (isRegExp(v)) return 'R:' + v.source + '/' + v.flags;
     if (isError(v)) return 'E:' + v.name + ':' + v.message;
-    if (v instanceof Map) {
+    if (Object.prototype.toString.call(v) === '[object Map]') {
       // Order is significant for a Map, so it is preserved rather than sorted.
       let out = 'Mp:[';
       let first = true;
@@ -532,7 +558,7 @@ function encodeArg(v, seen) {
       }
       return out + ']';
     }
-    if (v instanceof Set) {
+    if (Object.prototype.toString.call(v) === '[object Set]') {
       let out = 'St:[';
       let first = true;
       for (const val of v) {

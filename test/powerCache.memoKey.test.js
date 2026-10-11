@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import vm from 'node:vm';
 import { simpleArgsKey, PowerMemoizer } from '../src/index.js';
 
 // CACHE-009: `simpleArgsKey` handed the whole argument list to `JSON.stringify`
@@ -181,5 +182,94 @@ describe('simpleArgsKey: memoization still works', () => {
     const memo = new PowerMemoizer((a) => a, { keyResolver });
     memo.run({ a: 1 }, () => {});
     expect(keyResolver).toHaveBeenCalled();
+  });
+});
+
+// CACHE-009, second half. The row above fixed the `JSON.stringify` fallback; the
+// replacement encoder then carried four `instanceof` tests of its own, which is
+// the same defect class arriving by a different door. `AGENTS.md` records the
+// rule that comes with it: *"When you fix one site of a defect class, grep for
+// the class and not for the site."*
+//
+// `isError` was already routed through a realm-independent predicate, which is
+// exactly why the file read as covered — the right idea for one type, not for the
+// four beside it.
+//
+// Every fixture below is a real `node:vm` second realm. A hand-rolled stand-in is
+// not equivalent: `Object.keys()` on a plain object returns its own properties,
+// so a `{ getTime: () => 1 }` impostor would encode as a plain object and pass
+// for the wrong reason.
+
+/** A second realm, created once. */
+const realm = vm.createContext({});
+/** Evaluate an expression in the second realm. */
+const foreign = (expr) => vm.runInContext(expr, realm);
+
+describe('simpleArgsKey: a cross-realm value must not alias onto an empty object', () => {
+  it('encodes a foreign Date, RegExp, Map and Set distinctly', () => {
+    // Measured before the fix: all four encoded as `'A:[O:{}]'` — the same key as
+    // an empty plain object, and the same key as each other.
+    const empty = simpleArgsKey({});
+    expect(simpleArgsKey(foreign('new Date(123)'))).not.toBe(empty);
+    expect(simpleArgsKey(foreign('/abc/'))).not.toBe(empty);
+    expect(simpleArgsKey(foreign("new Map([['k', 1]])"))).not.toBe(empty);
+    expect(simpleArgsKey(foreign('new Set([1, 2])'))).not.toBe(empty);
+  });
+
+  it('gives a foreign value the same key as its same-realm twin', () => {
+    // The property a caller actually relies on: a value from a sandbox must be
+    // encodable exactly as the same value from this realm, or the memoizer
+    // silently splits one logical call across two cache entries.
+    expect(simpleArgsKey(foreign('new Date(123)'))).toBe(simpleArgsKey(new Date(123)));
+    expect(simpleArgsKey(foreign('/abc/'))).toBe(simpleArgsKey(/abc/));
+    expect(simpleArgsKey(foreign("new Map([['k', 1]])"))).toBe(simpleArgsKey(new Map([['k', 1]])));
+    expect(simpleArgsKey(foreign('new Set([1, 2])'))).toBe(simpleArgsKey(new Set([1, 2])));
+  });
+
+  it('separates two foreign values that differ only in content', () => {
+    // The collision that returned a wrong value rather than merely missing.
+    // `foreignDate(1)` and `foreignDate(2)` shared one key, so the second call
+    // was served the first call's memoized result.
+    expect(simpleArgsKey(foreign('new Date(1)'))).not.toBe(simpleArgsKey(foreign('new Date(2)')));
+    expect(simpleArgsKey(foreign('/a/'))).not.toBe(simpleArgsKey(foreign('/b/')));
+    expect(simpleArgsKey(foreign('new Map([["k", 1]])'))).not.toBe(
+      simpleArgsKey(foreign('new Map([["k", 2]])'))
+    );
+  });
+
+  it('serves the right value through a live memoizer, not just the right key', () => {
+    // The key is the mechanism; the wrong value is the defect. Asserted on the
+    // invocation count as well, so a fix that made every key unique without
+    // making them *correct* would still fail here.
+    let invocations = 0;
+    const memo = new PowerMemoizer(
+      (d) => {
+        invocations++;
+        return 'at-' + d.getTime();
+      },
+      { keyResolver: simpleArgsKey }
+    );
+    expect(memo.run(foreign('new Date(1000)'))).toBe('at-1000');
+    expect(memo.run(foreign('new Date(2000)'))).toBe('at-2000');
+    expect(invocations, 'two distinct inputs, two invocations').toBe(2);
+    // And the cache still works, so the fix did not simply disable it.
+    expect(memo.run(foreign('new Date(1000)'))).toBe('at-1000');
+    expect(invocations, 'a repeat is still a cache hit').toBe(2);
+  });
+
+  it('leaves the same-realm keys byte-identical, which the row above pins', () => {
+    // The scalar and same-realm object formats are load-bearing for callers who
+    // persist or compare keys. This fix must not have disturbed them.
+    //
+    // The exact strings are asserted rather than compared against each other,
+    // because "unchanged" is the claim. Note there is no `A:[...]` wrapper for a
+    // single non-array argument — that wrapper is the array branch, and an
+    // earlier draft of this test guessed otherwise.
+    expect(simpleArgsKey(1, 'a', true)).toBe(simpleArgsKey(1, 'a', true));
+    expect(simpleArgsKey({ a: 1 })).toBe('O:{s:1:a=d:1}');
+    expect(simpleArgsKey(new Date(123))).toBe('D:123');
+    expect(simpleArgsKey(new Set([1, 2]))).toBe('St:[d:1,d:2]');
+    expect(simpleArgsKey(new Map([['k', 1]]))).toBe('Mp:[s:1:k=d:1]');
+    expect(simpleArgsKey(/abc/)).toBe('R:abc/');
   });
 });
