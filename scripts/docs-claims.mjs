@@ -177,13 +177,40 @@ function listDeclarations(dir) {
   return out;
 }
 
+/**
+ * Map a guide to the declaration file that holds its constructor or factory.
+ *
+ * Two shapes are resolved, because this library ships both:
+ *
+ *   - `class PowerCache` — the majority.
+ *   - `function createBroadcastBus` — the factory form, where the guide name
+ *     loses its `power` prefix and gains `create`. `powerBroadcastBus`,
+ *     `powerOperationContext`, `powerSseAdapter` and `powerWebTransportAdapter`
+ *     all follow it, which is why it is derived rather than aliased.
+ *
+ * Deriving is safe here in a way it was not for `powerChunking`: the skip list
+ * printed at the end of the report makes a miss **visible**, so a future helper
+ * that breaks the convention shows up as a named guide rather than as silence.
+ * That is the whole difference between this and the heuristic the
+ * `GUIDE_CLASS_ALIASES` comment warns about.
+ *
+ * @param {string} guideName
+ * @returns {string|null}
+ */
 function declarationForGuide(guideName) {
   const candidates = listDeclarations(TYPES_DIR);
   const cls = GUIDE_CLASS_ALIASES[guideName] ?? guideName;
-  const wanted = `class ${cls[0].toUpperCase()}${cls.slice(1)}`;
+  const wanted = [`class ${cls[0].toUpperCase()}${cls.slice(1)}`];
+  // The factory form. `powerBuffer` and `powerMessageCodec` are collections of
+  // free functions with no factory at all, so this finds nothing for them and
+  // they stay in the skip list — which is correct, and now visible.
+  const stripped = cls.replace(/^power/, '');
+  if (stripped !== cls) {
+    wanted.push(`function create${stripped[0].toUpperCase()}${stripped.slice(1)}`);
+  }
   for (const file of candidates) {
     const src = readFileSync(file, 'utf8');
-    if (src.includes(wanted)) return src;
+    if (wanted.some((w) => src.includes(w))) return src;
   }
   return null;
 }
