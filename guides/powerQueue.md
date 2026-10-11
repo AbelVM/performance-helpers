@@ -14,6 +14,13 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 - `push(item)` — Enqueue `item` at the tail. Returns the new queue length as a `number`.
 
+- `unshift(item)` — **New in 2.0.1.** Enqueue `item` at the **head**, so it is the next
+  value `shift()` returns. The mirror of `push`, and the primitive a return-to-front
+  path needs: work that was dequeued for dispatch but could not be delivered goes back
+  where it came from rather than behind everything that arrived after it. O(1) —
+  moving a ring buffer's head back one slot leaves every existing item on its same
+  physical slot, so nothing is copied. See [Returning work to the front](#returning-work-to-the-front).
+
 - `shift()` — Dequeue and return the head item, or `undefined` when the queue is empty.
 
 - `peek()` — Inspect the head item without removing it; returns `any` or `undefined`.
@@ -61,6 +68,38 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
   The queue is still usable afterwards — `dispose()` is a teardown, not a
   poisoning — and calling it twice is a no-op. If you want a smaller _live_
   queue rather than a released one, that is `shrink()`.
+
+### Returning work to the front
+
+**New in 2.0.1.** `unshift(item)` puts an item back at the head, so it is the next
+thing `shift()` returns. The case it exists for is work that was already dequeued and
+then could not be delivered:
+
+```javascript
+const task = queue.shift();
+try {
+  worker.postMessage(task);
+} catch {
+  // The worker died or the post threw. Put it back where it came from, not at the
+  // back — at the back it would be reordered behind everything that arrived while
+  // it was in flight, which is a silent reordering of a caller's work.
+  queue.unshift(task);
+}
+```
+
+**It is O(1), and the reason is worth stating because the instinct is the opposite.**
+Inserting at the head of a ring buffer does not shift the existing items. Moving the
+head back by one slot leaves every item on its same physical slot: an item at logical
+index `i` sits at physical `head + i`, and its new logical index `i + 1` sits at
+physical `(head - 1) + (i + 1)` — the same place. So the only work is decrementing the
+head and writing one slot.
+
+`unshift` and `shift` are exact inverses, so a dequeue-then-restore round-trip leaves
+the queue byte-for-byte as it was. That is the property the return-to-front path
+relies on, and it is pinned by a test.
+
+For **bulk** prepends use `unshiftMany(items)`, which is the amortised-cheap path for
+putting a whole batch back.
 
 ### Weighted queues
 

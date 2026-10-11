@@ -114,3 +114,95 @@ describe('PowerQueue dispose (AUD-013)', () => {
     expect(q.length).toBe(0);
   });
 });
+
+describe('PowerQueue unshift', () => {
+  // PISC-008. The mirror of `push`, and the primitive a return-to-front path needs:
+  // a task dequeued for dispatch that could not be delivered goes back where it came
+  // from, not behind everything that arrived after it.
+  //
+  // **The wrap case is the one that matters.** A queue whose head is not 0 is where
+  // wrong slot arithmetic hides, and it is exactly what the first draft of this
+  // method got wrong — it looped over every item moving it back, dropped the tail
+  // item, and left a hole. The correct form is O(1) and moves nothing: see the JSDoc
+  // on the method for why.
+
+  it('enqueues at the head, so it is the next shift', () => {
+    const q = new PowerQueue(4);
+    q.push('a');
+    q.push('b');
+    q.push('c');
+    expect(q.unshift('z')).toBe(4);
+    expect(q.toArray()).toEqual(['z', 'a', 'b', 'c']);
+    expect(q.shift()).toBe('z');
+    expect(q.shift()).toBe('a');
+    expect(q.toArray()).toEqual(['b', 'c']);
+  });
+
+  it('works when the head has wrapped, which is where slot arithmetic hides', () => {
+    // Fill past the initial capacity so `_grow()` runs and the head is no longer 0.
+    // A draft that moved items by index rather than by ring position failed here
+    // while passing the plain case above.
+    const q = new PowerQueue(4);
+    for (let i = 0; i < 6; i++) q.push(i);
+    expect(q.toArray()).toEqual([0, 1, 2, 3, 4, 5]);
+    q.unshift('X');
+    expect(q.toArray()).toEqual(['X', 0, 1, 2, 3, 4, 5]);
+    expect(q.length).toBe(7);
+    expect(q.shift()).toBe('X');
+    expect(q.shift()).toBe(0);
+    expect(q.toArray()).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('grows when full, and preserves order across the growth', () => {
+    const q = new PowerQueue(2);
+    q.push(1);
+    q.push(2);
+    expect(q.length).toBe(2);
+    q.unshift(0);
+    expect(q.toArray()).toEqual([0, 1, 2]);
+    expect(q.length).toBe(3);
+  });
+
+  it('interleaves with push, so the two are true mirrors', () => {
+    const q = new PowerQueue(4);
+    q.push('a');
+    q.unshift('z');
+    q.push('b');
+    q.unshift('y');
+    expect(q.toArray()).toEqual(['y', 'z', 'a', 'b']);
+  });
+
+  it('accounts weight, so totalWeight stays the sum over queued items', () => {
+    // The bookkeeping `push` and `shift` maintain. A method that moved items without
+    // adjusting it would desynchronise the total from the contents.
+    const q = new PowerQueue(4);
+    q.push({ weight: 2 });
+    q.push({ weight: 3 });
+    expect(q.totalWeight).toBe(5);
+    q.unshift({ weight: 5 });
+    expect(q.totalWeight).toBe(10);
+    expect(q.shift().weight).toBe(5);
+    expect(q.totalWeight).toBe(5);
+  });
+
+  it('works on an empty queue', () => {
+    const q = new PowerQueue(4);
+    expect(q.unshift('solo')).toBe(1);
+    expect(q.toArray()).toEqual(['solo']);
+    expect(q.shift()).toBe('solo');
+    expect(q.length).toBe(0);
+  });
+
+  it('is the inverse of shift, so a round-trip is a no-op', () => {
+    // The property the return-to-front path actually relies on: dequeue, fail to
+    // deliver, put it back, and the queue is exactly as it was.
+    const q = new PowerQueue(4);
+    q.push('a');
+    q.push('b');
+    q.push('c');
+    const before = q.toArray();
+    const taken = q.shift();
+    q.unshift(taken);
+    expect(q.toArray()).toEqual(before);
+  });
+});

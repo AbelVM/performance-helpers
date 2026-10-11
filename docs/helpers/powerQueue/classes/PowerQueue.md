@@ -481,6 +481,50 @@ This is a convenience helper that does not consume the queue.
 
 ***
 
+### unshift()
+
+> **unshift**(`item`): `number`
+
+Enqueue an item at the **head**, so it is the next one `shift()` returns.
+
+The mirror of [PowerQueue#push](#push), and the primitive a return-to-front path
+needs: a task that was dequeued for dispatch but could not be delivered — the
+worker died, the post threw — goes back where it came from rather than to the
+back of the queue, where it would be reordered behind everything that arrived
+after it.
+
+**O(1), and the reason is worth stating because the instinct is the opposite.**
+Inserting at the head of a ring buffer does *not* shift the existing items.
+Moving the head back by one slot leaves every item on its same physical slot:
+an item at logical index `i` sits at physical `head + i`, and its new logical
+index `i + 1` sits at physical `(head - 1) + (i + 1)` — the same place. So the
+only work is decrementing the head and writing one slot.
+
+A first draft of this method looped over every item moving it back, and was
+wrong as well as slow: it dropped the tail item and left a hole, because the
+walk overwrote slots it had not yet read. The O(1) form is both correct and
+simpler, which is the usual shape of that lesson.
+
+The one precondition is a free slot, which the `_grow()` below guarantees — and
+`_grow()` re-lays the items out from index 0 with `_head = 0`, so the slot
+before the new head is free there too.
+
+#### Parameters
+
+##### item
+
+`any`
+
+Item to enqueue at the head.
+
+#### Returns
+
+`number`
+
+New queue length after unshift.
+
+***
+
 ### unshiftMany()
 
 > **unshiftMany**(`items`): `number`
