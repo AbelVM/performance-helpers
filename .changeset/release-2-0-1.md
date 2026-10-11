@@ -54,6 +54,22 @@
   for an existing caller. The relative error is `1.04/sqrt(m)`, so 256 registers
   give ~6.5 % and 1024 give ~3.2 %, at one byte per register. See the two fixes
   below for why this was not already possible.
+- `PowerPool`'s `maxQueueLength` accepts `'auto'`, resolving the cap to
+  `maxSize ** 2` and reporting it through `getStats().maxQueueLength`, which
+  previously did not expose the cap at all. The most common misconfiguration with
+  this option is leaving it unbounded — nothing refuses, nothing warns, and the
+  failure arrives as an OOM rather than as a refusal. **`Infinity` remains the
+  default**: a cap that silently appears is a cap nobody chose. Resolved once at
+  construction; a later `resize()` does not re-derive it, because a bound that
+  moves under a running pool is a bound nobody can reason about.
+- `PowerQueue.unshift(item)` — enqueue at the **head**, so the item is the next one
+  `shift()` returns. The mirror of `push`, and the primitive a return-to-front path
+  needs: work that was dequeued for dispatch but could not be delivered goes back
+  where it came from rather than behind everything that arrived after it. **O(1)** —
+  moving a ring buffer's head back one slot leaves every item on its same physical
+  slot, so nothing is copied. `unshift` and `shift` are exact inverses, so a
+  dequeue-then-restore round-trip leaves the queue exactly as it was. For bulk
+  prepends, `unshiftMany(items)` remains the amortised-cheap path.
 
 ### Changed
 
@@ -70,6 +86,12 @@
   on `createSseAdapter`'s return was suppressing the whole type.
 - `PowerHistogram.percentile()` documents that a value above 100 saturates to the
   maximum rather than throwing. `NaN` and negatives still throw.
+- `deepEqual`'s `Set` branch no longer allocates an array it never reads.
+  `unsigIndices` was declared, pushed to for every member whose `trySignature`
+  returned `null`, and never read — dead on arrival, because the structural fallback
+  scans every unmatched index whether or not anything remembers them. The coverage
+  report showed its `push` branch was never even taken, so no test could have
+  observed its absence.
 
 ### Fixed
 
@@ -227,6 +249,49 @@
   for any other width. Invisible while the count was a constant; exposed the
   moment it became a parameter, with m=1024 overestimating a 100 000-element set
   by 15x. The shift and the maximum rank are now derived from the count.
+- **Four cross-realm `instanceof` defects, found by grepping the class rather than
+  the site.** `AGENTS.md` records the rule — _"When you fix one site of a defect
+  class, grep for the class and not for the site"_ — and three of these four were in
+  files that had **already** been fixed for it. In every case a _neighbouring correct
+  check_ is what made the file read as covered: `isError` in `memoizer.js`,
+  `ArrayBuffer.isView` in `powerPool.js`, an `isArrayBuffer` call in the same
+  expression in `core.js`. A future audit should treat "this file already uses the
+  realm-independent helper" as a prompt to grep, not as evidence of safety. The
+  reasoning is recorded in ADR 0016.
+
+  - **`PowerCache.hasEqual` reported a `Set` as equal when it was not.** The `Set`
+    branch groups members by a JSON signature, then falls back to a structural scan.
+    Two members with the same signature that compared unequal were compared
+    **twice**, and the cycle guard (`if (mapForA?.has(b)) return true`) answered the
+    retry with `true`. **No cross-realm fixture is needed to reproduce it:**
+    `Set[{a:1}]` vs `Set[new Foo()]` returned `true`, where the direct comparison of
+    the same two values returned `false`. A plain object and a class instance with
+    identical own properties produce the same signature, so they collided. Fixed with
+    a generation stamp recording already-compared candidates, so the fallback never
+    re-compares a pair. Mutation-checked 3/3.
+
+  - **`simpleArgsKey` encoded every cross-realm `Date`, `RegExp`, `Map` and `Set` as
+    `'O:{}'`** — the same key as an empty object _and as each other_. A live memoizer
+    returned `at-1000` twice for two distinct inputs with **one** underlying
+    invocation: a wrong value from a public API, not a missed cache entry.
+    Mutation-checked 6/6.
+
+  - **`PowerPool` encoded a cross-realm `ArrayBuffer` instead of transferring it, in
+    fifteen places.** Views were never affected — `ArrayBuffer.isView` is
+    realm-independent and every site checks it alongside the `instanceof` — but a
+    bare cross-realm buffer was misclassified as a plain object at the gates, so it
+    was JSON-encoded and structured-cloned rather than moved. The data survived, so
+    this is a lost zero-copy optimisation rather than corruption; `awaitResponse` on
+    the same path _was_ data loss, because it augments the message with a
+    `correlationId` via `Object.assign`, which is only safe for a plain object.
+    Mutation-checked 9/9.
+
+  - **`markUntransferable()` reported a cross-realm `SharedArrayBuffer` as marked.**
+    The guard was `typeof SharedArrayBuffer === 'function' && buffer instanceof
+SharedArrayBuffer`, false for a foreign SAB, so it fell through to the platform
+    marker and returned `true` — the one case where the answer is wrong rather than
+    merely conservative. Mutation-checked 5/5.
+
 - **`PowerHistogram` lost small values recorded after a large one.** Naive `+=`
   on mixed magnitudes discards the small addends: recording `1e16` and then a
   thousand `1`s gave a `sum` of `1e16`, an absolute error of -1000, because
