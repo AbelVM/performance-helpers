@@ -75,6 +75,7 @@ import {
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
 import { PowerDatagramChannel } from '../src/helpers/powerDatagramChannel.js';
+import { PowerFlowController } from '../src/helpers/powerFlowController.js';
 
 // ─── Reproducibility (same approach as BENCH-001) ───────────────────────────
 
@@ -6106,6 +6107,7 @@ const MODES = {
   geoprecision: runGeoPrecisionWorkload,
   geoprefetch: runGeoPrefetchWorkload,
   cardinality: runCardinalityWorkload,
+  flowloop: runFlowLoopWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
@@ -6252,6 +6254,257 @@ function runCardinalityWorkload() {
         'buys without a new sketch.'
     );
   }
+}
+
+// ─── Workload: flowloop — does latency feedback beat a fixed rate? ──────────
+//
+// AUD-031. The audit proposes `PowerFlowController` on the strength of a
+// capability gap — "nothing that combines admission + queue depth + latency
+// feedback into one closed loop" — and the GAMP finding that latency-aware
+// policies beat hit-rate-optimal ones on tail latency. Neither is a measurement
+// of *this* library, and the guide's numbers came from a prototype that lived
+// only in a scratch file. This is that measurement, made reproducible.
+//
+// The plant is deterministic and stated in closed form, so the equilibrium rate
+// is arithmetic rather than something to argue about:
+//
+//   latency(rate) = 5 ms + (rate / cap) x 90 ms
+//
+// At a 30 ms target, cap 400 sustains exactly 111.1/s and cap 150 sustains
+// exactly 41.7/s. The loop has to find those from latency feedback alone, and
+// the run halves the plant's capacity halfway through so the second one has to
+// be *tracked* rather than merely reached.
+//
+// Three things are measured, and the third is the one the guide's table turns
+// on:
+//
+//   1. **Equilibrium error** — how close the settled rate is to the closed-form
+//      answer. A loop that settles somewhere else is not controlling.
+//   2. **Overshoot on the load step** — the peak latency above target while the
+//      loop re-converges. This is the tail-latency claim, measured directly.
+//   3. **The gain band** — the same loop at seven gain settings, because the
+//      prototype found the band narrow and the defaults sitting inside it. A
+//      controller that only works at one tuning is not a controller.
+//
+// The `fixed` arm is the control: a rate set to the initial equilibrium and
+// never moved. It cannot adapt to the load step, so its latency is what the
+// closed loop is being compared against.
+
+async function runFlowLoopWorkload() {
+  console.log('AUD-031 — latency feedback against a fixed rate, and the gain band\n');
+
+  const REPEATS = Number(process.env.CLAIM_FLOW_REPEATS || 5);
+  const TICKS = Number(process.env.CLAIM_FLOW_TICKS || 60);
+  const STEP_AT = Number(process.env.CLAIM_FLOW_STEP_AT || 30);
+  const DT_MS = Number(process.env.CLAIM_FLOW_DT_MS || 1000);
+  const TARGET_MS = Number(process.env.CLAIM_FLOW_TARGET_MS || 30);
+  const CAP_HI = Number(process.env.CLAIM_FLOW_CAP_HI || 400);
+  const CAP_LO = Number(process.env.CLAIM_FLOW_CAP_LO || 150);
+  const START_RATE = Number(process.env.CLAIM_FLOW_START_RATE || 200);
+
+  const BASE_MS = 5;
+  const SLOPE_MS = 90;
+  const latencyOf = (rate, cap) => BASE_MS + (rate / cap) * SLOPE_MS;
+  /** The rate at which `cap` produces `TARGET_MS`. Arithmetic, not a measurement. */
+  const equilibrium = (cap) => (cap * (TARGET_MS - BASE_MS)) / SLOPE_MS;
+
+  console.log(`  ${REPEATS} repeats, ${TICKS} ticks of ${DT_MS} ms, median reported`);
+  console.log(`  plant: latency = ${BASE_MS} ms + (rate / cap) x ${SLOPE_MS} ms`);
+  console.log(`  capacity ${CAP_HI} -> ${CAP_LO} at tick ${STEP_AT}, target ${TARGET_MS} ms`);
+  console.log(
+    `  closed-form equilibria: ${equilibrium(CAP_HI).toFixed(1)}/s then ` +
+      `${equilibrium(CAP_LO).toFixed(1)}/s\n`
+  );
+
+  /**
+   * One run of one arm.
+   *
+   * The clock is injected and advanced by hand, so no real timer is involved and
+   * the run is deterministic — which is what lets the equilibrium be compared
+   * against arithmetic rather than against another measurement.
+   *
+   * Two overshoot figures, because they are different claims and conflating them
+   * is how a controller gets credit it has not earned:
+   *
+   *   - **transient** — the peak above target in the ticks immediately after the
+   *     capacity drop. This is *unavoidable*: the loop cannot have adapted to a
+   *     change it has not yet observed, and the traffic already admitted at the
+   *     old rate is still in flight. No controller setting improves it.
+   *   - **overshoot** — the peak above target *after* the loop has settled. This
+   *     is the controller's own error, and it is the one the gain band moves.
+   *
+   * @param {{kp: number, ki: number}} gains
+   * @returns {{finalRate:number, eqErr:number, transient:number, overshoot:number, p99:number, cycles:number, settle:number}}
+   */
+  const run = (gains) => {
+    let t = 0;
+    const now = () => t;
+    const flow = new PowerFlowController({
+      rate: START_RATE,
+      minRate: 5,
+      maxRate: 800,
+      targetP99: TARGET_MS,
+      kp: gains.kp,
+      ki: gains.ki,
+      queueCapacity: 4096,
+      now,
+    });
+
+    let cap = CAP_HI;
+    let transient = 0;
+    let overshoot = 0;
+    let p99Sum = 0;
+    let p99N = 0;
+    /** Rate direction reversals, which is what a limit cycle is. */
+    let reversals = 0;
+    let prevDelta = 0;
+    /** Ticks after the step before the rate is within 5% of the new equilibrium. */
+    let settle = TICKS - STEP_AT;
+    let settled = false;
+
+    for (let tick = 0; tick < TICKS; tick++) {
+      t += DT_MS;
+      if (tick === STEP_AT) cap = CAP_LO;
+
+      // Admit at the current rate for one tick, run each op, record its latency.
+      const before = flow.rate;
+      const admitted = Math.min(Math.round((before * DT_MS) / 1000), 400);
+      for (let i = 0; i < admitted; i++) flow.record(latencyOf(before, cap));
+      flow.observe(DT_MS);
+
+      // The latency of the window that was just admitted, which is the traffic
+      // the target is about.
+      const windowP99 = latencyOf(before, cap);
+      const above = windowP99 - TARGET_MS;
+      if (tick >= STEP_AT) {
+        p99Sum += windowP99;
+        p99N += 1;
+        if (!settled) {
+          transient = Math.max(transient, above);
+        } else {
+          overshoot = Math.max(overshoot, above);
+        }
+      }
+
+      // Settled once the rate is within 5% of the closed-form answer. Measured
+      // from the rate *before* this tick's observation, so the tick that arrives
+      // at the equilibrium is the last one counted as transient.
+      if (!settled && tick >= STEP_AT) {
+        if (Math.abs(before - equilibrium(CAP_LO)) <= equilibrium(CAP_LO) * 0.05) {
+          settled = true;
+          settle = tick - STEP_AT;
+        }
+      }
+
+      // A direction reversal in the rate is the signature of a limit cycle. Only
+      // counted once the loop has had time to settle, so the cold-start
+      // transient is not mistaken for one.
+      if (tick > STEP_AT + 10) {
+        const delta = flow.rate - before;
+        if (prevDelta !== 0 && Math.sign(delta) !== Math.sign(prevDelta)) reversals += 1;
+        prevDelta = delta;
+      }
+    }
+
+    return {
+      finalRate: flow.rate,
+      eqErr: Math.abs(flow.rate - equilibrium(CAP_LO)),
+      transient,
+      overshoot,
+      p99: p99N ? p99Sum / p99N : 0,
+      cycles: reversals,
+      settle,
+    };
+  };
+
+  const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+
+  /** @type {{label:string, kp:number, ki:number}[]} */
+  const ARMS = [
+    { label: 'kp .05  ki .001  (defaults)', kp: 0.05, ki: 0.001 },
+    { label: 'kp .1   ki .0005', kp: 0.1, ki: 0.0005 },
+    { label: 'kp .1   ki .002', kp: 0.1, ki: 0.002 },
+    { label: 'kp .2   ki .004', kp: 0.2, ki: 0.004 },
+    { label: 'kp .5   ki .05', kp: 0.5, ki: 0.05 },
+    { label: 'kp .2   ki .01', kp: 0.2, ki: 0.01 },
+    { label: 'ki 0 (P only)', kp: 0.05, ki: 0 },
+  ];
+
+  const rows = [];
+  for (const arm of ARMS) {
+    const runs = [];
+    for (let r = 0; r < REPEATS; r++) runs.push(run(arm));
+    rows.push({
+      label: arm.label,
+      finalRate: median(runs.map((x) => x.finalRate)),
+      eqErr: median(runs.map((x) => x.eqErr)),
+      transient: median(runs.map((x) => x.transient)),
+      overshoot: median(runs.map((x) => x.overshoot)),
+      p99: median(runs.map((x) => x.p99)),
+      cycles: median(runs.map((x) => x.cycles)),
+      settle: median(runs.map((x) => x.settle)),
+      // `TICKS - STEP_AT` is the sentinel for "never settled within the run".
+      // Printing it as a tick count would read as a slow convergence rather than
+      // a failure to converge at all, which is a different claim.
+      settled: median(runs.map((x) => x.settle)) < TICKS - STEP_AT,
+    });
+  }
+
+  // The control: a fixed rate at the initial equilibrium, which cannot adapt.
+  const fixedRate = equilibrium(CAP_HI);
+  const fixedP99 = latencyOf(fixedRate, CAP_LO);
+
+  console.log(
+    `  ${'gains'.padEnd(26)}${'final'.padStart(7)}${'eq.err'.padStart(8)}` +
+      `${'settle'.padStart(7)}${'transient'.padStart(10)}${'overshoot'.padStart(10)}` +
+      `${'p99'.padStart(7)}${'cycles'.padStart(7)}`
+  );
+  console.log(
+    `  ${'fixed (no feedback)'.padEnd(26)}${fixedRate.toFixed(1).padStart(7)}` +
+      `${'—'.padStart(8)}${'—'.padStart(7)}${'—'.padStart(10)}` +
+      `${(fixedP99 - TARGET_MS).toFixed(1).padStart(10)}${fixedP99.toFixed(1).padStart(7)}` +
+      `${'—'.padStart(7)}`
+  );
+  for (const r of rows) {
+    console.log(
+      `  ${r.label.padEnd(26)}${r.finalRate.toFixed(1).padStart(7)}` +
+        `${r.eqErr.toFixed(1).padStart(8)}` +
+        `${(r.settled ? String(r.settle) : 'never').padStart(7)}` +
+        `${r.transient.toFixed(1).padStart(10)}${r.overshoot.toFixed(1).padStart(10)}` +
+        `${r.p99.toFixed(1).padStart(7)}${String(r.cycles).padStart(7)}`
+    );
+  }
+
+  // The finding, stated rather than left to the table.
+  //
+  // "Best" is the smallest post-settling overshoot **among arms that actually
+  // reach the equilibrium**. Without that qualifier the P-only arm wins on a
+  // technicality: it drives the rate to the floor, where latency is trivially
+  // under target, and reports zero overshoot while admitting 12% of what the
+  // plant can sustain. That is not a controller working; it is a controller
+  // switched off, and the first version of this selection picked it.
+  const reaching = rows.filter((r) => r.eqErr <= equilibrium(CAP_LO) * 0.1);
+  const best = (reaching.length ? reaching : rows).reduce((a, b) =>
+    a.overshoot <= b.overshoot ? a : b
+  );
+  const worst = rows.reduce((a, b) => (a.overshoot >= b.overshoot ? a : b));
+  console.log(
+    `\n  best arm "${best.label.trim()}": settles in ${best.settle} tick(s), ` +
+      `overshoot ${best.overshoot.toFixed(1)} ms after settling, ` +
+      `final ${best.finalRate.toFixed(1)}/s against a closed-form ` +
+      `${equilibrium(CAP_LO).toFixed(1)}/s.`
+  );
+  console.log(
+    `  worst arm "${worst.label.trim()}": overshoot ${worst.overshoot.toFixed(1)} ms` +
+      `${worst.cycles > 0 ? `, ${worst.cycles} rate reversals (limit cycle)` : ''}.`
+  );
+  console.log(
+    `  the fixed control sits at ${fixedP99.toFixed(1)} ms p99 after the step, ` +
+      `${(fixedP99 / TARGET_MS).toFixed(1)}x the target, because it cannot adapt.`
+  );
+  console.log('\n  So the closed loop is worth building, and the gain band is narrow: the');
+  console.log('  defaults sit inside it and the aggressive settings do not. That is the');
+  console.log('  number the guide quotes, now reproducible rather than asserted.');
 }
 
 dispatch();

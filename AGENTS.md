@@ -125,6 +125,7 @@ node bench/claims.js ratelimit   # static versus adaptive refill under burst + s
 node bench/claims.js datagram    # bounded datagram queue saturation and flush
 node bench/claims.js apdex       # APDEX from a sketch against exact counters
 node bench/claims.js cardinality # what the HLL sketch actually costs, and its bias
+node bench/claims.js flowloop    # does latency feedback beat a fixed rate, and at what gain
 node bench/claims.js geoencode   # flat typed array vs object graph, four arms on one payload
 node bench/claims.js geocoalesce # a coalescer against PowerBatch + a Map
 node bench/claims.js geoprecision # what coordinate rounding actually saves, on two payload shapes

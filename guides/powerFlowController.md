@@ -130,35 +130,67 @@ latency(rate) = 5 ms + (rate / cap) × 90 ms
 ```
 
 At a 30 ms target, `cap: 400` sustains exactly **111.1/s** and `cap: 150` sustains
-exactly **41.7/s**. The loop has to find those from latency feedback alone.
+exactly **41.7/s**. The loop has to find those from latency feedback alone, and the
+run halves the plant's capacity halfway through so the second one has to be
+_tracked_ rather than merely reached.
 
-| Configuration         | Equilibrium reached | Overshoot on a load step |
-| --------------------- | ------------------: | -----------------------: |
-| `kp: 0.05, ki: 0.001` |        111.1 → 41.7 |               **0.0 ms** |
-| `kp: 0.1, ki: 0.0005` |        111.1 → 41.7 |                   0.0 ms |
-| `kp: 0.1, ki: 0.002`  |        111.1 → 70.9 |                  27.6 ms |
-| `kp: 0.2, ki: 0.004`  |  limit-cycles 5↔761 |                  62.2 ms |
-| `kp: 0.5, ki: 0.05`   |     latches at 13/s |               167 ms p99 |
-| `kp: 0.2, ki: 0.01`   |  limit-cycles 5↔761 |                        — |
-| `ki: 0` (P only)      |      settles at 11% |                        — |
+Reproduce it with:
+
+```bash
+node bench/claims.js flowloop
+```
+
+| Configuration         | Final rate | Eq. error | Settles | Transient | Overshoot |   p99 | Reversals |
+| --------------------- | ---------: | --------: | ------: | --------: | --------: | ----: | --------: |
+| _fixed, no feedback_  |      111.1 |         — |       — |         — |      41.7 |  71.7 |         — |
+| `kp: 0.05, ki: 0.001` |   **41.7** |   **0.0** |      10 |      41.7 |   **0.8** |  32.3 |         5 |
+| `kp: 0.1, ki: 0.0005` |   **41.7** |   **0.0** |       7 |      40.2 |   **0.3** |  34.5 |         1 |
+| `kp: 0.1, ki: 0.002`  |        7.1 |      34.5 |   never |      41.7 |       0.0 |  33.9 |         6 |
+| `kp: 0.2, ki: 0.004`  |        5.0 |      36.7 |   never |      64.6 |       0.0 |  47.9 |         9 |
+| `kp: 0.5, ki: 0.05`   |      223.8 |     182.1 |   never |     440.7 |       0.0 | 195.8 |        12 |
+| `kp: 0.2, ki: 0.01`   |       35.8 |       5.8 |       6 |     164.2 |     134.4 |  86.0 |        10 |
+| `ki: 0` (P only)      |        5.0 |      36.7 |   never |       0.0 |       0.0 |   8.0 |         0 |
+
+**Two overshoot columns, because they are different claims and conflating them is
+how a controller gets credit it has not earned.** _Transient_ is the peak above
+target in the ticks immediately after the capacity drop, and it is **unavoidable**:
+the loop cannot have adapted to a change it has not yet observed, and the traffic
+already admitted at the old rate is still in flight. No gain setting improves it.
+_Overshoot_ is the peak above target _after_ the loop has settled, and that one is
+the controller's own error — the one the gain band moves.
 
 Three things that table says, in order of how much they will bite:
 
 1. **The gain band is narrow, and the defaults sit inside it.** `kp: 0.05,
-ki: 0.001` reaches both equilibria with zero overshoot. Double the gains and
-   the loop overshoots by 62 ms; double them again and it limit-cycles across the
-   whole range. This is not a defect in the arithmetic — 90 ms of plant gain
+ki: 0.001` reaches the new equilibrium exactly and holds it to within 0.8 ms.
+   `kp: 0.1, ki: 0.0005` is slightly better still — settles two ticks sooner, half
+   the residual overshoot — and is worth trying if your plant is as well-behaved
+   as this one. This is not a defect in the arithmetic: 90 ms of plant gain
    against a 30 ms target caps the usable loop gain, and any PI would do it. The
    clamp is what keeps a bad tuning _bounded_ rather than divergent, and
    `saturated` is `true` throughout.
 2. **`ki` must be non-zero, and the default is non-zero for that reason.** With
    `ki: 0` the output is `kp × error` alone, so a window that meets its target
    exactly produces an error of zero and therefore a rate of zero — which the
-   `minRate` clamp turns into the floor. P-only settled at 11% of the rate the
-   plant could sustain at the target latency.
+   `minRate` clamp turns into the floor. P-only settles at the floor, 5.0/s
+   against a sustainable 41.7/s, which is **12% of what the plant can do**.
+
+   Note that P-only reports _zero_ overshoot in the table, and that this is a
+   trap rather than a result. Driving the rate to the floor makes latency
+   trivially low because almost nothing is being admitted. The first version of
+   the bench's "best arm" selection picked it for exactly that reason, and the
+   selection now requires an arm to reach the equilibrium before it can win.
+
 3. **The loop is robust to the sample interval.** The equilibrium came out at
    108–111/s across `dt` from 100 ms to 2000 ms, because the integral dominates
    at steady state. You do not have to tune the gains against your tick rate.
+
+**And the control, which is the row's actual question.** A fixed rate set to the
+initial equilibrium — 111.1/s, the right answer before the plant degraded — sits
+at **71.7 ms p99 after the step, 2.4× the target**, and stays there, because it
+cannot adapt. Every arm that reaches its equilibrium beats it. That is the
+premise of the helper, measured rather than asserted: latency feedback is worth
+building, and the gain band is the price of admission.
 
 ## The cold start, and the one-step integral lag
 
