@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import vm from 'node:vm';
 
 describe('powerBuffer', () => {
   it('encodes and decodes plain objects', async () => {
@@ -233,5 +234,127 @@ describe('the encoder/decoder verdict is not cached as permanently unavailable',
     vi.unstubAllGlobals();
     expect(u82o(o2u8({ a: 1 })), 'and recovers once one exists').toEqual({ a: 1 });
     vi.resetModules();
+  });
+});
+
+describe('the realm-independent type predicates', () => {
+  // `AGENTS.md` records this defect class and the rule that comes with it: grep
+  // for the class, not the site. `isArrayBuffer` and `isSharedArrayBuffer`
+  // already existed; `isRegExp` and `isDate` were added because
+  // `trySignature` in `cache/core.js` carried two more `instanceof` sites of the
+  // same class, and a cross-realm `RegExp` inside a `Set` compared equal to a
+  // different one.
+  //
+  // Every fixture below is a real `node:vm` second realm. A hand-rolled
+  // `{ byteLength: n }` stand-in is *accepted* by `new Uint8Array()`, so it would
+  // pass for the wrong reason.
+
+  /** A second realm, created once. */
+  const realm = vm.createContext({});
+  /** Evaluate an expression in the second realm. */
+  const foreign = (expr) => vm.runInContext(expr, realm);
+
+  it('identifies a Date and a RegExp from another realm', async () => {
+    const { isDate, isRegExp } = await import('../src/helpers/powerBuffer.js');
+    // The whole point: `instanceof` is false for both of these.
+    expect(foreign('new Date(123)') instanceof Date).toBe(false);
+    expect(foreign('/abc/') instanceof RegExp).toBe(false);
+    expect(isDate(foreign('new Date(123)'))).toBe(true);
+    expect(isRegExp(foreign('/abc/'))).toBe(true);
+  });
+
+  it('rejects a Symbol.toStringTag impostor for every predicate', async () => {
+    // `Object.prototype.toString.call(v)` is realm-independent **and spoofable**.
+    // The tag is a pre-filter in all four predicates; the internal-slot check
+    // still has the final word, which is what rejects these.
+    const { isDate, isRegExp, isArrayBuffer, isSharedArrayBuffer } =
+      await import('../src/helpers/powerBuffer.js');
+    expect(isDate({ [Symbol.toStringTag]: 'Date' })).toBe(false);
+    expect(isRegExp({ [Symbol.toStringTag]: 'RegExp', source: 'x' })).toBe(false);
+    expect(isArrayBuffer({ [Symbol.toStringTag]: 'ArrayBuffer', byteLength: 8 })).toBe(false);
+    expect(isSharedArrayBuffer({ [Symbol.toStringTag]: 'SharedArrayBuffer', byteLength: 8 })).toBe(
+      false
+    );
+  });
+
+  it('does not report an ArrayBuffer as a Date, which the first draft did', async () => {
+    // **The bug this test exists for.** `Date.prototype.getTime` is a *method*,
+    // not an accessor, so `Reflect.get(Date.prototype, 'getTime', value)` returns
+    // the function for an ArrayBuffer, a plain object and a string alike without
+    // throwing. The first draft of `isDate` was written that way and returned
+    // `true` for every object it was handed.
+    //
+    // It was caught by the *performance* tests, not a correctness one: the caller
+    // (`trySignature`) then called `getTime()` on a buffer, threw, and lost the
+    // signature for every value. The slot check happens on invocation, so that is
+    // how it is spelled.
+    const { isDate } = await import('../src/helpers/powerBuffer.js');
+    expect(isDate(new ArrayBuffer(8))).toBe(false);
+    expect(isDate({})).toBe(false);
+    expect(isDate('x')).toBe(false);
+    expect(isDate(new Uint8Array(4))).toBe(false);
+    expect(isDate(/abc/)).toBe(false);
+  });
+
+  it('keeps the same-realm fast path ahead of the cross-realm check', async () => {
+    // A performance guard, not a correctness one: removing it is behaviourally
+    // equivalent, but every same-realm call would pay for the tag and the
+    // internal-slot read. Pinned by spying rather than by a duration, per the
+    // house rule.
+    const { isDate, isRegExp } = await import('../src/helpers/powerBuffer.js');
+    const toString = vi.spyOn(Object.prototype, 'toString');
+    try {
+      isDate(new Date(0));
+      isRegExp(/x/);
+      expect(toString).not.toHaveBeenCalled();
+    } finally {
+      toString.mockRestore();
+    }
+  });
+
+  it('rejects primitives and null without reaching the internal-slot check', async () => {
+    const { isDate, isRegExp, isArrayBuffer, isSharedArrayBuffer } =
+      await import('../src/helpers/powerBuffer.js');
+    for (const fn of [isDate, isRegExp, isArrayBuffer, isSharedArrayBuffer]) {
+      expect(fn(null)).toBe(false);
+      expect(fn(undefined)).toBe(false);
+      expect(fn(42)).toBe(false);
+      expect(fn('x')).toBe(false);
+      expect(fn(true)).toBe(false);
+      expect(fn(Symbol('s'))).toBe(false);
+    }
+  });
+
+  it('does not confuse the four predicates with each other', async () => {
+    const { isDate, isRegExp, isArrayBuffer, isSharedArrayBuffer } =
+      await import('../src/helpers/powerBuffer.js');
+    const d = new Date(0);
+    const r = /x/;
+    const ab = new ArrayBuffer(8);
+    const sab = new SharedArrayBuffer(8);
+    expect([isDate(d), isRegExp(d), isArrayBuffer(d), isSharedArrayBuffer(d)]).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+    expect([isDate(r), isRegExp(r), isArrayBuffer(r), isSharedArrayBuffer(r)]).toEqual([
+      false,
+      true,
+      false,
+      false,
+    ]);
+    expect([isDate(ab), isRegExp(ab), isArrayBuffer(ab), isSharedArrayBuffer(ab)]).toEqual([
+      false,
+      false,
+      true,
+      false,
+    ]);
+    expect([isDate(sab), isRegExp(sab), isArrayBuffer(sab), isSharedArrayBuffer(sab)]).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
   });
 });

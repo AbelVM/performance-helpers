@@ -48,6 +48,39 @@ describe('PowerCache additional branches', () => {
     expect(c.hasEqual('sets', sB)).toBe(true);
   });
 
+  it('hasEqual does not equate a plain object with a class instance inside a Set', () => {
+    // **The test that kills the correctness mutation, and it needs no cross-realm
+    // fixture at all.** Measured at HEAD: `true`, where the direct comparison of
+    // the same two values is correctly `false`.
+    //
+    // The `Set` branch groups members by a JSON signature to limit comparisons,
+    // then falls back to a structural scan. A plain object and a class instance
+    // with identical own properties produce the *same* signature, so the pair was
+    // compared twice — once in the candidate loop, once in the fallback — and the
+    // cycle guard at the top of `deepEqual` (`if (mapForA?.has(b)) return true`)
+    // answered the retry with `true`. A pair that had just compared `false` was
+    // reported equal.
+    //
+    // This is the same-realm shape of the defect, which is why it matters: the
+    // cross-realm tests in `powerCache.crossRealm.test.js` only exercise it while
+    // the signature helper is *also* broken. Fixing the signatures alone removes
+    // the collision and hides this, so reverting the `tried` tracking passes every
+    // cross-realm test. It does not pass this one.
+    class Foo {
+      constructor() {
+        this.a = 1;
+      }
+    }
+    const c = new PowerCache();
+    c.set('s', new Set([{ a: 1 }]));
+    expect(c.hasEqual('s', new Set([new Foo()]))).toBe(false);
+    // The control, so the assertion above is not vacuous.
+    expect(c.hasEqual('s', new Set([{ a: 1 }]))).toBe(true);
+    // And the direct comparison, which was always right.
+    c.set('d', { a: 1 });
+    expect(c.hasEqual('d', new Foo())).toBe(false);
+  });
+
   it('prefills pool and reuses nodes up to maxPoolSize', () => {
     const c = new PowerCache({ initialPoolSize: 2, maxPoolSize: 2 });
     expect(c.pool.length).toBeGreaterThanOrEqual(0);

@@ -66,6 +66,49 @@ export function isArrayBuffer(value: unknown): value is ArrayBuffer;
  * @returns {boolean}
  */
 export function isSharedArrayBuffer(buf: unknown): boolean;
+/**
+ * Whether `value` is a `RegExp`, from any realm.
+ *
+ * Same shape and same reason as `isArrayBuffer`: `instanceof RegExp` compares
+ * against *this* realm's prototype, so a regexp from a `node:vm` sandbox, an
+ * iframe or a worker fails it. The internal-slot check is
+ * `Reflect.get(RegExp.prototype, 'source', value)` — the spec's own accessor,
+ * which performs the slot check, returns the source for a real regexp
+ * cross-realm included, and **throws `TypeError`** for an impostor.
+ *
+ * `flags` is deliberately not the accessor used: it returns `''` rather than
+ * throwing for a non-regexp, so it cannot detect anything. `source` throws.
+ *
+ * `Symbol.toStringTag` is not an option for the usual reason recorded in
+ * `isArrayBuffer`: a `{ [Symbol.toStringTag]: 'RegExp' }` stand-in reports
+ * `[object RegExp]` and would be accepted. The tag is a pre-filter here and the
+ * accessor still has the final word.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isRegExp(value: unknown): boolean;
+/**
+ * Whether `value` is a `Date`, from any realm.
+ *
+ * **The internal-slot check here is a call, not a property read, and getting
+ * that wrong is silent.** `Date.prototype` has no accessor that performs the
+ * slot check — `getTime` is a *method*, so `Reflect.get(Date.prototype,
+ * 'getTime', value)` returns the function for an `ArrayBuffer`, a plain object
+ * and a string alike, without throwing. A first draft of this function was
+ * written that way and returned `true` for every object it was handed; the
+ * tests that caught it were the performance ones, because the caller
+ * (`trySignature` in `cache/core.js`) then called `getTime()` on a buffer, threw,
+ * and lost the signature for every value.
+ *
+ * The slot check happens when the method is *invoked*, so that is how it is
+ * spelled: `Date.prototype.getTime.call(value)` throws `TypeError` for a
+ * non-`Date` and returns for a real one, cross-realm included.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isDate(value: unknown): boolean;
 export function o2u8(obj: any, preStringified?: string): Uint8Array;
 export function u82o(buf: ArrayBuffer | ArrayBufferView): any;
 export function o2b(obj: any): ArrayBuffer;

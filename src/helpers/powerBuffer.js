@@ -104,6 +104,16 @@ export function isArrayBuffer(value) {
   // the accessor about one throws — which is the expensive way to learn
   // something already known from `typeof`.
   if (value === null || typeof value !== 'object') return false;
+  // **The tag is a pre-filter, not the test.** `Object.prototype.toString` reads
+  // the internal builtin slot, so it is realm-independent — but it is also
+  // spoofable via `Symbol.toStringTag`, which is why the accessor still runs
+  // below and still has the final word. What the tag buys is the *rejection*
+  // path: measured on Node 24.18, asking the accessor about a non-buffer costs
+  // 44.9 ms per 16k calls because every one throws a `TypeError`, while the tag
+  // rejects the same values in 0.88 ms — 51×. A caller walking arbitrary user
+  // values (`trySignature` in `cache/core.js` does exactly that) pays that on
+  // every value, so the cheap reject has to come first.
+  if (Object.prototype.toString.call(value) !== '[object ArrayBuffer]') return false;
   try {
     return typeof Reflect.get(ArrayBuffer.prototype, 'byteLength', value) === 'number';
   } catch {
@@ -140,11 +150,79 @@ export function isSharedArrayBuffer(buf) {
   // before, and reached `JSON.stringify` as `{}`.
   if (typeof SharedArrayBuffer === 'undefined') return false;
   if (buf instanceof SharedArrayBuffer) return true;
+  if (buf === null || typeof buf !== 'object') return false;
+  // Tag pre-filter, then the accessor has the final word — see `isArrayBuffer`
+  // for why the order matters and what it costs to get it wrong.
+  if (Object.prototype.toString.call(buf) !== '[object SharedArrayBuffer]') return false;
   try {
     return (
       typeof Reflect.get(SharedArrayBuffer.prototype, 'byteLength', /** @type {any} */ (buf)) ===
       'number'
     );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether `value` is a `RegExp`, from any realm.
+ *
+ * Same shape and same reason as `isArrayBuffer`: `instanceof RegExp` compares
+ * against *this* realm's prototype, so a regexp from a `node:vm` sandbox, an
+ * iframe or a worker fails it. The internal-slot check is
+ * `Reflect.get(RegExp.prototype, 'source', value)` — the spec's own accessor,
+ * which performs the slot check, returns the source for a real regexp
+ * cross-realm included, and **throws `TypeError`** for an impostor.
+ *
+ * `flags` is deliberately not the accessor used: it returns `''` rather than
+ * throwing for a non-regexp, so it cannot detect anything. `source` throws.
+ *
+ * `Symbol.toStringTag` is not an option for the usual reason recorded in
+ * `isArrayBuffer`: a `{ [Symbol.toStringTag]: 'RegExp' }` stand-in reports
+ * `[object RegExp]` and would be accepted. The tag is a pre-filter here and the
+ * accessor still has the final word.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isRegExp(value) {
+  if (value instanceof RegExp) return true;
+  if (value === null || typeof value !== 'object') return false;
+  if (Object.prototype.toString.call(value) !== '[object RegExp]') return false;
+  try {
+    return typeof Reflect.get(RegExp.prototype, 'source', value) === 'string';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether `value` is a `Date`, from any realm.
+ *
+ * **The internal-slot check here is a call, not a property read, and getting
+ * that wrong is silent.** `Date.prototype` has no accessor that performs the
+ * slot check — `getTime` is a *method*, so `Reflect.get(Date.prototype,
+ * 'getTime', value)` returns the function for an `ArrayBuffer`, a plain object
+ * and a string alike, without throwing. A first draft of this function was
+ * written that way and returned `true` for every object it was handed; the
+ * tests that caught it were the performance ones, because the caller
+ * (`trySignature` in `cache/core.js`) then called `getTime()` on a buffer, threw,
+ * and lost the signature for every value.
+ *
+ * The slot check happens when the method is *invoked*, so that is how it is
+ * spelled: `Date.prototype.getTime.call(value)` throws `TypeError` for a
+ * non-`Date` and returns for a real one, cross-realm included.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+export function isDate(value) {
+  if (value instanceof Date) return true;
+  if (value === null || typeof value !== 'object') return false;
+  if (Object.prototype.toString.call(value) !== '[object Date]') return false;
+  try {
+    Date.prototype.getTime.call(/** @type {any} */ (value));
+    return true;
   } catch {
     return false;
   }

@@ -161,3 +161,106 @@ describe('PowerCache.hasEqual across realms', () => {
     expect(isArrayBuffer(foreignBuffer([1]))).toBe(true);
   });
 });
+
+// A second defect in the same file, found by grepping the *class* rather than the
+// site. `deepEqual`'s `Set` branch groups members by a JSON signature to limit
+// comparisons, and the signature helper used `instanceof ArrayBuffer` — false for
+// a foreign buffer, so every one stringified to `{}` and collided with every
+// other object that has no enumerable properties.
+//
+// The collision alone is only a performance fault. What made it a correctness
+// fault is that the `Set` branch compared a colliding pair **twice** — once in
+// the signature-candidate loop, once in the structural fallback — and the cycle
+// guard at the top of `deepEqual` (`if (mapForA?.has(b)) return true`) answered
+// the retry with `true`. A pair that had just compared `false` was reported
+// equal.
+//
+// Measured before the fix: two cross-realm `ArrayBuffer`s holding **different
+// bytes** compared `true` inside a `Set` and `false` when compared directly.
+describe('PowerCache.hasEqual: a Set of cross-realm values', () => {
+  it('compares two foreign buffers with different bytes as unequal', () => {
+    // The regression, in its shortest form. Both buffers stringify to `{}`, so
+    // they collide; the pair is compared twice; the cycle guard lies.
+    const cache = new PowerCache();
+    cache.set('s', new Set([foreignBuffer([1, 2, 3, 4])]));
+    expect(cache.hasEqual('s', new Set([foreignBuffer([9, 9, 9, 9])]))).toBe(false);
+  });
+
+  it('compares two foreign buffers with the same bytes as equal', () => {
+    // The control, so the assertion above is not vacuous. Without it a fix that
+    // made every foreign Set compare `false` would pass.
+    const cache = new PowerCache();
+    cache.set('s', new Set([foreignBuffer([1, 2, 3, 4])]));
+    expect(cache.hasEqual('s', new Set([foreignBuffer([1, 2, 3, 4])]))).toBe(true);
+  });
+
+  it('does not equate a foreign buffer with a plain object', () => {
+    // The other collision partner. `{}` and a foreign `ArrayBuffer` both
+    // stringify to `{}`, and the retry turned that into a match.
+    const cache = new PowerCache();
+    cache.set('s', new Set([foreignBuffer([1, 2, 3, 4])]));
+    expect(cache.hasEqual('s', new Set([{}]))).toBe(false);
+  });
+
+  it('compares a same-realm buffer against a foreign one inside a Set', () => {
+    // The realistic shape, matching the direct-comparison test above: the cache
+    // holds what this realm produced, the caller passes what a sandbox produced.
+    const cache = new PowerCache();
+    const local = new ArrayBuffer(4);
+    new Uint8Array(local).set([4, 0, 0, 0]);
+    cache.set('s', new Set([local]));
+    expect(cache.hasEqual('s', new Set([foreignBuffer([4, 0, 0, 0])]))).toBe(true);
+    expect(cache.hasEqual('s', new Set([foreignBuffer([9, 9, 9, 9])]))).toBe(false);
+  });
+
+  it('compares two foreign RegExps with different sources as unequal', () => {
+    // The same defect through a different type. `instanceof RegExp` is also
+    // realm-fragile, and a foreign regexp stringifies to `{}` too.
+    const cache = new PowerCache();
+    cache.set('s', new Set([{ r: foreign('/abc/') }]));
+    expect(cache.hasEqual('s', new Set([{ r: foreign('/xyz/') }]))).toBe(false);
+    expect(cache.hasEqual('s', new Set([{ r: foreign('/abc/') }]))).toBe(true);
+  });
+
+  it('leaves the same-realm Set path correct, which it already was', () => {
+    // Pins that the fix did not trade the cross-realm case for the same-realm
+    // one. The same-realm path never collided, so it must be untouched.
+    const cache = new PowerCache();
+    const a = new ArrayBuffer(4);
+    const b = new ArrayBuffer(4);
+    new Uint8Array(a).set([1, 2, 3, 4]);
+    new Uint8Array(b).set([9, 9, 9, 9]);
+    cache.set('s', new Set([a]));
+    expect(cache.hasEqual('s', new Set([b]))).toBe(false);
+    expect(cache.hasEqual('s', new Set([a]))).toBe(true);
+  });
+
+  it('leaves Map unaffected, because its branch never uses the signature path', () => {
+    // A characterisation, not an aspiration: `Map` compares by key lookup plus a
+    // recursive `deepEqual`, so it never had the double comparison. Recorded so
+    // that a future change to the `Map` branch is a deliberate decision.
+    const cache = new PowerCache();
+    cache.set('m', new Map([['k', foreignBuffer([1, 2, 3, 4])]]));
+    expect(cache.hasEqual('m', new Map([['k', foreignBuffer([9, 9, 9, 9])]]))).toBe(false);
+    expect(cache.hasEqual('m', new Map([['k', foreignBuffer([1, 2, 3, 4])]]))).toBe(true);
+  });
+
+  it('still finds a match when the candidate loop fails and the fallback must run', () => {
+    // The path the `tried` tracking could have broken. A member whose signature
+    // does not collide must still be found by the structural fallback, and a
+    // member that genuinely has no match must still report `false` rather than
+    // being skipped as "already tried".
+    const cache = new PowerCache();
+    const local = new ArrayBuffer(4);
+    new Uint8Array(local).set([7, 7, 7, 7]);
+    // A Set whose members have *different* signatures, so no candidate is ever
+    // offered and every match comes from the fallback.
+    cache.set('s', new Set([local, { tag: 'a' }, 'primitive-free']));
+    expect(
+      cache.hasEqual('s', new Set([foreignBuffer([7, 7, 7, 7]), { tag: 'a' }, 'primitive-free']))
+    ).toBe(true);
+    expect(
+      cache.hasEqual('s', new Set([foreignBuffer([7, 7, 7, 7]), { tag: 'b' }, 'primitive-free']))
+    ).toBe(false);
+  });
+});

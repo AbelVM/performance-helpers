@@ -107,7 +107,7 @@ function sketchWidthFor(maxEntries) {
  */
 import { nowMs } from '../../utils/now.js';
 import { attach, detach } from '../metrics.js';
-import { isArrayBuffer } from '../powerBuffer.js';
+import { isArrayBuffer, isDate, isRegExp } from '../powerBuffer.js';
 import {
   assertFunction,
   assertLimitRequired,
@@ -3587,6 +3587,22 @@ function deepEqual(a, b, state, depth = 0) {
     const bItems = Array.from(b);
     const used = new Array(bItems.length).fill(false);
 
+    // **A generation stamp, not a per-item array, and the reason is measured.**
+    //
+    // The first version of the `tried` fix allocated `new Array(n).fill(false)`
+    // inside the per-item loop, which is O(n) per item and O(n²) overall. A/B
+    // against `HEAD` on a 400-element `Set` of same-realm `ArrayBuffer`s:
+    // 1.51 ms before, 9.39 ms after — a 6.2× regression on a path that was
+    // already correct. The stamp is O(1) per item and allocates nothing in the
+    // loop.
+    //
+    // `triedGen[i] === gen` means "index `i` was already compared for the item
+    // being matched now". Bumping `gen` per item retires the whole array at once,
+    // which is what makes it cheap. The wrap reset is defensive: a `Set` large
+    // enough to reach 2^31 members would otherwise alias an old generation.
+    const triedGen = new Array(bItems.length).fill(0);
+    let gen = 0;
+
     // Fast reference check: mark direct reference matches
     const refIndex = new Map();
     for (let i = 0; i < bItems.length; i++) refIndex.set(bItems[i], i);
@@ -3594,18 +3610,42 @@ function deepEqual(a, b, state, depth = 0) {
     // Helper: try to produce a stable-ish signature for many common objects
     // `any`, and deliberately so: this is called on values that came out of a
     // user's cache, whose type the library does not know.
+    //
+    // **Every type test here is realm-independent, and the reason is measured.**
+    // `instanceof` compares against *this* realm's prototype, so a value from a
+    // `node:vm` sandbox, an iframe or a worker failed all three branches, fell
+    // through to `return v`, and `JSON.stringify` serialised it as `{}` — the
+    // same signature as every other object with no enumerable properties. Two
+    // cross-realm `ArrayBuffer`s holding **different bytes** collided, as did two
+    // cross-realm `RegExp`s with different sources.
+    //
+    // The collision itself is only a *performance* fault — it widens the
+    // candidate list and forces the structural fallback. What made it a
+    // correctness fault was the `Set` branch comparing a colliding pair twice
+    // and the cycle guard answering the retry `true`; that is fixed above, and
+    // this is fixed here so the buckets are right in the first place.
+    //
+    // The `Date` branch is reachable only through an exotic path — a value whose
+    // `toJSON` returns a `Date`, because `JSON.stringify` calls `toJSON()` before
+    // the replacer and the replacer then sees the returned `Date`. Verified by
+    // instrumenting the replacer: a plain `Date`, top-level or nested, never
+    // reaches it. It is spelled realm-independently anyway, because a
+    // realm-fragile branch here is a *missed grouping* rather than a collision —
+    // a foreign `Date` fell through to `toJSON` and produced the ISO string while
+    // a same-realm one produced `{__type:'Date'}`, so equal dates landed in
+    // different buckets. That is the same defect class at lower severity, and
+    // leaving it is how the original bug read as covered.
     const trySignature = (/** @type {any} */ val) => {
       try {
         return JSON.stringify(val, (k, v) => {
-          if (v instanceof Date) return { __type: 'Date', v: v.getTime() };
-          if (v instanceof RegExp) return { __type: 'RegExp', v: v.toString() };
-          if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView(v))
+          if (isDate(v)) return { __type: 'Date', v: v.getTime() };
+          if (isRegExp(v)) return { __type: 'RegExp', v: String(v) };
+          if (ArrayBuffer.isView(v))
             return {
               __type: 'TypedArray',
               v: Array.from(new Uint8Array(v.buffer, v.byteOffset || 0, v.byteLength)),
             };
-          if (typeof ArrayBuffer !== 'undefined' && v instanceof ArrayBuffer)
-            return { __type: 'ArrayBuffer', v: Array.from(new Uint8Array(v)) };
+          if (isArrayBuffer(v)) return { __type: 'ArrayBuffer', v: Array.from(new Uint8Array(v)) };
           return v;
         });
       } catch (err) {
@@ -3635,6 +3675,31 @@ function deepEqual(a, b, state, depth = 0) {
         continue;
       }
 
+      // `tried` is load-bearing, and its absence was a correctness defect.
+      //
+      // The candidate loop below and the structural fallback after it both call
+      // `deepEqual(itemA, bItems[i])`. Without this the *same pair* was compared
+      // twice, and the second comparison was answered by the cycle guard at the
+      // top of `deepEqual` — `if (mapForA?.has(b)) return true` — which is
+      // correct for a cycle and wrong here. A pair that had just compared `false`
+      // was reported `true` on the retry.
+      //
+      // Measured with a real `node:vm` second realm: two cross-realm
+      // `ArrayBuffer`s holding **different bytes** compared `true` inside a `Set`
+      // and `false` when compared directly, with the same-realm control correct.
+      // A cross-realm `RegExp` nested in an object reproduced it. The trigger was
+      // a signature collision — `trySignature` used `instanceof ArrayBuffer`,
+      // false for a foreign buffer, so it stringified to `{}` and landed in the
+      // same bucket as anything else that does — but the collision is only the
+      // trigger. **Any** future collision would have reproduced it, which is why
+      // the fix is here rather than only in the signature helper.
+      //
+      // `Map` is unaffected: its branch never uses the signature path.
+      if (++gen > 0x7fffffff) {
+        triedGen.fill(0);
+        gen = 1;
+      }
+
       // signature match
       const sigA = trySignature(itemA);
       let found = false;
@@ -3642,6 +3707,9 @@ function deepEqual(a, b, state, depth = 0) {
         const cand = sigMap.get(sigA) || [];
         for (const idx of cand) {
           if (used[idx]) continue;
+          // Recorded *before* the comparison, so a pair that throws or returns
+          // is still never retried by the fallback below.
+          triedGen[idx] = gen;
           if (deepEqual(itemA, bItems[idx], state, depth + 1)) {
             used[idx] = true;
             found = true;
@@ -3653,7 +3721,10 @@ function deepEqual(a, b, state, depth = 0) {
 
       // fallback structural scan across any remaining unmatched bItems
       for (let i = 0; i < bItems.length; i++) {
-        if (used[i]) continue;
+        // `used` is taken by a match; `triedGen[i] === gen` was already compared
+        // for this item and answered `false`. Skipping only `used` is what let
+        // the cycle guard lie.
+        if (used[i] || triedGen[i] === gen) continue;
         if (deepEqual(itemA, bItems[i], state, depth + 1)) {
           used[i] = true;
           found = true;
