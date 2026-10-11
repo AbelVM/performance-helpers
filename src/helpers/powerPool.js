@@ -13,7 +13,7 @@
  *
  *
  */
-import { o2u8, u82o } from './powerBuffer.js';
+import { o2u8, u82o, isArrayBuffer } from './powerBuffer.js';
 import { abortReason } from '../utils/abort.js';
 import { isError } from '../utils/errors.js';
 import WorkerAgnostic from './WorkerAgnostic.js';
@@ -149,7 +149,7 @@ function isTransferListLive(transfer) {
   if (!Array.isArray(transfer)) return true;
   for (let i = 0; i < transfer.length; i++) {
     const item = transfer[i];
-    if (item instanceof ArrayBuffer) {
+    if (isArrayBuffer(item)) {
       if (isDetached(item)) return false;
     } else if (ArrayBuffer.isView(item)) {
       if (isDetached(item.buffer)) return false;
@@ -213,7 +213,7 @@ class WorkerWrapper {
     let msg = message;
     let tr = transfer;
     const isTransferable =
-      msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer;
+      msg instanceof Uint8Array || ArrayBuffer.isView(msg) || isArrayBuffer(msg);
     if (isTransferable) {
       if (Array.isArray(tr)) {
         try {
@@ -227,7 +227,7 @@ class WorkerWrapper {
       }
 
       if (!tr) {
-        const buffer = msg instanceof ArrayBuffer ? msg : msg.buffer;
+        const buffer = isArrayBuffer(msg) ? msg : msg.buffer;
         if (buffer?.byteLength > 0) tr = [buffer];
       }
 
@@ -242,10 +242,7 @@ class WorkerWrapper {
     }
 
     const isPlainObject =
-      msg !== null &&
-      typeof msg === 'object' &&
-      !ArrayBuffer.isView(msg) &&
-      !(msg instanceof ArrayBuffer);
+      msg !== null && typeof msg === 'object' && !ArrayBuffer.isView(msg) && !isArrayBuffer(msg);
     // A native envelope is *already* in wire form. Re-encoding it to JSON bytes
     // would post a bare body that reads as a legacy message: a worker using
     // `decodeInbound` would take its legacy branch, parse the bytes, and hand
@@ -1089,7 +1086,7 @@ export class PowerPool {
       prepared.message != null &&
       typeof prepared.message === 'object' &&
       !ArrayBuffer.isView(prepared.message) &&
-      !(prepared.message instanceof ArrayBuffer) &&
+      !isArrayBuffer(prepared.message) &&
       Array.isArray(prepared.transfer) &&
       prepared.transfer.length > 0 &&
       typeof underlying?.postMessage === 'function' &&
@@ -1951,10 +1948,7 @@ export class PowerPool {
       }
       // plain object -> encode via cache
       const isPlainObject =
-        msg !== null &&
-        typeof msg === 'object' &&
-        !ArrayBuffer.isView(msg) &&
-        !(msg instanceof ArrayBuffer);
+        msg !== null && typeof msg === 'object' && !ArrayBuffer.isView(msg) && !isArrayBuffer(msg);
       if (isPlainObject) {
         if (zeroCopy) {
           out[i] = { message: msg, transfer: undefined };
@@ -2001,8 +1995,8 @@ export class PowerPool {
         continue;
       }
       // ArrayBuffer or ArrayBuffer view -> make transferable in one normalized fast path.
-      if (msg instanceof ArrayBuffer || ArrayBuffer.isView(msg)) {
-        const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
+      if (isArrayBuffer(msg) || ArrayBuffer.isView(msg)) {
+        const transferTarget = isArrayBuffer(msg) ? msg : msg.buffer;
         out[i] = { message: msg, transfer: [transferTarget] };
         continue;
       }
@@ -2024,8 +2018,8 @@ export class PowerPool {
    */
   _prepareForTransfer(msg, tr, opts) {
     const zeroCopy = Boolean(opts?.zeroCopy);
-    if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer) {
-      const transferTarget = msg instanceof ArrayBuffer ? msg : msg.buffer;
+    if (msg instanceof Uint8Array || ArrayBuffer.isView(msg) || isArrayBuffer(msg)) {
+      const transferTarget = isArrayBuffer(msg) ? msg : msg.buffer;
       if (!tr) {
         // Binary is framed under the `raw` codec too, so a worker always sees
         // the same protocol regardless of what it was handed. Without this, an
@@ -2044,7 +2038,7 @@ export class PowerPool {
         }
         if (transferTarget?.byteLength === 0) {
           try {
-            const copy = msg instanceof ArrayBuffer ? msg.slice(0) : new Uint8Array(msg);
+            const copy = isArrayBuffer(msg) ? msg.slice(0) : new Uint8Array(msg);
             return { message: copy, transfer: [copy.buffer] };
           } catch (err) {
             return { message: msg, transfer: undefined };
@@ -2069,10 +2063,7 @@ export class PowerPool {
     }
 
     const isPlainObject =
-      msg !== null &&
-      typeof msg === 'object' &&
-      !ArrayBuffer.isView(msg) &&
-      !(msg instanceof ArrayBuffer);
+      msg !== null && typeof msg === 'object' && !ArrayBuffer.isView(msg) && !isArrayBuffer(msg);
     if (isPlainObject) {
       if (zeroCopy) return { message: msg, transfer: tr };
       // Under `'negotiated'` the carrier is a per-worker decision, and the
@@ -2662,7 +2653,7 @@ export class PowerPool {
         decoded = data.value;
         inboundMeta = data;
       }
-      if (data && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) {
+      if (data && (isArrayBuffer(data) || ArrayBuffer.isView(data))) {
         try {
           if (this._messageCodec !== 'legacy') {
             // No sniffing: the envelope says what the payload is, so a binary
@@ -3096,7 +3087,7 @@ export class PowerPool {
         message !== null &&
         typeof message === 'object' &&
         !ArrayBuffer.isView(message) &&
-        !(message instanceof ArrayBuffer);
+        !isArrayBuffer(message);
       if (!isPlainObject) {
         throw new Error('postMessage awaitResponse requires a plain-object message');
       }
@@ -3343,7 +3334,7 @@ export class PowerPool {
       message !== null &&
       typeof message === 'object' &&
       !ArrayBuffer.isView(message) &&
-      !(message instanceof ArrayBuffer);
+      !isArrayBuffer(message);
     for (const w of this.workers) {
       try {
         let msg = message;

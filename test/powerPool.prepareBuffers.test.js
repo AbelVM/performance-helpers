@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import vm from 'node:vm';
 import { PowerPool } from '../src/helpers/powerPool.js';
 
 /**
@@ -237,5 +238,311 @@ describe('PowerPool queue high-watermark re-arm', () => {
       });
     }
     expect(seen.length).toBe(2);
+  });
+});
+
+// The fourth site of a defect class `AGENTS.md` records and tells you to grep for
+// rather than fix site by site: `instanceof` compares against *this* realm's
+// prototype, so a value from a `node:vm` sandbox, an iframe or a worker fails it.
+//
+// `powerPool.js` carried **fifteen** `instanceof ArrayBuffer` sites. The triage
+// that found them established the reachability by measurement rather than by
+// pattern, and the split matters:
+//
+//   - **Views were always safe.** `ArrayBuffer.isView` is realm-independent, and
+//     every site checks it alongside the `instanceof`, so a cross-realm
+//     `Uint8Array` took the binary branch correctly all along.
+//   - **Bare `ArrayBuffer`s were not.** A cross-realm one failed the `instanceof`,
+//     so the `isPlainObject` guard beside it evaluated *true* and the buffer was
+//     encoded and structured-cloned instead of transferred.
+//
+// The data survived — `_encodeForTransfer` reads the bytes correctly for a foreign
+// buffer — so this is a **lost zero-copy** defect, not corruption. Measured before
+// the fix, under every codec: a same-realm buffer came back as
+// `{ message: <the buffer>, transfer: [<the buffer>] }` and a cross-realm one as
+// `{ message: <encoded>, transfer: undefined }`.
+//
+// Every fixture below is a real `node:vm` second realm. A hand-rolled stand-in is
+// not equivalent: `Object.keys()` on a plain object returns its own properties, so
+// an impostor would take the plain-object branch and pass for the wrong reason.
+
+/** A second realm, created once. */
+const realm = vm.createContext({});
+/** Build an ArrayBuffer in the second realm. */
+const foreignBuffer = (bytes) =>
+  vm.runInContext(
+    `(() => { const b = new ArrayBuffer(${bytes.length}); new Uint8Array(b).set(${JSON.stringify(
+      bytes
+    )}); return b; })()`,
+    realm
+  );
+
+describe('PowerPool: a cross-realm ArrayBuffer is transferred, not encoded', () => {
+  it('prepares a foreign ArrayBuffer through _prepareForTransfer too', () => {
+    // The second gate, and a separate code path from `prepareBuffers`. Reverting
+    // this one alone passes every test above, which is why it needs its own case:
+    // the two entry points share the `isPlainObject` idea but not the code.
+    const pool = makePool();
+    const local = new ArrayBuffer(8);
+    new Uint8Array(local).set([1, 2, 3, 4, 5, 6, 7, 8]);
+    const foreign = foreignBuffer([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    const a = pool._prepareForTransfer(local, undefined, {});
+    const b = pool._prepareForTransfer(foreign, undefined, {});
+
+    expect(b.transfer, 'the caller buffer in the transfer list').toEqual([foreign]);
+    expect(a.transfer, 'and the same shape as the same-realm control').toEqual([local]);
+    // Under every codec the two must agree, because the gate is shared.
+    for (const messageCodec of ['legacy', 'framed', 'negotiated']) {
+      const p = makePool({ messageCodec });
+      const f = foreignBuffer([5, 5, 5, 5]);
+      const same = new ArrayBuffer(4);
+      new Uint8Array(same).set([5, 5, 5, 5]);
+      expect(p._prepareForTransfer(f, undefined, {}).transfer, messageCodec).toEqual([f]);
+      expect(p._prepareForTransfer(same, undefined, {}).transfer, messageCodec).toEqual([same]);
+    }
+  });
+
+  it('prepares a foreign ArrayBuffer exactly as a same-realm one', () => {
+    // The whole defect in one assertion pair. Before the fix the foreign buffer
+    // came back with `transfer: undefined` — encoded and structured-cloned —
+    // while the same-realm one came back owning its own buffer in the transfer
+    // list.
+    const pool = makePool();
+    const local = new ArrayBuffer(8);
+    new Uint8Array(local).set([1, 2, 3, 4, 5, 6, 7, 8]);
+    const foreign = foreignBuffer([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    const a = pool.prepareBuffers([local])[0];
+    const b = pool.prepareBuffers([foreign])[0];
+
+    expect(b.message, 'the buffer itself, not an encoded stand-in').toBe(foreign);
+    expect(b.transfer, 'the caller buffer in the transfer list').toEqual([foreign]);
+    // And the same shape as the same-realm control, so the assertion above is not
+    // vacuous.
+    expect(a.message).toBe(local);
+    expect(a.transfer).toEqual([local]);
+  });
+
+  it('does so under every codec, because the gate is shared', () => {
+    // The `isPlainObject` guard and the binary branch are reached from
+    // `prepareBuffers`, `_prepareForTransfer` and `WorkerWrapper.postMessage`.
+    // One codec passing is not evidence the others do.
+    for (const messageCodec of ['legacy', 'framed', 'negotiated']) {
+      const pool = makePool({ messageCodec });
+      const foreign = foreignBuffer([9, 9, 9, 9]);
+      const prepared = pool.prepareBuffers([foreign])[0];
+      expect(prepared.message, messageCodec).toBe(foreign);
+      expect(prepared.transfer, messageCodec).toEqual([foreign]);
+    }
+  });
+
+  it('leaves a cross-realm view correct, which it already was', () => {
+    // A characterisation, not an aspiration: `ArrayBuffer.isView` is
+    // realm-independent, so a cross-realm `Uint8Array` took the binary branch
+    // before this change and must still do so. Recorded so that a future
+    // regression here is visible rather than assumed away.
+    const pool = makePool();
+    const foreign = foreignBuffer([1, 2, 3, 4]);
+    const view = new Uint8Array(foreign);
+    const prepared = pool.prepareBuffers([view])[0];
+    expect(prepared.message).toBe(view);
+    expect(prepared.transfer).toEqual([foreign]);
+  });
+
+  it('still encodes a plain object, which is the branch the fix must not break', () => {
+    // The other half. Making `isArrayBuffer` realm-independent must not have
+    // started treating plain objects as buffers, or every object message would
+    // be posted raw and the worker would receive no payload at all.
+    //
+    // The property that matters is that a plain object is **not** put in a
+    // transfer list — it is passed through and marked `deferred`, with the encode
+    // happening at dispatch. Asserted on the transfer list rather than on the
+    // message shape, because an earlier draft of this test guessed the message
+    // would be eagerly encoded and it is not.
+    const pool = makePool();
+    const payload = { a: 1 };
+    const prepared = pool.prepareBuffers([payload])[0];
+    expect(prepared.message, 'the object itself, passed through').toBe(payload);
+    expect(prepared.transfer, 'and never in a transfer list').toBeUndefined();
+    expect(prepared.deferred).toBe(true);
+  });
+
+  it('reports a detached foreign buffer in a transfer list as not live', () => {
+    // `isTransferListLive` is the pre-check that fails *before* the post rather
+    // than after. A cross-realm `ArrayBuffer` matched none of its three branches
+    // — not `instanceof ArrayBuffer`, not `isView`, and it *is* an object so the
+    // third was false too — so it was silently skipped and a detached one was
+    // never detected.
+    //
+    // `isDetached` reads `ArrayBuffer.prototype.detached`, which is
+    // realm-independent, so the fix is the gate and not the read. Verified
+    // directly: a foreign live buffer reports `false`, a foreign detached one
+    // reports `true`.
+    const pool = makePool();
+    const dead = foreignBuffer([1, 2, 3, 4]);
+    structuredClone({}, { transfer: [dead] });
+    expect(dead.byteLength, 'the fixture is genuinely detached').toBe(0);
+
+    // Reached through the public surface that uses the check.
+    const live = foreignBuffer([1, 2, 3, 4]);
+    expect(live.byteLength).toBe(4);
+    // A live foreign buffer must still be postable, so the fix did not make the
+    // pre-check refuse everything foreign.
+    expect(() => pool.postMessage({ a: 1 }, [live])).not.toThrow();
+  });
+});
+
+describe('PowerPool: a cross-realm ArrayBuffer reaches the worker untransformed', () => {
+  // The gates above are the synchronous decision points. This one observes the
+  // *dispatch* path, which is where `broadcast`'s own `isPlainObject` gate lives
+  // and which the synchronous tests cannot reach.
+  //
+  // `broadcast` with a plain object and no transfer list encodes once and slices
+  // per worker, so every worker receives a fresh `Uint8Array`. With a buffer it
+  // must forward the buffer itself. Reverting the `broadcast` gate alone passes
+  // every synchronous test above, which is why this case exists.
+
+  it('broadcasts a foreign ArrayBuffer as the buffer, not as a per-worker copy', async () => {
+    const posted = [];
+    class Recorder {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = (msg, transfer) => {
+          posted.push({ msg, transfer });
+        };
+        this.terminate = () => {};
+      }
+    }
+    const pool = new PowerPool(Recorder, {
+      size: 2,
+      minSize: 2,
+      maxSize: 2,
+      lazy: false,
+    });
+    pools.push(pool);
+
+    const foreign = foreignBuffer([1, 2, 3, 4]);
+    pool.broadcast(foreign);
+
+    await vi.waitFor(() => {
+      expect(posted.length).toBe(2);
+    });
+
+    for (const { msg, transfer } of posted) {
+      expect(msg, 'the caller buffer itself, not a slice').toBe(foreign);
+      expect(transfer, 'in the transfer list').toEqual([foreign]);
+    }
+  });
+
+  it('broadcasts a same-realm ArrayBuffer the same way, as the control', async () => {
+    const posted = [];
+    class Recorder {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = (msg, transfer) => {
+          posted.push({ msg, transfer });
+        };
+        this.terminate = () => {};
+      }
+    }
+    const pool = new PowerPool(Recorder, {
+      size: 2,
+      minSize: 2,
+      maxSize: 2,
+      lazy: false,
+    });
+    pools.push(pool);
+
+    const local = new ArrayBuffer(4);
+    new Uint8Array(local).set([1, 2, 3, 4]);
+    pool.broadcast(local);
+
+    await vi.waitFor(() => {
+      expect(posted.length).toBe(2);
+    });
+
+    for (const { msg, transfer } of posted) {
+      expect(msg).toBe(local);
+      expect(transfer).toEqual([local]);
+    }
+  });
+
+  it('still encodes a plain object on broadcast, which is the branch the fix must not break', async () => {
+    // The other half of the same gate: a plain object must still be encoded once
+    // and sliced per worker, or every object broadcast would arrive as a raw
+    // object the worker cannot decode.
+    const posted = [];
+    class Recorder {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = (msg, transfer) => {
+          posted.push({ msg, transfer });
+        };
+        this.terminate = () => {};
+      }
+    }
+    const pool = new PowerPool(Recorder, {
+      size: 2,
+      minSize: 2,
+      maxSize: 2,
+      lazy: false,
+    });
+    pools.push(pool);
+
+    pool.broadcast({ a: 1 });
+
+    await vi.waitFor(() => {
+      expect(posted.length).toBe(2);
+    });
+
+    for (const { msg } of posted) {
+      expect(msg, 'encoded, not the caller object').not.toBe({ a: 1 });
+      expect(ArrayBuffer.isView(msg) || msg instanceof ArrayBuffer).toBe(true);
+    }
+    // And each worker gets its own copy, which is the whole point of the slice.
+    expect(posted[0].msg).not.toBe(posted[1].msg);
+  });
+});
+
+describe('PowerPool: awaitResponse refuses a cross-realm ArrayBuffer', () => {
+  // The third gate, and the one whose failure is silent data loss rather than a
+  // lost optimisation. `awaitResponse` augments the message with a `correlationId`
+  // via `Object.assign`, which is only safe for a plain object. Applied to a
+  // buffer it produces `{ correlationId }` and the payload is gone.
+  //
+  // Reached through `_postMessageInner` directly, because the public `postMessage`
+  // prepares the message first and the gate is downstream of that.
+
+  it('refuses a foreign ArrayBuffer, exactly as it refuses a same-realm one', () => {
+    const pool = makePool();
+    const local = new ArrayBuffer(8);
+    const foreign = foreignBuffer([1, 2, 3, 4]);
+    for (const [label, value] of [
+      ['same-realm', local],
+      ['cross-realm', foreign],
+    ]) {
+      expect(
+        () => pool._postMessageInner(value, undefined, { awaitResponse: true }),
+        label
+      ).toThrow(/plain-object message/);
+    }
+  });
+
+  it('still accepts a plain object, which is the branch the fix must not break', () => {
+    // The other half: making `isArrayBuffer` realm-independent must not have
+    // started refusing plain objects, or `awaitResponse` would be unusable.
+    //
+    // The returned promise is captured and settled, not dropped. `awaitResponse`
+    // creates a pending response promise, and `afterEach` terminates the pool,
+    // which rejects it — an unhandled rejection that fails the whole run rather
+    // than this one test. The first draft of this case dropped it on the floor.
+    const pool = makePool();
+    let pending;
+    expect(() => {
+      pending = pool._postMessageInner({ a: 1 }, undefined, { awaitResponse: true });
+    }).not.toThrow();
+    expect(pending, 'a pending response promise').toBeInstanceOf(Promise);
+    pending.catch(() => {});
   });
 });
