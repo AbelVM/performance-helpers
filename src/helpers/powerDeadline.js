@@ -38,7 +38,14 @@ export class PowerDeadline {
       baseDelay,
       maxDelay,
       jitter,
+      now,
     } = options || {};
+
+    // GEO-039. Resolved once per run and called as a local, so the injected
+    // clock reaches every read below without threading an argument through the
+    // retry machinery. Defaults to the module clock, which is what every
+    // existing caller gets.
+    const nowFn = typeof now === 'function' ? now : nowMs;
 
     // These were `Math.max(1, Math.floor(Number(x) || 1))` and friends, which
     // silently rewrote nonsense into a plausible default: `maxAttempts: 0` and
@@ -75,7 +82,7 @@ export class PowerDeadline {
     });
     const shouldRetry = typeof retryIf === 'function' ? retryIf : () => Boolean(retryIf);
 
-    const startedAt = nowMs();
+    const startedAt = nowFn();
     const deadlineAt = deadlineMs !== null ? startedAt + deadlineMs : null;
     // Controller whose signal is folded into the user fn's signal so that when
     // the total deadline fires we can abort in-flight work instead of leaving
@@ -87,14 +94,14 @@ export class PowerDeadline {
       if (!signal) return null;
       if (signal.aborted) {
         return {
-          promise: Promise.reject(createAbortError(signal.reason, startedAt, deadlineMs)),
+          promise: Promise.reject(createAbortError(signal.reason, startedAt, deadlineMs, nowFn)),
           cleanup: null,
         };
       }
       let cleanup = null;
       const promise = new Promise((_, reject) => {
         const onAbort = () => {
-          reject(createAbortError(signal.reason, startedAt, deadlineMs));
+          reject(createAbortError(signal.reason, startedAt, deadlineMs, nowFn));
         };
         signal.addEventListener('abort', onAbort, { once: true });
         cleanup = () => signal.removeEventListener('abort', onAbort);
@@ -107,14 +114,14 @@ export class PowerDeadline {
      * @param {AbortSignal|undefined} retrySignal
      */
     const wrapAttempt = async (attempt, retrySignal) => {
-      const attemptStarted = nowMs();
+      const attemptStarted = nowFn();
       if (deadlineAt !== null && attemptStarted >= deadlineAt) {
         const err = /** @type {Error & {code: string, attempts: number, elapsedMs: number}} */ (
           new Error('Deadline exceeded')
         );
         err.code = 'EDEADLINE';
         err.attempts = attempt;
-        err.elapsedMs = nowMs() - startedAt;
+        err.elapsedMs = nowFn() - startedAt;
         throw err;
       }
 
@@ -133,14 +140,14 @@ export class PowerDeadline {
       // means this attempt is over, and it is the same defect with a different
       // clock.
       if (signal?.aborted) {
-        const err = createAbortError(signal.reason, startedAt, deadlineMs);
+        const err = createAbortError(signal.reason, startedAt, deadlineMs, nowFn);
         err.attempts = attempt;
         err.attemptTimeout = perAttemptTimeout;
         err.totalTimeout = deadlineMs;
         throw err;
       }
       if (retrySignal?.aborted) {
-        const err = createAbortError(retrySignal.reason, startedAt, deadlineMs);
+        const err = createAbortError(retrySignal.reason, startedAt, deadlineMs, nowFn);
         err.attempts = attempt;
         err.attemptTimeout = perAttemptTimeout;
         err.totalTimeout = deadlineMs;
@@ -169,7 +176,7 @@ export class PowerDeadline {
       const cleanups = [inner.detach, combined.detach];
 
       if (deadlineAt !== null) {
-        const remaining = deadlineAt - nowMs();
+        const remaining = deadlineAt - nowFn();
         let clearTotalTimeout;
         const p = new Promise((_, reject) => {
           const timer = setTimeout(() => {
@@ -187,7 +194,7 @@ export class PowerDeadline {
             );
             err.code = 'EDEADLINE';
             err.attempts = attempt;
-            err.elapsedMs = nowMs() - startedAt;
+            err.elapsedMs = nowFn() - startedAt;
             reject(err);
           }, remaining);
           clearTotalTimeout = () => clearTimeout(timer);
@@ -284,10 +291,19 @@ export class PowerDeadline {
         'baseDelay',
         'maxDelay',
         'jitter',
+        'now',
       ],
       'PowerDeadline'
     );
     this._options = options || {};
+    // Injected clock, matching the limiters (PERF-007), `PowerTTLMap` and
+    // `cache/core`. GEO-039: MapLibre exposes `setNow()`/`restoreNow()` so an
+    // application can freeze time for deterministic tests, and a deadline that
+    // reads the module clock cannot be driven by it. Resolved once here and
+    // called as `this._now()` at each site, which is one property lookup — the
+    // same shape the three helpers above already use, so the 141 ns `nowMs()`
+    // measurement PERF-007 and RES-019 are built on is not in the path.
+    this._now = typeof options.now === 'function' ? options.now : nowMs;
   }
 
   /**
@@ -317,16 +333,18 @@ export class PowerDeadline {
  *   a caller can attribute the cancellation.
  * @param {number} startedAt - `nowMs()` at the start of the run, for `elapsedMs`.
  * @param {number|null} deadlineMs - The configured total timeout, for context.
+ * @param {() => number} now - The run's clock, injected so GEO-039's frozen-time
+ *   case reaches this error's `elapsedMs` too.
  * @returns {Error & {code: 'EABORT', reason: any, attempts: number, elapsedMs: number, totalTimeout: number|null}}
  */
-const createAbortError = (reason, startedAt, deadlineMs) => {
+const createAbortError = (reason, startedAt, deadlineMs, now = nowMs) => {
   const err = new Error('Aborted');
   /** @type {Error & {code: 'EABORT', reason: any, attempts: number, elapsedMs: number, totalTimeout: number|null}} */
   const typed = /** @type {any} */ (err);
   typed.code = 'EABORT';
   typed.reason = reason;
   typed.attempts = 0;
-  typed.elapsedMs = nowMs() - startedAt;
+  typed.elapsedMs = now() - startedAt;
   typed.totalTimeout = deadlineMs;
   return typed;
 };

@@ -919,6 +919,10 @@ export {};
  *   Supplies `utilization()` instead of resolving Node's `perf_hooks`. The
  *   argument exists so a browser build, a bundler, or a test can provide the
  *   reading without this module reaching for a Node built-in.
+ * @property {() => number} [now] Injected clock, as the limiters take
+ *   (PERF-007). GEO-039: this helper's whole job is comparing *scheduled* time
+ *   against *observed* time, so a frozen clock has to reach both sides or
+ *   `coverage` cannot be exercised without real timers. Defaults to `nowMs()`.
  */
 
 /**
@@ -1009,6 +1013,12 @@ export {};
  *   `hub-closed`.
  * @property {import("./powerEventBus.js").PowerEventBus} [eventBus] - When
  *   given, transitions are also emitted on it as `stateChange`.
+ * @property {() => number} [now] Injected clock, as the limiters take
+ *   (PERF-007). GEO-039: this was the one clock-driven helper with no injection
+ *   point at all, so a caller freezing time — MapLibre's `setNow()`, or a
+ *   suite's fake timers — could not drive an open window. Defaults to
+ *   `monoMs()`, which `utils/now.js` documents as deliberately unmovable;
+ *   injecting a clock is the only way past that for this class.
  */
 
 /**
@@ -1214,6 +1224,10 @@ export {};
  * @property {number} [baseDelay]
  * @property {number} [maxDelay]
  * @property {boolean} [jitter]
+ * @property {() => number} [now] Injected clock, as the limiters take
+ *   (PERF-007). GEO-039: a deadline is arithmetic over `startedAt`, so a frozen
+ *   clock has to reach it or `totalTimeout` cannot be exercised without real
+ *   timers. Defaults to `nowMs()`.
  */
 
 /**

@@ -57,6 +57,7 @@ export class PowerEventLoopMonitor {
         'onDrift',
         'keepProcessAlive',
         'utilizationProvider',
+        'now',
       ],
       'PowerEventLoopMonitor'
     );
@@ -66,7 +67,14 @@ export class PowerEventLoopMonitor {
       onDrift = null,
       keepProcessAlive = false,
       utilizationProvider = null,
+      now,
     } = options;
+    // GEO-039. Injected clock, matching the limiters (PERF-007), `PowerTTLMap`,
+    // `cache/core`, `PowerDeadline`, `PowerCircuit` and `PowerCron`. The
+    // monitor's whole job is comparing *scheduled* time against *observed* time,
+    // so a frozen clock has to reach both sides or `coverage` cannot be
+    // exercised without real timers.
+    this._now = typeof now === 'function' ? now : nowMs;
 
     if (!Number.isFinite(intervalMs) || intervalMs < 1) {
       throw new TypeError('PowerEventLoopMonitor: `intervalMs` must be a finite number >= 1');
@@ -106,7 +114,7 @@ export class PowerEventLoopMonitor {
     // Wall-clock baseline for `coverage`. Re-based by `reset()`, because a
     // coverage figure whose window the caller has just cleared is a lie about the
     // cleared interval.
-    this._startedAt = nowMs();
+    this._startedAt = this._now();
     this._running = false;
     this._handle = null;
 
@@ -191,7 +199,7 @@ export class PowerEventLoopMonitor {
     this._dropped = 0;
     // The coverage window restarts with the samples, or coverage would keep
     // dividing a fresh sample count by the whole life of the monitor.
-    this._startedAt = nowMs();
+    this._startedAt = this._now();
   }
 
   /**
@@ -341,7 +349,7 @@ export class PowerEventLoopMonitor {
     // invisible in every other field. Coverage is the only number here that moves
     // when time passed unobserved.
     //
-    const elapsed = nowMs() - this._startedAt;
+    const elapsed = this._now() - this._startedAt;
     const accounted = hasSamples ? (this._samples - 1) * this.intervalMs + this._sum : 0;
     // `null` in three cases, and all three are one fact: there is no window to take
     // a fraction of.
@@ -442,12 +450,12 @@ export class PowerEventLoopMonitor {
    */
   _schedule() {
     if (!this._running) return;
-    const scheduledFor = nowMs() + this.intervalMs;
+    const scheduledFor = this._now() + this.intervalMs;
     this._handle = setSafeTimeout(
       () => {
         this._handle = null;
         if (!this._running) return;
-        this._record(nowMs() - scheduledFor);
+        this._record(this._now() - scheduledFor);
         this._schedule();
       },
       this.intervalMs,

@@ -58,6 +58,12 @@ admission over time. They are not interchangeable.
 | Deliver hub frames over a `MessagePort` with native structured clone   | `PowerMessagePort`                                 | `PowerRealtimeHub`, `PowerMessageCodec`                    | hand-rolled `postMessage` framing                                       |
 | Push to a socket without unbounded client-side buffering               | `PowerWebSocketClient`                             | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `ws.send` in a loop                                                 |
 | Push to a WebTransport stream with natural back-pressure               | `PowerWebTransportClient`                          | `PowerRealtimeHub`, `PowerMessageCodec`                    | raw `webTransport.send` in a loop                                       |
+| Move a large coordinate array to a worker or renderer                  | `PowerMessageCodec` (`CODECS.RAW`)                 | `collectTransferables()`, `PowerBuffer`                    | a new binary format — FlatGeobuf, geobuf and PMTiles exist              |
+| Coalesce a high-frequency stream of position reports                   | `PowerBatch` + a `Map`                             | `PowerRealtimeHub`, `PowerTTLMap`                          | a custom coalescer — measured, and it loses                             |
+| Expire map entities that stopped reporting                             | `PowerTTLMap`                                      | `PowerHeartbeat`, `PowerRealtimeHub`                       | a `setInterval` sweep that scans every entity                           |
+| Make a simulation reproducible run to run                              | an injected clock (`now` option)                   | `PowerPool`, `PowerChunker`, `PowerObserver`               | wall-clock time anywhere in the step                                    |
+| Know whether a frame budget was met, and whose fault a miss is         | `PowerApdex`, `PowerEventLoopMonitor`              | `PowerDeadline`, `PowerBrownout`                           | a hand-rolled FPS counter                                               |
+| Build a map application end to end                                     | [Geospatial](geo.md)                               | `metaGuide.md` for the general case                        | reimplementing turf, supercluster or a spatial index                    |
 | Handle an accepted socket without knowing which library produced it    | `PowerSocketAdapter`                               | `PowerRealtimeHub`, `PowerLogger`                          | `if (typeof socket.on === 'function')` in every handler                 |
 | Push to a WebRTC peer without tripping over the channel's string state | `PowerRTCChannel`                                  | `PowerRealtimeHub`, `PowerMessageCodec`                    | `dc.readyState === READY_STATE.OPEN`, which is always false             |
 | Push datagrams to a transport without silent loss                      | `PowerDatagramChannel`                             | `PowerMessageCodec`                                        | hand-rolled `send()` with no size check                                 |
@@ -157,6 +163,37 @@ respected, a pool sized against a latency target. It is a closed-loop
 stabiliser, and the helpers above are not: they observe a signal and correct
 against a limit. Reach for `PowerServo` when you have a **setpoint**; do not
 reach for it to replace a concurrency gate.
+
+### Geospatial
+
+Use [Geospatial](geo.md) when the application is a map, a simulation, or a
+location-based game. It is a router over the helpers above, not a new API — the
+domain's algorithms belong to maplibre-gl-js, turf.js, deck.gl, supercluster and
+flatbush, and none of them are reimplemented here.
+
+What this library adds is the layer _around_ those: moving coordinate data
+without a JSON round-trip, deciding when to push an update, expiring a record that
+stopped reporting, and knowing whether a frame budget was met.
+
+Four workloads, each a composition of shipped helpers:
+
+- **Realtime dashboard** (fleet, AIS, IoT) — `PowerWebSocketClient` →
+  `powerMessageCodec` → `PowerDeduplication` / `PowerSequencer` →
+  `PowerRealtimeHub` → `PowerTTLMap` → `PowerBatch` + a `Map` →
+  `GeoJSONSource.updateData`. The coalescer is `PowerBatch` plus a `Map`, and
+  `bench/claims.js geocoalesce` measures why a dedicated one loses.
+- **Simulator** (traffic, crowd, wildfire) — an injected clock for determinism,
+  `PowerPool` + `PowerChunker` for partitioning, `PowerObserver` for a snapshot
+  the render thread reads instead of live state.
+- **Map-based game** — the zero-allocation primitives (`PowerQueue`,
+  `PowerPriorityQueue`, `PowerBuffer`) plus the frame-budget stack
+  (`PowerApdex` + `PowerEventLoopMonitor` + `PowerDeadline` + `PowerBrownout`).
+- **Camera-movement prefetch** — a recipe only, scoped to custom sources and
+  deck.gl layers, because MapLibre PR #8670 adds `preload: true` to core for the
+  built-in case.
+
+The decision record, including everything rejected and why, is
+[ADR 0015](../adr/0015-geospatial-scope.md).
 
 ### Composition recipes
 

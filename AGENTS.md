@@ -125,17 +125,24 @@ node bench/claims.js ratelimit   # static versus adaptive refill under burst + s
 node bench/claims.js datagram    # bounded datagram queue saturation and flush
 node bench/claims.js apdex       # APDEX from a sketch against exact counters
 node bench/claims.js cardinality # what the HLL sketch actually costs, and its bias
+node bench/claims.js geoencode   # flat typed array vs object graph, four arms on one payload
+node bench/claims.js geocoalesce # a coalescer against PowerBatch + a Map
+node bench/claims.js geoprecision # what coordinate rounding actually saves, on two payload shapes
+node bench/claims.js geoprefetch # what in-flight window a camera prefetch should use
 npm run bench                    # the full harness (over an hour)
 npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all twenty-five** modes, not the six this file used to list: eleven
+That is **all thirty** modes, not the six this file used to list: eleven
 measurements were reachable only by reading `bench/claims.js`, and six of them
 were named in neither this file nor `bench/README.md`. Seven more (`defer`,
 `codec`, `envelopepool`, `sabring`, `keyshape`, `ratelimit`, `datagram`) landed
 without this list being updated, which is the drift the paragraph below warns
 about — so they are listed now rather than left for the next reader to discover.
+Four more (`geoencode`, `geocoalesce`, `geoprecision`, `geoprefetch`) landed the
+same way and were caught by `npm run check:bench-list` — the gate doing exactly
+the job it was built for, on the first batch of modes added after it existed.
 
 The list above is still hand-maintained, so it is now **checked rather than
 trusted**: `npm run check:bench-list` (step 13 of `verify`) runs the harness with

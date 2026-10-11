@@ -43,6 +43,10 @@ import { assertFunction, assertLimitRequired, assertKnownOptions } from '../util
  *   reports `0`, because the replays have already accounted for them. Under `skip`
  *   and `run-once` the single run reports how many periods were dropped or folded
  *   into it.
+ * @property {() => number} [now] Injected clock, as the limiters take
+ *   (PERF-007). GEO-039: a cron's cadence is deadline arithmetic over `_nextAt`,
+ *   so a frozen clock has to reach it or the catch-up policy cannot be
+ *   exercised without real timers. Defaults to `nowMs()`.
  * @property {boolean} [unref=true] - Whether the pending timer is `unref`'d, so
  *   a running cron does not by itself keep a Node process alive.
  */
@@ -96,10 +100,18 @@ export class PowerCron {
         'onError',
         'onFire',
         'unref',
+        'now',
       ],
       'PowerCron'
     );
     assertFunction(task, { name: 'task', className: 'PowerCron', optional: false });
+
+    // GEO-039. Injected clock, matching the limiters (PERF-007), `PowerTTLMap`,
+    // `cache/core`, `PowerDeadline` and `PowerCircuit`. A cron's cadence is
+    // deadline arithmetic over `_nextAt`, so a frozen clock (MapLibre's
+    // `setNow()`) has to reach it or the catch-up policy cannot be exercised
+    // without real timers.
+    this._now = typeof options.now === 'function' ? options.now : nowMs;
 
     this._task = task;
     this._intervalMs = assertLimitRequired(options.intervalMs, {
@@ -222,7 +234,7 @@ export class PowerCron {
   start() {
     if (this._running) return this;
     this._running = true;
-    this._nextAt = nowMs() + this._intervalMs;
+    this._nextAt = this._now() + this._intervalMs;
     // Arm first, then optionally run immediately. Arming first means
     // `runOnStart` cannot forget to schedule: an earlier version ran the task
     // and returned without arming, so a `runOnStart` cron fired exactly once
@@ -278,7 +290,7 @@ export class PowerCron {
    */
   _arm() {
     if (!this._running) return;
-    const delay = Math.max(0, this._nextAt - nowMs()) + this._jitterDelay();
+    const delay = Math.max(0, this._nextAt - this._now()) + this._jitterDelay();
     this._timer = setTimeout(() => {
       this._timer = null;
       this._onTimer();
@@ -303,7 +315,7 @@ export class PowerCron {
    */
   _onTimer() {
     if (!this._running) return;
-    const now = nowMs();
+    const now = this._now();
     const target = this._nextAt;
     // How many whole intervals have elapsed since the last aimed-at time? At
     // least 1, because this timer is for `target` itself. This is the count of
@@ -381,8 +393,8 @@ export class PowerCron {
    *   place that matters: `_onTimer` had already computed it.
    * @returns {void}
    */
-  _run(scheduledFor = nowMs(), missed = 0) {
-    const ranAt = nowMs();
+  _run(scheduledFor = this._now(), missed = 0) {
+    const ranAt = this._now();
     const driftMs = Math.max(0, ranAt - scheduledFor);
     this._totalDriftMs += driftMs;
     this._runningTask = true;

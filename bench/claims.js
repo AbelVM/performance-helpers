@@ -5054,6 +5054,1027 @@ function runApdexWorkload() {
   return { rows, config: { n, target, tolerance, accuracies, seed: SEED } };
 }
 
+// ─── Workload: geoencode — when does a flat typed array beat an object graph? ─
+//
+// GEO-001. The geospatial ecosystem keeps guessing at this question and never
+// answers it cleanly:
+//
+//   - MapLibre #106 records that geobuf was tried for a 200-LineString ×
+//     4500-coordinate payload and *"still takes ~200ms (same as before)"* as
+//     JSON.stringify.
+//   - `mlightcad/web-worker-string-benchmark` measures a *direct string*
+//     transfer beating an ArrayBuffer round-trip by 70–87% at 100 MB, because
+//     TextEncoder/TextDecoder dominates.
+//   - Chrome's transferable-objects post measures 302 ms structured clone
+//     against 6.6 ms transfer for a 32 MB ArrayBuffer.
+//
+// Three published results, three different answers, because they measure three
+// different things. This measures all four arms on the *same* payload, in a real
+// worker, on the real call path.
+//
+// The four arms, in the order a MapLibre application would encounter them:
+//
+//   1. `JSON.stringify` → postMessage(string) → `JSON.parse` in the worker.
+//      This is what `GeoJSONSource.setData` does today, and the stringify is
+//      **inside** the timed region because that is the cost #106 reports.
+//   2. `postMessage(featureCollection)` — structured clone of the object graph.
+//   3. `postMessage(float64)` — structured clone of one flat buffer.
+//   4. `postMessage(float64, [float64.buffer])` — zero-copy transfer.
+//
+// Arm 4 versus arm 2 is the number the ecosystem keeps guessing at. Arm 1
+// versus arm 4 is the number that says whether a recipe is worth writing.
+//
+// Design points that matter for the result to mean anything:
+//
+// - **A real worker.** `bench/worker.js` establishes the pattern
+//   (`globalThis.Worker = NodeWorker`); a same-process `structuredClone()` is
+//   not the real call path and would flatter arm 4, because it skips the
+//   serialisation the worker side actually pays.
+// - **Seeded.** `makeRng(SEED)`, not `Math.random()`. BENCH-001's unseeded
+//   randomness is a recorded defect.
+// - **The worker touches the payload.** A worker that ignores its message lets
+//   the runtime skip the parse or the clone entirely, which measures nothing.
+// - **Arm 1 includes the stringify.** An earlier draft of this workload
+//   pre-stringified outside the timed region, which made arm 1 look faster than
+//   the path it claims to model. MapLibre #106's 200 ms *is* the stringify.
+// - **Arm 4 reports its buffer build separately.** A transferred buffer is
+//   consumed, so each iteration needs a fresh one, and building a 13 MB
+//   Float64Array is not free. Subtracting the build from the total produces a
+//   number below timer resolution and meaninglessly close to zero, so the total
+//   is reported and the build is shown beside it.
+//
+// GEO-005, the columnar-carrier helper this was originally written to gate, is
+// rejected — `powerMessageCodec` already ships `CODECS.RAW` and
+// `collectTransferables()`. The measurement stands on its own.
+
+async function runGeoEncodeWorkload() {
+  const { Worker: NodeWorker } = await import('node:worker_threads');
+
+  const RUNS = Number(process.env.CLAIM_GEO_RUNS || 7);
+  const LINE_COUNT = Number(process.env.CLAIM_GEO_LINES || 200);
+  const LINE_COORDS = Number(process.env.CLAIM_GEO_LINE_COORDS || 4500);
+  const POINT_COUNT = Number(process.env.CLAIM_GEO_POINTS || 200000);
+
+  console.log('BENCH-002j — when does a flat typed array beat an object graph?\n');
+  console.log('  GEO-001. Four arms, same payload, real worker, real call path.');
+  console.log('  MapLibre #106 reports ~200ms of JSON.stringify per setData on the');
+  console.log('  lines payload; geobuf was tried there and "still takes ~200ms".\n');
+
+  // A worker that does the realistic thing with whatever it is handed, so no
+  // arm can win by having its work skipped.
+  const workerSource = `
+    import { parentPort } from 'worker_threads';
+    parentPort.on('message', (msg) => {
+      let touched = 0;
+      if (typeof msg === 'string') {
+        touched = countCoords(JSON.parse(msg));
+      } else if (msg && msg.__geo === 'flat') {
+        touched = msg.positions.length;
+      } else if (msg && msg.type === 'FeatureCollection') {
+        touched = countCoords(msg);
+      }
+      parentPort.postMessage({ touched });
+    });
+    function countCoords(fc) {
+      let n = 0;
+      for (const f of fc.features) {
+        const c = f.geometry.coordinates;
+        n += f.geometry.type === 'Point' ? 1 : c.length;
+      }
+      return n;
+    }
+  `;
+
+  const worker = new NodeWorker(workerSource, { eval: true });
+  worker.setMaxListeners(0);
+  await new Promise((resolve) => worker.once('online', resolve));
+
+  // One error listener for the whole run. Attaching one per round trip is what
+  // produced a MaxListenersExceededWarning on the second shape.
+  let workerError = null;
+  worker.on('error', (err) => {
+    workerError = err;
+  });
+
+  const roundTrip = (payload, transfer) =>
+    new Promise((resolve, reject) => {
+      const onMessage = (reply) => {
+        worker.off('message', onMessage);
+        resolve(reply);
+      };
+      worker.on('message', onMessage);
+      if (workerError) return reject(workerError);
+      if (transfer) worker.postMessage(payload, transfer);
+      else worker.postMessage(payload);
+    });
+
+  /** Trimmed median of `runs` measurements, in ms. */
+  const timeMs = async (make) => {
+    for (let i = 0; i < 2; i += 1) await make(); // warm up
+    const samples = [];
+    for (let r = 0; r < RUNS; r += 1) {
+      const t0 = process.hrtime.bigint();
+      await make();
+      samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
+    }
+    samples.sort((a, b) => a - b);
+    return samples[Math.floor(samples.length / 2)];
+  };
+
+  // ── Payload builders ──────────────────────────────────────────────────────
+
+  const makeLines = (rng) => {
+    const features = new Array(LINE_COUNT);
+    for (let i = 0; i < LINE_COUNT; i += 1) {
+      const coords = new Array(LINE_COORDS);
+      for (let j = 0; j < LINE_COORDS; j += 1) {
+        coords[j] = [-122.4 + rng() * 0.5, 37.7 + rng() * 0.5];
+      }
+      features[i] = {
+        type: 'Feature',
+        id: i,
+        properties: { speed: rng() * 30 },
+        geometry: { type: 'LineString', coordinates: coords },
+      };
+    }
+    return { type: 'FeatureCollection', features };
+  };
+
+  const makePoints = (rng) => {
+    const features = new Array(POINT_COUNT);
+    for (let i = 0; i < POINT_COUNT; i += 1) {
+      features[i] = {
+        type: 'Feature',
+        id: i,
+        properties: { v: rng() },
+        geometry: { type: 'Point', coordinates: [-122.4 + rng() * 0.5, 37.7 + rng() * 0.5] },
+      };
+    }
+    return { type: 'FeatureCollection', features };
+  };
+
+  /** The same logical data as one interleaved lon/lat Float64Array. */
+  const toFlat = (fc) => {
+    let n = 0;
+    for (const f of fc.features) {
+      n += f.geometry.type === 'Point' ? 1 : f.geometry.coordinates.length;
+    }
+    const positions = new Float64Array(n * 2);
+    let k = 0;
+    for (const f of fc.features) {
+      const c = f.geometry.coordinates;
+      if (f.geometry.type === 'Point') {
+        positions[k++] = c[0];
+        positions[k++] = c[1];
+      } else {
+        for (let j = 0; j < c.length; j += 1) {
+          positions[k++] = c[j][0];
+          positions[k++] = c[j][1];
+        }
+      }
+    }
+    return { __geo: 'flat', positions };
+  };
+
+  const shapes = [
+    { label: `${LINE_COUNT} lines x ${LINE_COORDS}`, make: makeLines, note: 'MapLibre #106 shape' },
+    { label: `${POINT_COUNT} points`, make: makePoints, note: 'deck.gl / supercluster shape' },
+  ];
+
+  const rows = [];
+  for (const shape of shapes) {
+    const rng = makeRng(SEED);
+    const fc = shape.make(rng);
+    const flat = toFlat(fc);
+    const json = JSON.stringify(fc);
+
+    const bytesJson = Buffer.byteLength(json);
+    const bytesFlat = flat.positions.byteLength;
+
+    // Costs that happen *before* the wire, reported beside the arm that
+    // contains them so the split is visible rather than hidden.
+    const stringifyMs = await timeMs(() => JSON.stringify(fc));
+    const buildMs = await timeMs(() => toFlat(fc));
+
+    const arm1 = await timeMs(() => roundTrip(JSON.stringify(fc), undefined));
+    const arm2 = await timeMs(() => roundTrip(fc, undefined));
+    const arm3 = await timeMs(() => roundTrip(flat, undefined));
+    const arm4 = await timeMs(() => {
+      const fresh = toFlat(fc);
+      return roundTrip(fresh, [fresh.positions.buffer]);
+    });
+
+    rows.push({
+      label: shape.label,
+      note: shape.note,
+      bytesJson,
+      bytesFlat,
+      stringifyMs,
+      buildMs,
+      arm1,
+      arm2,
+      arm3,
+      arm4,
+    });
+  }
+
+  console.log(
+    `  ${'payload'.padEnd(22)}${'flat MB'.padStart(9)}${'arm1 json'.padStart(11)}` +
+      `${'arm2 clone'.padStart(12)}${'arm3 clone'.padStart(12)}${'arm4 xfer'.padStart(11)}` +
+      `${'4 vs 2'.padStart(9)}`
+  );
+  console.log(`  ${'-'.repeat(86)}`);
+  for (const r of rows) {
+    const ratio = r.arm2 / (r.arm4 || 0.0001);
+    console.log(
+      `  ${r.label.padEnd(22)}${(r.bytesFlat / 1048576).toFixed(1).padStart(9)}` +
+        `${r.arm1.toFixed(2).padStart(11)}${r.arm2.toFixed(2).padStart(12)}` +
+        `${r.arm3.toFixed(2).padStart(12)}${r.arm4.toFixed(2).padStart(11)}` +
+        `${ratio.toFixed(1).padStart(8)}x`
+    );
+  }
+
+  console.log('\n  arm1 includes the main-thread stringify, because that is the cost');
+  console.log('  MapLibre #106 reports. arm4 includes building the buffer, because a');
+  console.log('  transferred buffer is consumed. Both pre-wire costs, separately:');
+  for (const r of rows) {
+    console.log(
+      `    ${r.label.padEnd(22)} stringify ${r.stringifyMs.toFixed(2)}ms` +
+        `   build ${r.buildMs.toFixed(2)}ms`
+    );
+  }
+
+  console.log('\n  bytes on the wire — the two representations are not the same size,');
+  console.log('  and that difference is part of the answer:');
+  for (const r of rows) {
+    console.log(
+      `    ${r.label.padEnd(22)} json ${(r.bytesJson / 1048576).toFixed(1)}M` +
+        `   flat ${(r.bytesFlat / 1048576).toFixed(1)}M` +
+        `   ratio ${(r.bytesJson / r.bytesFlat).toFixed(2)}x`
+    );
+  }
+
+  console.log('\n  Reading the table:');
+  console.log('  - arm2 vs arm4 is the object-graph penalty, which is the number the');
+  console.log('    ecosystem keeps guessing at.');
+  console.log('  - arm1 vs arm4 is the JSON penalty, which is what MapLibre #106');
+  console.log('    actually pays today.');
+  console.log('  - arm3 vs arm4 is the transfer win. Chrome measured ~46x for 32MB;');
+  console.log('    it should show up here if the payload is large enough.');
+  console.log('  - arm1 vs arm2 says whether JSON is faster than structured clone for');
+  console.log('    this shape, which is not the obvious answer and is worth pinning.');
+  console.log('  - A negative result is a publishable finding, not a deleted task.');
+
+  console.log('\n  Stability: the large arms are stable to a few per cent across runs.');
+  console.log('  The small ones are not — arm3 on the points payload has been seen at');
+  console.log('  0.06ms and 0.64ms on consecutive runs, because it is near timer');
+  console.log('  resolution. Read the ratios between the large arms, not the absolute');
+  console.log('  value of a sub-millisecond cell. BENCH-001 measured a 28% median');
+  console.log('  min/max spread on the main harness for the same reason.');
+
+  await worker.terminate();
+  return { shapes: rows.map((r) => r.label) };
+}
+
+// ─── Workload: geocoalesce — does a coalescer beat PowerBatch + a Map? ───────
+//
+// GEO-002. UC1 (a realtime geospatial dashboard) has to fit a high-frequency
+// stream of feature mutations into ~60 frames a second. 5,000 entities at 1 Hz
+// is 5,000 mutations/s; 50,000 at 5 Hz is 250,000/s. The frame budget allows
+// about 60 updates/s, so the ratio is the whole problem.
+//
+// MapLibre #106's accepted workaround is a hand-rolled `requestAnimationFrame`
+// throttle with an in-memory cache of pending changes — i.e. the ecosystem's
+// answer is application code. This measures whether a helper beats that.
+//
+// The four arms:
+//
+//   1. One `updateData` per mutation, no coalescing.
+//   2. `PowerBatch` with a microtask flush.
+//   3. `PowerBatch` plus a `Map` for the keyed last-write-wins merge — **the
+//      honest composition, and the one the candidate has to beat.** An earlier
+//      draft of this plan described the fallback as "`PowerBatch` with a
+//      `maxWait`", which is not an option `PowerBatch` has; its options are
+//      `maxSize`, `scheduling` and `onError`, and neither it nor
+//      `PowerScheduler` has any *time* bound at all.
+//   4. A time-bounded coalescer with a declared drop policy (the candidate).
+//
+// **Diff quality is reported, not just latency.** A coalescer that wins on
+// throughput by silently discarding half the mutations has not won. MapLibre's
+// `dataabort` event is the observable that tells you a queued update was
+// dropped, so the harness counts drops and reports them as a column.
+//
+// **Arrival is spread over time, and this is the whole design.** A first draft
+// of this workload consumed the stream in one synchronous `for` loop, so every
+// mutation arrived in the same event-loop turn: `PowerBatch` flushed once, the
+// coalescer's window fired once, and all three coalescing arms tied at one
+// update each. That is the `setImmediate`/608x lesson in AGENTS.md almost
+// verbatim — *"per-turn cost is not batch cost"* — reproduced by a harness that
+// looked reasonable. Mutations now arrive in per-frame batches with a real
+// delay between frames, which is what a WebSocket delivering position reports
+// actually does.
+//
+// The fake source does the real work — serialise, post, parse, apply to a Map
+// keyed by feature id, mark affected tiles dirty. A stub that just counts calls
+// would show a 600x win that does not exist end to end.
+
+async function runGeoCoalesceWorkload() {
+  const { Worker: NodeWorker } = await import('node:worker_threads');
+  const { PowerBatch } = await import('../src/helpers/powerBatch.js');
+
+  const RUNS = Number(process.env.CLAIM_COALESCE_RUNS || 3);
+  const ENTITIES = Number(process.env.CLAIM_COALESCE_ENTITIES || 5000);
+  const SECONDS = Number(process.env.CLAIM_COALESCE_SECONDS || 2);
+  const HZ = Number(process.env.CLAIM_COALESCE_HZ || 1);
+  const FRAME_MS = Number(process.env.CLAIM_COALESCE_FRAME_MS || 1);
+  const WINDOW_MS = Number(process.env.CLAIM_COALESCE_WINDOW_MS || 16);
+
+  const FRAMES = Math.max(1, Math.round(SECONDS * 60));
+  const TOTAL = ENTITIES * HZ * SECONDS;
+  const PER_FRAME = Math.max(1, Math.floor(TOTAL / FRAMES));
+
+  console.log('BENCH-002k — does a coalescer beat PowerBatch + a Map?\n');
+  console.log('  GEO-002. UC1 has to fit a high-frequency mutation stream into ~60');
+  console.log("  frames a second. MapLibre #106's accepted workaround is a hand-rolled");
+  console.log('  requestAnimationFrame throttle, so the bar is application code.\n');
+  console.log(
+    `  ${ENTITIES} entities at ${HZ}Hz for ${SECONDS}s = ` +
+      `${TOTAL.toLocaleString()} mutations over ${FRAMES} frames ` +
+      `(${PER_FRAME} per frame, ${FRAME_MS}ms apart).\n`
+  );
+
+  // A worker that applies a diff to a Map keyed by feature id and marks
+  // affected tiles dirty — the work MapLibre's GeoJSON worker source does.
+  const workerSource = `
+    import { parentPort } from 'worker_threads';
+    const store = new Map();
+    const dirty = new Set();
+    parentPort.on('message', (msg) => {
+      if (msg.kind === 'diff') {
+        for (const u of msg.update) {
+          store.set(u.id, u);
+          dirty.add(u.tile);
+        }
+        parentPort.postMessage({ applied: msg.update.length, size: store.size });
+      } else if (msg.kind === 'reset') {
+        store.clear();
+        dirty.clear();
+        parentPort.postMessage({ reset: true });
+      }
+    });
+  `;
+
+  const worker = new NodeWorker(workerSource, { eval: true });
+  worker.setMaxListeners(0);
+  await new Promise((resolve) => worker.once('online', resolve));
+
+  const send = (payload) =>
+    new Promise((resolve) => {
+      const onMessage = (reply) => {
+        worker.off('message', onMessage);
+        resolve(reply);
+      };
+      worker.on('message', onMessage);
+      worker.postMessage(payload);
+    });
+
+  // ── The mutation stream ───────────────────────────────────────────────────
+  // Seeded, and the same stream drives every arm, so the workload difference
+  // cannot fold into the policy difference (BENCH-001's lesson).
+  const buildStream = () => {
+    const rng = makeRng(SEED);
+    /** @type {Array<Array<{id:number,lon:number,lat:number,tile:number}>>} */
+    const frames = [];
+    for (let f = 0; f < FRAMES; f += 1) {
+      const batch = new Array(PER_FRAME);
+      for (let i = 0; i < PER_FRAME; i += 1) {
+        batch[i] = {
+          id: Math.floor(rng() * ENTITIES),
+          lon: -122.4 + rng() * 0.5,
+          lat: 37.7 + rng() * 0.5,
+          tile: Math.floor(rng() * 64),
+        };
+      }
+      frames.push(batch);
+    }
+    return frames;
+  };
+
+  const stream = buildStream();
+  // `setImmediate` when FRAME_MS is 0, so the event loop still turns between
+  // frames — which is what makes the arrival pattern realistic — without
+  // charging every arm the same artificial delay. With `setTimeout(..., 0)`
+  // the delay floor is ~1ms and it dominates the total, hiding the work.
+  const frameDelay = () =>
+    FRAME_MS > 0
+      ? new Promise((resolve) => setTimeout(resolve, FRAME_MS))
+      : new Promise((resolve) => setImmediate(resolve));
+
+  /** Serialise a diff the way MapLibre's main thread does. */
+  const encodeDiff = (updates) => JSON.stringify({ kind: 'diff', update: updates });
+
+  // ── Arm 1: one updateData per mutation ────────────────────────────────────
+  const runPerMutation = async () => {
+    let applied = 0;
+    for (const frame of stream) {
+      for (const m of frame) {
+        const reply = await send(JSON.parse(encodeDiff([m])));
+        applied += reply.applied;
+      }
+      await frameDelay();
+    }
+    return { applied, dropped: 0, updates: TOTAL };
+  };
+
+  // ── Arm 2: PowerBatch, microtask flush, no keyed merge ────────────────────
+  const runBatch = async () => {
+    let applied = 0;
+    let updates = 0;
+    const batch = new PowerBatch(async (items) => {
+      const reply = await send(JSON.parse(encodeDiff(items)));
+      applied += reply.applied;
+      updates += 1;
+    });
+    for (const frame of stream) {
+      for (const m of frame) batch.add(m);
+      await frameDelay();
+    }
+    await batch.flush();
+    batch.dispose();
+    return { applied, dropped: 0, updates };
+  };
+
+  // ── Arm 3: PowerBatch + a Map for the keyed last-write-wins merge ─────────
+  // This is the honest composition and the one the candidate has to beat.
+  const runBatchPlusMap = async () => {
+    let applied = 0;
+    let updates = 0;
+    const pending = new Map();
+    const batch = new PowerBatch(async () => {
+      const items = [...pending.values()];
+      pending.clear();
+      const reply = await send(JSON.parse(encodeDiff(items)));
+      applied += reply.applied;
+      updates += 1;
+    });
+    for (const frame of stream) {
+      for (const m of frame) {
+        pending.set(m.id, m);
+        batch.add(m.id);
+      }
+      await frameDelay();
+    }
+    await batch.flush();
+    batch.dispose();
+    return { applied, dropped: 0, updates };
+  };
+
+  // ── Arm 4: a time-bounded coalescer with a declared drop policy ───────────
+  // The candidate. Bounded queue, `drop-oldest` declared up front, and the drop
+  // count reported rather than hidden.
+  const runCoalescer = async () => {
+    let applied = 0;
+    let updates = 0;
+    let dropped = 0;
+    const pending = new Map();
+    let timer = null;
+
+    const flush = async () => {
+      timer = null;
+      if (pending.size === 0) return;
+      const items = [...pending.values()];
+      pending.clear();
+      const reply = await send(JSON.parse(encodeDiff(items)));
+      applied += reply.applied;
+      updates += 1;
+    };
+
+    for (const frame of stream) {
+      for (const m of frame) {
+        if (pending.size >= ENTITIES && !pending.has(m.id)) {
+          // Bounded queue: the declared policy decides what goes, and it is
+          // counted rather than silent.
+          const oldest = pending.keys().next().value;
+          pending.delete(oldest);
+          dropped += 1;
+        }
+        pending.set(m.id, m);
+      }
+      if (timer === null) {
+        timer = setTimeout(() => void flush(), WINDOW_MS);
+      }
+      await frameDelay();
+    }
+    // Drain whatever is left, so the arm is not rewarded for abandoning work.
+    if (timer) clearTimeout(timer);
+    await flush();
+    return { applied, dropped, updates };
+  };
+
+  const arms = [
+    { label: 'per-mutation', run: runPerMutation },
+    { label: 'PowerBatch', run: runBatch },
+    { label: 'Batch + Map', run: runBatchPlusMap },
+    { label: `coalescer ${WINDOW_MS}ms`, run: runCoalescer },
+  ];
+
+  const results = [];
+  for (const arm of arms) {
+    await send({ kind: 'reset' });
+    await arm.run(); // warm up, so worker JIT is not in the sample
+    await send({ kind: 'reset' });
+
+    const samples = [];
+    let last = null;
+    for (let r = 0; r < RUNS; r += 1) {
+      const t0 = process.hrtime.bigint();
+      last = await arm.run();
+      samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
+    }
+    samples.sort((a, b) => a - b);
+    const total = samples[Math.floor(samples.length / 2)];
+    // The frame delay is charged to every arm equally, so it is subtracted to
+    // show the work. Both are reported: the total is the end-to-end number an
+    // application sees, the work is the number that compares the arms.
+    const delayMs = FRAMES * FRAME_MS;
+    results.push({
+      label: arm.label,
+      ms: total,
+      workMs: Math.max(0, total - delayMs),
+      ...last,
+    });
+  }
+
+  console.log(
+    `  ${'arm'.padEnd(16)}${'total ms'.padStart(10)}${'work ms'.padStart(10)}` +
+      `${'updates'.padStart(10)}${'applied'.padStart(10)}${'dropped'.padStart(10)}`
+  );
+  console.log(`  ${'-'.repeat(66)}`);
+  for (const r of results) {
+    console.log(
+      `  ${r.label.padEnd(16)}${r.ms.toFixed(1).padStart(10)}${r.workMs.toFixed(1).padStart(10)}` +
+        `${String(r.updates).padStart(10)}` +
+        `${r.applied.toLocaleString().padStart(10)}${r.dropped.toLocaleString().padStart(10)}`
+    );
+  }
+
+  const base = results[0];
+  const best = results[results.length - 1];
+  console.log('\n  What matters is not the ms column on its own:');
+  console.log(
+    `  - the per-mutation arm issues ${base.updates} updates for ` +
+      `${TOTAL.toLocaleString()} mutations`
+  );
+  console.log(
+    `  - the coalescer issues ${best.updates} for the same stream, ` +
+      `${best.dropped.toLocaleString()} dropped`
+  );
+  console.log('  - a coalescer that wins on throughput while dropping silently has not');
+  console.log('    won, which is why `dropped` is a column and not a footnote.');
+  console.log('  - `work ms` subtracts the frame delay, which is charged to every arm');
+  console.log('    equally. `total ms` is the end-to-end number an application sees.');
+  console.log('  - if Batch + Map ties with the coalescer on work ms, ship the recipe');
+  console.log('    and delete the helper. That is the rejection condition, written down');
+  console.log('    in advance — and on the default settings it is close to firing.');
+  console.log('  - `applied` differs between the coalescing arms because a longer');
+  console.log('    window collapses more mutations under last-write-wins. Fewer');
+  console.log('    applied is not free: it means staler positions on screen.');
+  console.log('  - the frame delay is part of the measurement. Set');
+  console.log('    CLAIM_COALESCE_FRAME_MS to a positive value and every arm is');
+  console.log('    charged the same artificial wait; set it to 0 and the loop still');
+  console.log('    turns via setImmediate, which is the realistic arrival pattern.');
+
+  await worker.terminate();
+  return { arms: results.map((r) => r.label) };
+}
+
+// ─── Workload: geoprecision — what does rounding actually save? ──────────────
+//
+// GEO-003, re-scoped. This was written to gate `powerGeoPrecision`, a standalone
+// helper that rounds coordinates in a typed array. That helper is **rejected**:
+// turf.js owns `truncate`, a typed-array variant is a performance variant of a
+// filled gap rather than a filled gap, and a second truncate to choose between
+// makes the developer experience worse rather than better.
+//
+// What survives is the *number*. RFC 7946 says 6 decimal places is ~10 cm and
+// warns that 15 inflates a Polygon-heavy document "almost by a factor of two";
+// `geojson-precision` reports ~50% going from 15 to 6; GDAL RFC 99 measures 13%
+// on a zipped GeoPackage. Three third-party numbers, none of them on a payload
+// shape a browser application would recognise.
+//
+// So this measures the byte saving on the two shapes `geoencode` already uses,
+// for both representations, with no new dependency: the object-shaped baseline
+// is hand-rolled rather than imported from turf, because adding turf to
+// devDependencies to measure a helper we are not building is the wrong trade.
+//
+// The output is a table the GEO-020 recipe can cite.
+
+async function runGeoPrecisionWorkload() {
+  const DECIMALS = (process.env.CLAIM_PRECISION_DECIMALS || '15,7,6,5,4,3')
+    .split(',')
+    .map((s) => Number(s.trim()));
+
+  console.log('BENCH-002l — what does rounding coordinates actually save?\n');
+  console.log('  GEO-003, re-scoped. The helper this gated is rejected (turf owns');
+  console.log('  `truncate`); what survives is the number the recipe needs.\n');
+  console.log('  RFC 7946: 6 decimals is ~10cm, and 15 inflates a Polygon-heavy');
+  console.log('  document "almost by a factor of two". geojson-precision reports ~50%');
+  console.log('  going from 15 to 6. Neither is measured on a browser payload shape.\n');
+
+  const LINE_COUNT = Number(process.env.CLAIM_GEO_LINES || 200);
+  const LINE_COORDS = Number(process.env.CLAIM_GEO_LINE_COORDS || 4500);
+  const POINT_COUNT = Number(process.env.CLAIM_GEO_POINTS || 200000);
+
+  const makeLines = (rng) => {
+    const features = new Array(LINE_COUNT);
+    for (let i = 0; i < LINE_COUNT; i += 1) {
+      const coords = new Array(LINE_COORDS);
+      for (let j = 0; j < LINE_COORDS; j += 1) {
+        coords[j] = [-122.4 + rng() * 0.5, 37.7 + rng() * 0.5];
+      }
+      features[i] = {
+        type: 'Feature',
+        id: i,
+        properties: { speed: rng() * 30 },
+        geometry: { type: 'LineString', coordinates: coords },
+      };
+    }
+    return { type: 'FeatureCollection', features };
+  };
+
+  const makePoints = (rng) => {
+    const features = new Array(POINT_COUNT);
+    for (let i = 0; i < POINT_COUNT; i += 1) {
+      features[i] = {
+        type: 'Feature',
+        id: i,
+        properties: { v: rng() },
+        geometry: { type: 'Point', coordinates: [-122.4 + rng() * 0.5, 37.7 + rng() * 0.5] },
+      };
+    }
+    return { type: 'FeatureCollection', features };
+  };
+
+  const toFlat = (fc) => {
+    let n = 0;
+    for (const f of fc.features) {
+      n += f.geometry.type === 'Point' ? 1 : f.geometry.coordinates.length;
+    }
+    const positions = new Float64Array(n * 2);
+    let k = 0;
+    for (const f of fc.features) {
+      const c = f.geometry.coordinates;
+      if (f.geometry.type === 'Point') {
+        positions[k++] = c[0];
+        positions[k++] = c[1];
+      } else {
+        for (let j = 0; j < c.length; j += 1) {
+          positions[k++] = c[j][0];
+          positions[k++] = c[j][1];
+        }
+      }
+    }
+    return positions;
+  };
+
+  // Object-shaped rounding, hand-rolled rather than imported. This is the shape
+  // `turf.truncate` has, and the point of the comparison is that it allocates a
+  // new object graph.
+  const roundObject = (fc, decimals) => {
+    const factor = 10 ** decimals;
+    const features = new Array(fc.features.length);
+    for (let i = 0; i < fc.features.length; i += 1) {
+      const src = fc.features[i];
+      const c = src.geometry.coordinates;
+      let geometry;
+      if (src.geometry.type === 'Point') {
+        geometry = {
+          type: 'Point',
+          coordinates: [Math.round(c[0] * factor) / factor, Math.round(c[1] * factor) / factor],
+        };
+      } else {
+        const coords = new Array(c.length);
+        for (let j = 0; j < c.length; j += 1) {
+          coords[j] = [
+            Math.round(c[j][0] * factor) / factor,
+            Math.round(c[j][1] * factor) / factor,
+          ];
+        }
+        geometry = { type: 'LineString', coordinates: coords };
+      }
+      features[i] = { ...src, geometry };
+    }
+    return { type: 'FeatureCollection', features };
+  };
+
+  // Typed-array rounding: in place, no allocation beyond the output buffer.
+  const roundFlat = (positions, decimals) => {
+    const factor = 10 ** decimals;
+    const out = new Float64Array(positions.length);
+    for (let i = 0; i < positions.length; i += 1) {
+      out[i] = Math.round(positions[i] * factor) / factor;
+    }
+    return out;
+  };
+
+  const shapes = [
+    { label: `${LINE_COUNT} lines x ${LINE_COORDS}`, make: makeLines },
+    { label: `${POINT_COUNT} points`, make: makePoints },
+  ];
+
+  const rows = [];
+  for (const shape of shapes) {
+    const rng = makeRng(SEED);
+    const fc = shape.make(rng);
+    const flat = toFlat(fc);
+    const baseJson = Buffer.byteLength(JSON.stringify(fc));
+    const baseFlat = flat.byteLength;
+
+    const cells = DECIMALS.map((d) => {
+      const jsonBytes = Buffer.byteLength(JSON.stringify(roundObject(fc, d)));
+      const flatBytes = roundFlat(flat, d).byteLength;
+      return { d, jsonBytes, flatBytes };
+    });
+
+    rows.push({ label: shape.label, baseJson, baseFlat, cells });
+  }
+
+  console.log(
+    `  ${'payload'.padEnd(22)}${'repr'.padEnd(8)}` +
+      DECIMALS.map((d) => `${d}d`.padStart(12)).join('')
+  );
+  console.log(`  ${'-'.repeat(30 + DECIMALS.length * 12)}`);
+  for (const r of rows) {
+    console.log(
+      `  ${r.label.padEnd(22)}${'json'.padEnd(8)}` +
+        r.cells.map((c) => `${(c.jsonBytes / 1048576).toFixed(1)}M`.padStart(12)).join('')
+    );
+    console.log(
+      `  ${''.padEnd(22)}${'flat'.padEnd(8)}` +
+        r.cells.map((c) => `${(c.flatBytes / 1048576).toFixed(1)}M`.padStart(12)).join('')
+    );
+  }
+
+  console.log('\n  saving against the unrounded payload:');
+  for (const r of rows) {
+    console.log(`  ${r.label}`);
+    for (const c of r.cells) {
+      const jsonPct = (100 * (1 - c.jsonBytes / r.baseJson)).toFixed(1);
+      const flatPct = (100 * (1 - c.flatBytes / r.baseFlat)).toFixed(1);
+      console.log(
+        `    ${String(c.d).padStart(2)}d   json -${jsonPct}%`.padEnd(34) + `flat -${flatPct}%`
+      );
+    }
+  }
+
+  console.log('\n  Note what the flat column is saying: a Float64Array is 8 bytes per');
+  console.log('  coordinate whatever the value, so rounding does not shrink it at all.');
+  console.log('  The saving is entirely on the JSON side. That is the whole argument');
+  console.log('  for the GEO-020 recipe being about *which representation you choose*,');
+  console.log('  not about a rounding helper.');
+  console.log('\n  A Float32Array column would be 4 bytes per coordinate regardless of');
+  console.log('  precision, and loses precision beyond ~6 decimals — which is exactly');
+  console.log('  the RFC 7946 recommendation, so the loss is acceptable but must be');
+  console.log('  stated rather than discovered.');
+
+  return { shapes: rows.map((r) => r.label), decimals: DECIMALS };
+}
+
+// ─── Workload: geoprefetch — what in-flight window should a prefetch use? ────
+//
+// GEO-049. UC4 (camera-movement prefetch) needs a priority cursor bounded by an
+// in-flight window. MapLibre PR #8670 measures 12 as optimal against Chromium's
+// ~6 connections per origin and states the ratio explicitly — but that ratio is
+// host-dependent, and a recipe that hard-codes it is a claim without a number.
+//
+// This sweeps the window against a simulated per-tile latency and reports the
+// three numbers that matter:
+//
+//   - **requests issued** — the total load put on the tile server
+//   - **requests abandoned mid-flight** — the waste; a moving camera's network
+//     cost is dominated by these, because the viewport covers ground and then
+//     uncovers it mid-download
+//   - **outstanding at arrival** — work still queued behind the render loop when
+//     the camera lands
+//
+// PR #8670's own sweep, for comparison: window 6 → 53 requests / 23 abandoned /
+// 6 outstanding; **12 → 36 / 0 / 6**; 24 → 46 / 5 / 18. A window that is too
+// small puts the churn back; one that is too large holds requests that queue
+// behind the render loop.
+//
+// **This is a simulation, not a measurement of a real browser.** It cannot
+// discover the host's connection limit — `test/bench/e2e/preload_flight.mjs` can,
+// because it runs in one — so the limit is *injected* and the mode says so. What
+// it measures is the shape of the trade-off, which is host-independent, and the
+// crossover, which is not.
+
+async function runGeoPrefetchWorkload() {
+  const WINDOWS = (process.env.CLAIM_PREFETCH_WINDOWS || '6,12,24')
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n >= 1);
+  const LATENCY = Number(process.env.CLAIM_PREFETCH_LATENCY_MS || 600);
+  const FRAMES = Number(process.env.CLAIM_PREFETCH_FRAMES || 180); // 3s at 60fps
+  const FRAME_MS = Number(process.env.CLAIM_PREFETCH_FRAME_MS || 16.7);
+  const TILES_PER_FRAME = Number(process.env.CLAIM_PREFETCH_TILES || 12);
+  const CONNECTION_LIMIT = Number(process.env.CLAIM_PREFETCH_CONNECTIONS || 6);
+
+  console.log('BENCH-002m — what in-flight window should a camera prefetch use?\n');
+  console.log('  GEO-049. UC4 needs a priority cursor bounded by an in-flight window.');
+  console.log("  MapLibre PR #8670 measures 12 as optimal against Chromium's ~6");
+  console.log('  connections per origin — but that ratio is host-dependent, so this');
+  console.log('  sweeps it rather than copying it.\n');
+  const LEAD = Math.max(2, Math.round(1000 / FRAME_MS));
+  console.log(
+    `  ${FRAMES} frames at ${FRAME_MS}ms (${((FRAMES * FRAME_MS) / 1000).toFixed(1)}s), ` +
+      `${TILES_PER_FRAME} tiles of new ground per frame, ${LATENCY}ms per tile.\n`
+  );
+  console.log(
+    `  Read-ahead lead: ${LEAD} frames (${(LEAD * FRAME_MS).toFixed(0)}ms) — one second's ` +
+      'worth of samples, floored at two, per PR #8670.\n'
+  );
+  console.log("  **This is a simulation.** It cannot discover the host's connection");
+  console.log('  limit — the browser harness can, because it runs in one — so the limit');
+  console.log('  is injected. What it measures is the shape of the trade-off, which is');
+  console.log('  host-independent, and the crossover, which is not.\n');
+
+  // A deterministic flight: each frame the viewport covers a window of tiles that
+  // slides forward, so ground is covered and then uncovered. Seeded, so every
+  // window sees the identical flight (BENCH-001's lesson).
+  const buildFlight = () => {
+    const rng = makeRng(SEED);
+    /** @type {number[][]} */
+    const coverage = [];
+    let base = 0;
+    for (let f = 0; f < FRAMES; f += 1) {
+      // The viewport slides, and jitters a little so tiles are not perfectly
+      // predictable — a real camera does not move in lockstep.
+      base += Math.max(1, Math.round(TILES_PER_FRAME * (0.6 + rng() * 0.8)));
+      const span = TILES_PER_FRAME * 2;
+      const frame = [];
+      for (let i = 0; i < span; i += 1) frame.push(base + i);
+      coverage.push(frame);
+    }
+    return coverage;
+  };
+
+  const coverage = buildFlight();
+
+  // The read-ahead lead, in frames, is `LEAD` from the header above. PR #8670
+  // reads ahead by *one second's worth of samples, floored at two* — two samples
+  // is worth 1.26s of warning on a ten-second flight but ~50ms on a one-second
+  // one, because a longer movement is divided into more samples.
+
+  /**
+   * Run one window size over the flight, under the read-ahead policy.
+   *
+   * At frame `f` the cursor requests the tiles the viewport will cover at frame
+   * `f + LEAD`, not the tiles it covers now. That is the whole policy: a tile
+   * requested at `f` is ready at `f + LATENCY`, and the camera arrives at
+   * `f + LEAD`, so the lead has to cover the latency or the tile lands late.
+   *
+   * The destination is read first, because a path ends where it is going. PR
+   * #8670 measured the alternative — reading in camera order — and it *"brought
+   * not one destination tile in before arrival, and because those trip tiles
+   * queued ahead, the destination landed 20-770ms LATER than with no preload at
+   * all."*
+   *
+   * @param {number} window
+   */
+  const runWindow = (window) => {
+    /** tile id -> time it became available */
+    const available = new Map();
+    /** @type {Array<{tile: number, readyAt: number}>} */
+    let inflight = [];
+    let issued = 0;
+    let abandoned = 0;
+    let late = 0;
+
+    /** Tiles the viewport covers at frame `f`. */
+    const coveredAt = (f) => (f >= 0 && f < FRAMES ? new Set(coverage[f]) : new Set());
+
+    // The last frame that covers each tile. A request that lands after that frame
+    // is late: the camera has already passed the ground it was for. The first
+    // draft looked *backwards* from the landing frame, which reported almost
+    // everything as late — a tile requested at frame 0 for frame 60 lands at 36
+    // and is covered at 60, so it is not late at all.
+    /** @type {Map<number, number>} */
+    const lastCovered = new Map();
+    for (let f = 0; f < FRAMES; f += 1) {
+      for (const tile of coverage[f]) {
+        if (!lastCovered.has(tile) || lastCovered.get(tile) < f) lastCovered.set(tile, f);
+      }
+    }
+
+    for (let f = 0; f < FRAMES; f += 1) {
+      const now = f * FRAME_MS;
+
+      // Retire anything that has landed, and count a tile that landed after the
+      // camera had already passed over it.
+      const stillFlying = [];
+      for (const req of inflight) {
+        if (req.readyAt <= now) {
+          available.set(req.tile, req.readyAt);
+          // Late means the camera had already passed this ground: the tile's last
+          // covering frame is behind the frame it landed on.
+          const landedOnFrame = Math.round(req.readyAt / FRAME_MS);
+          if (landedOnFrame > (lastCovered.get(req.tile) ?? -1)) late += 1;
+        } else {
+          stillFlying.push(req);
+        }
+      }
+      inflight = stillFlying;
+
+      // Abandon requests for ground the camera has left **for good** — that is,
+      // ground no remaining frame will ever cover. The first draft of this check
+      // kept a request only if its tile was covered at `f` or at `f + LEAD`,
+      // which abandoned almost everything: a tile requested at frame 0 for frame
+      // 60 is in neither set at frame 1, so it was dropped one frame after being
+      // issued. That modelled no policy at all, and reported 99.4% waste at every
+      // window — a number that looked like a finding and was a bug.
+      const kept = [];
+      for (const req of inflight) {
+        let stillAhead = false;
+        for (let g = f; g < FRAMES; g += 1) {
+          if (coverage[g].includes(req.tile)) {
+            stillAhead = true;
+            break;
+          }
+        }
+        if (stillAhead) kept.push(req);
+        else abandoned += 1;
+      }
+      inflight = kept;
+
+      // The cursor: destination first on the opening frame, then read ahead.
+      const target = f === 0 ? FRAMES - 1 : Math.min(FRAMES - 1, f + LEAD);
+      const wanted = coveredAt(target);
+      for (const tile of wanted) {
+        if (inflight.length >= window) break;
+        if (available.has(tile)) continue;
+        if (inflight.some((r) => r.tile === tile)) continue;
+        inflight.push({ tile, readyAt: now + LATENCY });
+        issued += 1;
+      }
+    }
+
+    return { window, issued, abandoned, outstanding: inflight.length, late };
+  };
+
+  const results = WINDOWS.map(runWindow);
+
+  console.log(
+    `  ${'window'.padEnd(10)}${'issued'.padStart(10)}${'abandoned'.padStart(12)}` +
+      `${'outstanding'.padStart(14)}${'landed late'.padStart(14)}${'waste %'.padStart(10)}`
+  );
+  console.log(`  ${'-'.repeat(70)}`);
+  for (const r of results) {
+    const waste = (100 * r.abandoned) / Math.max(1, r.issued);
+    console.log(
+      `  ${String(r.window).padEnd(10)}${String(r.issued).padStart(10)}` +
+        `${String(r.abandoned).padStart(12)}${String(r.outstanding).padStart(14)}` +
+        `${String(r.late).padStart(14)}${waste.toFixed(1).padStart(9)}%`
+    );
+  }
+
+  const best = results.reduce((a, b) =>
+    b.abandoned + b.outstanding + b.late < a.abandoned + a.outstanding + a.late ? b : a
+  );
+  console.log(
+    `\n  Lowest combined waste on this flight: window ${best.window} ` +
+      `(${best.abandoned} abandoned, ${best.outstanding} outstanding, ${best.late} late).`
+  );
+
+  // The determinant the sweep is really measuring.
+  const leadMs = LEAD * FRAME_MS;
+  console.log(
+    `\n  The determinant is lead vs latency, not the window: lead ${leadMs.toFixed(0)}ms ` +
+      `against ${LATENCY}ms per tile.`
+  );
+  if (leadMs >= LATENCY) {
+    console.log('  Lead covers latency, so no tile can land late and none can be abandoned —');
+    console.log('  the window then controls only how far ahead you read (`issued`) and how');
+    console.log('  much is still in flight when the camera lands (`outstanding`). That is why');
+    console.log('  every row above shows zero waste: the policy is sound and the window is a');
+    console.log('  read-ahead distance, not a waste control.');
+  } else {
+    console.log('  Lead does NOT cover latency, so tiles land late whatever the window. Raise');
+    console.log('  the lead (a longer read-ahead) before tuning the window — the window cannot');
+    console.log('  fix a lead that is too short.');
+  }
+  console.log("\n  Compare with PR #8670's measured 12 against Chromium's ~6 connections");
+  console.log('  per origin. If the two disagree, the host differs — which is the point of');
+  console.log('  measuring rather than copying. Their 23 abandoned at window 6 came from a');
+  console.log('  real browser whose sampled path and actual path diverge; this model uses one');
+  console.log('  path for both, so it cannot reproduce that term.');
+  console.log('\n  The connection limit is injected, not discovered: this runs in Node.');
+  console.log(
+    `  Set CLAIM_PREFETCH_CONNECTIONS to your host's value (Chromium: ~${CONNECTION_LIMIT}).`
+  );
+
+  return { windows: WINDOWS, best: best.window };
+}
+
 const MODES = {
   zipf: runZipfWorkload,
   latency: runScaledLatencyWorkload,
@@ -5080,6 +6101,10 @@ const MODES = {
   ratelimit: runRateLimitWorkload,
   datagram: runDatagramWorkload,
   apdex: runApdexWorkload,
+  geoencode: runGeoEncodeWorkload,
+  geocoalesce: runGeoCoalesceWorkload,
+  geoprecision: runGeoPrecisionWorkload,
+  geoprefetch: runGeoPrefetchWorkload,
   cardinality: runCardinalityWorkload,
 };
 
