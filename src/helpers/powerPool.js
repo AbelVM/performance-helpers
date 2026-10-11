@@ -392,7 +392,7 @@ export class PowerPool {
    * @param {'enqueue'|'drop-oldest'|'drop-newest'|'reject'} [options.queuePolicy='enqueue'] - Queue overflow behavior when the pool is saturated.
    * @param {boolean} [options.lazy=true] - If true, defer creating workers up to `size` until demand; only `minSize` workers are created at construction.
    * @param {number} [options.slowTaskThreshold=Infinity] - Task duration (ms) above which a completed task is counted as "slow". When finite, `stats().performance.percentSlowTasks` reports the exact percentage of tasks exceeding this threshold. Defaults to `Infinity` (disabled; `percentSlowTasks` stays `0`).
-   * @param {number} [options.maxQueueLength=Infinity] - Hard cap on queued tasks. With the default `queuePolicy: 'enqueue'` and no cap, a saturated pool grows its queue until the process runs out of memory; a cap makes the overflow observable instead - the incoming task is refused (`false`, or `ERR_POOL_QUEUE_FULL` when awaiting a response). `drop-oldest` still evicts the oldest to make room.
+   * @param {number|'auto'} [options.maxQueueLength=Infinity] - Hard cap on queued tasks. With the default `queuePolicy: 'enqueue'` and no cap, a saturated pool grows its queue until the process runs out of memory; a cap makes the overflow observable instead - the incoming task is refused (`false`, or `ERR_POOL_QUEUE_FULL` when awaiting a response). `drop-oldest` still evicts the oldest to make room. Pass `'auto'` to resolve the cap to `maxSize ** 2` — a starting point for the common case of an unbounded queue, not a default. The resolved number is reported by `getStats().maxQueueLength`, and a later `resize()` does not re-derive it.
    * @param {number} [options.maxDrainWaiters=100] - Cap on concurrent `drain()` waits, so a caller that drains in a loop cannot accumulate unbounded `idle` listeners. (Internally `DEFAULT_MAX_DRAIN_WAITERS`; not exported.)
    */
   constructor(workerSource, options = {}) {
@@ -521,14 +521,29 @@ export class PowerPool {
       : 'enqueue';
     // Hard cap on the task queue. `Infinity` (the default) preserves the
     // pre-2.0 behaviour where `queuePolicy: 'enqueue'` grows without bound.
-    this._maxQueueLength = assertLimitRequired(options.maxQueueLength, {
-      name: 'maxQueueLength',
-      className: 'PowerPool',
-      integer: true,
-      min: 0,
-      allowInfinity: true,
-      fallback: Infinity,
-    });
+    //
+    // `'auto'` resolves to `maxSize ** 2` (PISC-007) — Piscina's affordance for the
+    // most common misconfiguration, which is leaving the queue unbounded and
+    // discovering it as an OOM rather than as a refusal. It is a **starting point,
+    // not a default**: `Infinity` remains the default, because a cap that silently
+    // appears is a cap nobody chose, and the whole value of a cap is that it is a
+    // decision.
+    //
+    // Resolved once, here, and reported back through `getStats().maxQueueLength`.
+    // A later `resize()` does **not** re-derive it: a bound that moves under a
+    // running pool is a bound nobody can reason about, and the caller who wants a
+    // different one can pass a number.
+    this._maxQueueLength =
+      options.maxQueueLength === 'auto'
+        ? this.maxSize * this.maxSize
+        : assertLimitRequired(options.maxQueueLength, {
+            name: 'maxQueueLength',
+            className: 'PowerPool',
+            integer: true,
+            min: 0,
+            allowInfinity: true,
+            fallback: Infinity,
+          });
     this._maxDrainWaiters = assertLimitRequired(options.maxDrainWaiters, {
       name: 'maxDrainWaiters',
       className: 'PowerPool',
@@ -4632,6 +4647,9 @@ export class PowerPool {
       },
       queueLength: this.queue.length,
       queueDepth: this.queue.length,
+      // The **resolved** cap, so a caller that passed `'auto'` can see what it
+      // became without re-deriving `maxSize ** 2` (PISC-007).
+      maxQueueLength: this._maxQueueLength,
       queuePressure: Number.isFinite(this._maxQueueLength)
         ? Math.min(1, this.queue.length / Math.max(1, this._maxQueueLength))
         : this.queue.length > 0

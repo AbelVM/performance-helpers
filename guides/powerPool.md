@@ -29,7 +29,7 @@ positional transfer argument is retained for compatibility. Call
 | `options.messageCodec`                                  |              `'framed' \| 'legacy' \| 'negotiated'` |                                     `'framed'` | Wire protocol for object messages. `'framed'` posts a `PowerMessageCodec` envelope; `'legacy'` restores the 1.x bare-JSON body; `'negotiated'` behaves exactly like `'framed'` until a worker advertises the native carrier, then sends that carrier to that worker alone. See [Migrating to the framed protocol](#migrating-to-the-framed-protocol-breaking-change-in-20) and [Protocol negotiation](#protocol-negotiation-negotiated). |
 | `options.taskQueue`                                     |                                           `boolean` |                                         `true` | Whether to queue tasks when pool is saturated.                                                                                                                                                                                                                                                                                                                                                                                           |
 | `options.queuePolicy`                                   | `'enqueue'\|'drop-oldest'\|'drop-newest'\|'reject'` |                                      `enqueue` | Policy to apply when the pool is saturated and the queue would otherwise grow. See the queue policy section below.                                                                                                                                                                                                                                                                                                                       |
-| `options.maxQueueLength`                                |                                            `number` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                                                                                                                        |
+| `options.maxQueueLength`                                |                                  `number`\|`'auto'` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                                                                                                                        |
 | `options.priority`                                      |                                            `number` |                                            `0` | Default task priority for queued messages. Higher values are dispatched before lower values when the pool is saturated. Tasks with the same priority maintain FIFO order. Can be overridden per-message via `postMessage(msg, transfer, { priority })`. See [Task priority](#task-priority).                                                                                                                                             |
 | `options.priorityAgingMs`                               |                                            `number` |                                            `0` | Waiting milliseconds required to gain one effective priority point. Set above `0` to prevent low-priority queued work from starving during sustained high-priority traffic.                                                                                                                                                                                                                                                              |
 | `options.maxDrainWaiters`                               |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be _waiting_ at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners.                                                                                                                                                                                                                                    |
@@ -213,6 +213,22 @@ try {
 ```
 
 A batch is capped as a group: if 8 of 10 items do not fit, the first 2 are queued and the remaining 8 slots in the result array are `false`. The pool does not queue what fits and then silently drop the rest.
+
+**`maxQueueLength: 'auto'` — a starting point, not a default.** **New in 2.0.1.** Pass the string `'auto'` and the cap resolves to `maxSize ** 2`, which is Piscina's affordance for the most common misconfiguration with this option: leaving it unbounded and discovering that as an OOM rather than as a refusal.
+
+```js
+const pool = new PowerPool(ImageWorker, {
+  minSize: 2,
+  maxSize: 8,
+  maxQueueLength: 'auto', // resolves to 64
+});
+pool.getStats().maxQueueLength; // 64 — the resolved number, not the string
+```
+
+Two things to know:
+
+- **`Infinity` is still the default.** A cap that silently appears is a cap nobody chose, and the whole value of a bound is that it is a decision. `'auto'` is something you opt into.
+- **It is resolved once, at construction.** A later `resize()` does not re-derive it, because a bound that moves under a running pool is a bound nobody can reason about. If you want a different number, pass a number.
 
 If you would rather be **told** about pressure without refusing anything, set `options.queueHighThreshold` instead. It emits `pool:queue:high` on the first crossing (and not again until the queue drains back below it) and changes nothing else — see [Events and handlers](#events-and-handlers). The two compose: use the threshold for alerting, the cap for safety.
 

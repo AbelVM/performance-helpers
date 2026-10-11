@@ -280,3 +280,79 @@ describe('PowerPool option parsing fallbacks', () => {
     expect(pool._slowTaskThreshold).toBe(250);
   });
 });
+
+describe('PowerPool maxQueueLength: auto', () => {
+  // PISC-007. The most common misconfiguration with this pool is leaving the queue
+  // unbounded: nothing refuses, nothing warns, and the failure arrives as an OOM
+  // rather than as a refusal. `'auto'` is the affordance for that — but it is a
+  // *starting point*, not a default, and the tests below pin both halves of that.
+
+  it('resolves to maxSize squared', () => {
+    const pool = new PowerPool(Busy, {
+      size: 1,
+      minSize: 1,
+      maxSize: 4,
+      lazy: false,
+      maxQueueLength: 'auto',
+    });
+    expect(pool.getStats().maxQueueLength).toBe(16);
+  });
+
+  it('leaves Infinity as the default, because a cap nobody chose is not a cap', () => {
+    // The other half, and the reason this is an affordance rather than a default
+    // change. A bound that silently appears is a bound nobody decided on, and the
+    // whole value of a bound is that it is a decision.
+    const pool = new PowerPool(Busy, { size: 1, minSize: 1, maxSize: 4, lazy: false });
+    expect(pool.getStats().maxQueueLength).toBe(Infinity);
+  });
+
+  it('still accepts an explicit number, unchanged', () => {
+    const pool = new PowerPool(Busy, {
+      size: 1,
+      minSize: 1,
+      maxSize: 4,
+      lazy: false,
+      maxQueueLength: 500,
+    });
+    expect(pool.getStats().maxQueueLength).toBe(500);
+  });
+
+  it('does not re-derive the cap on resize, so the bound stays reasoned-about', () => {
+    // A bound that moves under a running pool is a bound nobody can reason about.
+    // Recorded as a deliberate decision rather than an oversight: the caller who
+    // wants a different cap can pass a number.
+    const pool = new PowerPool(Busy, {
+      size: 1,
+      minSize: 1,
+      maxSize: 4,
+      lazy: false,
+      maxQueueLength: 'auto',
+    });
+    pool.resize({ maxSize: 10 });
+    expect(pool.getStats().maxQueueLength).toBe(16);
+  });
+
+  it('actually bounds the queue, rather than only reporting a number', () => {
+    // The point of the option. With `'auto'` and `maxSize: 1` the cap is 1, so once
+    // the single worker has its one in-flight task the next arrival must be
+    // refused — otherwise the resolved number is decoration.
+    //
+    // `maxTasksPerWorker: 1` is what saturates the pool: without it the worker
+    // accepts every post and the queue never fills, which is how the first draft of
+    // this test passed with the cap doing nothing.
+    const pool = new PowerPool(Busy, {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      lazy: false,
+      maxQueueLength: 'auto',
+      queuePolicy: 'reject',
+    });
+    expect(pool.getStats().maxQueueLength).toBe(1);
+    // The first task takes the worker's single in-flight slot.
+    expect(pool.postMessage({ n: 1 })).not.toBe(false);
+    // The second has nowhere to go and the cap refuses it.
+    expect(pool.postMessage({ n: 2 })).toBe(false);
+  });
+});
