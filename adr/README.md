@@ -49,6 +49,8 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 | [0012](./0012-sieve-eviction-is-measured-and-rejected.md)       | SIEVE eviction is measured and rejected                                          | Rejected |
 | [0013](./0013-envelope-pooling-is-measured-and-does-not-pay.md) | Envelope pooling is measured and does not pay                                    | Rejected |
 | [0014](./0014-apdex-counters-not-a-sketch.md)                   | APDEX keeps integer counters, not a score derived from a sketch                  | Accepted |
+| [0015](./0015-geospatial-scope.md)                              | Geospatial scope: fill the gaps maplibre-gl-js, turf.js and deck.gl leave        | Accepted |
+| [0016](./0016-piscina-as-a-source-of-ideas-not-of-code.md)      | Piscina as a source of ideas, not of code                                        | Accepted |
 
 ## Status values
 
