@@ -424,6 +424,18 @@ option - it only stops it being the default.
 
 ***
 
+### missCost
+
+> **missCost**: ((`key`, `value`) => `number`) \| `null`
+
+***
+
+### missCostScan
+
+> **missCostScan**: `number`
+
+***
+
 ### onError
 
 > **onError**: ((`arg0`, `arg1`) => `void`) \| `null`

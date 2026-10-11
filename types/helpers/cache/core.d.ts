@@ -54,6 +54,9 @@ export class PowerCache {
      */
     allowStale: boolean;
     staleTtl: number;
+    /** @type {?(key: *, value: *) => number} */
+    missCost: ((key: any, value: any) => number) | null;
+    missCostScan: number;
     /** @type {Function|null} */
     fetchMethod: Function | null;
     _now: () => number;
@@ -614,6 +617,41 @@ export class PowerCache {
      * @returns {void}
      */
     private _evictIfNeeded;
+    /**
+     * AUD-032. Pick the eviction victim by miss cost rather than by recency.
+     *
+     * Walks at most `missCostScan` nodes forward from the eviction candidate and
+     * returns the one whose `missCost` is lowest. The walk is **bounded**, and the
+     * bound is the whole design: an unbounded scan would be O(n) per eviction on
+     * the path that runs every time the cache is full, which is the one path this
+     * library has always kept O(1).
+     *
+     * The measurement behind the default, on a two-class workload (2000 cheap keys
+     * at 1 ms, 400 dear keys at 100 ms, 500-entry cache, 10 % dear accesses):
+     *
+     * | scan | dear keys re-read | dear keys one-off |
+     * | ---- | ---------------- | ----------------- |
+     * | 1    | baseline (LRU)   | baseline (LRU)    |
+     * | 8    | -1.8 %           | +0.0 %            |
+     * | 32   | -7.3 %           | +0.1 %            |
+     * | 500  | -84.2 %          | **+1.7 %**        |
+     *
+     * Read the last row carefully, because it is the reason the default is small.
+     * A full scan is dramatically better when expensive keys are re-read and
+     * measurably *worse* when they are not — it fills the cache with entries that
+     * will never be read again and evicts cheap ones that will be. The benefit is
+     * entirely a property of the caller's workload, which is why the hook is
+     * opt-in and the width is a knob rather than a constant.
+     *
+     * A throwing `missCost` is treated as "no opinion" and falls back to recency
+     * for that candidate, for the same reason `onEvict` is guarded: a callback
+     * error must not turn an eviction into an exception on a path with no
+     * `try/catch` above it.
+     *
+     * @private
+     * @returns {CacheNode|null}
+     */
+    private _cheapestEvictionCandidate;
     /** SIEVE eviction: scan from tail, clear visited bits, evict first unvisited. */
     _sieveEvict(): void;
     /** S3-FIFO eviction: enforce Small, Main, and Ghost queue limits. */

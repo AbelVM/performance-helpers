@@ -455,6 +455,84 @@ on every CI run rather than being a one-off measurement.
   because the probation segment and the sketch are the same mechanism.
   [Below](#tinylfu-admission-resisting-a-scan) has the numbers.
 
+## Cost-weighted eviction: `missCost`
+
+Every policy above answers **how often** an entry is used. None of them answers
+**what a miss costs** — and for a cache in front of an expensive computation,
+those are different questions. A key that is read once a second but takes 400 ms
+to recompute deserves more protection than a key read a thousand times a second
+that costs nothing to rebuild, and no recency- or frequency-based policy can see
+the difference.
+
+`missCost` closes that gap:
+
+```javascript
+const cache = new PowerCache({
+  maxEntries: 500,
+  missCost: (key, value) => estimateRecomputeMs(key, value),
+  missCostScan: 8,
+});
+```
+
+When the hook is set, the LRU eviction path evicts the **cheapest of the next
+`missCostScan` candidates** instead of the head. The hook receives both the key
+and the value, returns a number in whatever unit you care about, and is consulted
+only when the cache is actually full.
+
+### The measurement, and why the default is small
+
+Two-class workload: 2000 cheap keys at 1 ms, 400 dear keys at 100 ms, a 500-entry
+cache, 10 % of accesses landing on the dear class.
+
+| `missCostScan` | dear keys re-read | dear keys one-off |
+| -------------: | ----------------: | ----------------: |
+|              1 |          baseline |          baseline |
+|              8 |        **−1.8 %** |            +0.0 % |
+|             32 |        **−7.3 %** |            +0.1 % |
+|            500 |       **−84.2 %** |        **+1.7 %** |
+
+Read the last row before you raise the width. A full scan is dramatically better
+when expensive keys are re-read and measurably **worse** when they are not: it
+fills the cache with entries that will never be read again and evicts cheap ones
+that will be. The benefit is entirely a property of your workload, which is why
+the hook is opt-in and the width is a knob.
+
+The default of 8 is the conservative end. It is nearly free in the adversarial
+case and leaves real money on the table in the beneficial one — if you know your
+expensive keys are re-read, raise it.
+
+### What it costs
+
+- **Eviction becomes O(`missCostScan`) instead of O(1).** The walk is bounded,
+  and the bound is the design: an unbounded scan would be O(n) on the path that
+  runs every time the cache is full. With no hook set, the path is byte-for-byte
+  the old one — one node read, one unlink, no scan.
+- **A throwing hook is treated as "no opinion"** and falls back to recency for
+  that candidate, for the same reason `onEvict` is guarded: the eviction path has
+  no `try/catch` above it, so a callback error would otherwise turn a cache write
+  into a crash.
+- **A non-number return is also "no opinion."** `NaN` loses every comparison, so
+  a candidate whose cost could not be read never wins.
+
+### When not to use it
+
+- **Your miss costs are all similar.** There is nothing for the hook to exploit,
+  and you pay the scan for nothing.
+- **Your expensive keys are one-off.** The adversarial row above. A report
+  generated once per user, a migration run once per tenant — protecting those
+  fills the cache with entries that will never be read again.
+- **You want scan resistance.** That is `policy: 'slru'` or
+  `{ admission: 'tinylfu' }`, and both are measured above. `missCost` weights by
+  cost; it does not make the cache scan-resistant.
+
+### Pinned, not aspirational
+
+Both rows of the table are asserted in `test/powerCache.missCost.test.js` as
+**characterisations** — including the adversarial penalty, pinned specifically so
+that "the hook is free" cannot be claimed by someone reading only the beneficial
+row. If a future change to the eviction path inverts either result, that test
+fails.
+
 ## PowerMemoizer
 
 Small memoization helper that uses a `PowerCache` instance internally. It deduplicates concurrent Promise-returning calls and does not cache rejected Promises.

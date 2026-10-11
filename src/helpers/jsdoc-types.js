@@ -1145,6 +1145,19 @@ export {};
  *   `Infinity` to opt out of one on purpose.
  * @property {?(function(): (Promise<*>|*))} [fetchMethod] Default producer for
  *   {@link PowerCache#getOrFetch}. A per-call factory overrides it.
+ * @property {?(function(*, *): number)} [missCost] AUD-032. Weights
+ *   eviction by what a miss on this entry costs, in whatever unit the caller
+ *   cares about. When set, the LRU eviction path evicts the cheapest of the next
+ *   `missCostScan` candidates instead of the head. Off by default, and when unset
+ *   the eviction path is byte-for-byte the old one — one node read, one unlink,
+ *   no scan. The measurement behind the default width is in
+ *   `_cheapestEvictionCandidate`; the short version is that a wide scan is
+ *   dramatically better when expensive keys are re-read and measurably worse
+ *   when they are not, so the width is a knob and the hook is opt-in.
+ * @property {number} [missCostScan=8] How many eviction candidates
+ *   `missCost` compares. `1` means plain LRU. Bounded on purpose: an unbounded
+ *   scan would make eviction O(n) on the path that runs every time the cache is
+ *   full.
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability=false] - Opt in
  *   to metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Read by the constructor via `attach()` in
