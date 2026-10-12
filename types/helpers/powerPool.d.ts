@@ -103,7 +103,7 @@ export class PowerPool {
      */
     /** @type {WorkerObj[]} */
     workers: WorkerObj[];
-    queue: PowerQueue;
+    queue: PowerQueue | PowerPriorityQueue;
     /** number of currently active (dispatched) tasks across all workers */
     /** whether the pool is considered idle (no active tasks and empty queue) */
     /** whether queued dispatch is paused */
@@ -441,6 +441,68 @@ export class PowerPool {
      *
      * @returns {void}
      */
+    /**
+     * Graceful shutdown as a single entry point: wait for in-flight work, then
+     * terminate. **New in 2.0.1** (PISC-011).
+     *
+     * The `shutdown()` / `drain()` / `[Symbol.asyncDispose]` model is defensible and
+     * stays exactly as it is — this is a composition of it, not a replacement. What
+     * it adds is the one call a caller reaching for "shut this down properly"
+     * actually wants, which is *both* halves in the right order. Getting the order
+     * wrong is the failure this prevents: `shutdown()` alone abandons in-flight work,
+     * and `drain()` alone leaves the workers running.
+     *
+     * ```js
+     * await pool.close();                          // wait for work, then terminate
+     * await pool.close({ timeout: 5000 });         // wait at most 5 s, then terminate
+     * await pool.close({ force: true });           // terminate now, abandon work
+     * ```
+     *
+     * `force` and `timeout` are mutually exclusive: a forced close has nothing to
+     * wait for, so passing both is a contradiction rather than a precedence rule.
+     *
+     * @param {{force?: boolean, timeout?: number, signal?: AbortSignal}} [options]
+     * @returns {Promise<Object>} Resolves with the final `getStats()` snapshot.
+     */
+    close(options?: {
+        force?: boolean;
+        timeout?: number;
+        signal?: AbortSignal;
+    }): Promise<Object>;
+    /**
+     * Build the task queue for this pool: a heap when the priority key is static, a
+     * ring buffer when it is not. **New in 2.0.1** (PISC-004).
+     *
+     * The saturated dispatch path used to call `PowerQueue.shiftHighestPriority`,
+     * which scans every queued item to find the best one — O(n) per dispatch, so
+     * draining a saturated queue was O(n²). Under sustained saturation that is the
+     * difference between a pool that keeps up and one that falls behind
+     * progressively, and it matters more here than in Piscina: a long pause on a
+     * browser main thread is a dropped frame.
+     *
+     * **Why the split, and why it is not just "always use the heap".** The heap keys
+     * on `item.priority` at push time. `priorityAgingMs` makes the *effective*
+     * priority `priority + (now - enqueuedAt) / priorityAgingMs`, which drifts with
+     * the clock — so a static heap would order by a key that is already stale. Aging
+     * is therefore kept on the O(n) scan, and the heap is used when aging is off,
+     * which is the default and the case that saturates.
+     *
+     * The two orderings agree exactly for pool items: `PowerPriorityQueue` breaks
+     * priority ties on an insertion sequence number, which is FIFO — the same
+     * invariant `PowerQueue.shiftHighestPriority` documents and its tests pin. Its
+     * `itemPriority` also falls back to `item.weight`, but a pool's queued items
+     * carry `priority` and never `weight`, so that fallback never fires here.
+     *
+     * @returns {PowerQueue|PowerPriorityQueue}
+     * @private
+     */
+    /**
+     * Whether the task queue is the heap, and therefore whether `shift()` already
+     * returns the highest-priority item.
+     * @returns {boolean}
+     * @private
+     */
+    private get _usesPriorityHeap();
     shutdown(): void;
     /**
      * Encode a plain object to a Uint8Array, using a small cache to avoid
@@ -1220,6 +1282,7 @@ export type PostMessageOptions = import("./jsdoc-types.js").PostMessageOptions;
 export type PendingResponseEntry = import("./jsdoc-types.js").PendingResponseEntry;
 export type PowerPoolOptions = import("./jsdoc-types.js").PowerPoolOptions;
 import { PowerQueue } from './powerQueue.js';
+import { PowerPriorityQueue } from './powerPriorityQueue.js';
 import { PowerEventBus } from './powerEventBus.js';
 import { PowerLogger } from './powerLogger.js';
 import { PowerServo } from './powerServo.js';

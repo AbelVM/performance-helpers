@@ -544,7 +544,7 @@ interval, pinning the Node.js process).
 
 ### queue
 
-> **queue**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md)
+> **queue**: [`PowerQueue`](../../powerQueue/classes/PowerQueue.md) \| [`PowerPriorityQueue`](../../powerPriorityQueue/classes/PowerPriorityQueue.md)
 
 ***
 
@@ -913,6 +913,53 @@ receives an independent transferable buffer to avoid structured-clone copies.
 #### Returns
 
 `void`
+
+***
+
+### close()
+
+> **close**(`options?`): `Promise`\<`Object`\>
+
+Graceful shutdown as a single entry point: wait for in-flight work, then
+terminate. **New in 2.0.1** (PISC-011).
+
+The `shutdown()` / `drain()` / `[Symbol.asyncDispose]` model is defensible and
+stays exactly as it is — this is a composition of it, not a replacement. What
+it adds is the one call a caller reaching for "shut this down properly"
+actually wants, which is *both* halves in the right order. Getting the order
+wrong is the failure this prevents: `shutdown()` alone abandons in-flight work,
+and `drain()` alone leaves the workers running.
+
+```js
+await pool.close();                          // wait for work, then terminate
+await pool.close({ timeout: 5000 });         // wait at most 5 s, then terminate
+await pool.close({ force: true });           // terminate now, abandon work
+```
+
+`force` and `timeout` are mutually exclusive: a forced close has nothing to
+wait for, so passing both is a contradiction rather than a precedence rule.
+
+#### Parameters
+
+##### options?
+
+###### force?
+
+`boolean`
+
+###### signal?
+
+`AbortSignal`
+
+###### timeout?
+
+`number`
+
+#### Returns
+
+`Promise`\<`Object`\>
+
+Resolves with the final `getStats()` snapshot.
 
 ***
 
@@ -1303,15 +1350,6 @@ waiting tasks to available workers.
 ### shutdown()
 
 > **shutdown**(): `void`
-
-Shutdown the pool: clear timers, reject pending responses, terminate workers,
-and clear internal queues. This is a full stop that prevents background
-timers from keeping the process alive.
-
-Shutdown is **final**: the pool refuses every subsequent `postMessage()`,
-`postMessageBatch()`, `addWorker()` and `resize()` with an
-`ERR_POOL_TERMINATED` error rather than silently recreating workers.
-Create a new `PowerPool` to start again.
 
 #### Returns
 

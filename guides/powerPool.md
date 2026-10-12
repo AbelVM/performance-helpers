@@ -159,6 +159,8 @@ ignored.
 
 - `terminate()` — Immediately terminate all workers, clear queues, and stop the reaper interval.
 
+- `close({ force, timeout })` — **New in 2.0.1.** Graceful shutdown as a single entry point: wait for in-flight work, then terminate. A composition of `drain()` + `shutdown()`, both of which stay exactly as they are. See [Closing the pool](#closing-the-pool).
+
 - Disposal hooks: `[Symbol.dispose]()` calls `terminate()` synchronously; `[Symbol.asyncDispose]()` awaits `drain()` then terminates.
 
 - `getStats()` — Return a snapshot `{ status: Array<{id,tasks,lastActive}>, performance: Object, queueDepth, queuePressure }` with per-worker status and aggregated performance metrics (EWMA/time-per-task stats). `queuePressure` is normalized to `0..1` when `maxQueueLength` is finite. This is useful for logging and autoscale decisions.
@@ -254,6 +256,22 @@ pool.postMessage(normalTask); // priority 0
 - The default is `0`. Omitting `priority` is the same as `0`.
 - Priority is a property of the queued item, not the pool. Every post can choose its own priority regardless of the constructor default.
 - Priority composes with `queuePolicy`. `drop-oldest` still evicts the oldest entry when over `maxQueueLength`; `drop-newest` and `reject` still refuse the newcomer. Priority only changes the order in which queued items are _dispatched_, not which items are _admitted_ or _dropped_.
+
+**How it is dispatched, and why aging is the exception. New in 2.0.1.** With
+`priorityAgingMs` at its default of `0` the effective priority is static, so the
+queue is a **binary heap** and each dispatch is O(log n). Before this it was an O(n)
+scan of every queued item, which made draining a saturated queue O(n²) — under
+sustained saturation, the difference between a pool that keeps up and one that falls
+behind progressively. It matters more here than in a Node-only pool: a long pause on
+a browser main thread is a dropped frame.
+
+`priorityAgingMs` above `0` makes the effective priority
+`priority + (now - enqueuedAt) / priorityAgingMs`, which **drifts with the clock**. A
+heap keys on the priority at push time, so it would order by a key that is already
+stale; aging therefore stays on the O(n) scan. The two paths dispatch in the same
+order for the same input, and both keep FIFO among equal priorities — that equivalence
+is pinned by a test, so swapping the structure is not something a future change can
+quietly get wrong.
 
 **Batch posts.** `postMessageBatch` accepts `options.priority` and applies it to every item in the batch. Individual items cannot carry different priorities in the same batch — if you need mixed priorities, post them in separate batches or individual posts.
 
@@ -445,6 +463,9 @@ async function shutdown() {
   await pool.drain(); // wait until queue empty and workers idle
   // `terminate()` now delegates to `shutdown()` internally, but you can call either.
   pool.terminate();
+
+  // Option B (new in 2.0.1): the same thing in one call.
+  // await pool.close();
 }
 
 // Example usage
@@ -855,6 +876,35 @@ const shared = encodeMessage({ big: 'payload', repeated: true });
 const batch = Array.from({ length: 100 }, () => ({ message: shared, transfer: [shared.buffer] }));
 pool.postMessageBatch(batch);
 ```
+
+## Closing the pool
+
+**New in 2.0.1.** `close()` is graceful shutdown as a single entry point. The
+`shutdown()` / `drain()` / `[Symbol.asyncDispose]` model is defensible and stays
+exactly as it is — `close()` composes it rather than replacing it. What it adds is
+the one call a caller reaching for "shut this down properly" actually wants, which
+is _both_ halves in the right order.
+
+```js
+await pool.close(); // wait for in-flight work, then terminate
+await pool.close({ timeout: 5000 }); // wait at most 5 s, then terminate anyway
+await pool.close({ force: true }); // terminate now, abandoning the work
+```
+
+**Why the order matters.** `shutdown()` alone abandons in-flight work, and `drain()`
+alone leaves the workers running. Getting it wrong is silent — the pool looks closed
+and the last few tasks are gone.
+
+Three things to know:
+
+- **`force` and `timeout` are mutually exclusive.** A forced close has nothing to
+  wait for, so passing both is a contradiction rather than a precedence rule, and it
+  throws rather than silently preferring one.
+- **A drain that cannot finish does not block the close.** A timeout, an abort or too
+  many waiters is logged and the pool terminates anyway — a close that refuses to
+  finish because the drain timed out is worse than one that terminates.
+- **It resolves with the final `getStats()` snapshot**, the same shape `drain()`
+  resolves with, so a caller can log the closing state without a second call.
 
 ## Recommendations
 

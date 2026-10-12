@@ -278,6 +278,32 @@ The worst item, or `undefined` when empty.
 
 ***
 
+### pushMany()
+
+> **pushMany**(`items`): `number`
+
+Enqueue several items in one call.
+
+A loop over [PowerPriorityQueue#push](#push), and deliberately so: each push is
+already O(log n), so the bulk call is O(k log n) with no shared setup to
+amortise. `PowerQueue.pushMany` earns its separate implementation because a
+ring buffer can grow once and copy in blocks; a heap cannot, and pretending
+otherwise would be a slower loop with more code.
+
+#### Parameters
+
+##### items
+
+`any`[]
+
+#### Returns
+
+`number`
+
+New queue length after all pushes.
+
+***
+
 ### reset()
 
 > **reset**(): `void`
@@ -295,3 +321,26 @@ The worst item, or `undefined` when empty.
 #### Returns
 
 `any`
+
+***
+
+### toArray()
+
+> **toArray**(): `any`[]
+
+Return a shallow array snapshot of the queue contents **in dispatch order** —
+highest priority first, FIFO among equal priorities.
+
+Dispatch order rather than insertion order, because that is the useful
+question for a priority queue: "what would I get if I drained this". A caller
+who wants insertion order wants a `PowerQueue`.
+
+Sorts the *entries*, not the items, and that is the whole subtlety: the FIFO
+tiebreak is the insertion sequence number, which lives on the entry. Sorting
+the items directly would compare equal priorities as equal and fall back on
+the heap array's layout, which is a valid heap but not an insertion order — so
+the result would look sorted and not be FIFO.
+
+#### Returns
+
+`any`[]

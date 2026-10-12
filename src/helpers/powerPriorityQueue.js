@@ -67,6 +67,54 @@ export class PowerPriorityQueue {
     return this._size;
   }
 
+  /**
+   * Enqueue several items in one call.
+   *
+   * A loop over {@link PowerPriorityQueue#push}, and deliberately so: each push is
+   * already O(log n), so the bulk call is O(k log n) with no shared setup to
+   * amortise. `PowerQueue.pushMany` earns its separate implementation because a
+   * ring buffer can grow once and copy in blocks; a heap cannot, and pretending
+   * otherwise would be a slower loop with more code.
+   *
+   * @param {Array<any>} items
+   * @returns {number} New queue length after all pushes.
+   */
+  pushMany(items) {
+    if (!items || typeof items.length !== 'number') return this._size;
+    for (let i = 0; i < items.length; i++) this.push(items[i]);
+    return this._size;
+  }
+
+  /**
+   * Return a shallow array snapshot of the queue contents **in dispatch order** —
+   * highest priority first, FIFO among equal priorities.
+   *
+   * Dispatch order rather than insertion order, because that is the useful
+   * question for a priority queue: "what would I get if I drained this". A caller
+   * who wants insertion order wants a `PowerQueue`.
+   *
+   * Sorts the *entries*, not the items, and that is the whole subtlety: the FIFO
+   * tiebreak is the insertion sequence number, which lives on the entry. Sorting
+   * the items directly would compare equal priorities as equal and fall back on
+   * the heap array's layout, which is a valid heap but not an insertion order — so
+   * the result would look sorted and not be FIFO.
+   *
+   * @returns {Array<any>}
+   */
+  toArray() {
+    const entries = [];
+    for (let i = 1; i <= this._size; i++) entries.push(this._heap[i]);
+    // `_isBetter` is the class's own comparator, reused rather than re-spelled.
+    // Two comparators that must agree is two places for the ordering to drift,
+    // and the drift would be invisible: both would look sorted.
+    entries.sort((a, b) => {
+      if (this._isBetter(a, b)) return -1;
+      if (this._isBetter(b, a)) return 1;
+      return 0;
+    });
+    return entries.map((e) => e.item);
+  }
+
   shift() {
     if (this._size === 0) return undefined;
     const root = this._heap[1];
