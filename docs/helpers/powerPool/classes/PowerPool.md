@@ -250,6 +250,12 @@ whether the pool is considered idle (no active tasks and empty queue)
 
 ***
 
+### \_loadBalancer
+
+> **\_loadBalancer**: ((`arg0`) => `number` \| `Object` \| `null` \| `undefined`) \| `null`
+
+***
+
 ### \_logger
 
 > **\_logger**: [`PowerLogger`](../../powerLogger/classes/PowerLogger.md)

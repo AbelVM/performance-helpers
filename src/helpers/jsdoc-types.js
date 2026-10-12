@@ -101,6 +101,13 @@
  *   and `getStats().performance` reports `percentiles`, `queueWaitPercentiles` and
  *   `utilization`. Off by default, and the default path allocates no histogram and
  *   pays one boolean test per recording site.
+ * @property {function(Array<Object>): (number|Object|null|undefined)} [loadBalancer] -
+ *   Caller-supplied worker-selection policy (PISC-006). Called with a frozen array
+ *   of per-worker views — `{ id, tasks, latencyEwma, lastActive }` — and returns the
+ *   id or the object of the worker a new task should go to. Omit it and the built-in
+ *   least-loaded-plus-EWMA rule runs, exactly as before. A balancer that throws or
+ *   returns nothing usable falls back to that rule rather than breaking the send
+ *   path. The view is a plain frozen snapshot, never the live worker object.
  * @property {number} [maxListeners] - Cap on registered pool listeners before
  *   the `MaxListenersExceededWarning` path is taken.
  * @property {'framed'|'legacy'|'negotiated'} [messageCodec='framed'] - Wire

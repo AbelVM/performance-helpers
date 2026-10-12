@@ -322,6 +322,47 @@ Three things to know:
 `percentSlowTasks` keep their exact closed forms; the sketches add the tail shape
 beside them. Cross-reference ADR 0014.
 
+## Choosing the worker
+
+**New in 2.0.1.** `options.loadBalancer` replaces the _choice_ of worker, not the
+policy. Omit it and the built-in least-loaded-plus-EWMA rule runs, exactly as before —
+that rule beats a plain least-loaded count for heterogeneous tasks, because a worker
+that has been answering fast is a better bet than one that is merely idle.
+
+```js
+const pool = new PowerPool(WorkerScript, {
+  loadBalancer: (workers) => {
+    // `workers` is a frozen array of { id, tasks, latencyEwma, lastActive }
+    const quietest = workers.reduce((a, b) => (b.tasks < a.tasks ? b : a));
+    return quietest.id; // or the object itself
+  },
+});
+```
+
+**The view is a plain frozen object, not the live worker.** This is the part worth
+understanding before you write a balancer. A balancer is _your_ code running inside the
+pool, invoked from the pool's own send path — so it is handed a snapshot of four fields
+rather than the worker object, which would otherwise expose `terminate()`, the event
+wrapper, and everything reachable from them. `Object.freeze` makes an attempt to write
+to the view loud rather than silent.
+
+`latencyEwma` is in the view explicitly, because the whole point of the view is that
+reaching past it is not possible.
+
+Three things to know:
+
+- **Return the id or the object, either works.** A balancer that just read the view has
+  the id in hand; one that kept a reference has the object.
+- **A bad return falls back, it does not throw.** `null`, `undefined`, or an id that is
+  not in the pool selects the default rule. The alternative turns your bug into every
+  other caller's outage, because the throw would come from inside the pool's send path.
+  A balancer that _throws_ is logged and falls back the same way.
+- **A non-function is rejected at construction**, once, rather than silently ignored on
+  every dispatch.
+
+The same frozen view is reported per worker by `getStats().workers`, so debugging a
+custom policy reads exactly what the policy read.
+
 ## Autoscaling
 
 `PowerPool` supports an optional autoscaling mode that grows or shrinks the worker pool based on recent observed task latency (EWMA) and queue pressure. Enable it by passing `options.autoScale` to the constructor.

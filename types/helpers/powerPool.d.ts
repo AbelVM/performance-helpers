@@ -736,6 +736,50 @@ export class PowerPool {
      * @returns {void}
      */
     /**
+     * Choose the worker a new task goes to: the caller's `loadBalancer` if one is set,
+     * otherwise the built-in least-loaded-plus-EWMA rule. **New in 2.0.1** (PISC-006).
+     *
+     * **The default policy is not replaced.** PowerPool's EWMA tiebreak beats Piscina's
+     * for heterogeneous tasks, so this adds a choice rather than taking one away, and
+     * omitting `loadBalancer` behaves exactly as before.
+     *
+     * **The view a balancer receives is a plain frozen object, not the live
+     * `WorkerObj`, and that is the security-shaped half of this change.** A
+     * caller-supplied balancer is caller code running *inside* the pool, invoked from
+     * the pool's own send path. Handing it the live object would hand it
+     * `worker.terminate()`, the `WorkerAgnostic`, and everything reachable from them —
+     * enough to break the pool from a callback the pool itself calls. A frozen snapshot
+     * of four fields cannot do any of that, and `Object.freeze` makes the attempt loud
+     * rather than silent.
+     *
+     * `latencyEwma` is in the view explicitly rather than left for a balancer to reach
+     * past it for, because the whole point of the view is that reaching past it is not
+     * possible.
+     *
+     * A balancer that returns nothing usable — `null`, `undefined`, an id not in the
+     * pool, a non-object — falls back to the default rule rather than throwing. The
+     * alternative is throwing from inside the pool's own send path, which turns a
+     * caller's bug into every other caller's outage.
+     *
+     * @returns {WorkerObj|null}
+     * @private
+     */
+    /**
+     * Build the frozen per-worker view handed to a `loadBalancer` and reported by
+     * `getStats().workers`. **New in 2.0.1** (PISC-006).
+     *
+     * Four fields, and each is there because a balancer cannot do its job without it:
+     * `id` to name a choice, `tasks` for load, `latencyEwma` for the heterogeneous-task
+     * case the default policy exists for, and `lastActive` for an idle-aware policy.
+     *
+     * A fresh array of fresh frozen objects per call, not a cached one. A cached view
+     * would alias across calls, so a balancer that held onto one would observe — and be
+     * confused by — mutations it did not cause.
+     *
+     * @returns {Array<Object>}
+     * @private
+     */
+    /**
      * Return the least-loaded worker (smallest `tasks` count).
      *
      * When multiple workers share the same `tasks` count prefer the one with

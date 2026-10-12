@@ -429,6 +429,7 @@ export class PowerPool {
         'awaitResponseTimeout',
         'slowTaskThreshold',
         'recordTiming',
+        'loadBalancer',
         'maxListeners',
         'messageCodec',
         'encodeCacheLimit',
@@ -467,6 +468,9 @@ export class PowerPool {
       // Opt-in percentile telemetry (PISC-002). Off by default; see the histogram
       // allocation in the constructor for what it costs when on.
       recordTiming = false,
+      // Caller-supplied worker-selection policy (PISC-006). Omit it and the
+      // built-in least-loaded-plus-EWMA rule runs, exactly as before.
+      loadBalancer = null,
       autoScale = false,
       priorityAgingMs = 0,
     } = options;
@@ -627,6 +631,13 @@ export class PowerPool {
     // `queueWait` report and what `percentSlowTasks` counts against; the sketches
     // add the tail shape those cannot express. Cross-reference ADR 0014.
     this._recordTiming = recordTiming === true;
+    // Caller-supplied worker-selection policy (PISC-006). Validated here rather than
+    // at each call site, so a non-function is rejected once at construction instead
+    // of silently ignored on every dispatch.
+    if (loadBalancer != null && typeof loadBalancer !== 'function') {
+      throw new TypeError('PowerPool: `loadBalancer` must be a function');
+    }
+    this._loadBalancer = loadBalancer ?? null;
     this._taskDurationHistogram = this._recordTiming ? new PowerHistogram() : null;
     this._queueWaitHistogram = this._recordTiming ? new PowerHistogram() : null;
     // optional autoscaling configuration (disabled by default)
@@ -3115,6 +3126,93 @@ export class PowerPool {
   }
 
   /**
+   * Choose the worker a new task goes to: the caller's `loadBalancer` if one is set,
+   * otherwise the built-in least-loaded-plus-EWMA rule. **New in 2.0.1** (PISC-006).
+   *
+   * **The default policy is not replaced.** PowerPool's EWMA tiebreak beats Piscina's
+   * for heterogeneous tasks, so this adds a choice rather than taking one away, and
+   * omitting `loadBalancer` behaves exactly as before.
+   *
+   * **The view a balancer receives is a plain frozen object, not the live
+   * `WorkerObj`, and that is the security-shaped half of this change.** A
+   * caller-supplied balancer is caller code running *inside* the pool, invoked from
+   * the pool's own send path. Handing it the live object would hand it
+   * `worker.terminate()`, the `WorkerAgnostic`, and everything reachable from them —
+   * enough to break the pool from a callback the pool itself calls. A frozen snapshot
+   * of four fields cannot do any of that, and `Object.freeze` makes the attempt loud
+   * rather than silent.
+   *
+   * `latencyEwma` is in the view explicitly rather than left for a balancer to reach
+   * past it for, because the whole point of the view is that reaching past it is not
+   * possible.
+   *
+   * A balancer that returns nothing usable — `null`, `undefined`, an id not in the
+   * pool, a non-object — falls back to the default rule rather than throwing. The
+   * alternative is throwing from inside the pool's own send path, which turns a
+   * caller's bug into every other caller's outage.
+   *
+   * @returns {WorkerObj|null}
+   * @private
+   */
+  _selectWorker() {
+    if (!this.workers.length) return null;
+    if (typeof this._loadBalancer !== 'function') return this._findLeastLoadedWorker();
+
+    /** @type {any} */
+    let chosen;
+    try {
+      chosen = this._loadBalancer(this._workerViews());
+    } catch (err) {
+      // A balancer that throws is a caller bug, but it must not take the send path
+      // down with it. Logged and fallen back, for the same reason as a bad return.
+      this._debugLog?.(err, 'loadBalancer threw; falling back to the default policy');
+      return this._findLeastLoadedWorker();
+    }
+
+    if (chosen == null) return this._findLeastLoadedWorker();
+    // Both spellings: a balancer that just read the view has the id in hand, and one
+    // that kept a reference has the object. Refusing either would be a needless sharp
+    // edge.
+    const byId = typeof chosen === 'number' ? this.workers.find((w) => w.id === chosen) : null;
+    const byObject =
+      chosen && typeof chosen === 'object' ? this.workers.find((w) => w === chosen) : null;
+    // A frozen view is *not* a `WorkerObj`, so `byObject` cannot match one — which is
+    // the point. A balancer that returns the view it was handed therefore falls back,
+    // rather than the pool mistaking a snapshot for a worker.
+    const picked = byId ?? byObject ?? null;
+    return picked ?? this._findLeastLoadedWorker();
+  }
+
+  /**
+   * Build the frozen per-worker view handed to a `loadBalancer` and reported by
+   * `getStats().workers`. **New in 2.0.1** (PISC-006).
+   *
+   * Four fields, and each is there because a balancer cannot do its job without it:
+   * `id` to name a choice, `tasks` for load, `latencyEwma` for the heterogeneous-task
+   * case the default policy exists for, and `lastActive` for an idle-aware policy.
+   *
+   * A fresh array of fresh frozen objects per call, not a cached one. A cached view
+   * would alias across calls, so a balancer that held onto one would observe — and be
+   * confused by — mutations it did not cause.
+   *
+   * @returns {Array<Object>}
+   * @private
+   */
+  _workerViews() {
+    const out = new Array(this.workers.length);
+    for (let i = 0; i < this.workers.length; i++) {
+      const w = this.workers[i];
+      out[i] = Object.freeze({
+        id: w.id,
+        tasks: w.tasks,
+        latencyEwma: w.latencyEwma ?? null,
+        lastActive: w.lastActive,
+      });
+    }
+    return out;
+  }
+
+  /**
    * Return the least-loaded worker (smallest `tasks` count).
    *
    * When multiple workers share the same `tasks` count prefer the one with
@@ -3408,12 +3506,18 @@ export class PowerPool {
     const singleWorkerDirectFastPath =
       targetWorkerId == null && this.workers.length === 1 && this._maxTasksPerWorker === Infinity;
     // prefer an existing idle/least-loaded worker
+    //
+    // A caller-supplied `loadBalancer` replaces the *choice*, not the policy: it is
+    // consulted only when the caller has not pinned a target and the pool is not on
+    // the single-worker fast path, both of which are explicit decisions that
+    // outrank a heuristic. See `_selectWorker` for the view it receives and why that
+    // view is frozen. PISC-006.
     const least =
       targetWorkerId != null
         ? this.workers.find((w) => w.id === targetWorkerId)
         : singleWorkerDirectFastPath
           ? this.workers[0]
-          : this._findLeastLoadedWorker();
+          : this._selectWorker();
 
     // support awaiting a response: options.awaitResponse or explicit options.correlationId
     const wantResponse = Boolean(options?.awaitResponse || options?.correlationId != null);
@@ -4846,6 +4950,12 @@ export class PowerPool {
       lastActive: w.lastActive,
     }));
 
+    // The same frozen view a `loadBalancer` receives (PISC-006), so an operator
+    // debugging a custom policy reads exactly what the policy read — including
+    // `latencyEwma`, which `status` above deliberately omits because it is not part
+    // of that field's contract.
+    const workerViews = this._workerViews();
+
     // Negotiation state, per worker, so an operator can see whether the pool has
     // actually upgraded — and a mixed fleet is the normal state during a
     // rollout, so the counts are the useful part: "2 of 9 on native" is the
@@ -5017,6 +5127,11 @@ export class PowerPool {
           : 0,
       activeTasks: this._activeTasks,
       workerCount: this.workers.length,
+      // The frozen per-worker view a `loadBalancer` receives (PISC-006). Separate
+      // from `status`, which keeps its own three-field contract; this one adds
+      // `latencyEwma`, because that is the field a balancer needs and an operator
+      // debugging one needs to see.
+      workers: workerViews,
       minSize: this.minSize,
       maxSize: this.maxSize,
       isIdle: this._activeTasks === 0 && this.queue.length === 0,
