@@ -25,6 +25,7 @@ import { PowerPriorityQueue } from './powerPriorityQueue.js';
 import { PowerLogger } from './powerLogger.js';
 import { PowerEventBus } from './powerEventBus.js';
 import { PowerServo } from './powerServo.js';
+import { PowerHistogram } from './powerHistogram.js';
 import {
   frameEncodedJson,
   decodeMessage,
@@ -427,6 +428,7 @@ export class PowerPool {
         'autoScale',
         'awaitResponseTimeout',
         'slowTaskThreshold',
+        'recordTiming',
         'maxListeners',
         'messageCodec',
         'encodeCacheLimit',
@@ -462,6 +464,9 @@ export class PowerPool {
       // default timeout (ms) applied to awaitResponse Promises when callers omit per-call timeout
       awaitResponseTimeout = DEFAULT_TIMEOUT_MS,
       slowTaskThreshold = Infinity,
+      // Opt-in percentile telemetry (PISC-002). Off by default; see the histogram
+      // allocation in the constructor for what it costs when on.
+      recordTiming = false,
       autoScale = false,
       priorityAgingMs = 0,
     } = options;
@@ -600,6 +605,30 @@ export class PowerPool {
       ? Number(slowTaskThreshold)
       : Infinity;
     this._slowTaskCount = 0;
+    // Busy-interval accounting for `performance.utilization` (PISC-002). Tracked as
+    // intervals rather than sampled — see `_closeBusyInterval` for why.
+    this._busyTimeMs = 0;
+    /** @type {number|null} */
+    this._busySince = null;
+    // Opt-in percentile telemetry (PISC-002).
+    //
+    // **Gated, and the default path pays nothing.** Two `PowerHistogram`s are
+    // allocated only when `recordTiming` is on; with it off these stay `null` and
+    // the two `record()` calls below are a single boolean test each. A pool that
+    // never asks for percentiles should not carry a sketch it never fills.
+    //
+    // `PowerHistogram` rather than Piscina's histogram, which is
+    // `node:perf_hooks` and does not exist in a browser. The class already exists
+    // here and `bench/claims.js latency` already validates its quantile accuracy
+    // across four decades.
+    //
+    // The Welford accumulators above are **not** replaced. They give exact
+    // mean/stddev/min/max in O(1) memory, which is what `timePerTask` and
+    // `queueWait` report and what `percentSlowTasks` counts against; the sketches
+    // add the tail shape those cannot express. Cross-reference ADR 0014.
+    this._recordTiming = recordTiming === true;
+    this._taskDurationHistogram = this._recordTiming ? new PowerHistogram() : null;
+    this._queueWaitHistogram = this._recordTiming ? new PowerHistogram() : null;
     // optional autoscaling configuration (disabled by default)
     this._ewmaLatency = null; // pool-level EWMA for recent task latency (ms)
     this._autoScale = null; // { enabled, intervalMs, targetMs, alpha, cooldownMs, hysteresis }
@@ -1237,13 +1266,25 @@ export class PowerPool {
     // fire-and-forget message and `_markPendingWorker` returns immediately.
     this._markPendingWorker(correlationId, workerObj.id);
     workerObj.tasks += 1;
+    const beforeActive = this._activeTasks;
     this._activeTasks += 1;
+    // Open the busy interval if this was the first in-flight task (PISC-002).
+    //
+    // **`startTime` is passed rather than read from the clock.** POOL-006 pins one
+    // clock read per batch, not per item, and calling `nowMs()` here would add a
+    // second read on the dispatch path — caught by `powerPool.batchClock.test.js`
+    // reporting 2 where it pins 1. `startTime` is already the clock read for this
+    // dispatch, so reusing it is both correct and free.
+    this._closeBusyInterval(beforeActive, this._activeTasks, startTime);
     workerObj.lastActive = startTime;
     return startTime;
   }
 
   _recordQueueWait(wait) {
     if (!Number.isFinite(wait)) return;
+    // Opt-in sketch (PISC-002). One boolean test when off, which is the whole point
+    // of gating it: the default path must not pay for a histogram nobody reads.
+    if (this._queueWaitHistogram) this._queueWaitHistogram.record(wait);
     const count = this._queueWaitWelfordCount + 1;
     const delta = wait - this._queueWaitWelfordMean;
     this._queueWaitWelfordMean += delta / count;
@@ -2323,9 +2364,40 @@ export class PowerPool {
   _decrementActiveTasks(n = 1) {
     try {
       const dec = Number.isFinite(Number(n)) ? Math.max(0, Math.floor(Number(n))) : 1;
+      const before = this._activeTasks;
       this._activeTasks = Math.max(0, this._activeTasks - dec);
+      // Close the busy interval if this took the pool to idle (PISC-002).
+      this._closeBusyInterval(before, this._activeTasks);
     } catch (err) {
       this._activeTasks = 0;
+    }
+  }
+
+  /**
+   * Open or close the "at least one task in flight" interval that
+   * `getStats().performance.utilization` is computed from (PISC-002).
+   *
+   * Tracked as intervals rather than sampled, because a sampled utilization is a
+   * function of the sampling rate: a pool that is busy for 1 ms out of every 10
+   * reads as idle at a 100 ms sample and saturated at a 1 ms one. The interval
+   * boundaries are the two transitions that already happen on every dispatch and
+   * every completion, so this costs two comparisons and no timer.
+   *
+   * @param {number} before - `_activeTasks` before the change.
+   * @param {number} after - `_activeTasks` after it.
+   * @param {number} [now] - The clock reading to use, when the caller already has
+   *   one. Omit and `nowMs()` is called — which is why the dispatch path passes
+   *   `startTime`: POOL-006 pins one clock read per batch, not per item.
+   * @returns {void}
+   * @private
+   */
+  _closeBusyInterval(before, after, now) {
+    const at = now ?? nowMs();
+    if (before > 0 && after === 0 && this._busySince != null) {
+      this._busyTimeMs += Math.max(0, at - this._busySince);
+      this._busySince = null;
+    } else if (before === 0 && after > 0 && this._busySince == null) {
+      this._busySince = at;
     }
   }
 
@@ -2679,6 +2751,9 @@ export class PowerPool {
             if (Number.isFinite(this._slowTaskThreshold) && x > this._slowTaskThreshold) {
               this._slowTaskCount = (this._slowTaskCount || 0) + 1;
             }
+            // Opt-in sketch (PISC-002), same gate and same reason as the queue-wait
+            // one in `_recordQueueWait`.
+            if (this._taskDurationHistogram) this._taskDurationHistogram.record(x);
           }
         } catch (err) {
           this._debugLog?.(err, 'worker.onmessage: latency tracking inner');
@@ -4839,6 +4914,37 @@ export class PowerPool {
         timePerTask: { max, min, average, stddev },
         queueWait,
         percentSlowTasks,
+        // Opt-in percentile telemetry (PISC-002).
+        //
+        // **`null` when the flag is off, not zeros.** A pool that never asked for
+        // percentiles has no sketch, and reporting `p50: 0` would read as "the
+        // median task took no time" rather than "nobody is measuring". `null` is
+        // the honest answer to "is this on", which is the first thing an operator
+        // checks.
+        //
+        // `utilization` is the fraction of wall-clock time the pool spent with at
+        // least one task in flight, over the pool's lifetime. It is reported
+        // alongside the percentiles because it answers the question they cannot:
+        // a p99 of 4 ms on a pool running at 3 % utilization is a different problem
+        // from the same p99 at 90 %.
+        percentiles: this._taskDurationHistogram
+          ? {
+              p50: this._taskDurationHistogram.percentile(50),
+              p90: this._taskDurationHistogram.percentile(90),
+              p99: this._taskDurationHistogram.percentile(99),
+              p999: this._taskDurationHistogram.percentile(99.9),
+            }
+          : null,
+        queueWaitPercentiles: this._queueWaitHistogram
+          ? {
+              p50: this._queueWaitHistogram.percentile(50),
+              p90: this._queueWaitHistogram.percentile(90),
+              p99: this._queueWaitHistogram.percentile(99),
+              p999: this._queueWaitHistogram.percentile(99.9),
+            }
+          : null,
+        utilization:
+          liveDuration > 0 ? Math.round((this._busyTimeMs / liveDuration) * 1000) / 1000 : 0,
         // Adaptive concurrency controller.
         //
         // **`autoScalePolicy` is gated on the interval, not on the config object.**

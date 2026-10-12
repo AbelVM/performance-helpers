@@ -96,6 +96,11 @@
  *   `awaitResponse` when a call does not pass its own.
  * @property {number} [slowTaskThreshold] - Tasks slower than this (ms) are
  *   counted for the slow-task / `pool:slow` signal.
+ * @property {boolean} [recordTiming] - Opt in to percentile telemetry (PISC-002).
+ *   When true, task duration and queue wait are recorded into `PowerHistogram`s
+ *   and `getStats().performance` reports `percentiles`, `queueWaitPercentiles` and
+ *   `utilization`. Off by default, and the default path allocates no histogram and
+ *   pays one boolean test per recording site.
  * @property {number} [maxListeners] - Cap on registered pool listeners before
  *   the `MaxListenersExceededWarning` path is taken.
  * @property {'framed'|'legacy'|'negotiated'} [messageCodec='framed'] - Wire

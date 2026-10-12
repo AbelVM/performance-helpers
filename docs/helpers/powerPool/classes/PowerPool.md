@@ -93,6 +93,18 @@ number of currently active (dispatched) tasks across all workers
 
 ***
 
+### \_busySince
+
+> **\_busySince**: `number` \| `null`
+
+***
+
+### \_busyTimeMs
+
+> **\_busyTimeMs**: `number`
+
+***
+
 ### \_congestion
 
 > **\_congestion**: `boolean` \| `undefined`
@@ -393,6 +405,12 @@ whether queued dispatch is paused
 
 ***
 
+### \_queueWaitHistogram
+
+> **\_queueWaitHistogram**: [`PowerHistogram`](../../powerHistogram/classes/PowerHistogram.md) \| `null`
+
+***
+
 ### \_queueWaitMax
 
 > **\_queueWaitMax**: `number`
@@ -429,6 +447,12 @@ whether queued dispatch is paused
 
 ***
 
+### \_recordTiming
+
+> **\_recordTiming**: `boolean`
+
+***
+
 ### \_slowTaskCount
 
 > **\_slowTaskCount**: `number`
@@ -438,6 +462,12 @@ whether queued dispatch is paused
 ### \_slowTaskThreshold
 
 > **\_slowTaskThreshold**: `number`
+
+***
+
+### \_taskDurationHistogram
+
+> **\_taskDurationHistogram**: [`PowerHistogram`](../../powerHistogram/classes/PowerHistogram.md) \| `null`
 
 ***
 

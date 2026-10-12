@@ -291,3 +291,152 @@ describe('PowerPool debug logging', () => {
     expect(debug).toHaveBeenCalled();
   });
 });
+
+describe('PISC-002 opt-in percentile telemetry', () => {
+  // Task duration and queue wait recorded into `PowerHistogram`s, exposed as
+  // p50/p90/p99/p99.9 plus `utilization` in `getStats().performance`.
+  //
+  // **Gated, and the default path pays nothing.** With `recordTiming` off the two
+  // histograms are never allocated and the two `record()` calls are a single
+  // boolean test each. A pool that never asks for percentiles should not carry a
+  // sketch it never fills.
+  //
+  // `PowerHistogram` rather than Piscina's histogram, which is `node:perf_hooks`
+  // and does not exist in a browser. The Welford accumulators are **not**
+  // replaced: they give exact mean/stddev/min/max in O(1) memory, which is what
+  // `timePerTask`, `queueWait` and `percentSlowTasks` report. The sketches add the
+  // tail shape those cannot express. Cross-reference ADR 0014.
+
+  /** A worker that answers after `delay` ms. */
+  function slowWorker(delay = 10) {
+    return class {
+      constructor() {
+        this.onmessage = null;
+        this.postMessage = (msg) => {
+          setTimeout(() => this.onmessage?.({ data: { ok: true, req: msg } }), delay);
+        };
+        this.terminate = () => {};
+      }
+    };
+  }
+
+  it('reports null when off, not zeros', () => {
+    // A pool that never asked for percentiles has no sketch, and `p50: 0` would
+    // read as "the median task took no time" rather than "nobody is measuring".
+    // `null` is the honest answer to "is this on".
+    const pool = new PowerPool(slowWorker(), { size: 1, minSize: 1, maxSize: 1, lazy: false });
+    const perf = pool.getStats().performance;
+    expect(perf.percentiles).toBeNull();
+    expect(perf.queueWaitPercentiles).toBeNull();
+    // `utilization` is not gated — it is two comparisons on transitions that
+    // already happen, so it costs nothing and is always reported.
+    expect(typeof perf.utilization).toBe('number');
+  });
+
+  it('allocates no histogram when off, so the default path pays nothing', () => {
+    const pool = new PowerPool(slowWorker(), { size: 1, minSize: 1, maxSize: 1, lazy: false });
+    expect(pool._taskDurationHistogram).toBeNull();
+    expect(pool._queueWaitHistogram).toBeNull();
+  });
+
+  it('reports ordered percentiles once tasks have completed', async () => {
+    const pool = new PowerPool(slowWorker(), {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      lazy: false,
+      recordTiming: true,
+    });
+    for (let i = 0; i < 20; i++) pool.postMessage({ i });
+    await vi.waitFor(() => {
+      expect(pool.getStats().performance.totalTasksPerformed).toBe(20);
+    });
+
+    const p = pool.getStats().performance.percentiles;
+    expect(p).not.toBeNull();
+    // Monotone, which is the property a caller relies on. Exact values would pin
+    // the sketch's bucket boundaries rather than the behaviour.
+    expect(p.p50).toBeLessThanOrEqual(p.p90);
+    expect(p.p90).toBeLessThanOrEqual(p.p99);
+    expect(p.p99).toBeLessThanOrEqual(p.p999);
+    expect(p.p50).toBeGreaterThan(0);
+  });
+
+  it('records queue wait only when work actually queues', async () => {
+    // `maxTasksPerWorker: 1` is what saturates the pool; without it every post
+    // dispatches immediately and there is no queue wait to record — which is how
+    // the first draft of this test asserted nothing.
+    const pool = new PowerPool(slowWorker(), {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      lazy: false,
+      recordTiming: true,
+    });
+    for (let i = 0; i < 20; i++) pool.postMessage({ i });
+    await vi.waitFor(() => {
+      expect(pool.getStats().performance.totalTasksPerformed).toBe(20);
+    });
+
+    const q = pool.getStats().performance.queueWaitPercentiles;
+    expect(q).not.toBeNull();
+    expect(q.p50).toBeGreaterThan(0);
+    expect(q.p50).toBeLessThanOrEqual(q.p99);
+  });
+
+  it('leaves the Welford statistics and percentSlowTasks exact', async () => {
+    // The sketches are additive, not a replacement. `timePerTask`, `queueWait` and
+    // `percentSlowTasks` keep their exact closed forms, and a change that made
+    // them approximate would be a regression this pins.
+    const pool = new PowerPool(slowWorker(), {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      maxTasksPerWorker: 1,
+      lazy: false,
+      recordTiming: true,
+      slowTaskThreshold: 5,
+    });
+    for (let i = 0; i < 10; i++) pool.postMessage({ i });
+    await vi.waitFor(() => {
+      expect(pool.getStats().performance.totalTasksPerformed).toBe(10);
+    });
+
+    const perf = pool.getStats().performance;
+    // `timePerTask` carries no `count` — it is `{max, min, average, stddev}`, and
+    // the count lives in `totalTasksPerformed`. An earlier draft of this test
+    // asserted `timePerTask.count`, which is `undefined` and passes nothing.
+    expect(perf.totalTasksPerformed).toBe(10);
+    expect(perf.timePerTask.average).toBeGreaterThan(0);
+    expect(perf.timePerTask.min).toBeLessThanOrEqual(perf.timePerTask.average);
+    expect(perf.timePerTask.average).toBeLessThanOrEqual(perf.timePerTask.max);
+    expect(perf.queueWait.count).toBe(9);
+    // Every task took ~10 ms against a 5 ms threshold, so all 10 are slow.
+    expect(perf.percentSlowTasks).toBe(100);
+  });
+
+  it('reports utilization as busy time over pool lifetime', async () => {
+    // Interval-based rather than sampled: a sampled utilization is a function of
+    // the sampling rate, and a pool busy for 1 ms in every 10 reads as idle at a
+    // 100 ms sample and saturated at a 1 ms one.
+    const pool = new PowerPool(slowWorker(20), {
+      size: 1,
+      minSize: 1,
+      maxSize: 1,
+      lazy: false,
+      recordTiming: true,
+    });
+    for (let i = 0; i < 5; i++) pool.postMessage({ i });
+    await vi.waitFor(() => {
+      expect(pool.getStats().performance.totalTasksPerformed).toBe(5);
+    });
+
+    const perf = pool.getStats().performance;
+    expect(perf.utilization).toBeGreaterThan(0);
+    expect(perf.utilization).toBeLessThanOrEqual(1);
+    // And it is consistent with the two numbers it is derived from.
+    const expected = pool._busyTimeMs / perf.poolLiveDuration;
+    expect(perf.utilization).toBeCloseTo(Math.round(expected * 1000) / 1000, 2);
+  });
+});

@@ -101,6 +101,7 @@ export class PowerPool {
      * `DEFAULT_MAX_DRAIN_WAITERS`.
      * @type {number}
      */
+    /** @type {number|null} */
     /** @type {WorkerObj[]} */
     workers: WorkerObj[];
     queue: PowerQueue | PowerPriorityQueue;
@@ -615,6 +616,24 @@ export class PowerPool {
      *
      * @private
      * @param {number} [n=1]
+     */
+    /**
+     * Open or close the "at least one task in flight" interval that
+     * `getStats().performance.utilization` is computed from (PISC-002).
+     *
+     * Tracked as intervals rather than sampled, because a sampled utilization is a
+     * function of the sampling rate: a pool that is busy for 1 ms out of every 10
+     * reads as idle at a 100 ms sample and saturated at a 1 ms one. The interval
+     * boundaries are the two transitions that already happen on every dispatch and
+     * every completion, so this costs two comparisons and no timer.
+     *
+     * @param {number} before - `_activeTasks` before the change.
+     * @param {number} after - `_activeTasks` after it.
+     * @param {number} [now] - The clock reading to use, when the caller already has
+     *   one. Omit and `nowMs()` is called — which is why the dispatch path passes
+     *   `startTime`: POOL-006 pins one clock read per batch, not per item.
+     * @returns {void}
+     * @private
      */
     /**
      * Resize the pool's maximum size at runtime.
@@ -1281,6 +1300,7 @@ export type WorkerObj = import("./jsdoc-types.js").WorkerObj;
 export type PostMessageOptions = import("./jsdoc-types.js").PostMessageOptions;
 export type PendingResponseEntry = import("./jsdoc-types.js").PendingResponseEntry;
 export type PowerPoolOptions = import("./jsdoc-types.js").PowerPoolOptions;
+import { PowerHistogram } from './powerHistogram.js';
 import { PowerQueue } from './powerQueue.js';
 import { PowerPriorityQueue } from './powerPriorityQueue.js';
 import { PowerEventBus } from './powerEventBus.js';

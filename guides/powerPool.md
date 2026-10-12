@@ -32,6 +32,7 @@ positional transfer argument is retained for compatibility. Call
 | `options.maxQueueLength`                                |                                  `number`\|`'auto'` |                                     `Infinity` | **Hard cap on queued tasks.** With the default `'enqueue'` policy and no cap, a saturated pool grows its queue until the process runs out of memory — the failure mode this option exists to make observable. Set a finite cap and see [Bounding the queue](#bounding-the-queue).                                                                                                                                                        |
 | `options.priority`                                      |                                            `number` |                                            `0` | Default task priority for queued messages. Higher values are dispatched before lower values when the pool is saturated. Tasks with the same priority maintain FIFO order. Can be overridden per-message via `postMessage(msg, transfer, { priority })`. See [Task priority](#task-priority).                                                                                                                                             |
 | `options.priorityAgingMs`                               |                                            `number` |                                            `0` | Waiting milliseconds required to gain one effective priority point. Set above `0` to prevent low-priority queued work from starving during sustained high-priority traffic.                                                                                                                                                                                                                                                              |
+| `options.recordTiming`                                  |                                           `boolean` |                                        `false` | Opt in to percentile telemetry. When `true`, task duration and queue wait are recorded into `PowerHistogram`s and `getStats().performance` reports `percentiles` (p50/p90/p99/p99.9), `queueWaitPercentiles` and `utilization`. Off by default, and the default path allocates no histogram and pays one boolean test per recording site. See [Percentile telemetry](#percentile-telemetry).                                             |
 | `options.maxDrainWaiters`                               |                                            `number` |                                          `100` | Maximum number of `drain()` calls that may be _waiting_ at once. Beyond it, `drain()` rejects with `ERR_POOL_DRAIN_TOO_MANY_WAITERS` instead of accumulating an unbounded number of `idle` listeners.                                                                                                                                                                                                                                    |
 | `options.lazy`                                          |                                           `boolean` |                                         `true` | When `true` defer creating workers up to `size` until demand; only `minSize` workers are created at construction. Use this for low-load deployments to avoid unnecessary worker startup cost.                                                                                                                                                                                                                                            |
 | `options.listenerMaxListeners` / `options.maxListeners` |                                            `number` |                                `0` (unlimited) | Maximum listeners per internal pool event (see notes). `0` means unlimited. If set to a positive number the pool will throw when registering additional listeners beyond that limit.                                                                                                                                                                                                                                                     |
@@ -274,6 +275,52 @@ is pinned by a test, so swapping the structure is not something a future change 
 quietly get wrong.
 
 **Batch posts.** `postMessageBatch` accepts `options.priority` and applies it to every item in the batch. Individual items cannot carry different priorities in the same batch — if you need mixed priorities, post them in separate batches or individual posts.
+
+## Percentile telemetry
+
+**New in 2.0.1.** `options.recordTiming` opts in to tail-shape statistics that the
+existing O(1) accumulators cannot express.
+
+```js
+const pool = new PowerPool(WorkerScript, { recordTiming: true });
+// … after some work …
+const perf = pool.getStats().performance;
+perf.percentiles; // { p50, p90, p99, p999 } — task duration, ms
+perf.queueWaitPercentiles; // { p50, p90, p99, p999 } — time spent queued, ms
+perf.utilization; // 0..1 — fraction of pool lifetime with work in flight
+```
+
+**Why a sketch and not more counters.** `timePerTask` and `queueWait` already report
+exact mean, stddev, min and max in O(1) memory, and `percentSlowTasks` counts exactly
+against a threshold. None of those can answer "what does the tail look like" — a mean
+of 12 ms is a different pool at p99 = 13 ms than at p99 = 400 ms, and only the second
+one has a problem. `PowerHistogram` is a DDSketch, which bounds _relative_ error across
+decades of magnitude, so a 3 ms task and a 3 s task land in the same sketch without one
+swamping the other.
+
+**It is `PowerHistogram`, not Piscina's histogram.** Piscina's is `node:perf_hooks`,
+which does not exist in a browser; this pool runs in six realms. The class already
+exists here and `bench/claims.js latency` already validates its quantile accuracy.
+
+Three things to know:
+
+- **Off by default, and the default path pays nothing.** With `recordTiming` off the
+  two histograms are never allocated, and each recording site is a single boolean
+  test. A pool that never asks for percentiles should not carry a sketch it never
+  fills.
+- **`percentiles` and `queueWaitPercentiles` are `null` when off, not zeros.** A pool
+  that never opted in has no sketch, and `p50: 0` would read as "the median task took
+  no time" rather than "nobody is measuring". `null` is the honest answer to "is this
+  on", which is the first thing to check.
+- **`utilization` is not gated.** It is two comparisons on transitions that already
+  happen on every dispatch and every completion, so it costs nothing and is always
+  reported. It is interval-based rather than sampled, because a sampled utilization is
+  a function of the sampling rate: a pool busy for 1 ms in every 10 reads as idle at a
+  100 ms sample and saturated at a 1 ms one.
+
+**The Welford statistics are additive, not replaced.** `timePerTask`, `queueWait` and
+`percentSlowTasks` keep their exact closed forms; the sketches add the tail shape
+beside them. Cross-reference ADR 0014.
 
 ## Autoscaling
 

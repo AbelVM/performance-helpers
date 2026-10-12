@@ -142,6 +142,14 @@ export type PowerPoolOptions = {
      */
     slowTaskThreshold?: number | undefined;
     /**
+     * - Opt in to percentile telemetry (PISC-002).
+     * When true, task duration and queue wait are recorded into `PowerHistogram`s
+     * and `getStats().performance` reports `percentiles`, `queueWaitPercentiles` and
+     * `utilization`. Off by default, and the default path allocates no histogram and
+     * pays one boolean test per recording site.
+     */
+    recordTiming?: boolean | undefined;
+    /**
      * - Cap on registered pool listeners before
      * the `MaxListenersExceededWarning` path is taken.
      */
