@@ -220,6 +220,8 @@ export class PowerPool {
      * @param {boolean} wantResponse
      * @param {string|undefined} correlationKey
      * @param {Promise<any>} pendingPromise
+     * @param {AbortSignal} [signal] - Per-task abort signal (PISC-003), carried
+     *   through to the in-flight policy in `_dispatchToWorker`.
      * @returns {Promise<any>|boolean}
      * @private
      */
@@ -270,7 +272,7 @@ export class PowerPool {
      *   records actually are would add an error at every call site for no gain.
      * @param {PreparedItem} prepared - Must be prepared. A `deferred` item is
      *   framed here, which is why every route can hand one over unchanged.
-     * @param {{correlationId?: (string|undefined), startTime?: (number|undefined)}=} options
+     * @param {{correlationId?: (string|undefined), startTime?: (number|undefined), signal?: (AbortSignal|null)}=} options
      *   `correlationId` for a task awaiting a response, so the pending entry can be
      *   tied to this worker; `startTime` when the caller already took a timestamp
      *   and wants every record in a batch or a broadcast to share it.
@@ -313,7 +315,7 @@ export class PowerPool {
      * Preserves the same pending-response cleanup semantics as inline logic.
      * @param {*} message
      * @param {TransferList} [transfer]
-     * @param {Object} [options]
+     * @param {import('./jsdoc-types.js').PostMessageOptions} [options]
      * @param {number} startTime
      * @param {boolean} [wantResponse]
      * @param {string} [correlationId]
@@ -371,6 +373,8 @@ export class PowerPool {
      *   or `prepareBuffers`. Taking the item whole is deliberate: a signature of
      *   `(message, transfer)` would let a caller hand in an unprepared object,
      *   which is the shape of the POOL-003 defect.
+     * @param {import('./jsdoc-types.js').PostMessageOptions} [options] - The caller's
+     *   post options, read here for `signal` (PISC-003).
      * @private
      */
     /**

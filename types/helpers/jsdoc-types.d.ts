@@ -43,6 +43,22 @@ export type PostMessageOptions = {
      * priority maintain FIFO order. Defaults to `0`.
      */
     priority?: number | undefined;
+    /**
+     * - Absolute time (ms, from the same clock as
+     * `Date.now()`) after which a **queued** task is discarded rather than dispatched.
+     * A task already in flight is not affected: the deadline is checked at dispatch,
+     * so it bounds queueing delay and not execution time.
+     */
+    deadlineAt?: number | undefined;
+    /**
+     * - PISC-003. Per-task abort. An already-aborted
+     * signal refuses the post before any queue work. A task aborted while queued has
+     * its pending response rejected at abort time and is skipped at dispatch. A task
+     * aborted while in flight has its waiter released immediately but **the work runs
+     * to completion** — see the guide for why terminating the worker is the wrong
+     * trade under `maxTasksPerWorker > 1`.
+     */
+    signal?: AbortSignal | undefined;
 };
 /**
  * Entry used to track pending responses for `awaitResponse` callers.

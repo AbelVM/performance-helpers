@@ -276,6 +276,47 @@ quietly get wrong.
 
 **Batch posts.** `postMessageBatch` accepts `options.priority` and applies it to every item in the batch. Individual items cannot carry different priorities in the same batch — if you need mixed priorities, post them in separate batches or individual posts.
 
+## Aborting a single task
+
+**New in 2.0.1.** `postMessage`'s third argument accepts a `signal` — a standard
+`AbortSignal`, which is why this works the same way in every realm the pool runs in.
+
+```js
+const ac = new AbortController();
+const pending = pool.postMessage(task, undefined, { awaitResponse: true, signal: ac.signal });
+ac.abort(); // the caller stops waiting, immediately
+```
+
+Three cases, and the third is the one worth understanding:
+
+- **Already aborted at post time** — refused before any queue work. A caller holding an
+  aborted signal has already changed their mind, so queuing the task would be work done
+  on their behalf after they cancelled it. Fire-and-forget returns `false` rather than
+  throwing, matching every other refusal on that path.
+- **Aborted while queued** — the pending response is rejected _at abort time_, not at
+  dispatch time. The item is deliberately **not** pulled out of the queue: neither queue
+  implementation has an efficient remove-by-value, and the dispatch loop already walks
+  past items it is going to discard — the same trade `deadlineAt` makes. The cost is one
+  held slot until dispatch; the alternative is an O(n) scan on every abort.
+- **Aborted while in flight** — **the work runs to completion and the waiter is released
+  now.**
+
+**Why not terminate the worker, the way Piscina does.** Under `maxTasksPerWorker > 1` a
+worker carries several in-flight tasks, so terminating it to abandon one kills every
+other task on that worker — a blast radius far larger than the task being aborted, and
+one the callers of those other tasks did nothing to earn. It also discards a warm worker
+and its negotiated protocol state. So the _work_ finishes and the _waiter_ is released
+immediately, with the response discarded when it arrives.
+
+That is the honest reading of what an abort usually means — "stop waiting for this". A
+caller who genuinely needs the work undone has to arrange that in the worker, because no
+pool can undo a side effect.
+
+**`skipQueue` is deliberately not an option.** The pool already dispatches immediately
+when a worker is free; the queue is only used under saturation; and a `skipQueue` that
+jumped ahead of queued work would be a priority mechanism by another name when `priority`
+already exists.
+
 ## Percentile telemetry
 
 **New in 2.0.1.** `options.recordTiming` opts in to tail-shape statistics that the

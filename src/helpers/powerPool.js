@@ -1127,10 +1127,20 @@ export class PowerPool {
    * @param {boolean} wantResponse
    * @param {string|undefined} correlationKey
    * @param {Promise<any>} pendingPromise
+   * @param {AbortSignal} [signal] - Per-task abort signal (PISC-003), carried
+   *   through to the in-flight policy in `_dispatchToWorker`.
    * @returns {Promise<any>|boolean}
    * @private
    */
-  _postToWorkerObj(obj, prepared, startTime, wantResponse, correlationKey, pendingPromise) {
+  _postToWorkerObj(
+    obj,
+    prepared,
+    startTime,
+    wantResponse,
+    correlationKey,
+    pendingPromise,
+    signal = undefined
+  ) {
     prepared = this._encodeForWorker(obj, prepared);
     // Bypass the wrapper for "plain object + explicit transfer list".
     //
@@ -1185,7 +1195,15 @@ export class PowerPool {
       }
     }
     try {
-      this._dispatchToWorker(obj, prepared, { correlationId: correlationKey, startTime });
+      this._dispatchToWorker(obj, prepared, {
+        correlationId: correlationKey,
+        startTime,
+        // Carried through so the in-flight abort policy can find the signal again
+        // (PISC-003). Without this the direct-dispatch path — a free worker, no
+        // queue — silently skipped the abort listener, which is how the first draft
+        // of this feature passed its queued tests and failed its in-flight one.
+        signal,
+      });
       if (this._isIdle) this._updateIdleState();
       return wantResponse ? pendingPromise : true;
     } catch (err) {
@@ -1242,14 +1260,14 @@ export class PowerPool {
    *   records actually are would add an error at every call site for no gain.
    * @param {PreparedItem} prepared - Must be prepared. A `deferred` item is
    *   framed here, which is why every route can hand one over unchanged.
-   * @param {{correlationId?: (string|undefined), startTime?: (number|undefined)}=} options
+   * @param {{correlationId?: (string|undefined), startTime?: (number|undefined), signal?: (AbortSignal|null)}=} options
    *   `correlationId` for a task awaiting a response, so the pending entry can be
    *   tied to this worker; `startTime` when the caller already took a timestamp
    *   and wants every record in a batch or a broadcast to share it.
    * @returns {number} The `startTime` used, for a caller that has not taken one.
    */
   _dispatchToWorker(workerObj, prepared, options = {}) {
-    const { correlationId, startTime = nowMs() } = options;
+    const { correlationId, startTime = nowMs(), signal } = options;
     // Resolve a deferred encode here rather than at each call site. A `deferred`
     // item is one whose framing is still owed, and posting it verbatim puts raw
     // bytes on the wire where the worker reads the first byte of a JSON body as
@@ -1288,6 +1306,37 @@ export class PowerPool {
     // dispatch, so reusing it is both correct and free.
     this._closeBusyInterval(beforeActive, this._activeTasks, startTime);
     workerObj.lastActive = startTime;
+    // **The in-flight abort policy (PISC-003), and the decision is to let the task
+    // finish.**
+    //
+    // Piscina terminates the worker. That is the wrong trade here: under
+    // `maxTasksPerWorker > 1` a worker carries several in-flight tasks, so
+    // terminating it to abandon one kills every other task on that worker — a blast
+    // radius far larger than the task being aborted, and one the callers of those
+    // other tasks did nothing to earn. It also throws away a warm worker and its
+    // negotiated protocol state.
+    //
+    // So the *work* runs to completion and the *waiter* is released now. The
+    // response is discarded when it arrives, because the pending entry is already
+    // gone. This is the honest reading of what an abort usually means — "stop
+    // waiting for this" — and a caller who genuinely needs the work undone has to
+    // arrange that in the worker, because no pool can undo a side effect.
+    //
+    // The listener is `{ once: true }` and closes over nothing but the id, so it is
+    // collected with the signal.
+    if (signal && correlationId != null) {
+      if (signal.aborted) {
+        this._cleanupPendingResponse(correlationId, { rejectWith: abortReason(signal) });
+      } else {
+        signal.addEventListener(
+          'abort',
+          () => {
+            this._cleanupPendingResponse(correlationId, { rejectWith: abortReason(signal) });
+          },
+          { once: true }
+        );
+      }
+    }
     return startTime;
   }
 
@@ -1378,7 +1427,7 @@ export class PowerPool {
    * Preserves the same pending-response cleanup semantics as inline logic.
    * @param {*} message
    * @param {TransferList} [transfer]
-   * @param {Object} [options]
+   * @param {import('./jsdoc-types.js').PostMessageOptions} [options]
    * @param {number} startTime
    * @param {boolean} [wantResponse]
    * @param {string} [correlationId]
@@ -1439,7 +1488,8 @@ export class PowerPool {
       startTime,
       wantResponse,
       correlationKey,
-      pendingPromise
+      pendingPromise,
+      options?.signal
     );
   }
 
@@ -1534,6 +1584,8 @@ export class PowerPool {
    *   or `prepareBuffers`. Taking the item whole is deliberate: a signature of
    *   `(message, transfer)` would let a caller hand in an unprepared object,
    *   which is the shape of the POOL-003 defect.
+   * @param {import('./jsdoc-types.js').PostMessageOptions} [options] - The caller's
+   *   post options, read here for `signal` (PISC-003).
    * @private
    */
   _enqueueOrReject(prepared, wantResponse, correlationKey, pendingPromise, options) {
@@ -1583,7 +1635,7 @@ export class PowerPool {
       }
       return false;
     }
-    /** @type {PreparedItem & {correlationId?: string, priority?: number}} */
+    /** @type {PreparedItem & {correlationId?: string, priority?: number, signal?: AbortSignal, deadlineAt?: number, deferred?: boolean, enqueuedAt: number}} */
     const queuedItem = {
       message: prepared.message,
       transfer: prepared.transfer,
@@ -1593,7 +1645,36 @@ export class PowerPool {
     if (prepared.deferred === true) queuedItem.deferred = true;
     if (wantResponse && correlationKey) queuedItem.correlationId = correlationKey;
     if (options?.priority != null) queuedItem.priority = options.priority;
+    // Per-task abort (PISC-003). The signal is carried on the queued item rather
+    // than only in a listener, so the dispatch loop can skip an item that was
+    // aborted while it waited — the same shape as the `deadlineAt` check beside it.
+    if (options?.signal) queuedItem.signal = options.signal;
     this.queue.push(queuedItem);
+    // **Tell the caller at abort time, not at dispatch time (PISC-003).**
+    //
+    // The dispatch loop skips an aborted item and rejects its pending response, but
+    // that only happens when a worker frees up — which under saturation may be a
+    // long wait. A caller who aborted has stopped waiting *now*, so the listener
+    // settles the promise immediately and the queue slot is reclaimed at dispatch.
+    //
+    // The item is **not** removed from the queue here. Neither queue implementation
+    // has an efficient remove-by-value, and the dispatch loop already walks past
+    // items it is going to discard — the same trade the `deadlineAt` path makes. The
+    // cost is one held slot until dispatch; the alternative is an O(n) scan on every
+    // abort, on the saturated path this whole change exists to make cheaper.
+    //
+    // `{ once: true }`, and the handler closes over nothing but the id, so it is
+    // collected with the signal.
+    if (options?.signal && wantResponse && correlationKey) {
+      const sig = options.signal;
+      sig.addEventListener(
+        'abort',
+        () => {
+          this._cleanupPendingResponse(correlationKey, { rejectWith: abortReason(sig) });
+        },
+        { once: true }
+      );
+    }
     try {
       if (
         Number.isFinite(this._queueHighThreshold) &&
@@ -1846,8 +1927,16 @@ export class PowerPool {
     // abort, too many waiters — is *not* propagated: the caller asked to close, and
     // a close that refuses to finish because the drain timed out is worse than one
     // that terminates anyway. The reason is logged rather than swallowed silently.
+    //
+    // The options object is built rather than passed inline, because `signal` is
+    // `AbortSignal | null` here and `drain`'s type is `AbortSignal | undefined` —
+    // passing `null` through is a type error, and the honest fix is to omit the key
+    // when there is no signal rather than to widen `drain`'s contract to accept one.
+    const drainOptions = {};
+    if (timeout > 0) drainOptions.timeout = timeout;
+    if (signal) drainOptions.signal = signal;
     try {
-      await this.drain(timeout > 0 ? { timeout, signal } : signal ? { signal } : {});
+      await this.drain(drainOptions);
     } catch (err) {
       this._debugLog?.(err, 'close: drain did not complete; terminating anyway');
     }
@@ -2787,16 +2876,35 @@ export class PowerPool {
           // order by a stale one. See `_makeTaskQueue`.
           item = this._usesPriorityHeap
             ? this.queue.shift()
-            : this.queue.shiftHighestPriority((queuedItem) => {
-                const priority = queuedItem.priority ?? 0;
-                return this._priorityAgingMs > 0
-                  ? priority + Math.max(0, now - queuedItem.enqueuedAt) / this._priorityAgingMs
-                  : priority;
-              });
-          if (item.deadlineAt === undefined || item.deadlineAt > now) break;
+            : // The scan is only ever reached when aging is on, and `_makeTaskQueue`
+              // builds a `PowerQueue` in exactly that case — so the cast says what
+              // the branch already guarantees, without a runtime check on a path
+              // that exists to be cheap.
+              /** @type {PowerQueue} */ (this.queue).shiftHighestPriority(
+                /** @param {any} queuedItem */ (queuedItem) => {
+                  const priority = queuedItem.priority ?? 0;
+                  return this._priorityAgingMs > 0
+                    ? priority + Math.max(0, now - queuedItem.enqueuedAt) / this._priorityAgingMs
+                    : priority;
+                }
+              );
+          if (item.deadlineAt === undefined || item.deadlineAt > now) {
+            // Aborted while it waited (PISC-003). Skipped here rather than removed
+            // from the queue at abort time, because neither queue implementation has
+            // an efficient remove-by-value and the dispatch loop already walks past
+            // items it is going to discard. The caller was told at abort time; this
+            // is the queue slot catching up.
+            if (!item.signal?.aborted) break;
+          }
           if (item.correlationId != null) {
-            const err = new Error('postMessage queued task deadline elapsed');
-            err.code = 'EDEADLINE';
+            const err =
+              item.signal?.aborted === true
+                ? abortReason(item.signal)
+                : (() => {
+                    const e = new Error('postMessage queued task deadline elapsed');
+                    e.code = 'EDEADLINE';
+                    return e;
+                  })();
             this._cleanupPendingResponse(item.correlationId, { rejectWith: err });
           }
           item = null;
@@ -2808,6 +2916,9 @@ export class PowerPool {
             this._dispatchToWorker(workerObj, dispatch, {
               correlationId: item.correlationId,
               startTime: now,
+              // Carried through so the in-flight abort policy can find the signal
+              // again (PISC-003).
+              signal: item.signal,
             });
           } catch (err) {
             this._debugLog?.(err, 'dispatch queued message to worker failed');
@@ -3521,6 +3632,20 @@ export class PowerPool {
 
     // support awaiting a response: options.awaitResponse or explicit options.correlationId
     const wantResponse = Boolean(options?.awaitResponse || options?.correlationId != null);
+
+    // **Already aborted before the post (PISC-003).** Rejected here, before any
+    // queue work, because a caller holding an aborted signal has already changed
+    // their mind and queuing the task would be work done on their behalf after they
+    // cancelled it. The fire-and-forget case returns `false` rather than throwing,
+    // matching every other refusal on this path.
+    const signal = options?.signal ?? null;
+    if (signal?.aborted) {
+      if (wantResponse) {
+        return Promise.reject(abortReason(signal));
+      }
+      return false;
+    }
+
     let correlationId;
     let pendingPromise;
     if (wantResponse) {
@@ -3593,7 +3718,8 @@ export class PowerPool {
           startTime,
           wantResponse,
           correlationId,
-          pendingPromise
+          pendingPromise,
+          options?.signal ?? null
         );
       } catch (err) {
         if (wantResponse && correlationId) {
