@@ -70,6 +70,44 @@
   slot, so nothing is copied. `unshift` and `shift` are exact inverses, so a
   dequeue-then-restore round-trip leaves the queue exactly as it was. For bulk
   prepends, `unshiftMany(items)` remains the amortised-cheap path.
+- `PowerPool`'s `recordTiming` option — opt-in percentile telemetry.
+  `getStats().performance` gains `percentiles` and `queueWaitPercentiles`
+  (`{ p50, p90, p99, p999 }`) plus `utilization`. **Why a sketch and not more
+  counters:** `timePerTask` and `queueWait` already report exact mean, stddev, min
+  and max in O(1) memory, and `percentSlowTasks` counts exactly against a threshold
+  — none of those can answer "what does the tail look like", and a mean of 12 ms is a
+  different pool at p99 = 13 ms than at p99 = 400 ms. `PowerHistogram` is a DDSketch,
+  which bounds _relative_ error across decades of magnitude, so a 3 ms task and a 3 s
+  task land in the same sketch without one swamping the other. It is
+  `PowerHistogram` rather than Piscina's histogram, which is `node:perf_hooks` and
+  does not exist in a browser. **Off by default, and the default path pays nothing** —
+  with the flag off the histograms are never allocated and each recording site is a
+  single boolean test. `percentiles` and `queueWaitPercentiles` are `null` when off
+  rather than zeros, because `p50: 0` would read as "the median task took no time"
+  rather than "nobody is measuring". `utilization` is _not_ gated — it is two
+  comparisons on transitions that already happen — and is interval-based rather than
+  sampled, because a sampled utilization is a function of the sampling rate. The
+  Welford statistics are additive, not replaced. Cross-reference ADR 0014.
+- `PowerPool`'s `loadBalancer` option — a caller-supplied worker-selection policy.
+  Called with a frozen array of per-worker views (`{ id, tasks, latencyEwma,
+lastActive }`) and returns the id or the object of the worker a new task should go
+  to. **The default policy is not replaced:** PowerPool's least-loaded-plus-EWMA rule
+  beats Piscina's for heterogeneous tasks, so this adds a choice rather than taking
+  one away, and omitting the option behaves exactly as before. **The view is a plain
+  frozen object, not the live `WorkerObj`** — a balancer is caller code running inside
+  the pool, invoked from the pool's own send path, so the live object would expose
+  `terminate()`, the `WorkerAgnostic` and everything reachable from them. A balancer
+  that throws or returns nothing usable falls back to the default rule rather than
+  breaking the send path, and a non-function is rejected once at construction. The
+  same frozen view is reported per worker by `getStats().workers`.
+- `PowerPool.close({ force, timeout })` — graceful shutdown as a single entry point.
+  A composition of `drain()` + `shutdown()`, both of which stay exactly as they are.
+  What it prevents is the _order_: `shutdown()` alone abandons in-flight work, and
+  `drain()` alone leaves the workers running — and getting it wrong is silent, because
+  the pool looks closed and the last few tasks are gone. `force` and `timeout` are
+  mutually exclusive and throw rather than silently preferring one, because a forced
+  close has nothing to wait for. A drain that cannot finish is logged and the close
+  proceeds. Resolves with the final `getStats()` snapshot.
 
 ### Changed
 
@@ -92,9 +130,49 @@
   scans every unmatched index whether or not anything remembers them. The coverage
   report showed its `push` branch was never even taken, so no test could have
   observed its absence.
+- `PowerPool`'s saturated dispatch path is O(log n) per dispatch instead of O(n),
+  removing an O(n²) term under sustained saturation. The queue was a `PowerQueue` and
+  every dispatch called `shiftHighestPriority`, which scans every queued item to find
+  the best one. With `priorityAgingMs` at its default of `0` the effective priority is
+  static, so the queue is now a `PowerPriorityQueue` — a binary heap. This matters more
+  here than in a Node-only pool: a long pause on a browser main thread is a dropped
+  frame. **`priorityAgingMs` above `0` keeps the O(n) scan, deliberately** — aging makes
+  the effective priority `priority + (now - enqueuedAt) / priorityAgingMs`, which drifts
+  with the clock, and a heap keys on the priority at push time, so it would order by a
+  key that is already stale. The two paths dispatch in the same order for the same
+  input, and both keep FIFO among equal priorities; that equivalence is itself pinned
+  by a test.
+- `PowerPriorityQueue` gained `pushMany(items)` — bulk enqueue, a deliberate loop over
+  `push` because each push is already O(log n) and a heap has no block-copy
+  amortisation to earn — and `toArray()`, a snapshot in **dispatch order**. `toArray()`
+  sorts the heap _entries_ rather than the items, and that is the whole subtlety: the
+  FIFO tiebreak is the insertion sequence number, which lives on the entry, so sorting
+  items directly would compare equal priorities as equal and fall back on the heap
+  array's layout — which is a valid heap but not an insertion order. The result would
+  look sorted and not be FIFO.
 
 ### Fixed
 
+- **`PowerPool` now detects a worker that dies, settles it, and replaces it.** Before
+  this, a dead worker was simply absent, and three things followed — all observable
+  from outside as "the pool stopped working": `drain()` hung waiting for a response
+  that would never arrive; every `awaitResponse` promise timed out instead of
+  rejecting, so a caller waited the full timeout — 30 s by default, forever under
+  `awaitResponseTimeout: Infinity` — to learn what had already happened; and the pool
+  sat below `minSize` permanently, because nothing noticed the shortfall. The pool now
+  settles the dead worker's in-flight tasks and **rejects its pending responses at the
+  moment of death** rather than at a timeout, removes it, emits `pool:worker:exit`, and
+  refills toward `minSize`. **The bootstrap guard is the part worth understanding:** a
+  worker that dies having never completed a task is a worker that failed to _load_ — a
+  syntax error, a missing module, bad `workerOptions` — and refilling on every such
+  death is a respawn storm, each replacement loading, throwing, dying and being
+  replaced at full CPU forever. So **three consecutive load-failures stop the refill**
+  and the reason is logged rather than retried; that bound is a judgement call borrowed
+  in substance from Piscina's `workerFailsDuringBootstrap`, not a measured number. A
+  worker that had been working and then died is a _crash_, not a load failure, and
+  resets the bound. **Known limitation, recorded rather than papered over: this is
+  Node-only.** A browser `Worker` has no `'exit'` event, so the handler never fires
+  there and the `drain()`-hangs symptom persists in that runtime.
 - Two metrics leaks on the `await using` teardown path. `PowerCache`'s
   `[Symbol.asyncDispose]()` repeated `[Symbol.dispose]()`'s body and the copy
   dropped the `detach`; `PowerPool`'s called `terminate()`, which never detaches.
