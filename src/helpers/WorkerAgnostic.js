@@ -115,7 +115,15 @@ function detectEnv() {
 }
 
 // Normalized event types supported across environments.
-const SUPPORTED_EVENTS = ['message', 'error', 'messageerror'];
+//
+// `'exit'` is in the list and is **Node-only in practice**: a browser `Worker` has
+// no such event, so registering it there is a no-op that never fires. It is
+// normalised anyway rather than special-cased at the call site, because the
+// alternative is every consumer re-deriving "does this runtime tell me when a
+// worker dies" — and the answer changes per runtime, which is exactly what this
+// class exists to absorb. A consumer that cares simply never hears it on a
+// browser, which is the honest signal: there is nothing to hear.
+const SUPPORTED_EVENTS = ['message', 'error', 'messageerror', 'exit'];
 
 /**
  * The constructor options minus this class's own `onError`.
@@ -614,7 +622,13 @@ class WorkerAgnostic {
       const saved = [];
       for (const type of SUPPORTED_EVENTS) {
         const prop =
-          type === 'message' ? 'onmessage' : type === 'error' ? 'onerror' : 'onmessageerror';
+          type === 'message'
+            ? 'onmessage'
+            : type === 'error'
+              ? 'onerror'
+              : type === 'exit'
+                ? 'onexit'
+                : 'onmessageerror';
         /** @type {(...args: any[]) => void} */
         const handler = (...args) => this._dispatch(type, ...args);
         saved.push([prop, w[prop]]);

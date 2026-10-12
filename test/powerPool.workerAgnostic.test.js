@@ -369,14 +369,19 @@ describe('WRK-004: the pool subscribes to all three events', () => {
 });
 
 describe('WRK-004: retiring a worker releases what it attached', () => {
-  it('detaches the three native listeners on the emitter model', () => {
+  it('detaches every native listener on the emitter model', () => {
     const fake = emitterWorker();
     const pool = poolFor(() => fake);
     try {
       pool._terminateWorker(pool.workers[0], 'test');
       // All three, and through `off` — the emitter model's detach. A partial
       // release here is what leaves a terminated worker holding the pool.
-      expect([...new Set(fake.offCalls)].sort()).toEqual(['error', 'message', 'messageerror']);
+      expect([...new Set(fake.offCalls)].sort()).toEqual([
+        'error',
+        'exit',
+        'message',
+        'messageerror',
+      ]);
     } finally {
       pool.shutdown();
     }
@@ -387,7 +392,12 @@ describe('WRK-004: retiring a worker releases what it attached', () => {
     const pool = poolFor(() => fake);
     try {
       pool._terminateWorker(pool.workers[0], 'test');
-      expect([...new Set(fake.detached)].sort()).toEqual(['error', 'message', 'messageerror']);
+      expect([...new Set(fake.detached)].sort()).toEqual([
+        'error',
+        'exit',
+        'message',
+        'messageerror',
+      ]);
     } finally {
       pool.shutdown();
     }

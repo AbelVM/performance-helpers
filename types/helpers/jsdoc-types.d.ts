@@ -253,25 +253,25 @@ export type AutoScaleOptions = {
  *  assignment (`worker.onmessage = ...`) is how the oldest of them are wired.
  */
 export type WorkerLike = {
-    postMessage: (arg0: any, arg1: (ArrayBuffer[] | ArrayBufferView[] | Object) | undefined) => any;
+    postMessage: (arg0: any, arg1: TransferList | undefined) => any;
     terminate?: (() => (Promise<void> | void)) | undefined;
     addEventListener?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
     removeEventListener?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
     on?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
     off?: ((arg0: string, arg1: (...args: any[]) => void) => any) | undefined;
-    onmessage?: ((...arg0: any[]) => void) | undefined;
-    onerror?: ((...arg0: any[]) => void) | undefined;
-    onmessageerror?: ((...arg0: any[]) => void) | undefined;
+    onmessage?: ((...arg0: any[]) => void) | null | undefined;
+    onerror?: ((...arg0: any[]) => void) | null | undefined;
+    onmessageerror?: ((...arg0: any[]) => void) | null | undefined;
+    onexit?: ((...arg0: any[]) => void) | null | undefined;
     importScripts?: ((...arg0: any[]) => void) | undefined;
 };
 /**
- * /**
- *  A transferable list: an array of buffers/views, or any array-like of them.
+ * A transferable list: an array of buffers/views, or any array-like of them.
  *
- *  Spelled without a bare `Object` member on purpose - the pool reads `.length`
- *  off the transfer list, and a `Object` in the union makes that an error at
- *  every call site. An array-like is the honest widening: the code also accepts
- *  iterables and converts them once.
+ * Spelled without a bare `Object` member on purpose - the pool reads `.length`
+ * off the transfer list, and a `Object` in the union makes that an error at
+ * every call site. An array-like is the honest widening: the code also accepts
+ * iterables and converts them once.
  */
 export type TransferList = ArrayBuffer[] | ArrayBufferView[] | {
     length: number;
@@ -339,6 +339,31 @@ export type WorkerObj = {
      * tasks were outstanding. BUG-011.
      */
     tasksSettled: boolean;
+    /**
+     * - Set once this worker has finished a
+     * task. Read by the bootstrap-failure guard in `_handleWorkerExit`: a worker
+     * that dies having never completed one failed to *load*, and a run of those is
+     * a respawn storm rather than a recovery, so the pool stops refilling. A worker
+     * that had been working and then died is a crash and resets the bound.
+     * Optional, and written as a plain read rather than `=== true` at the one site
+     * that matters, so an entry built before the field existed behaves as "never
+     * completed" - which is the safe direction. PISC-001.
+     */
+    everCompletedTask?: boolean | undefined;
+    /**
+     * - Set once `_handleWorkerExit` has run for this
+     * worker, so a second arrival is a no-op. `'exit'` can reach the pool after an
+     * explicit `terminate()` - shutdown, a `resize()`, an idle reap - and
+     * re-running the teardown would double-count the worker's completed tasks and
+     * re-reject responses that were already settled. PISC-001.
+     */
+    exited?: boolean | undefined;
+    /**
+     * - The exit code the runtime reported, where it
+     * reports one. Carried on the entry and echoed in the `pool:worker:exit` event
+     * payload. PISC-001.
+     */
+    exitCode?: number | undefined;
 };
 /**
  * Deferred promise options for `PowerDefer`.

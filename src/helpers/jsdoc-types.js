@@ -186,19 +186,19 @@
  * assignment (`worker.onmessage = ...`) is how the oldest of them are wired.
  *
  * @typedef {Object} WorkerLike
- * @property {function(*, (ArrayBuffer[]|ArrayBufferView[]|Object)=): *} postMessage
+ * @property {function(*, TransferList=): *} postMessage
  * @property {function(): (Promise<void>|void)} [terminate]
  * @property {function(string, function(...*):void): *} [addEventListener]
  * @property {function(string, function(...*):void): *} [removeEventListener]
  * @property {function(string, function(...*):void): *} [on]
  * @property {function(string, function(...*):void): *} [off]
- * @property {function(...*):void} [onmessage]
- * @property {function(...*):void} [onerror]
- * @property {function(...*):void} [onmessageerror]
+ * @property {?(function(...*):void)} [onmessage]
+ * @property {?(function(...*):void)} [onerror]
+ * @property {?(function(...*):void)} [onmessageerror]
+ * @property {?(function(...*):void)} [onexit]
  * @property {function(...*):void} [importScripts]
  */
 
-/**
 /**
  * A transferable list: an array of buffers/views, or any array-like of them.
  *
@@ -238,6 +238,22 @@
  *   would be decremented a second time - stealing a count that belongs to a
  *   *different* worker still doing work, so the pool would report idle while
  *   tasks were outstanding. BUG-011.
+ * @property {boolean} [everCompletedTask] - Set once this worker has finished a
+ *   task. Read by the bootstrap-failure guard in `_handleWorkerExit`: a worker
+ *   that dies having never completed one failed to *load*, and a run of those is
+ *   a respawn storm rather than a recovery, so the pool stops refilling. A worker
+ *   that had been working and then died is a crash and resets the bound.
+ *   Optional, and written as a plain read rather than `=== true` at the one site
+ *   that matters, so an entry built before the field existed behaves as "never
+ *   completed" - which is the safe direction. PISC-001.
+ * @property {boolean} [exited] - Set once `_handleWorkerExit` has run for this
+ *   worker, so a second arrival is a no-op. `'exit'` can reach the pool after an
+ *   explicit `terminate()` - shutdown, a `resize()`, an idle reap - and
+ *   re-running the teardown would double-count the worker's completed tasks and
+ *   re-reject responses that were already settled. PISC-001.
+ * @property {number} [exitCode] - The exit code the runtime reported, where it
+ *   reports one. Carried on the entry and echoed in the `pool:worker:exit` event
+ *   payload. PISC-001.
  */
 
 export {};

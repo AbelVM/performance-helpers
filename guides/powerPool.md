@@ -393,6 +393,22 @@ Both are computed lazily, so an idle transition costs nothing when no listener r
 
 `pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
 
+`pool:worker:exit` — **New in 2.0.1.** emitted on the internal event bus when a worker dies. Payload: `{ id, code, completedTask, remaining }`, where `code` is the exit code the runtime reported (or `null` where it reports none) and `completedTask` says whether that worker had ever finished a task. See [Worker death](#worker-death).
+
+### Worker death
+
+**New in 2.0.1.** A worker that dies is now detected, settled and replaced. Before this, a dead worker was simply absent, and three things followed — all observable from outside as "the pool stopped working":
+
+- `drain()` hung, waiting for a response that would never arrive;
+- every `awaitResponse` promise timed out instead of rejecting, so a caller waited the full timeout to learn what had already happened;
+- the pool sat below `minSize` permanently, because nothing noticed the shortfall.
+
+The pool now settles the dead worker's in-flight tasks and **rejects its pending responses at the moment of death** rather than at a timeout, removes it, emits `pool:worker:exit`, and refills toward `minSize`.
+
+**The bootstrap guard is the part worth understanding.** A worker that dies having never completed a task is a worker that failed to _load_ — a syntax error, a missing module, bad `workerOptions`. Refilling on every such death is a respawn storm: each replacement loads, throws, dies, and is replaced, at full CPU, forever. So **three consecutive load-failures stop the refill**, and the reason is logged rather than retried. A worker that had been working and then died is a _crash_, not a load failure, and resets that bound — otherwise one bad deploy would permanently shrink a healthy pool.
+
+**Known limitation, recorded rather than papered over: this is Node-only.** A browser `Worker` has no `'exit'` event, so the handler never fires there and the `drain()`-hangs symptom persists in that runtime. There is nothing to listen for; inventing a heartbeat to detect death would be a different feature with its own false-positive rate.
+
 ## Example
 
 ## Realistic Example — image thumbnail worker

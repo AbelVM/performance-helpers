@@ -65,6 +65,14 @@ import { markUntransferable } from '../utils/transferable.js';
 // not appear on the hot path.
 const CORRELATION_PROCESS_TAG = Math.floor(Math.random() * 0xffffffff).toString(36);
 
+// How many workers may die having never completed a task before the pool stops
+// refilling (PISC-001). A worker that exits with no work done is a worker that
+// failed to load, and replacing each one is a respawn storm rather than a
+// recovery — each replacement loads, throws, dies, and is replaced, at full CPU,
+// forever. Three is small enough that a genuine transient failure still recovers
+// and large enough that one bad worker does not look like a broken source.
+const MAX_CONSECUTIVE_BOOTSTRAP_FAILURES = 3;
+
 // Process-global, not per pool. A per-pool counter with a shared tag is not
 // unique across pools in the same process - two pools both emit `<tag>-0` -
 // which is exactly the collision the tag was supposed to prevent. Caught by
@@ -564,6 +572,11 @@ export class PowerPool {
     this._createdAt = nowMs(); // pool creation timestamp (ms)
     this._totalWorkersCreated = 0; // increments for every created worker instance
     this._totalTasksCompleted = 0; // increments for every finished task
+    // Consecutive workers that died having never completed a task. Read by the
+    // bootstrap-failure guard in `_handleWorkerExit`; reset by any worker that
+    // does real work and then dies, because that is a crash rather than a load
+    // failure. PISC-001.
+    this._consecutiveBootstrapFailures = 0;
     // Batched posts that could not be dispatched. `postMessageBatch` reports a
     // per-item boolean, so a failure used to be a `false` in an array and
     // nothing else — no log, no event, no count — which is the one failure mode a
@@ -2444,6 +2457,11 @@ export class PowerPool {
       // not decrement the global counter a second time. See `_terminateWorker`
       // and the guard in the `onmessage` handler. BUG-011.
       tasksSettled: false,
+      // Whether this worker has ever completed a task. The bootstrap-failure guard
+      // in `_handleWorkerExit` reads it: a worker that dies having done no work is
+      // a worker that failed to load, and a pool that keeps replacing those is in
+      // a respawn storm rather than recovering. PISC-001.
+      everCompletedTask: false,
     };
     this.workers.push(workerObj);
     this._totalWorkersCreated++;
@@ -2541,6 +2559,10 @@ export class PowerPool {
             // Update counts and Welford streaming stats (O(1) memory/time)
             this._totalTasksCompleted = (this._totalTasksCompleted || 0) + 1;
             workerObj.completedTasks = (workerObj.completedTasks || 0) + 1;
+            // First completed task, so the bootstrap-failure guard in
+            // `_handleWorkerExit` stops counting this worker's eventual death as a
+            // load failure. PISC-001.
+            if (!workerObj.everCompletedTask) workerObj.everCompletedTask = true;
             // POOL-011. This was `const k = 1; // single sample`, read twice below.
             // A named constant for the literal 1 bought nothing: `k` had no second
             // value it could ever take, so every reader had to look up what `k` was
@@ -2781,8 +2803,136 @@ export class PowerPool {
     agnostic.on('message', _handleMessage);
     agnostic.on('error', _handleError);
     agnostic.on('messageerror', _handleMessageError);
+    // **Worker death (PISC-001).** Without this a worker that dies is simply gone:
+    // `drain()` hangs waiting for a response that will never come, every
+    // `awaitResponse` promise times out instead of rejecting, and the pool sits
+    // below `minSize` permanently because nothing notices the shortfall.
+    //
+    // `'exit'` is normalised by `WorkerAgnostic` and is Node-only in practice — a
+    // browser `Worker` has no such event, so this handler never fires there and
+    // the browser half of the problem stays open. That is recorded rather than
+    // papered over: there is no `'exit'` to listen for, and inventing a heartbeat
+    // to detect death would be a different feature with its own false-positive
+    // rate.
+    agnostic.on('exit', (code) => this._handleWorkerExit(workerObj, code));
 
     return workerObj;
+  }
+
+  /**
+   * Handle a worker that has died (PISC-001).
+   *
+   * Before this existed a dead worker was simply absent: `drain()` hung waiting
+   * for a response that would never arrive, every `awaitResponse` promise timed
+   * out instead of rejecting, and the pool sat below `minSize` permanently
+   * because nothing noticed the shortfall. All three are observable from outside
+   * as "the pool stopped working", which is why this is a correctness fix rather
+   * than a nicety.
+   *
+   * The order matters. `_terminateWorker` settles the in-flight tasks and rejects
+   * the pending responses *first*, so a caller is told at the moment of death
+   * rather than at a timeout; only then is the worker removed and the pool
+   * refilled.
+   *
+   * **The bootstrap guard is the part that is easy to get wrong.** A worker that
+   * dies having never completed a task is a worker that failed to load — a syntax
+   * error in the worker file, a missing module, a bad `workerOptions`. Refilling
+   * on every such death is a respawn storm: each replacement loads, throws, dies,
+   * and is replaced, forever, at full CPU. Piscina carries a
+   * `workerFailsDuringBootstrap` guard for exactly this and it is copied here in
+   * substance: consecutive bootstrap failures past a small bound stop the refill
+   * and surface the reason instead.
+   *
+   * @param {WorkerObj} workerObj - The worker that exited.
+   * @param {number} [code] - The exit code, where the runtime provides one.
+   * @private
+   * @returns {void}
+   */
+  _handleWorkerExit(workerObj, code) {
+    if (!workerObj) return;
+    // Idempotent. `'exit'` can arrive after an explicit `terminate()` — the pool
+    // shutting down, a `resize()`, an idle reap — and re-running the teardown
+    // would double-count the worker's completed tasks and re-reject responses
+    // that were already settled.
+    if (workerObj.exited) return;
+    workerObj.exited = true;
+    workerObj.exitCode = code;
+
+    const id = this._terminateWorker(workerObj, 'worker-exit');
+
+    // Remove from the live set, O(1) by swap-with-last, the same shape
+    // `_reapIdleWorkers` uses.
+    //
+    // The popped value is captured and checked rather than assigned inline.
+    // `Array.prototype.pop()` is typed `WorkerObj | undefined`, and assigning that
+    // straight into `this.workers[i]` is an error against the array's element type
+    // — which is how the first draft of this block failed the type ratchet. The
+    // `undefined` case is unreachable here (`i !== last` and the array is
+    // non-empty), but the guard is what makes that explicit rather than assumed.
+    const i = this.workers.indexOf(workerObj);
+    if (i !== -1) {
+      const last = this.workers.length - 1;
+      if (i === last) {
+        this.workers.pop();
+      } else {
+        const moved = this.workers.pop();
+        if (moved !== undefined) this.workers[i] = moved;
+      }
+    }
+
+    this._bus.emit('pool:worker:exit', {
+      id,
+      code: code ?? null,
+      // Whether this worker had ever done work, which is the signal that
+      // separates "a worker crashed" from "a worker never started".
+      completedTask: workerObj.everCompletedTask === true,
+      remaining: this.workers.length,
+    });
+
+    // A worker that died having done no work never loaded. Count it; a run of
+    // them is a storm, not a recovery.
+    if (workerObj.everCompletedTask !== true) {
+      this._consecutiveBootstrapFailures = (this._consecutiveBootstrapFailures || 0) + 1;
+      if (this._consecutiveBootstrapFailures >= MAX_CONSECUTIVE_BOOTSTRAP_FAILURES) {
+        this._debugLog?.(
+          null,
+          `worker-exit: ${this._consecutiveBootstrapFailures} consecutive bootstrap failures; not refilling. The worker source is probably failing to load.`
+        );
+        this._updateIdleState();
+        return;
+      }
+    } else {
+      // A worker that had been working and then died is a crash, not a load
+      // failure, so it does not count toward the storm bound.
+      this._consecutiveBootstrapFailures = 0;
+    }
+
+    // Refill toward `minSize`. Bounded by `maxSize` as every other growth path is,
+    // and skipped entirely once the pool is shut down — a `shutdown()` that
+    // respawns workers on the way out never finishes.
+    //
+    // `_terminated` is the flag `shutdown()` sets, and it is the one to read here.
+    // A first draft of this guard tested `this._shuttingDown`, which **does not
+    // exist anywhere in this file** — it was referenced once, here, and never
+    // initialised or assigned, so the guard was a silent no-op that read as
+    // coverage. That is the exact failure `AGENTS.md` records, and it is why the
+    // flag was verified by grep before this comment was written rather than
+    // assumed from the name.
+    if (this._terminated) {
+      this._updateIdleState();
+      return;
+    }
+    while (this.workers.length < this.minSize && this.workers.length < this.maxSize) {
+      try {
+        this._addWorkerInstance();
+      } catch (err) {
+        // A refill that throws is the same storm wearing a different coat: stop
+        // and report rather than retry in a loop.
+        this._debugLog?.(err, 'worker-exit: refill failed');
+        break;
+      }
+    }
+    this._updateIdleState();
   }
 
   /**

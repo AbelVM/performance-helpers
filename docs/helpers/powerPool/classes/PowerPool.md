@@ -99,6 +99,12 @@ number of currently active (dispatched) tasks across all workers
 
 ***
 
+### \_consecutiveBootstrapFailures
+
+> **\_consecutiveBootstrapFailures**: `number`
+
+***
+
 ### \_createdAt
 
 > **\_createdAt**: `number`

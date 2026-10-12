@@ -626,6 +626,35 @@ export class PowerPool {
      * @returns {WorkerObj} The newly created worker entry.
      */
     /**
+     * Handle a worker that has died (PISC-001).
+     *
+     * Before this existed a dead worker was simply absent: `drain()` hung waiting
+     * for a response that would never arrive, every `awaitResponse` promise timed
+     * out instead of rejecting, and the pool sat below `minSize` permanently
+     * because nothing noticed the shortfall. All three are observable from outside
+     * as "the pool stopped working", which is why this is a correctness fix rather
+     * than a nicety.
+     *
+     * The order matters. `_terminateWorker` settles the in-flight tasks and rejects
+     * the pending responses *first*, so a caller is told at the moment of death
+     * rather than at a timeout; only then is the worker removed and the pool
+     * refilled.
+     *
+     * **The bootstrap guard is the part that is easy to get wrong.** A worker that
+     * dies having never completed a task is a worker that failed to load — a syntax
+     * error in the worker file, a missing module, a bad `workerOptions`. Refilling
+     * on every such death is a respawn storm: each replacement loads, throws, dies,
+     * and is replaced, forever, at full CPU. Piscina carries a
+     * `workerFailsDuringBootstrap` guard for exactly this and it is copied here in
+     * substance: consecutive bootstrap failures past a small bound stop the refill
+     * and surface the reason instead.
+     *
+     * @param {WorkerObj} workerObj - The worker that exited.
+     * @param {number} [code] - The exit code, where the runtime provides one.
+     * @private
+     * @returns {void}
+     */
+    /**
      * Return the least-loaded worker (smallest `tasks` count).
      *
      * When multiple workers share the same `tasks` count prefer the one with
