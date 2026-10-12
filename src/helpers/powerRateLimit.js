@@ -564,6 +564,23 @@ export class PowerRateLimit {
    * Returns `null` when reservation fails.
    * The returned token is a simple marker object such as `{ n: 1 }`, and it can
    * be consumed by `release(token)` or `rollback(token)` to restore the limiters.
+   *
+   * **Throws when the reservation cannot be decided synchronously** — that is,
+   * when `sharedState` is configured with an async adapter, so `tryConsume`
+   * returns a promise. Use {@link PowerRateLimit#reserveAsync} there.
+   *
+   * The throw is the fix for AUD-007, and it is a throw rather than a `null`
+   * return for a reason worth stating. The previous behaviour was
+   * `if (!this.tryConsume(...)) return null;` — and a promise is truthy, so
+   * `!promise` was `false`, the guard never fired, and **every reservation was
+   * reported as granted**, including ones the shared store had denied. A caller
+   * who then `release()`d that token credited permits that were never spent, so
+   * the distributed budget leaked by one per denied request. Returning `null`
+   * instead would have been quieter but still wrong: it would tell a caller
+   * "you were denied" when the truth is "I could not find out", and those need
+   * different handling. A synchronous method that cannot be synchronous must say
+   * so.
+   *
    * @param {number} [n=1]
    * @param {PowerRateLimitCallOptions} [options] - Per-call overrides; `context`
    *   selects the `keyFn` slot, so a reservation is made against the same
@@ -576,14 +593,44 @@ export class PowerRateLimit {
     // The key has to reach `tryConsume`, so it is forwarded rather than
     // re-derived: reserving on the instance's default slot and consuming on the
     // caller's slot would split one reservation across two budgets.
-    if (!this.tryConsume(want, { ...options, atomic: true })) return null;
+    const outcome = this.tryConsume(want, { ...options, atomic: true });
+    if (isPromise(outcome)) {
+      throw new TypeError(
+        'PowerRateLimit.reserve(): the sharedState adapter is async, so a reservation ' +
+          'cannot be decided synchronously. Use reserveAsync(), which awaits it.'
+      );
+    }
     // The token shape is `{ n }` and nothing else. A `slot` field was added here
     // so `reserve()` could be tested against `limitersFor()`, and it broke an
     // existing `toEqual({ n: 1 })` in `powerRateLimit.extra.test.js` — a test
     // pinning the documented shape. The token is public API: `release()` accepts
     // it and callers may compare it, so growing it for a test's benefit is the
     // wrong direction of dependency. `limitersFor()` already exposes the slot.
+    if (!outcome) return null;
     return { n: want };
+  }
+
+  /**
+   * The awaiting counterpart to {@link PowerRateLimit#reserve}, for a
+   * `sharedState` adapter whose `checkAndIncrement` returns a promise.
+   * **New in 2.0.1** (AUD-007).
+   *
+   * Same contract, same token shape, same `null` on denial — it simply does not
+   * pretend a promise is an answer. A caller with a synchronous adapter can use
+   * either; `reserve()` is the cheaper one there because it allocates no promise.
+   *
+   * @param {number} [n=1]
+   * @param {PowerRateLimitCallOptions} [options]
+   * @returns {Promise<{n:number}|null>}
+   */
+  async reserveAsync(n = 1, options = {}) {
+    const want = assertCount(n, { name: 'n', className: 'PowerRateLimit', method: 'reserveAsync' });
+    if (want === 0) return { n: 0 };
+    // `tryConsume` already normalises both shapes: it returns a boolean for a
+    // sync adapter and a promise for an async one, and `await` on a boolean is
+    // that boolean. So this is the one implementation that covers both.
+    const ok = await this.tryConsume(want, { ...options, atomic: true });
+    return ok ? { n: want } : null;
   }
 
   /**

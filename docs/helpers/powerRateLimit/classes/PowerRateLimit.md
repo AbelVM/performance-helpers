@@ -425,6 +425,22 @@ Returns `null` when reservation fails.
 The returned token is a simple marker object such as `{ n: 1 }`, and it can
 be consumed by `release(token)` or `rollback(token)` to restore the limiters.
 
+**Throws when the reservation cannot be decided synchronously** — that is,
+when `sharedState` is configured with an async adapter, so `tryConsume`
+returns a promise. Use [PowerRateLimit#reserveAsync](#reserveasync) there.
+
+The throw is the fix for AUD-007, and it is a throw rather than a `null`
+return for a reason worth stating. The previous behaviour was
+`if (!this.tryConsume(...)) return null;` — and a promise is truthy, so
+`!promise` was `false`, the guard never fired, and **every reservation was
+reported as granted**, including ones the shared store had denied. A caller
+who then `release()`d that token credited permits that were never spent, so
+the distributed budget leaked by one per denied request. Returning `null`
+instead would have been quieter but still wrong: it would tell a caller
+"you were denied" when the truth is "I could not find out", and those need
+different handling. A synchronous method that cannot be synchronous must say
+so.
+
 #### Parameters
 
 ##### n?
@@ -442,6 +458,34 @@ Per-call overrides; `context`
 #### Returns
 
 \{ `n`: `number`; \} \| `null`
+
+***
+
+### reserveAsync()
+
+> **reserveAsync**(`n?`, `options?`): `Promise`\<\{ `n`: `number`; \} \| `null`\>
+
+The awaiting counterpart to [PowerRateLimit#reserve](#reserve), for a
+`sharedState` adapter whose `checkAndIncrement` returns a promise.
+**New in 2.0.1** (AUD-007).
+
+Same contract, same token shape, same `null` on denial — it simply does not
+pretend a promise is an answer. A caller with a synchronous adapter can use
+either; `reserve()` is the cheaper one there because it allocates no promise.
+
+#### Parameters
+
+##### n?
+
+`number` = `1`
+
+##### options?
+
+`PowerRateLimitCallOptions` = `{}`
+
+#### Returns
+
+`Promise`\<\{ `n`: `number`; \} \| `null`\>
 
 ***
 

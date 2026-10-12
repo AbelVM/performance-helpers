@@ -24,6 +24,8 @@ Options:
 ## API
 
 - `tryConsume(n?)` — returns `true` only when every underlying limiter permits consuming `n` tokens.
+- `reserve(n?)` — reserves `n` tokens and returns a `{ n }` token to undo later, or `null` when the reservation is refused. **Throws** when a `sharedState` adapter is async, because the answer is not synchronously available — use `reserveAsync()` there. See [Async adapters](#async-adapters).
+- `reserveAsync(n?)` — **New in 2.0.1.** The awaiting counterpart to `reserve()`, for an async `sharedState` adapter. Same contract and same token shape; also works with a synchronous adapter.
 - `reset()` — calls `reset()` on underlying limiters where present.
 - `dispose()` — releases what the composer built, and supports `using`. See [Disposal](#disposal).
 - `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available, rejectionRate, legErrors }`. `rejectionRate` is the fraction of composed consume calls refused so far. `legErrors` is **new in 2.0** and counts legs whose `available()` threw during a pre-flight — see [When a leg throws](#when-a-leg-throws). See [Metrics](#metrics).
@@ -161,6 +163,41 @@ const ok = await limiter.tryConsume(1, { context: { tenant: 'acme' } });
 The local legs are only consulted after the shared store admits, so an async
 adapter does not change the admission order — it only makes the round-trip
 visible to the caller.
+
+**`reserve()` and `reserveAsync()` — new in 2.0.1.** An async adapter also makes
+`reserve()` unable to answer synchronously, and the two are now separate methods
+rather than one that guesses:
+
+```javascript
+// A synchronous adapter (or no sharedState at all):
+const token = limiter.reserve(1); // { n: 1 } | null
+
+// An async adapter:
+const token = await limiter.reserveAsync(1); // { n: 1 } | null
+```
+
+`reserve()` **throws** when the adapter is async, rather than returning `null`.
+That is deliberate, and it is the fix for a real defect: the previous
+implementation was `if (!this.tryConsume(...)) return null`, and a promise is
+truthy — so `!promise` was `false`, the guard never fired, and **every
+reservation was reported as granted**, including ones the shared store had
+denied. A caller who then `release()`d that token credited permits that were
+never spent, so the distributed budget leaked by one per denied request.
+
+Returning `null` instead would have been quieter but still wrong: it would tell a
+caller "you were denied" when the truth is "I could not find out", and those need
+different handling. A synchronous method that cannot be synchronous says so.
+
+`reserveAsync()` covers both shapes — `tryConsume` normalises them and `await` on
+a boolean is that boolean — so a caller with a synchronous adapter can use either
+method, and `reserve()` is the cheaper one there because it allocates no promise.
+
+**The shared store has no refund.** Its contract is `checkAndIncrement(key, n)`
+and nothing else, so `release(token)` credits the _local_ legs and cannot
+decrement the distributed counter. A reservation that is released therefore still
+counts against the global budget for the window. That is a limitation of the
+adapter contract rather than an oversight, and closing it needs an atomic
+decrement in the store — which is a design question, not a bug fix.
 
 ## External feedback and adaptive refill
 
