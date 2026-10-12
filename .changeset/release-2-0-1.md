@@ -108,6 +108,35 @@ lastActive }`) and returns the id or the object of the worker a new task should 
   mutually exclusive and throw rather than silently preferring one, because a forced
   close has nothing to wait for. A drain that cannot finish is logged and the close
   proceeds. Resolves with the final `getStats()` snapshot.
+- `postMessage` accepts a per-task `signal` — a standard `AbortSignal`, which is why
+  this works the same way in every realm the pool runs in. **Already aborted at post
+  time** is refused before any queue work, because a caller holding an aborted signal
+  has already changed their mind; fire-and-forget returns `false` rather than throwing,
+  matching every other refusal on that path. **Aborted while queued** rejects the
+  pending response _at abort time_, not at dispatch time — the item is deliberately
+  **not** pulled out of the queue, because neither queue implementation has an
+  efficient remove-by-value and the dispatch loop already walks past items it is going
+  to discard, the same trade `deadlineAt` makes. **Aborted while in flight: the work
+  runs to completion and the waiter is released now.** Piscina terminates the worker;
+  that is the wrong trade here, because under `maxTasksPerWorker > 1` a worker carries
+  several in-flight tasks, so terminating it to abandon one kills every other task on
+  that worker — a blast radius far larger than the task being aborted, and one the
+  callers of those other tasks did nothing to earn. It also discards a warm worker and
+  its negotiated protocol state. The response is discarded when it arrives, because the
+  pending entry is already gone. That is the honest reading of what an abort usually
+  means — "stop waiting for this" — and a caller who genuinely needs the work undone
+  has to arrange that in the worker, because no pool can undo a side effect.
+  **`skipQueue` is rejected** as part of this change: the pool already dispatches
+  immediately when a worker is free, the queue is only used under saturation, and a
+  `skipQueue` that jumped ahead of queued work would be a priority mechanism by another
+  name when `priority` already exists.
+- `PowerRateLimit.reserveAsync(n, options)` — the awaiting counterpart to `reserve()`,
+  for a `sharedState` adapter whose `checkAndIncrement` returns a promise. Same
+  contract, same `{ n }` token shape, same `null` on refusal. `reserve()` now **throws**
+  a `TypeError` when the adapter is async, rather than returning `null`: returning
+  `null` would tell a caller "you were denied" when the truth is "I could not find
+  out", and those need different handling. `reserveAsync()` covers both shapes, because
+  `tryConsume` normalises them and `await` on a boolean is that boolean.
 
 ### Changed
 
@@ -153,6 +182,16 @@ lastActive }`) and returns the id or the object of the worker a new task should 
 
 ### Fixed
 
+- **`PowerRateLimit.reserve()` reported every reservation as granted when
+  `sharedState` was configured with an async adapter.** The implementation was
+  `if (!this.tryConsume(...)) return null;` — and `tryConsume` returns a _promise_ for
+  an async adapter. A promise is truthy, so `!promise` was `false`, the guard never
+  fired, and the method returned `{ n }` unconditionally, including for reservations
+  the shared store had denied. A caller who then `release()`d that token credited
+  permits that were never spent, so the distributed budget leaked by one per denied
+  request. Reproduced before the fix: an adapter denying everything, `reserve(1)`
+  returning `{ n: 1 }` where the synchronous adapter correctly returned `null`. Fixed
+  by splitting into `reserve()` / `reserveAsync()` — see the Added section.
 - **`PowerPool` now detects a worker that dies, settles it, and replaces it.** Before
   this, a dead worker was simply absent, and three things followed — all observable
   from outside as "the pool stopped working": `drain()` hung waiting for a response

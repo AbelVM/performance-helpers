@@ -207,6 +207,15 @@ const CROSS_CLASS = new Set([
   'broadcast',
   // Rate limiters, referenced from powerRateLimit and powerGCRA.
   'addTokens',
+  // `sharedState.checkAndIncrement()`, named throughout powerRateLimit's
+  // distributed section. It is a method of the **caller's own adapter**, not of
+  // `PowerRateLimit` — the constructor validates that the adapter supplies it and
+  // the guide's whole subject is what that adapter must implement. So the
+  // per-guide rule cannot resolve it, and the guide's advice ("the store is the
+  // source of truth for admission") is only meaningful against the adapter's own
+  // method. Same category as `createDataChannel` above: a method the guide
+  // describes a contract for rather than one this helper declares.
+  'checkAndIncrement',
   // `PowerGCRA.tryReserve`, referenced from powerRateLimit, powerThrottle and
   // powerSlidingWindow. All four limiter guides share one Clocks section, and
   // naming `stats().tat` and `tryReserve().runAt` there is how the section says
