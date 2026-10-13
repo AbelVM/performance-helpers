@@ -93,6 +93,7 @@ node bench/claims.js stepsize     # does the autoscale step controller beat a fi
 node bench/claims.js ratelimit    # static versus adaptive refill under burst + steady load
 node bench/claims.js datagram     # bounded datagram queue saturation and flush
 node bench/claims.js apdex        # APDEX from a sketch against exact counters
+node bench/claims.js adaptive     # does an online policy selector beat any single policy
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only
@@ -106,7 +107,7 @@ Both report **ratios over a whole run** — hit rate, and quantile relative erro
 
 The `zipf` workload drives every policy with a **byte-identical seeded key stream**, so a difference between two rows is attributable to the policy rather than to a different input. It also **refuses to run** when `maxEntries` exceeds the working set: a cache that can hold the whole working set has no admission problem, every policy ties near 100%, and the run would prove nothing. Parameters are overridable — `CLAIM_ZIPF`, `CLAIM_WORKING_SET`, `CLAIM_MAX_ENTRIES`, `CLAIM_SCAN_KEYS`, `CLAIM_SCAN_EVERY`, `CLAIM_REPEATS` — and the seed is shared with `run.js` so a result is reproducible.
 
-**`zipf` currently reports a failure.** `admission: 'tynilfu'` is meant to protect a working set from a scan; on a cold cache it does the opposite, measuring a 2.5% hit rate against plain LRU's 66.4%. The release note's original claim for this feature has been withdrawn accordingly. Run the benchmark rather than trusting either the old note or this paragraph.
+**`zipf` used to report a failure, and no longer does.** `admission: 'tinylfu'` is meant to protect a working set from a scan; it measured a 2.5% hit rate against plain LRU's 66.4% on a cold cache, and the release note's original claim for the feature was withdrawn accordingly. Two defects were behind that — a refused key was never recorded in the sketch, and the sketch's half-life clock stopped once its counters saturated — and both are fixed in 2.0.1. The row now reads **93.0 %** working-set hit rate and **37.0/40** survivors, which beats `policy: 'slru'` (89.4 %, 33.0/40) rather than losing to it. The cold-start case is still far behind plain LRU and is still the reason the option is off by default; see the `powerCache` guide for the corrected distribution, which is a mean over 300 seeds rather than the single draw this file used to quote. Run the benchmark rather than trusting either the old note or this paragraph.
 
 **`sieve` reports a negative result, and that is the finding.** SIEVE is implemented _in the bench file_, not in `src/`: the claim under test is whether a policy beats what ships, so the policy was measured before the library gained it. It sits beside a hand-rolled plain-LRU **control** that differs from it in exactly one respect — three pointer writes per hit instead of one bit store — and that control reproduces shipped `PowerCache` exactly on both traces, which is what makes the SIEVE row a difference in policy rather than a difference in structure.
 

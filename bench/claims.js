@@ -45,6 +45,7 @@
  *   node bench/claims.js sabring   # SharedArrayBuffer ring vs structured clone
  *   node bench/claims.js keyshape # cache key-shape performance (int/string/object)
  *   node bench/claims.js datagram # bounded datagram queue saturation and flush
+ *   node bench/claims.js adaptive  # does an online policy selector beat any single policy
  *
  * That list is a convenience, not the authority: `MODES` below is, and running
  * this file with an unrecognised mode prints every mode that exists.
@@ -2170,6 +2171,460 @@ function runSieveWorkload() {
   );
 
   return { workloads: all, config: { capacity, seed, workingSet, scanEvery, scanKeys, zipf } };
+}
+
+// ─── Workload: adaptive policy selection — does picking online beat picking once? ──
+//
+// AUD-028. The audit's §8.2 recommends "an adaptive mode that runs a hill-climbing
+// selector over the resident policies, the way Caffeine does", gated behind an
+// opt-in flag with its own `bench/claims.js` mode, "because an adaptive policy that
+// picks wrong is worse than a fixed one that is merely suboptimal".
+//
+// This is that mode, and it is built **before** the feature, for the reason the
+// sieve mode gives: the claim under test is whether *selecting* beats any single
+// resident policy, and adding the selector to `src/` first would be building the
+// feature before measuring its premise. The selector here is a prototype in this
+// file; nothing in it is shipped until the numbers say it should be.
+//
+// Three things this mode is careful about, each of which has already produced a
+// wrong answer somewhere in this harness:
+//
+// 1. **Paired streams.** Every arm sees the identical seeded key sequence, so the
+//    workload difference cannot be folded into the policy difference.
+// 2. **Matched memory.** The obvious way to build an adaptive arm is N shadow caches
+//    at the configured capacity, which is N× the memory of any fixed arm — and the
+//    sieve mode already records what that confound does to a comparison (the
+//    generational row "won" by 37 points entirely on over-fill, and lost by a wide
+//    margin once sized to the memory it actually used). So this mode reports the
+//    adaptive arm **twice**: once at full capacity per shadow, and once with the
+//    capacity divided by the arm count so the *total* resident set matches a fixed
+//    arm. The second row is the one that answers "is this worth the bound".
+// 3. **A workload where no single policy wins.** On a stationary trace the best
+//    fixed policy is the ceiling and an adaptive arm can only tie at best, because
+//    it pays a learning cost and then oscillates around a choice it could have been
+//    given. Measuring adaptation only on a stationary workload would be measuring
+//    the wrong thing and concluding "no". So the second workload here **moves the
+//    working set**, which is the case the GAMP study's "no single policy wins"
+//    result is actually about.
+//
+// The selector itself is deliberately plain: evaluate every arm over a fixed-length
+// epoch, then make the best arm live. Over a *discrete* policy set with epoch-wise
+// evaluation, hill-climbing reduces to best-of-epoch — there is no gradient to
+// follow and no neighbour structure to walk. What is left to decide is the
+// anti-oscillation rule, so `minDwell` (the number of epochs a policy must stay
+// live before it may be replaced) is a parameter rather than a constant, and the
+// switch count is reported so a selector that thrashes is visible as one.
+
+/**
+ * A hill-climbing selector over a fixed set of resident policies.
+ *
+ * Every arm is a real `PowerCache`, so the counterfactual each arm represents is
+ * "what if this policy had been live for the whole run" — which is exactly the
+ * question, and is why the arms are the shipped class rather than a
+ * re-implementation that could drift from it.
+ *
+ * The live arm is the one whose hit/miss is reported. The others keep simulating
+ * on the same stream, because a shadow that stopped seeing traffic could not be
+ * evaluated when its turn came.
+ */
+class BenchAdaptive {
+  /**
+   * @param {{
+   *   capacity: number,
+   *   arms: {label: string, policy: string, admission: string}[],
+   *   epoch: number,
+   *   minDwell: number,
+   *   workingSetSize: number,
+   *   hot?: Uint8Array,
+   * }} cfg
+   */
+  constructor({ capacity, arms, epoch, minDwell, workingSetSize, hot }) {
+    this.arms = arms;
+    this.epoch = Math.max(1, epoch);
+    this.minDwell = Math.max(1, minDwell);
+    this.workingSetSize = workingSetSize;
+    this.hot = hot ?? null;
+
+    /** @type {{label: string, cache: import('../src/helpers/powerCache.js').PowerCache, epochHits: number, epochReqs: number}[]} */
+    this.shadows = arms.map((a) => ({
+      label: a.label,
+      cache: new PowerCache({
+        maxEntries: capacity,
+        policy: a.policy,
+        admission: a.admission,
+      }),
+      epochHits: 0,
+      epochReqs: 0,
+    }));
+
+    this.live = 0;
+    this.dwell = 0;
+    this.switches = 0;
+    this.hits = 0;
+    this.misses = 0;
+    this.hotHits = 0;
+    this.hotReqs = 0;
+    this.count = 0;
+    /** @type {{at: number, to: string}[]} */
+    this.switchLog = [];
+  }
+
+  /**
+   * @param {number} key
+   * @returns {boolean} whether the live arm hit.
+   */
+  request(key) {
+    let liveHit = false;
+    for (let i = 0; i < this.shadows.length; i++) {
+      const s = this.shadows[i];
+      const hit = s.cache.get(key) !== undefined;
+      s.epochHits += hit ? 1 : 0;
+      s.epochReqs++;
+      // Every arm pays identical miss work, so the comparison is about admission
+      // and eviction rather than about who got asked to produce a value.
+      if (!hit) s.cache.set(key, 1);
+      if (i === this.live) liveHit = hit;
+    }
+
+    if (liveHit) this.hits++;
+    else this.misses++;
+
+    const isHot = this.hot ? this.hot[this.count] === 1 : key < this.workingSetSize;
+    if (isHot) {
+      this.hotReqs++;
+      if (liveHit) this.hotHits++;
+    }
+
+    this.count++;
+    if (this.count % this.epoch === 0) this._evaluate();
+    return liveHit;
+  }
+
+  /** Pick the best arm of the epoch that just ended, subject to the dwell rule. */
+  _evaluate() {
+    let best = this.live;
+    let bestRate = -1;
+    for (let i = 0; i < this.shadows.length; i++) {
+      const s = this.shadows[i];
+      const rate = s.epochReqs > 0 ? s.epochHits / s.epochReqs : 0;
+      s.epochHits = 0;
+      s.epochReqs = 0;
+      // Strictly greater, so ties keep the incumbent. A selector that flips on a
+      // tie is a selector that thrashes for no gain.
+      if (rate > bestRate) {
+        bestRate = rate;
+        best = i;
+      }
+    }
+
+    this.dwell++;
+    if (best !== this.live && this.dwell >= this.minDwell) {
+      this.live = best;
+      this.dwell = 0;
+      this.switches++;
+      this.switchLog.push({ at: this.count, to: this.shadows[best].label });
+    }
+  }
+
+  get hitRate() {
+    return this.hits + this.misses > 0 ? this.hits / (this.hits + this.misses) : 0;
+  }
+
+  get hotHitRate() {
+    return this.hotReqs > 0 ? this.hotHits / this.hotReqs : 0;
+  }
+}
+
+/**
+ * A trace whose working set **moves**.
+ *
+ * This is the workload the GAMP study's "no single policy wins" result is about,
+ * and the one a stationary Zipf trace cannot express: with a fixed popularity
+ * distribution, the best policy is a property of the trace and choosing it once is
+ * optimal by construction. Here the hot region is replaced every `phaseLen`
+ * requests and the cycle repeats, so there is something to track and something to
+ * re-learn.
+ *
+ * The phases are laid out at disjoint key ranges rather than shuffled within one
+ * range, so a phase boundary is a genuine change of working set rather than a
+ * re-weighting of the same keys — a policy that retained the previous phase's keys
+ * is holding pure garbage, which is the pressure being measured.
+ *
+ * @param {ReturnType<typeof makeRng>} rng
+ * @param {{keySpace: number, workingSet: number, phaseLen: number, phases: number, scanKeys: number, zipf: number}} cfg
+ * @returns {{stream: number[], hot: Uint8Array, workingSetSize: number}}
+ */
+function buildPhaseShiftStream(rng, cfg) {
+  const { keySpace, workingSet, phaseLen, phases, scanKeys, zipf } = cfg;
+  const cum = zipfTable(workingSet, zipf);
+  const scanBase = workingSet * phases;
+  const scanSpace = Math.max(1, keySpace - scanBase);
+  const stream = [];
+  const hot = new Uint8Array(phaseLen * phases);
+
+  for (let p = 0; p < phases; p++) {
+    const base = p * workingSet;
+    for (let i = 0; i < phaseLen; i++) {
+      // Scan noise, interleaved. A phase with no one-shot traffic would measure
+      // pure eviction agility and nothing about scan resistance, and the two are
+      // the axes the resident policies actually differ on.
+      if (i % 20 === 0) {
+        for (let s = 0; s < scanKeys; s++) {
+          stream.push(scanBase + Math.floor(rng() * scanSpace));
+        }
+      }
+      const rank = zipfDraw(cum, workingSet, rng);
+      stream.push(base + Math.min(rank, workingSet - 1));
+      hot[stream.length - 1] = 1;
+    }
+  }
+  return { stream, hot, workingSetSize: workingSet };
+}
+
+/**
+ * AUD-028: does an online policy selector beat any single resident policy?
+ *
+ * @returns {object}
+ */
+function runAdaptiveWorkload() {
+  const capacity = Number(process.env.CLAIM_ADAPTIVE_CAPACITY || 200);
+  const workingSet = Number(process.env.CLAIM_ADAPTIVE_WORKING || 200);
+  const phaseLen = Number(process.env.CLAIM_ADAPTIVE_PHASE_LEN || 4000);
+  const phases = Number(process.env.CLAIM_ADAPTIVE_PHASES || 4);
+  const scanKeys = Number(process.env.CLAIM_ADAPTIVE_SCAN_KEYS || 25);
+  const zipf = Number(process.env.CLAIM_ADAPTIVE_ZIPF || 1.0);
+  const keySpace = workingSet * phases * 5;
+  const epoch = Number(process.env.CLAIM_ADAPTIVE_EPOCH || 500);
+  const minDwell = Number(process.env.CLAIM_ADAPTIVE_MIN_DWELL || 2);
+  const seed = Number(process.env.CLAIM_ADAPTIVE_SEED || 0x5eed1234);
+
+  // The full resident policy space. `admission: 'tinylfu'` is listed once, against
+  // `lru`, because the sketch is only built under `policy: 'lru'` — under `slru`,
+  // `sieve` and `s3fifo` the option is a documented no-op, so listing it against
+  // each would print the same row three times and read as three data points.
+  const ARMS = [
+    { label: 'lru', policy: 'lru', admission: 'none' },
+    { label: 'lru + tinylfu', policy: 'lru', admission: 'tinylfu' },
+    { label: 'slru', policy: 'slru', admission: 'none' },
+    { label: 'sieve', policy: 'sieve', admission: 'none' },
+    { label: 's3fifo', policy: 's3fifo', admission: 'none' },
+  ];
+
+  const workloads = [
+    {
+      name: 'stationary zipf + scan',
+      // The control: a fixed popularity distribution. On this trace the best
+      // fixed policy is the ceiling, so an adaptive arm can only tie at best.
+      build: (rng) => {
+        const { stream, workingSetSize } = buildZipfScanStream(rng, {
+          keySpace,
+          workingSet,
+          scanKeys,
+          scanEvery: 40,
+          zipf,
+        });
+        return { stream, workingSetSize, hot: null };
+      },
+    },
+    {
+      name: `phase-shift (${phases} x ${phaseLen})`,
+      build: (rng) =>
+        buildPhaseShiftStream(rng, { keySpace, workingSet, phaseLen, phases, scanKeys, zipf }),
+    },
+  ];
+
+  console.log('AUD-028 — adaptive policy selection against the resident policies\n');
+  console.log('  The selector is a prototype in THIS FILE, not in src/. The claim under');
+  console.log('  test is whether *selecting* beats any single resident policy; adding the');
+  console.log('  selector to the library first would be building the feature before');
+  console.log('  measuring its premise.\n');
+  console.log(`  seed              ${seed}`);
+  console.log(`  capacity          ${capacity} entries per arm`);
+  console.log(`  working set       ${workingSet} keys per phase`);
+  console.log(`  epoch             ${epoch} requests, min dwell ${minDwell} epochs`);
+  console.log(`  arms              ${ARMS.length} (${ARMS.map((a) => a.label).join(', ')})\n`);
+  console.log('  **Memory.** The `adaptive` row runs every arm at the configured capacity,');
+  console.log(
+    `  so it holds ${ARMS.length}x the resident set of any fixed row. ` +
+      `\`adaptive @ 1/${ARMS.length}\` divides the`
+  );
+  console.log('  capacity by the arm count so the *total* matches — that is the row that');
+  console.log('  answers "is this worth the bound", and it is the one to read first.\n');
+
+  const HEAD = 'workload';
+  console.log(
+    `  ${HEAD.padEnd(26)}${'arm'.padEnd(22)}${'hit rate'.padStart(9)}${'hot hits'.padStart(10)}${'ns/op'.padStart(9)}${'switches'.padStart(10)}`
+  );
+  console.log(`  ${'-'.repeat(76)}`);
+
+  /** @type {Record<string, object[]>} */
+  const all = {};
+  for (const workload of workloads) {
+    const rows = [];
+    const rng = makeRng(seed);
+    const { stream, workingSetSize, hot } = workload.build(rng);
+
+    // Fixed arms first, so the reading order is "what a single choice gets you".
+    for (const arm of ARMS) {
+      const cache = new PowerCache({
+        maxEntries: capacity,
+        policy: arm.policy,
+        admission: arm.admission,
+      });
+      const t0 = process.hrtime.bigint();
+      let hits = 0;
+      let hotHits = 0;
+      let hotReqs = 0;
+      for (let i = 0; i < stream.length; i++) {
+        const key = stream[i];
+        const hit = cache.get(key) !== undefined;
+        if (hit) hits++;
+        else cache.set(key, 1);
+        const isHot = hot ? hot[i] === 1 : key < workingSetSize;
+        if (isHot) {
+          hotReqs++;
+          if (hit) hotHits++;
+        }
+      }
+      const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
+      const requests = stream.length;
+      rows.push({
+        arm: arm.label,
+        kind: 'fixed',
+        hitRate: hits / requests,
+        hotHitRate: hotReqs ? hotHits / hotReqs : 0,
+        nsPerOp: (elapsedMs * 1e6) / requests,
+        switches: 0,
+      });
+    }
+
+    // The adaptive arm, at full capacity per shadow.
+    {
+      const adaptive = new BenchAdaptive({
+        capacity,
+        arms: ARMS,
+        epoch,
+        minDwell,
+        workingSetSize,
+        hot,
+      });
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < stream.length; i++) adaptive.request(stream[i]);
+      const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
+      rows.push({
+        arm: 'adaptive',
+        kind: 'adaptive',
+        hitRate: adaptive.hitRate,
+        hotHitRate: adaptive.hotHitRate,
+        nsPerOp: (elapsedMs * 1e6) / stream.length,
+        switches: adaptive.switches,
+        switchLog: adaptive.switchLog,
+      });
+    }
+
+    // The matched-memory arm: the same selector, with the capacity divided by the
+    // arm count so the total resident set equals a fixed arm's. This is the row
+    // that is not confounded by over-filling.
+    {
+      const perArm = Math.max(1, Math.floor(capacity / ARMS.length));
+      const adaptive = new BenchAdaptive({
+        capacity: perArm,
+        arms: ARMS,
+        epoch,
+        minDwell,
+        workingSetSize,
+        hot,
+      });
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < stream.length; i++) adaptive.request(stream[i]);
+      const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
+      rows.push({
+        arm: `adaptive @ 1/${ARMS.length}`,
+        kind: 'adaptive-matched',
+        hitRate: adaptive.hitRate,
+        hotHitRate: adaptive.hotHitRate,
+        nsPerOp: (elapsedMs * 1e6) / stream.length,
+        switches: adaptive.switches,
+        switchLog: adaptive.switchLog,
+        perArm,
+      });
+    }
+
+    for (const r of rows) {
+      console.log(
+        `  ${workload.name.padEnd(26)}${r.arm.padEnd(22)}${(r.hitRate * 100).toFixed(1).padStart(8)}%` +
+          `${(r.hotHitRate * 100).toFixed(1).padStart(9)}%${r.nsPerOp.toFixed(0).padStart(9)}` +
+          `${r.switches.toString().padStart(10)}`
+      );
+    }
+    all[workload.name] = rows;
+    console.log('');
+  }
+
+  // The claims, stated as the numbers that would have to be true.
+  const pt = (a, b) => `${a >= b ? '+' : ''}${((a - b) * 100).toFixed(1)} points`;
+  for (const workload of workloads) {
+    const rows = all[workload.name];
+    const fixed = rows.filter((r) => r.kind === 'fixed');
+    const bestFixed = fixed.reduce((a, b) => (b.hitRate > a.hitRate ? b : a));
+    const adaptive = rows.find((r) => r.kind === 'adaptive');
+    const matched = rows.find((r) => r.kind === 'adaptive-matched');
+    const lru = fixed.find((r) => r.arm === 'lru');
+
+    console.log(`  ${workload.name}`);
+    console.log(
+      `    best fixed arm: ${bestFixed.arm} at ${(bestFixed.hitRate * 100).toFixed(1)} % ` +
+        `(plain lru ${(lru.hitRate * 100).toFixed(1)} %, ${pt(bestFixed.hitRate, lru.hitRate)})`
+    );
+    console.log(
+      `    adaptive: ${(adaptive.hitRate * 100).toFixed(1)} % — ${pt(adaptive.hitRate, bestFixed.hitRate)} ` +
+        `the best fixed arm, at ${(adaptive.nsPerOp / bestFixed.nsPerOp).toFixed(1)}x the cost ` +
+        `and ${ARMS.length}x the memory.`
+    );
+    console.log(
+      `    adaptive @ 1/${ARMS.length} (matched memory): ${(matched.hitRate * 100).toFixed(1)} % — ` +
+        `${pt(matched.hitRate, bestFixed.hitRate)} the best fixed arm.`
+    );
+    console.log(
+      `    switches: ${adaptive.switches}` +
+        (adaptive.switchLog.length
+          ? ` (${adaptive.switchLog.map((s) => `${s.to}@${s.at}`).join(', ')})`
+          : ' (never moved)')
+    );
+    console.log('');
+  }
+
+  console.log(
+    '  How to read this. On the stationary trace the best fixed arm is the ceiling and\n' +
+      '  the adaptive arm can only tie at best — it pays a learning cost and then\n' +
+      '  oscillates around a choice it could have been given. That row is the control,\n' +
+      '  not the result. The phase-shift trace is the one the GAMP "no single policy\n' +
+      '  wins" claim is about, and the only one where selecting online can win.\n' +
+      '\n' +
+      '  The matched-memory row is the honest one for a memory-bounded caller, and it\n' +
+      '  is the row most likely to be negative: dividing the capacity by the arm count\n' +
+      '  cripples every arm, including the one that would have won. If the selector\n' +
+      '  only wins at N× the memory, it has not beaten a fixed policy — it has bought\n' +
+      '  a hit rate with memory, which is the same trap the generational row in the\n' +
+      '  sieve mode already recorded.'
+  );
+
+  return {
+    workloads: all,
+    config: {
+      capacity,
+      workingSet,
+      phaseLen,
+      phases,
+      scanKeys,
+      zipf,
+      keySpace,
+      epoch,
+      minDwell,
+      seed,
+      arms: ARMS.length,
+    },
+  };
 }
 
 // ─── Workload 9: what the TinyLFU sketch spends its time on ──────────────────
@@ -6108,6 +6563,7 @@ const MODES = {
   geoprefetch: runGeoPrefetchWorkload,
   cardinality: runCardinalityWorkload,
   flowloop: runFlowLoopWorkload,
+  adaptive: runAdaptiveWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
