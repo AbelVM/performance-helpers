@@ -362,6 +362,7 @@
     "check:bundle": "node scripts/check-bundle-exports.mjs",
     "check:barrel": "node scripts/check-barrel.mjs",
     "check:bench-list": "node scripts/check-bench-list.mjs",
+    "check:node-floor": "node scripts/check-node-floor.mjs",
     "docs:claims": "node scripts/docs-claims.mjs",
     "mutants:servo": "node scripts/mutant-check.mjs",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.cjs",

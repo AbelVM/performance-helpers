@@ -91,6 +91,14 @@ import { spawnSync } from 'node:child_process';
  *   errors instead of one clear one, at the cost of a full suite run to discover.
  *   It imports the module rather than parsing it, because a duplicate export is
  *   syntactically valid and only fails at link time. See `scripts/check-barrel.mjs`.
+ * - `check:node-floor` is **second**, for the same reason: it is the other "the
+ *   source does not load" failure, and it is the one step a developer's own
+ *   runtime cannot see. `using` / `await using` is ES2026 syntax, so on the
+ *   declared 22.12 floor it is a SyntaxError that fails a whole test file at
+ *   import time — ungatherable by `it.runIf()`, and green on a Node 24 machine.
+ *   Seven suites were red on the matrix leg for exactly that. It reads the floor
+ *   from `engines.node`, so raising the floor retires it. See
+ *   `scripts/check-node-floor.mjs`.
  *
  * @type {string[]}
  */
@@ -99,6 +107,28 @@ const STEPS = [
   // meaningless, so it goes before everything — including `lock:sync`, which is
   // about the installed tree rather than the source.
   'check:barrel',
+  // The Node floor, enforced before anything runs the code. CI runs this gate on
+  // a `['22.12', '24']` matrix and the 22.12 leg was red with seven failed
+  // *suites* — `powerQueue`, `powerSequencer`, `powerPriorityQueue`,
+  // `powerHeartbeat`, `powerFlowControl`, `powerFlowController` and
+  // `powerRateLimit.keyed` each used a `using` / `await using` declaration, which
+  // is ES2026 syntax and a **SyntaxError** on 22.12. A syntax error fails the
+  // whole file at import time, so it is not a test failure and `it.runIf()`
+  // cannot gate it — which is why the earlier floor fix (`c81a015`) could probe
+  // `Error.isError` and `worker_threads.locks` but had to *rewrite* the `using`
+  // usages instead.
+  //
+  // It sits here, second, for the same reason `check:barrel` sits first: both are
+  // "the source does not load" failures, and left to the test step they surface
+  // as seven confusing per-file errors at the cost of a full suite run. It is
+  // also the only step whose subject is a *syntax* the developer's own runtime
+  // accepts — a maintainer on Node 24 runs the suite green, so without this the
+  // only thing that notices is the matrix leg, after a push.
+  //
+  // It reads the floor from `engines.node` rather than hard-coding 22, so raising
+  // the floor retires the check instead of leaving a blocker behind. See
+  // `scripts/check-node-floor.mjs`.
+  'check:node-floor',
   // The lock file and `package.json` agreeing is the one thing `verify` cannot
   // assume, because everything below runs against an already-installed tree.
   //

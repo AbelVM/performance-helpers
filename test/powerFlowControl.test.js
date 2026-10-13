@@ -333,9 +333,14 @@ describe('PowerFlowControl', () => {
     });
 
     it('supports using and await using', () => {
-      {
-        using f = new PowerFlowControl({ capacity: 10 });
+      // `using` is spelled out rather than used as syntax: Node 22.12 has no
+      // Explicit Resource Management, and a syntax error fails the whole file
+      // rather than skipping one test.
+      const f = new PowerFlowControl({ capacity: 10 });
+      try {
         expect(f.tokens).toBe(10);
+      } finally {
+        f[Symbol.dispose]();
       }
       expect(typeof PowerFlowControl.prototype[Symbol.dispose]).toBe('function');
       expect(typeof PowerFlowControl.prototype[Symbol.asyncDispose]).toBe('function');

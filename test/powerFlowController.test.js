@@ -531,11 +531,17 @@ describe('PowerFlowController', () => {
       // queue is emptied rather than the object being frozen, because this
       // helper owns no timer and its `dispose()` is a state reset.
       let disposed;
-      {
-        using fc = new PowerFlowController({ rate: 10, minRate: 1 });
+      // `using` is spelled out rather than used as syntax: Node 22.12 has no
+      // Explicit Resource Management, and a syntax error fails the whole file
+      // rather than skipping one test. The protocol under test is unchanged —
+      // the scope exit calls `[Symbol.dispose]()` and nothing else.
+      const fc = new PowerFlowController({ rate: 10, minRate: 1 });
+      try {
         fc.submit('x');
         expect(fc.depth).toBe(1);
         disposed = fc;
+      } finally {
+        fc[Symbol.dispose]();
       }
       expect(disposed.depth).toBe(0);
       expect(disposed.p99).toBeUndefined();
@@ -543,11 +549,16 @@ describe('PowerFlowController', () => {
 
     it('takes part in `await using`', async () => {
       let disposed;
-      {
-        await using fc = new PowerFlowController({ rate: 10, minRate: 1 });
+      // Same reason as the sync case above: `await using` is syntax, and a
+      // syntax error fails the file rather than the test. The scope exit calls
+      // `[Symbol.asyncDispose]()` and nothing else.
+      const fc = new PowerFlowController({ rate: 10, minRate: 1 });
+      try {
         fc.submit('x');
         expect(fc.depth).toBe(1);
         disposed = fc;
+      } finally {
+        await fc[Symbol.asyncDispose]();
       }
       expect(disposed.depth).toBe(0);
     });

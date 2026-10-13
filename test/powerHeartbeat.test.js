@@ -236,17 +236,26 @@ describe('PowerHeartbeat', () => {
       // The interface is identical to every other long-lived helper here; the
       // reason it exists is that a heartbeat is exactly the thing a DI
       // teardown holds.
-      {
-        using hb = new PowerHeartbeat({ interval: 100 });
+      // `using` / `await using` are spelled out rather than used as syntax:
+      // Node 22.12 has no Explicit Resource Management, and a syntax error
+      // fails the whole file rather than skipping one test. The protocol
+      // under test is unchanged — the scope exit calls the dispose symbol
+      // and nothing else.
+      const hb = new PowerHeartbeat({ interval: 100 });
+      try {
         hb.start();
         expect(vi.getTimerCount()).toBe(1);
+      } finally {
+        hb[Symbol.dispose]();
       }
       expect(vi.getTimerCount()).toBe(0);
 
-      {
-        await using hb = new PowerHeartbeat({ interval: 100 });
-        hb.start();
+      const hb2 = new PowerHeartbeat({ interval: 100 });
+      try {
+        hb2.start();
         expect(vi.getTimerCount()).toBe(1);
+      } finally {
+        await hb2[Symbol.asyncDispose]();
       }
       expect(vi.getTimerCount()).toBe(0);
     });

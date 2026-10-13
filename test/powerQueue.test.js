@@ -83,10 +83,16 @@ describe('PowerQueue dispose (AUD-013)', () => {
     // long-lived helper here supports — and its sibling `PowerPriorityQueue` has
     // had `dispose()` all along.
     let disposed;
-    {
-      using q = new PowerQueue(4);
+    // `using` is spelled out rather than used as syntax: Node 22.12 has no
+    // Explicit Resource Management, and a syntax error fails the whole file
+    // rather than skipping one test. The protocol under test is unchanged —
+    // the scope exit calls `[Symbol.dispose]()` and nothing else.
+    const q = new PowerQueue(4);
+    try {
       q.push(1);
       disposed = q;
+    } finally {
+      q[Symbol.dispose]();
     }
     expect(disposed.length).toBe(0);
     expect(disposed._buffer.every((v) => v === undefined)).toBe(true);
@@ -94,10 +100,15 @@ describe('PowerQueue dispose (AUD-013)', () => {
 
   it('takes part in `await using` teardown', async () => {
     let disposed;
-    {
-      await using q = new PowerQueue(4);
+    // Same reason as the sync case above: `await using` is syntax, and a
+    // syntax error fails the file rather than the test. The scope exit calls
+    // `[Symbol.asyncDispose]()` and nothing else.
+    const q = new PowerQueue(4);
+    try {
       q.push(1);
       disposed = q;
+    } finally {
+      await q[Symbol.asyncDispose]();
     }
     expect(disposed.length).toBe(0);
   });

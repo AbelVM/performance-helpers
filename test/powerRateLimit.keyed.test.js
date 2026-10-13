@@ -369,20 +369,25 @@ describe('per-key limiting: dispose() releases the built slots (AUD-022)', () =>
     // that leaks.
     const disposed = [];
     let held;
-    {
-      using l = new PowerRateLimit(
-        [
-          () => ({
-            tryConsume: () => true,
-            dispose() {
-              disposed.push('slot');
-            },
-          }),
-        ],
-        { keyFn: (ctx) => ctx.tenant, buckets: 8 }
-      );
+    // `using` is spelled out rather than used as syntax: Node 22.12 has no
+    // Explicit Resource Management, and a syntax error fails the whole file
+    // rather than skipping one test.
+    const l = new PowerRateLimit(
+      [
+        () => ({
+          tryConsume: () => true,
+          dispose() {
+            disposed.push('slot');
+          },
+        }),
+      ],
+      { keyFn: (ctx) => ctx.tenant, buckets: 8 }
+    );
+    try {
       l.tryConsume(1, { context: { tenant: 'alice' } });
       held = l;
+    } finally {
+      l[Symbol.dispose]();
     }
     expect(disposed).toEqual(['slot']);
     expect(held._liveLimiters()).toHaveLength(0);

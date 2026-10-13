@@ -259,10 +259,15 @@ describe('PowerPriorityQueue eviction and lifecycle', () => {
     });
 
     it('supports using and await using', () => {
-      {
-        using q = new PowerPriorityQueue();
+      // `using` is spelled out rather than used as syntax: Node 22.12 has no
+      // Explicit Resource Management, and a syntax error fails the whole file
+      // rather than skipping one test.
+      const q = new PowerPriorityQueue();
+      try {
         q.push({ v: 'a', priority: 1 });
         expect(q.size).toBe(1);
+      } finally {
+        q[Symbol.dispose]();
       }
       // A stateless-after-dispose value type: nothing to assert beyond the
       // symbols existing and not throwing.

@@ -270,10 +270,15 @@ describe('PowerSequencer refusals, reset and lifecycle', () => {
     });
 
     it('supports using and await using', () => {
-      {
-        using s = new PowerSequencer();
+      // `using` is spelled out rather than used as syntax: Node 22.12 has no
+      // Explicit Resource Management, and a syntax error fails the whole file
+      // rather than skipping one test.
+      const s = new PowerSequencer();
+      try {
         s.push(1, 'b');
         expect(s.buffered).toBe(1);
+      } finally {
+        s[Symbol.dispose]();
       }
       expect(typeof PowerSequencer.prototype[Symbol.dispose]).toBe('function');
       expect(typeof PowerSequencer.prototype[Symbol.asyncDispose]).toBe('function');
