@@ -9,8 +9,9 @@
  *
  * `RT-005` is how that happened. The note was written and the status cell was
  * left untouched, so the table asserted two contradictory things and nothing
- * objected. `AGENTS.md` already names the consequence — "a stale row is worse
- * than a missing one: it sends someone to build something twice" — and the fix
+ * objected. `AGENTS.md` already names the consequence — "a row that still reads
+ * 'not started' while its work sits in the tree is worse than a missing one: it
+ * sends someone to build the same thing twice" — and the fix
  * was `scripts/close-review-row.mjs`, a tool that existed to make exactly this
  * edit correctly and had not been used.
  *

@@ -18,14 +18,13 @@ replaced.
 
 ## The three things that will waste your time if you do not know them
 
-**1. `review.md` is gitignored and not in the repository.** It is the working
-plan. `test/reviewTable.test.js` guards against its plan table being malformed,
-and that test **skips when the file is absent** — so in CI it asserts nothing, and
-its section-reference tally was deleted rather than kept, because a test whose
-expected value is "whatever an untracked file currently says" is not a test. Do
-not add assertions that depend on `review.md`, `notes.md`, `review2.md`,
-`.kilo/`, `.zvec-grep/`, or `.vitest/`: they will pass locally and there will be
-no file to fail against in CI.
+**1. Some files are gitignored and not in the repository.** A test that reads one
+passes locally and asserts nothing in CI, because in a clean checkout the file
+does not exist. Do not add assertions that depend on a gitignored or otherwise
+untracked path — `.kilo/`, `.zvec-grep/` and `.vitest/` are all in this class, as
+is any local working note. A test whose expected value is "whatever an untracked
+file currently says" is not a test. If a check needs a file to exist, the file
+belongs in the repository.
 
 **2. `docs/` is generated _and_ committed.** `npm run docs` rewrites it, and the
 project website links into it, so it is tracked despite being 1.7 MB. Never put a
@@ -60,17 +59,9 @@ drifted until CI was running neither `test:types` nor `check:bundle` (see the
 comment at the top of `.github/workflows/ci.yml`). **To add a check, add it to
 that script**, not to the workflow.
 
-**Two scripts in `scripts/` look like gates and are not.** A script shaped like
-a check but wired to nothing is worse than no script, because it reads as
-coverage:
+**A script shaped like a check but wired to nothing is worse than no script**,
+because it reads as coverage:
 
-- **`npm run review:check` gates nothing.** It is not in `scripts/verify.mjs`,
-  not in `.husky/pre-commit`, and not in CI — and it cannot be, because
-  `review.md` is **gitignored**, so in a clean checkout the file it reads does
-  not exist and `test/reviewTable.test.js` skips itself. There is nothing for a
-  gate to assert against. Run it by hand, before you close a row, because it is
-  the only thing that will tell you a table row has the wrong number of columns
-  or a duplicate id.
 - **`npm run audit:exports` is a diagnostic, not a check.** It prints an export
   inventory for a human to read. It asserts nothing and exits 0 on a tree full
   of surprises. Do not add it to `verify.mjs` expecting it to catch something; if
@@ -280,9 +271,9 @@ message payload, a guessed `drain()` return value, and a guessed
 `detectEnv()` result — in the last case the test passed while exercising the
 _other_ branch. Read the code.
 
-**The plan table must be closed in the same commit as the work.** FEAT-008 read
-⬜ for three commits while its work sat in the tree. A stale row is worse than a
-missing one: it sends someone to build something twice.
+**Close a tracking row in the same commit as the work.** A row that still reads
+"not started" while its work sits in the tree is worse than a missing one: it
+sends someone to build the same thing twice.
 
 **After an edit that lands next to a structural boundary, verify the pairing — no
 gate here will.** Three defects in one session shared a shape: a doc comment
@@ -309,8 +300,7 @@ the mutation checks:
   rather than guess** — that assertion is what turned the third occurrence into
   one wasted step instead of a corrupted changeset, and it is worth writing
   before the edit rather than after the mistake.
-- **Count the columns after rewriting a table row, both ends.** `review:check`
-  catches the result, but only once the file is already written; verify against a
+- **Count the columns after rewriting a table row, both ends.** Verify against a
   backup that the diff is _one_ changed line, and remember that a `|` inside
   backticks — `a || b` — splits a cell just as a bare one does.
 
@@ -479,33 +469,31 @@ helper`) carries `src/helpers/powerRTCChannel.js` — **783 lines**, an entire
   shift under you so the diff must be on **message text**, not positions.
   Raise the ceiling only for debt that was already there: `--raise --reason` is
   for a file that is itself known debt, never for debt a change just introduced.
-- **Do not edit `review.md` with a multi-step script, and do not trust one that
-  reported success.** It is 450 KB+, gitignored — so `git checkout` cannot undo a
-  bad edit and no commit ever holds it — and a markdown table row cannot contain
-  a newline. Three failures in one session, all mine, and the third cost ~150 KB
-  that is unrecoverable:
-  - A `String.replace` whose "region" ran to end-of-file collapsed everything
-    after the edited row into four characters.
-  - A note written to a temp file with hard line breaks was appended verbatim,
-    splitting one table row across ~50 physical lines.
-  - A repair reported `row 649 -> 4268 chars, file +3619 bytes` as success while
-    the line on disk was still 649 characters, because the measurement and the
-    write had diverged. Only reading the line directly caught it.
-    So: `cp review.md /tmp/…` first, collapse any note to a single line with
-    `' '.join(text.split())` before it goes anywhere near a row, edit by index
-    arithmetic on one line rather than by pattern over the file, and verify by
-    diffing the prefix and suffix against the backup — not by the script's own
-    report. `test/reviewTable.test.js` checks **structure** (column count, header,
-    duplicate ids) and cannot see a truncated cell, so a green run there is not
-    evidence the file is intact.
-- Do not put a bare `|` in a `review.md` cell. Escape it as `\|`. The same
-  applies to a shell operator inside backticks — `a || b` splits a cell, and the
-  table test reports a _column_ error for a _character_ mistake.
+- **Do not edit a large gitignored file with a multi-step script, and do not trust
+  one that reported success.** A file no commit holds cannot be recovered with
+  `git checkout`, and a markdown table row cannot contain a newline. Three
+  failures worth remembering: a `String.replace` whose "region" ran to end-of-file
+  and collapsed everything after the edited row; a note written with hard line
+  breaks and appended verbatim, splitting one row across dozens of physical lines;
+  and a repair that reported success while the line on disk was still the old one,
+  because the measurement and the write had diverged. Only reading the line
+  directly caught that last one.
+
+  So: back the file up first, collapse any note to a single line with
+  `' '.join(text.split())` before it goes anywhere near a row, edit by index
+  arithmetic on one line rather than by pattern over the file, and verify by
+  diffing the prefix and suffix against the backup — not by the script's own
+  report. A structural check (column count, header, duplicate ids) cannot see a
+  truncated cell, so a green run is not evidence the file is intact.
+
+- Do not put a bare `|` in a markdown table cell. Escape it as `\|`. The same
+  applies to a shell operator inside backticks — `a || b` splits a cell, and a
+  structural check reports a _column_ error for a _character_ mistake.
   - **A `split(' | ')` / `join(' | ')` round-trip is not round-trip safe.**
     Splitting `| a | b |` leaves `| a` in the first element, so re-joining
     and re-adding a leading pipe gives `|| a | b |`; set the last element
-    and the trailing pipe goes with it, leaving a seven-column row that
-    `review:check` catches only after the file is written. Build the row as
+    and the trailing pipe goes with it, leaving a seven-column row that a
+    structural check catches only after the file is written. Build the row as
     one string from cells you construct, and assert both ends of the line.
 
 ## Before you finish
@@ -515,5 +503,4 @@ npm run verify
 ```
 
 Then: a changeset in `.changeset/`, guides updated if behaviour or a documented
-decision changed, an ADR if a decision was made, and the review row closed in the
-same commit as the work.
+decision changed, and an ADR if a decision was made.
