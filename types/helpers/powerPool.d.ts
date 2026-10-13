@@ -448,7 +448,7 @@ export class PowerPool {
      */
     /**
      * Graceful shutdown as a single entry point: wait for in-flight work, then
-     * terminate. **New in 2.0.1** (PISC-011).
+     * terminate. **New in 2.1.0** (PISC-011).
      *
      * The `shutdown()` / `drain()` / `[Symbol.asyncDispose]` model is defensible and
      * stays exactly as it is — this is a composition of it, not a replacement. What
@@ -476,7 +476,7 @@ export class PowerPool {
     }): Promise<Object>;
     /**
      * Build the task queue for this pool: a heap when the priority key is static, a
-     * ring buffer when it is not. **New in 2.0.1** (PISC-004).
+     * ring buffer when it is not. **New in 2.1.0** (PISC-004).
      *
      * The saturated dispatch path used to call `PowerQueue.shiftHighestPriority`,
      * which scans every queued item to find the best one — O(n) per dispatch, so
@@ -741,7 +741,7 @@ export class PowerPool {
      */
     /**
      * Choose the worker a new task goes to: the caller's `loadBalancer` if one is set,
-     * otherwise the built-in least-loaded-plus-EWMA rule. **New in 2.0.1** (PISC-006).
+     * otherwise the built-in least-loaded-plus-EWMA rule. **New in 2.1.0** (PISC-006).
      *
      * **The default policy is not replaced.** PowerPool's EWMA tiebreak beats Piscina's
      * for heterogeneous tasks, so this adds a choice rather than taking one away, and
@@ -783,7 +783,7 @@ export class PowerPool {
     _selectWorker(): import("./jsdoc-types.js").WorkerObj | null;
     /**
      * Build the frozen per-worker view handed to a `loadBalancer` and reported by
-     * `getStats().workers`. **New in 2.0.1** (PISC-006).
+     * `getStats().workers`. **New in 2.1.0** (PISC-006).
      *
      * Four fields, and each is there because a balancer cannot do its job without it:
      * `id` to name a choice, `tasks` for load, `latencyEwma` for the heterogeneous-task

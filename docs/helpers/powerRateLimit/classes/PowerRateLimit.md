@@ -467,7 +467,7 @@ Per-call overrides; `context`
 
 The awaiting counterpart to [PowerRateLimit#reserve](#reserve), for a
 `sharedState` adapter whose `checkAndIncrement` returns a promise.
-**New in 2.0.1** (AUD-007).
+**New in 2.1.0** (AUD-007).
 
 Same contract, same token shape, same `null` on denial — it simply does not
 pretend a promise is an answer. A caller with a synchronous adapter can use

@@ -8,6 +8,229 @@ The detailed v2.0 release narrative is available in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - Unreleased
+
+### Added
+
+- `PowerPriorityQueue` — a binary heap dequeuing highest priority first, FIFO on
+  ties, with `popLowest()` for bounded eviction from the other end.
+- `PowerDeduplication` — time-windowed duplicate suppression with a TTL, a
+  `maxKeys` cap, and an injectable clock.
+- `PowerHeartbeat` — jittered liveness detection. Jitter is applied to the
+  scheduled check rather than the deadline, so a peer beating on time is never
+  failed for arriving early.
+- `PowerSequencer` — gap detection and in-order reassembly for out-of-order
+  datagrams. `missing()` is the list a NACK would carry.
+- `PowerFlowControl` — an adaptive token bucket whose refill rate is the output of
+  a `PowerServo`. The servo's bounds are the rate bounds, so the controller cannot
+  ask for a rate the bucket would refuse.
+- `PowerFlowController` — admission, queueing and latency feedback in one closed
+  loop.
+- `PowerApdex` — APDEX scoring over three exact integer counters. It deliberately
+  does **not** derive its score from a `PowerHistogram`: the derived version is
+  324 points wrong (reporting 0.625 for a service attaining 0.950) when the mass
+  concentrates inside one bucket straddling the threshold, and the error is not
+  monotonic in `relativeAccuracy`, so no accuracy setting repairs it. See
+  [ADR 0014](adr/0014-apdex-counters-not-a-sketch.md).
+- `PowerRealtimeHub`'s `messagePriority` option, ordering each subscriber's queue
+  by the `priority` passed to `publish()`. Off by default; FIFO delivery is
+  unchanged.
+- `WorkerAgnostic`'s `shared` option, constructing a `SharedWorker` and adapting
+  its port to the worker-like surface.
+- `ReconnectPolicy` in `src/utils/` — the shared decorrelated-jitter backoff curve
+  the reconnecting transports compose. Behaviour-preserving; both transports
+  already used this exact curve.
+- `Symbol.asyncDispose` on the classes that were missing it, so every long-lived
+  helper takes part in `await using` teardown.
+- `PowerQueue.dispose()`, `[Symbol.dispose]()` and `[Symbol.asyncDispose]()`. The
+  ring buffer only ever grows, so a queue that took 5 000 items once kept an
+  8 192-slot buffer for life; `clear()` empties the slots but deliberately keeps
+  the array, which is right for a container bounding memory and wrong for one
+  being torn down.
+- `PowerQueue.unshift(item)` — enqueue at the **head**, so the item is the next one
+  `shift()` returns. O(1), and an exact inverse of `shift()`.
+- `PowerHistogram.fromJSON()`, and a `merge()` that accepts a `PowerHistogram`, a
+  cross-realm `PowerHistogram`, **or** a `toJSON()` result. `structuredClone` does
+  not preserve the class, so a sketch arriving from a worker is a plain object and
+  `merge()` rejected it with "expects a PowerHistogram" — the headline distributed
+  use case was unreachable without hand-rolling reconstruction. The check is
+  structural rather than `instanceof`, per the cross-realm rule.
+- `PowerHistogram.countAtOrBelow(value)` — the inverse of `percentile()`. Shipped
+  as a general rank query and documented as unsound for an SLO attainment figure,
+  with the number, in both its JSDoc and the guide.
+- `HyperLogLog` now takes a register count, defaulting to 64 so nothing changes for
+  an existing caller. Relative error is `1.04/sqrt(m)`: 256 registers give ~6.5 %
+  and 1024 give ~3.2 %, at one byte per register.
+- `PowerCache`'s `missCost` option, and the `missCostScan` width that bounds it.
+- `PowerGCRA.setRate(rate)` — change the sustained rate at runtime.
+- `PowerPool.close({ force, timeout })` — graceful shutdown as a single entry point,
+  composing `drain()` + `shutdown()`. What it prevents is the _order_:
+  `shutdown()` alone abandons in-flight work and `drain()` alone leaves the workers
+  running, and getting it wrong is silent. `force` and `timeout` are mutually
+  exclusive and throw rather than silently preferring one.
+- `PowerPool`'s `maxQueueLength` accepts `'auto'`, resolving the cap to
+  `maxSize ** 2` and reporting it through `getStats().maxQueueLength`, which
+  previously did not expose the cap at all. **`Infinity` remains the default**: a
+  cap that silently appears is a cap nobody chose.
+- `PowerPool`'s `recordTiming` option — opt-in percentile telemetry.
+  `getStats().performance` gains `percentiles` and `queueWaitPercentiles`
+  (`{ p50, p90, p99, p999 }`) plus `utilization`. Off by default, and the default
+  path pays nothing; the percentile fields are `null` when off rather than zeros,
+  because `p50: 0` would read as "the median task took no time" rather than "nobody
+  is measuring".
+- `PowerPool`'s `loadBalancer` option — a caller-supplied worker-selection policy,
+  called with a frozen array of per-worker views. **The default policy is not
+  replaced**, and the view is a plain frozen object rather than the live
+  `WorkerObj`, so a balancer cannot reach `terminate()` or the `WorkerAgnostic`.
+- `PowerPool`'s `ready` option — a readiness gate holding a worker out of dispatch
+  until it signals it has initialised. The field name is yours, the signal is
+  pool-internal traffic, and `readyTimeout` fails open.
+- `postMessage` accepts a per-task `signal` — a standard `AbortSignal`. Already
+  aborted at post time is refused before any queue work; aborted while queued
+  rejects the pending response at abort time; **aborted while in flight the work
+  runs to completion and the waiter is released now**, because under
+  `maxTasksPerWorker > 1` terminating a worker to abandon one task kills every
+  other task on it. `skipQueue` is rejected as part of this change.
+- `PowerRateLimit.reserveAsync(n, options)` — the awaiting counterpart to
+  `reserve()`, for an async `sharedState` adapter. `reserve()` now **throws** a
+  `TypeError` when the adapter is async rather than returning `null`: returning
+  `null` would tell a caller "you were denied" when the truth is "I could not find
+  out", and those need different handling.
+- `createBroadcastBus`'s `getPendingCounts()`, a snapshot of the per-receiver
+  pending-ack counts in the same shape as the existing `getSlowConsumerIds()`.
+- `createSseAdapter`'s `lastEventId(sub)` and `lastSentId(sub)`, the two ends of a
+  reconnect gap.
+- `PowerRTCChannel`'s `lowWaterMarkBytes` and `queueBudget` options, and the
+  `queuedBytes` / `queuedFrames` getters.
+
+### Changed
+
+- `PowerPool`'s saturated dispatch path is O(log n) per dispatch instead of O(n),
+  removing an O(n²) term under sustained saturation. The queue is now a
+  `PowerPriorityQueue` — a binary heap — because with `priorityAgingMs` at its
+  default of `0` the effective priority is static. **`priorityAgingMs` above `0`
+  keeps the O(n) scan, deliberately**: aging makes the effective priority drift
+  with the clock, and a heap keys on the priority at push time, so it would order
+  by a key that is already stale. Both paths dispatch in the same order for the
+  same input, and that equivalence is pinned by a test.
+- `PowerRealtimeHub`'s `drop-oldest` policy evicts the message **furthest from
+  delivery** when `messagePriority` is on — lowest priority, and among equal
+  priorities the most recently queued. In FIFO mode it still discards the head.
+- `PowerPriorityQueue` gained `pushMany(items)` and `toArray()`, a snapshot in
+  **dispatch order**. `toArray()` sorts the heap _entries_ rather than the items,
+  because the FIFO tiebreak is the insertion sequence number, which lives on the
+  entry.
+- `formatPrometheus` validation errors name the offending label key and which half
+  of the pair is wrong, and name the specific histogram field that is malformed
+  rather than listing all three requirements.
+- The published types for `createBroadcastBus`, `createSseAdapter` and
+  `createWebTransportAdapter` now include the disposal symbols. Their hand-written
+  `@returns` types had drifted and omitted them, and an `any` cast on
+  `createSseAdapter`'s return was suppressing the whole type.
+- `PowerHistogram.percentile()` documents that a value above 100 saturates to the
+  maximum rather than throwing. `NaN` and negatives still throw.
+- `deepEqual`'s `Set` branch no longer allocates an array it never reads.
+- `PowerHistogram`'s cached bucket order now carries cumulative counts alongside
+  the sorted index list, so `countAtOrBelow()` does not walk the occupied range.
+
+### Fixed
+
+- **`PowerRateLimit.reserve()` reported every reservation as granted** when the
+  `sharedState` adapter was async.
+- **`PowerPool` now detects a worker that dies, settles it, and replaces it.**
+  Before this, a dead worker was simply absent, and three things followed — all
+  observable from outside as "the pool stopped working". A `pool:worker:exit` event
+  is emitted on the internal bus.
+- **S3-FIFO served stale evicted values**, its live set could exceed `maxEntries`,
+  and it leaked weight on every Small-queue exit.
+- **`PowerCache { admission: 'tinylfu' }` could never adapt to a working set that
+  changed.** Two defects: a refused key was never recorded in the sketch, and the
+  sketch's half-life clock stopped once its counters saturated. The `zipf` row now
+  reads 93.0 % working-set hit rate and 37.0/40 survivors, beating
+  `policy: 'slru'` (89.4 %, 33.0/40) rather than losing to it.
+- **`PowerHistogram` lost small values recorded after a large one.**
+- **`HyperLogLog` used the wrong bias constant** for the register count it shipped,
+  and its rank calibration was hardcoded for one register count.
+- **Four cross-realm `instanceof` defects**, found by grepping the class rather than
+  the site, plus two more in the message codec.
+- `PowerPool.drain()` leaked an abort listener on every non-abort exit.
+- `_idempotencySweep` allocated the whole ledger on every post.
+- `PowerBroadcastBus.close()` left a zero entry per closed subscriber.
+- `PowerSlidingWindow` reallocated its ring on every window boundary.
+- `PowerRateLimit.dispose()` did not dispose the per-slot limiters.
+- A throwing rate-limit leg was indistinguishable from "no capacity".
+- `createSseAdapter` dropped every event emitted during a reconnect gap.
+- `PowerRTCChannel` had back-pressure detection with nothing behind it.
+- `PowerHistogram.record()`'s rejection of a negative named the constraint but not
+  the fix.
+
+### Benchmarks
+
+Eight `bench/claims.js` modes were added to settle questions by measurement rather
+than assertion. **Five of them reject the feature they were written to evaluate**,
+and nothing in `src/` changed as a result:
+
+- `blockqueue` — Piscina's `FixedQueue` design against the shipped `PowerQueue`
+  ring buffer. The structural claim is true and is not enough: a block chain
+  allocates 15× the churn, and the worst-case pause the design was meant to bound
+  is itself a GC pause. Rejected in ADR 0017.
+- `namedexport` — `postMessage(msg, transfer, { name })`. A worker costs 7.88 MB of
+  marginal RSS, but `shared/type` (a payload field, available today) ties
+  `shared/name` at every skew, and `name` costs a flat +20 bytes per message.
+  Rejected in ADR 0018.
+- `messageport` — a dedicated `MessageChannel` per worker. The sniffing it removes
+  is 11.6 ns per inbound message, 0.065 % of the 17.97 µs framed round trip; the
+  port it adds costs 15.97 µs per worker. Rejected in ADR 0019.
+- `geocoalesce` — a coalescer against `PowerBatch` + a `Map`. The rejection
+  condition fired: at best equal on work, and always fewer mutations applied.
+- `flowloop` — **the closed loop is worth building, and the gain band is narrow.**
+  The fixed control sits at 71.7 ms p99 after a capacity step, 2.4× the 30 ms
+  target; the defaults settle on the closed-form equilibrium with 0.8 ms overshoot,
+  while the aggressive settings fail to control at all.
+- `geoencode` — four arms on one payload in a real worker. Structured clone of the
+  object graph is _slower_ than JSON, a flat buffer is 47× faster than the object
+  graph, and **the win is flattening, not transferring**.
+- `geoprecision` — rounding coordinates saves nothing on a flat `Float64Array`,
+  40.6 % on line-heavy JSON and only 10.8 % on point-heavy JSON.
+- `geoprefetch` — **the in-flight window is the wrong knob.** The determinant is
+  read-ahead lead vs per-tile latency, not the window: with the lead covering the
+  latency every window reads 0.0 % waste, and with the lead too short a _larger_
+  window wastes more, not less.
+
+### Tests and gates
+
+- `test/docsCodeAgreement.test.js` gains **GATE-010**, which scans fenced code
+  blocks for `recv.method(` calls. GATE-002 and GATE-005 both scan _inline_
+  backticked calls and neither can see a code block — exactly the shape of the bug
+  GATE-002 was written for. Two layers, both measured before being written:
+  **precise** (274 call sites, 0 mismatches) and **union** (409 call sites, 0
+  mismatches). Mutation-checked with three planted faults, all caught.
+- `test/geoClock.injection.test.js` — 15 cases driving each helper from a clock the
+  test owns. Two pin failure modes worth recording: a **frozen** clock does not
+  work for `PowerEventLoopMonitor`, and `PowerCircuit`'s drawn open window is
+  jittered, so an exact boundary assertion is a coin flip.
+- 13 tests in `test/powerPool.readiness.test.js`, mutation-checked 5 of 5 —
+  including reverting the single-worker fast path, which is where the first draft
+  of the implementation was wrong.
+- A Node-version floor guard (`scripts/check-node-floor.mjs`, step 2 of `verify`)
+  that rejects `using` / `await using` in `src`, `test`, `bench` and `scripts`,
+  because the syntax is a hard SyntaxError on the `engines.node` floor and cannot
+  be gated with `it.runIf()`.
+
+### Design notes
+
+- `PowerApdex` does **not** compute its score from a `PowerHistogram`, although
+  that would have been less code and no new state. See ADR 0014.
+- `countAtOrBelow()` ships as a general rank query and is documented as unsound for
+  an SLO attainment figure, with the number, in both its JSDoc and
+  `guides/powerHistogram.md`.
+- `guides/powerApdex.md` and `guides/metaGuide.md` carry recipes for pairing
+  `PowerApdex` with `PowerBrownout`, windowing it with a double buffer, and scoring
+  per route — and a section on why it must **not** be used as an adaptive control
+  signal. Every adaptive helper in this library takes a signed, unbounded,
+  gradient-carrying quantity; APDEX is a bounded ratio that saturates at `1.0` and
+  goes blind exactly when the SLO is being met.
+
 ## [2.0.0] - 2026-10-08
 
 ### Breaking Changes
@@ -88,5 +311,6 @@ The final 1.x release. See the
 [GitHub releases](https://github.com/AbelVM/performance-helpers/releases) for
 historical 1.x notes.
 
+[2.1.0]: https://github.com/AbelVM/performance-helpers/compare/v2.0.0...main
 [2.0.0]: https://github.com/AbelVM/performance-helpers/releases/tag/v2.0.0
 [1.0.3]: https://github.com/AbelVM/performance-helpers/releases/tag/v1.0.3

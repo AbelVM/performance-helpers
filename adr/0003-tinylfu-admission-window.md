@@ -700,7 +700,7 @@ set equal to `maxEntries` is a deliberately brutal one.
 
 ---
 
-## Amendment (2.0.1) — two defects found and fixed; the decision stands, two of its numbers do not
+## Amendment (2.1.0) — two defects found and fixed; the decision stands, two of its numbers do not
 
 **Status of this amendment:** the decision above is **not reopened**. The window
 stays off by default and `windowSize` stays `0`. What follows records that two of

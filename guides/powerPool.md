@@ -160,7 +160,7 @@ ignored.
 
 - `terminate()` — Immediately terminate all workers, clear queues, and stop the reaper interval.
 
-- `close({ force, timeout })` — **New in 2.0.1.** Graceful shutdown as a single entry point: wait for in-flight work, then terminate. A composition of `drain()` + `shutdown()`, both of which stay exactly as they are. See [Closing the pool](#closing-the-pool).
+- `close({ force, timeout })` — **New in 2.1.0.** Graceful shutdown as a single entry point: wait for in-flight work, then terminate. A composition of `drain()` + `shutdown()`, both of which stay exactly as they are. See [Closing the pool](#closing-the-pool).
 
 - Disposal hooks: `[Symbol.dispose]()` calls `terminate()` synchronously; `[Symbol.asyncDispose]()` awaits `drain()` then terminates.
 
@@ -217,7 +217,7 @@ try {
 
 A batch is capped as a group: if 8 of 10 items do not fit, the first 2 are queued and the remaining 8 slots in the result array are `false`. The pool does not queue what fits and then silently drop the rest.
 
-**`maxQueueLength: 'auto'` — a starting point, not a default.** **New in 2.0.1.** Pass the string `'auto'` and the cap resolves to `maxSize ** 2`, which is Piscina's affordance for the most common misconfiguration with this option: leaving it unbounded and discovering that as an OOM rather than as a refusal.
+**`maxQueueLength: 'auto'` — a starting point, not a default.** **New in 2.1.0.** Pass the string `'auto'` and the cap resolves to `maxSize ** 2`, which is Piscina's affordance for the most common misconfiguration with this option: leaving it unbounded and discovering that as an OOM rather than as a refusal.
 
 ```js
 const pool = new PowerPool(ImageWorker, {
@@ -258,7 +258,7 @@ pool.postMessage(normalTask); // priority 0
 - Priority is a property of the queued item, not the pool. Every post can choose its own priority regardless of the constructor default.
 - Priority composes with `queuePolicy`. `drop-oldest` still evicts the oldest entry when over `maxQueueLength`; `drop-newest` and `reject` still refuse the newcomer. Priority only changes the order in which queued items are _dispatched_, not which items are _admitted_ or _dropped_.
 
-**How it is dispatched, and why aging is the exception. New in 2.0.1.** With
+**How it is dispatched, and why aging is the exception. New in 2.1.0.** With
 `priorityAgingMs` at its default of `0` the effective priority is static, so the
 queue is a **binary heap** and each dispatch is O(log n). Before this it was an O(n)
 scan of every queued item, which made draining a saturated queue O(n²) — under
@@ -278,7 +278,7 @@ quietly get wrong.
 
 ## Aborting a single task
 
-**New in 2.0.1.** `postMessage`'s third argument accepts a `signal` — a standard
+**New in 2.1.0.** `postMessage`'s third argument accepts a `signal` — a standard
 `AbortSignal`, which is why this works the same way in every realm the pool runs in.
 
 ```js
@@ -319,7 +319,7 @@ already exists.
 
 ## Percentile telemetry
 
-**New in 2.0.1.** `options.recordTiming` opts in to tail-shape statistics that the
+**New in 2.1.0.** `options.recordTiming` opts in to tail-shape statistics that the
 existing O(1) accumulators cannot express.
 
 ```js
@@ -365,7 +365,7 @@ beside them. Cross-reference ADR 0014.
 
 ## Choosing the worker
 
-**New in 2.0.1.** `options.loadBalancer` replaces the _choice_ of worker, not the
+**New in 2.1.0.** `options.loadBalancer` replaces the _choice_ of worker, not the
 policy. Omit it and the built-in least-loaded-plus-EWMA rule runs, exactly as before —
 that rule beats a plain least-loaded count for heterogeneous tasks, because a worker
 that has been answering fast is a better bet than one that is merely idle.
@@ -406,7 +406,7 @@ custom policy reads exactly what the policy read.
 
 ## Worker readiness
 
-**New in 2.0.1.** `options.ready` holds a worker out of dispatch until it signals it has
+**New in 2.1.0.** `options.ready` holds a worker out of dispatch until it signals it has
 finished async init.
 
 ```js
@@ -575,11 +575,11 @@ Both are computed lazily, so an idle transition costs nothing when no listener r
 
 `pool:scale` — emitted when workers are added or removed. Payloads vary by origin: when workers are created the payload is `{ action: 'add', id, minSize, maxSize }`; when workers are terminated the payload contains `{ action: 'remove', terminated: [ids], count }`. The existing `resize` event is still emitted for API compatibility.
 
-`pool:worker:exit` — **New in 2.0.1.** emitted on the internal event bus when a worker dies. Payload: `{ id, code, completedTask, remaining }`, where `code` is the exit code the runtime reported (or `null` where it reports none) and `completedTask` says whether that worker had ever finished a task. See [Worker death](#worker-death).
+`pool:worker:exit` — **New in 2.1.0.** emitted on the internal event bus when a worker dies. Payload: `{ id, code, completedTask, remaining }`, where `code` is the exit code the runtime reported (or `null` where it reports none) and `completedTask` says whether that worker had ever finished a task. See [Worker death](#worker-death).
 
 ### Worker death
 
-**New in 2.0.1.** A worker that dies is now detected, settled and replaced. Before this, a dead worker was simply absent, and three things followed — all observable from outside as "the pool stopped working":
+**New in 2.1.0.** A worker that dies is now detected, settled and replaced. Before this, a dead worker was simply absent, and three things followed — all observable from outside as "the pool stopped working":
 
 - `drain()` hung, waiting for a response that would never arrive;
 - every `awaitResponse` promise timed out instead of rejecting, so a caller waited the full timeout to learn what had already happened;
@@ -628,7 +628,7 @@ async function shutdown() {
   // `terminate()` now delegates to `shutdown()` internally, but you can call either.
   pool.terminate();
 
-  // Option B (new in 2.0.1): the same thing in one call.
+  // Option B (new in 2.1.0): the same thing in one call.
   // await pool.close();
 }
 
@@ -1043,7 +1043,7 @@ pool.postMessageBatch(batch);
 
 ## Closing the pool
 
-**New in 2.0.1.** `close()` is graceful shutdown as a single entry point. The
+**New in 2.1.0.** `close()` is graceful shutdown as a single entry point. The
 `shutdown()` / `drain()` / `[Symbol.asyncDispose]` model is defensible and stays
 exactly as it is — `close()` composes it rather than replacing it. What it adds is
 the one call a caller reaching for "shut this down properly" actually wants, which

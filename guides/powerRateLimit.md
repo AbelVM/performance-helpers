@@ -25,7 +25,7 @@ Options:
 
 - `tryConsume(n?)` — returns `true` only when every underlying limiter permits consuming `n` tokens.
 - `reserve(n?)` — reserves `n` tokens and returns a `{ n }` token to undo later, or `null` when the reservation is refused. **Throws** when a `sharedState` adapter is async, because the answer is not synchronously available — use `reserveAsync()` there. See [Async adapters](#async-adapters).
-- `reserveAsync(n?)` — **New in 2.0.1.** The awaiting counterpart to `reserve()`, for an async `sharedState` adapter. Same contract and same token shape; also works with a synchronous adapter.
+- `reserveAsync(n?)` — **New in 2.1.0.** The awaiting counterpart to `reserve()`, for an async `sharedState` adapter. Same contract and same token shape; also works with a synchronous adapter.
 - `reset()` — calls `reset()` on underlying limiters where present.
 - `dispose()` — releases what the composer built, and supports `using`. See [Disposal](#disposal).
 - `stats()` — snapshot of `{ legs, atomic, keyed, buckets, builtSlots, available, rejectionRate, legErrors }`. `rejectionRate` is the fraction of composed consume calls refused so far. `legErrors` is **new in 2.0** and counts legs whose `available()` threw during a pre-flight — see [When a leg throws](#when-a-leg-throws). See [Metrics](#metrics).
@@ -164,7 +164,7 @@ The local legs are only consulted after the shared store admits, so an async
 adapter does not change the admission order — it only makes the round-trip
 visible to the caller.
 
-**`reserve()` and `reserveAsync()` — new in 2.0.1.** An async adapter also makes
+**`reserve()` and `reserveAsync()` — new in 2.1.0.** An async adapter also makes
 `reserve()` unable to answer synchronously, and the two are now separate methods
 rather than one that guesses:
 

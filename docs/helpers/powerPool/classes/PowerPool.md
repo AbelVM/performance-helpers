@@ -979,7 +979,7 @@ receives an independent transferable buffer to avoid structured-clone copies.
 > **close**(`options?`): `Promise`\<`Object`\>
 
 Graceful shutdown as a single entry point: wait for in-flight work, then
-terminate. **New in 2.0.1** (PISC-011).
+terminate. **New in 2.1.0** (PISC-011).
 
 The `shutdown()` / `drain()` / `[Symbol.asyncDispose]` model is defensible and
 stays exactly as it is — this is a composition of it, not a replacement. What

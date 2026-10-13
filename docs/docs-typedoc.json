@@ -46317,7 +46317,7 @@
 										"summary": [
 											{
 												"kind": "text",
-												"text": "Graceful shutdown as a single entry point: wait for in-flight work, then\nterminate. **New in 2.0.1** (PISC-011).\n\nThe "
+												"text": "Graceful shutdown as a single entry point: wait for in-flight work, then\nterminate. **New in 2.1.0** (PISC-011).\n\nThe "
 											},
 											{
 												"kind": "code",
@@ -54182,7 +54182,7 @@
 											},
 											{
 												"kind": "text",
-												"text": " returns a promise.\n**New in 2.0.1** (AUD-007).\n\nSame contract, same token shape, same "
+												"text": " returns a promise.\n**New in 2.1.0** (AUD-007).\n\nSame contract, same token shape, same "
 											},
 											{
 												"kind": "code",

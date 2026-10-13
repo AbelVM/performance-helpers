@@ -14,7 +14,7 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 - `push(item)` — Enqueue `item` at the tail. Returns the new queue length as a `number`.
 
-- `unshift(item)` — **New in 2.0.1.** Enqueue `item` at the **head**, so it is the next
+- `unshift(item)` — **New in 2.1.0.** Enqueue `item` at the **head**, so it is the next
   value `shift()` returns. The mirror of `push`, and the primitive a return-to-front
   path needs: work that was dequeued for dispatch but could not be delivered goes back
   where it came from rather than behind everything that arrived after it. O(1) —
@@ -71,7 +71,7 @@ A resizable ring-buffer queue with O(1) enqueue/dequeue. Useful as a high-perfor
 
 ### Returning work to the front
 
-**New in 2.0.1.** `unshift(item)` puts an item back at the head, so it is the next
+**New in 2.1.0.** `unshift(item)` puts an item back at the head, so it is the next
 thing `shift()` returns. The case it exists for is work that was already dequeued and
 then could not be delivered:
 

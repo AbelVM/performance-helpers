@@ -17,11 +17,26 @@ cut.
 
 2. Open a PR. CI runs the full gate; the changeset is a normal file in the diff.
 
-3. On merge to `main`, the **Release** workflow opens (or updates) a
-   *"chore: version packages"* PR. That PR contains the version bump, the
-   regenerated `types/*.d.ts`, and `CHANGELOG.md`.
+3. Cut the release by hand. **There is no Release workflow** —
+   `.github/workflows/` holds only `ci.yml`, and nothing opens a
+   _"chore: version packages"_ PR for you:
 
-4. Merging that PR publishes to npm.
+   ```sh
+   npm run release:version   # changeset version + regenerate types/
+   npm run verify            # the full gate, before anything is staged
+   git tag v2.1.0 && git push --tags
+   npm run release:publish   # changeset publish
+   ```
+
+   `release:version` consumes every changeset in this directory, writes the version
+   bump and the `CHANGELOG.md` entry, and regenerates `types/`. Run `npm run verify`
+   **after** the version step and **before** committing: `docs:drift` compares
+   against the index rather than `HEAD`, so a tree that was green before the bump is
+   not necessarily green after it.
+
+4. `changeset publish` publishes to npm from the tag. It reads the version
+   `package.json` already carries, so a tag pushed without step 3 publishes
+   whatever the previous release left behind.
 
 ## Rules
 

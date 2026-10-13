@@ -12,7 +12,9 @@ zero-copy buffer helpers, a versioned message codec, and a logger. No runtime
 dependencies, ESM + CJS bundles, and a typecheck ratchet rather than a type
 rewrite.
 
-`package.json` is `1.0.3`; **2.0 is unreleased and the changeset is staged**.
+`package.json` is `2.0.0`; **2.1.0 is unreleased and its changeset is staged** in
+`.changeset/release-2-1-0.md` — the single consolidated file, not the eight it
+replaced.
 
 ## The three things that will waste your time if you do not know them
 
