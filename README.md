@@ -14,11 +14,15 @@ Start with the [Quick Guide](guides/metaGuide.md) to choose a helper, or browse
 the categories below. The root package supports both ESM and CommonJS;
 ESM-only subpaths are available when you want smaller bundles.
 
-## What’s new in v2.0
+## What’s new
 
-v2.0 adds versioned worker messaging, realtime transports, retry budgets,
-adaptive concurrency, event-loop monitoring, richer observability, and safer
-resource lifecycles. Read the concise [what’s new guide](assets/whatsnew2.0.md).
+v2.1 adds seven helpers — a priority queue, deduplication, heartbeats, sequence
+reassembly, two closed-loop flow controllers and exact APDEX scoring — plus a
+worker pool that detects and replaces a dead worker, and a cache admission filter
+that finally adapts to a changing working set. v2.0 added versioned worker
+messaging, realtime transports, retry budgets, adaptive concurrency, event-loop
+monitoring, richer observability, and safer resource lifecycles. Read the
+[what’s new guide](assets/whatsnew2.0.md) for both.
 
 ## Upgrade from v1.x
 
@@ -266,6 +270,7 @@ import {
   PowerHeartbeat,
   PowerSequencer,
   PowerFlowControl,
+  PowerFlowController,
   PowerSemaphore,
   PowerServo,
   PowerDefer,

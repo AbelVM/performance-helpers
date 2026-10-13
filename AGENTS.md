@@ -41,7 +41,7 @@ reason the next proposal does not repeat the work.
 
 ```bash
 npm run verify          # the full gate: lint, test, types, ratchet, build, bundle, drift, docs
-npm test                # vitest run — ~1726 tests, ~193 files (the gate, not this number)
+npm test                # vitest run — ~3757 tests, ~335 files (the gate, not this number)
 npm run test:coverage   # what CI runs
 npm run test:types      # tsc against the public type tests
 npm run lint            # eslint; 0 errors expected, plus a few dozen pre-existing warnings
@@ -53,7 +53,7 @@ npm run docs:drift      # fails if docs/ is out of date
 npm run mutants:servo   # 18 PowerServo mutants, each killed by a named test
 ```
 
-The gate is `scripts/verify.mjs`, and it is the **only** list of checks — eleven
+The gate is `scripts/verify.mjs`, and it is the **only** list of checks — fourteen
 steps. CI calls it rather than keeping its own copy: it did once, and the copies
 drifted until CI was running neither `test:types` nor `check:bundle` (see the
 comment at the top of `.github/workflows/ci.yml`). **To add a check, add it to

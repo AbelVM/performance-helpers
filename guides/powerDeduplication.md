@@ -20,8 +20,8 @@ import { PowerDeduplication } from 'performance-helpers/powerDeduplication';
 
 Options: `{ ttl?: number, maxKeys?: number, now?: () => number }` or just `ttl` (number).
 
-- `ttl` (number, ms): how long a key remains considered seen (default varies by impl usage; typically 60s). 0 means immediate expiry.
-- `maxKeys` (number): maximum keys to track; when exceeded, evicts oldest.
+- `ttl` (number, ms): how long a key remains considered seen. Default `60000`. `0` disables the window entirely — every key is new, so `has()` never reports a duplicate.
+- `maxKeys` (number): maximum keys to track, default `1000`; when exceeded, evicts oldest.
 - `now` (function): injected clock for testing.
 
 ### Methods

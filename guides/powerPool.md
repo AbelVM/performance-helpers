@@ -118,7 +118,7 @@ ignored.
   `Promise`. Use `postMessage` for fire-and-forget work or when the positional
   transfer-list API is preferable.
 
-- `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool encodes them into a transferable `Uint8Array` automatically, wrapped in a [`PowerMessageCodec`](powerMessageCodec.md) envelope. **See [Migrating to the framed protocol](#migrating-to-the-framed-protocol) — this changed in 2.0 and requires a one-line edit in every worker.**
+- `postMessage(message, transfer, options)` — Dispatch a single message to the pool. Returns `true` when dispatched/queued successfully, or when `options.awaitResponse` (or `options.correlationId`) is present returns a `Promise` that resolves with the worker response. When sending plain objects the pool encodes them into a transferable `Uint8Array` automatically, wrapped in a [`PowerMessageCodec`](powerMessageCodec.md) envelope. **See [Migrating to the framed protocol](#migrating-to-the-framed-protocol-breaking-change-in-20) — this changed in 2.0 and requires a one-line edit in every worker.**
 
   - Pass `options.workerId` to route the message to a specific worker id; targeting a missing or saturated worker will fail (returns `false` or a rejected Promise).
   - When `options.taskQueue` is enabled, `options.queuePolicy` controls overload behavior:

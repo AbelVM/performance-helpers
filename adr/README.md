@@ -62,7 +62,7 @@ plainly in a guide. If a reader needs it at the call site, it goes in
 A rejected decision is still worth recording. A reader who proposes the same
 thing next year should find the measurement that killed it rather than repeat
 the work — which is what happened twice in this project's own history, and is
-why `review.md` keeps `PERF-006` and `BENCH-002` rather than closing them.
+why `PERF-006` and `BENCH-002` are kept open rather than closed.
 
 ## There is one of these directories, not two
 

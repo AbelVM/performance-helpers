@@ -757,9 +757,12 @@ This section is intentionally concise. Use it as a directory, not as the primary
 
 - `PowerPool`: Worker/task pool with batching, response tracking, and autoscaling.
 - `PowerChunker`: Chunked iterable processing built on pool semantics.
+- `WorkerAgnostic`: One worker abstraction over `worker_threads`, `Worker` and `SharedWorker`.
 - `PowerQueue`: Fast FIFO queue for burst absorption.
+- `PowerPriorityQueue`: Binary heap, highest priority first, FIFO on ties.
 - `PowerBackpressure`: Producer-facing admission control.
 - `PowerFlowController`: Admission + bounded queue + latency feedback in one closed loop. Use it when the SLO is a tail latency rather than a depth.
+- `PowerFlowControl`: Adaptive token bucket whose refill rate a `PowerServo` sets.
 - `PowerBatch`: Coalesce many calls into one flush.
 - `PowerSemaphore`: Global async concurrency gate.
 - `PowerCrossLock`: Cross-worker mutex. Use it when the thing you must exclude is running in _another_ thread — `PowerSemaphore` cannot do that, because every instance is local to its thread.
@@ -767,6 +770,11 @@ This section is intentionally concise. Use it as a directory, not as the primary
 - `PowerPermitGate`: Low-level permit primitive used by higher-level gates.
 - `PowerScheduler`: Small flush scheduler for deferred work.
 - `PowerCron`: Drift-free interval scheduler for recurring work.
+- `PowerServo`: Closed-loop transfer function — holds a measured value at a setpoint.
+- `PowerAdaptiveProposal`: Turns feedback into bounded, explainable proposals with hysteresis and rollback.
+- `PowerBrownout`: Sheds caller-declared optional work under resource pressure.
+- `PowerSequencer`: Reassembles out-of-order datagrams; `missing()` is the NACK payload.
+- `PowerDeduplication`: Drops duplicates inside a TTL window, with a key cap.
 
 If something is already misbehaving rather than undecided, start at
 [Troubleshooting](troubleshooting.md) — it leads with the pure-ESM `preloadNode()` failure,
@@ -781,8 +789,10 @@ reliable way to mislead yourself.
 
 - `PowerThrottle`: Token-bucket style rate limiter.
 - `PowerSlidingWindow`: Strict rolling-window quota limiter.
+- `PowerGCRA`: O(1) cell-based limiter with an exact `retryAfter()`.
 - `PowerRateLimit`: Compose multiple limiter strategies.
 - `PowerRetry`: Retry with backoff, jitter, a retry budget, and hedged attempts.
+- `PowerRetryBudget`: Caps total retries so they cannot amplify an outage.
 - `PowerDeadline`: Attempt timeout, total deadline, abort, and retry budget wrapper.
 - `PowerCircuit`: Circuit breaker for unhealthy downstream dependencies.
 
@@ -801,11 +811,18 @@ reliable way to mislead yourself.
 - `PowerHistogram`: In-process latency and percentile-style telemetry.
 - `PowerApdex`: Exact SLO attainment scoring over three integer counters.
 - `PowerEventLoopMonitor`: Event-loop delay histogram and `utilization()`.
+- `PowerHeartbeat`: Jittered liveness detection, so a fleet does not check in lockstep.
+- **Metrics**: `createObservation`, `diffObservation` and `formatPrometheus` normalise
+  each helper's `stats()` into versioned names, numeric deltas, or Prometheus text.
+  See [metrics.md](metrics.md) — the shapes are different kinds of thing, and the
+  snapshot is what gives them stable names.
 
 ### Coordination and async building blocks
 
 - `PowerDefer`: External resolve/reject promise primitive.
 - `PowerLatch`: Wait until a count reaches zero.
+- `createOperationContext`: Carries deadline, cancellation, retry budget,
+  correlation id and priority through one call without hidden global state.
 
 ### Buffer and timing utilities
 

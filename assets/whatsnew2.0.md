@@ -1,3 +1,138 @@
+## What's new in v2.1.0
+
+Seven new helpers, a worker pool that survives a dead worker, and a cache
+admission filter that finally adapts. The [changelog](../CHANGELOG.md) has the
+full list; this note covers what changes how you use the library.
+
+### New helpers
+
+- **`PowerPriorityQueue`** — a binary heap dequeuing highest priority first, FIFO
+  on ties, with `popLowest()` for bounded eviction from the other end. It is also
+  what `PowerPool` now dispatches from under saturation, which is why that path
+  dropped from O(n) to O(log n) per dispatch.
+- **`PowerDeduplication`** — time-windowed duplicate suppression with a TTL, a
+  `maxKeys` cap, and an injectable clock.
+- **`PowerHeartbeat`** — jittered liveness detection. Jitter is applied to the
+  scheduled check rather than the deadline, so a peer beating on time is never
+  failed for arriving early.
+- **`PowerSequencer`** — gap detection and in-order reassembly for out-of-order
+  datagrams. `missing()` is the list a NACK would carry.
+- **`PowerFlowControl`** — an adaptive token bucket whose refill rate is the
+  output of a `PowerServo`. The servo's bounds are the rate bounds, so the
+  controller cannot ask for a rate the bucket would refuse.
+- **`PowerFlowController`** — admission, a bounded queue and tail-latency
+  feedback in one closed loop. `bench/claims.js flowloop` measures it against a
+  fixed rate: the closed loop is worth building, and its gain band is narrow.
+- **`PowerApdex`** — APDEX scoring over three integer counters. It deliberately
+  does not derive its score from a `PowerHistogram`: the derived version reads
+  0.625 where the truth is 0.950 when the mass sits at the threshold, and the
+  error is not monotonic in `relativeAccuracy`, so no accuracy setting repairs
+  it. See [ADR 0014](../adr/0014-apdex-counters-not-a-sketch.md).
+
+### Worker pool
+
+- **A dead worker is now detected, settled and replaced.** Before this a worker
+  that died was simply absent, and the pool looked closed while the last few
+  tasks were gone. A `pool:worker:exit` event reports it.
+- **`close({ force, timeout })`** — graceful shutdown as a single entry point.
+  `shutdown()` alone abandons in-flight work and `drain()` alone leaves the
+  workers running; getting the order wrong is silent.
+- **`ready`** — a readiness gate holding a worker out of dispatch until it
+  signals it has initialised, so a task never reaches a worker still starting up.
+- **`maxQueueLength: 'auto'`** resolves the cap to `maxSize ** 2`. `Infinity`
+  remains the default: a cap that silently appears is a cap nobody chose.
+- **`recordTiming`** opts in to percentile telemetry (`p50`/`p90`/`p99`/`p999`
+  plus `utilization`). Off by default, and the default path pays nothing.
+- **`loadBalancer`** — a caller-supplied worker-selection policy over a frozen
+  per-worker view. The default least-loaded-plus-EWMA rule is not replaced.
+- **A per-task `signal`** on `postMessage`. Aborting while in flight releases the
+  waiter now and lets the work finish, rather than terminating a worker that may
+  be carrying several other tasks.
+
+### Caching
+
+- **`admission: 'tinylfu'` can now adapt to a working set that changes.** Two
+  defects had made it unable to: a refused key was never recorded in the sketch,
+  and the sketch's half-life clock stopped once its counters saturated. The
+  `zipf` row now reads 93.0 % working-set hit rate against SLRU's 89.4 %, rather
+  than losing to it. TinyLFU is still off by default.
+- **`missCost`** — weight eviction by what a miss costs, bounded by a
+  `missCostScan` width.
+- **S3-FIFO** no longer serves stale evicted values, exceeds `maxEntries`, or
+  leaks weight on every Small-queue exit.
+
+### Rate limiting and resilience
+
+- **`reserveAsync(n, options)`** — the awaiting counterpart to `reserve()`, for
+  an async `sharedState` adapter. `reserve()` now **throws** a `TypeError` when
+  the adapter is async rather than returning `null`, because "you were denied"
+  and "I could not find out" need different handling.
+- **`PowerRateLimit.dispose()`** now disposes the per-slot limiters it built.
+- **`PowerGCRA.setRate(rate)`** changes the sustained rate at runtime.
+- **`PowerSlidingWindow`** no longer reallocates its ring on every window
+  boundary.
+- **`PowerRateLimit.stats().legErrors`** counts legs whose `available()` threw,
+  which used to be indistinguishable from "rate limited". Non-zero means the
+  limiter is broken, not busy.
+
+### Realtime
+
+- **`messagePriority`** on `PowerRealtimeHub` orders each subscriber's queue by
+  the `priority` passed to `publish()`. Off by default; FIFO is unchanged.
+- **`PowerRTCChannel`** gains `lowWaterMarkBytes` and `queueBudget`, plus
+  `queuedBytes` / `queuedFrames` — back-pressure that arrives as a push signal
+  instead of a poll timer.
+- **`createSseAdapter`** no longer drops every event emitted during a reconnect
+  gap: it emits an `id:` field with every frame, so a browser `EventSource` sends
+  `Last-Event-ID` on reconnect, and `lastEventId(sub)` / `lastSentId(sub)` expose
+  both ends of it. Replaying is the caller's — the adapter holds no buffer.
+
+### Observability
+
+- **`PowerHistogram.countAtOrBelow(value)`** — the inverse of `percentile()`.
+  Shipped as a general rank query and documented as unsound for an SLO
+  attainment figure, with the number.
+- **`HyperLogLog`** takes a register count, defaulting to 64 so nothing changes
+  for an existing caller. Two bias defects had made this impossible before.
+- **`PowerHistogram.merge()`** now accepts a cross-realm sketch or a plain
+  `toJSON()` result. `structuredClone` does not preserve the class, so a sketch
+  arriving from a worker was rejected with "expects a PowerHistogram" — the
+  headline distributed use case was unreachable without hand-rolling
+  reconstruction.
+
+### Lifecycles and correctness
+
+- **`Symbol.asyncDispose`** on the classes that were missing it, so every
+  long-lived helper takes part in `await using` teardown.
+- **`PowerQueue.dispose()`** releases the ring buffer. A queue that took 5 000
+  items once kept an 8 192-slot buffer for life; `clear()` empties the slots but
+  deliberately keeps the array, which is right for a container bounding memory
+  and wrong for one being torn down.
+- **Six cross-realm `instanceof` defects fixed**, found by grepping the defect
+  class rather than the site. Both obvious answers are wrong cross-realm, and a
+  `Symbol.toStringTag` check is spoofable — what ships is the spec's own
+  internal-slot accessor.
+
+### Measurement
+
+Eight new `bench/claims.js` modes, and **five of them reject the feature they
+were written to evaluate** — nothing in `src/` changed as a result:
+
+```sh
+node bench/claims.js blockqueue    # a block-chained queue against the shipped ring
+node bench/claims.js namedexport   # postMessage's `name` option
+node bench/claims.js messageport   # a dedicated MessageChannel per worker
+node bench/claims.js geocoalesce   # a coalescer against PowerBatch + a Map
+node bench/claims.js geoprefetch   # a camera-prefetch helper — the window is the wrong knob
+```
+
+`flowloop` is the one that says build it: the fixed control sits at 2.4× the
+target latency after a capacity step, and the defaults settle on the closed-form
+equilibrium. The five above are recorded as rejected in ADRs 0017, 0018, 0019 and
+0015, with the measurements that killed them.
+
+---
+
 ## What's new in v2.0.0
 
 Version 2.0 consolidates the worker protocol, realtime transports, resilience
@@ -44,20 +179,6 @@ the migration-relevant detail.
   error routing, and framework-neutral React, Vue, and Angular recipes.
 - **Safer lifecycles:** Resource-owning helpers support `dispose()` and
   `[Symbol.dispose]()`, and waiting APIs accept `AbortSignal` cancellation.
-  `PowerQueue` joins them, so a burst-grown ring is released on teardown rather
-  than held for the life of the process.
-- **Resumable SSE:** `createSseAdapter` emits an `id:` field with every frame, so
-  a browser `EventSource` sends `Last-Event-ID` on reconnect instead of silently
-  dropping the gap. `lastEventId(sub)` and `lastSentId(sub)` expose both ends of
-  it; replaying is the caller's, because the adapter holds no buffer.
-- **Mergeable histograms:** `PowerHistogram.fromJSON()` and a `merge()` that
-  accepts a plain `toJSON()` result close the distributed path — a sketch from a
-  worker merges directly, with no reconstruction step to get the bucket indices
-  wrong. The running sum is Neumaier-compensated, so a large value no longer
-  swallows the small ones recorded after it.
-- **Visible limiter faults:** `PowerRateLimit.stats().legErrors` counts legs whose
-  `available()` threw, which used to be indistinguishable from "rate limited".
-  Non-zero means the limiter is broken, not busy.
 
 ### Performance and reliability
 

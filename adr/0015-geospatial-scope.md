@@ -4,10 +4,11 @@
 **Affects:** no shipped code. One new guide (`guides/geo.md`), one new section in
 `guides/metaGuide.md`, one new helper option on four existing helpers
 (`PowerDeadline`, `PowerCircuit`, `PowerCron`, `PowerEventLoopMonitor` — GEO-039),
-and three new `bench/claims.js` modes (`geoencode`, `geocoalesce`, `geoprecision`).
-**Evidence:** `node bench/claims.js geoencode|geocoalesce|geoprecision`, run
-2026-10-10. All three modes were added for this decision; before they existed the
-questions had no answers either way.
+and four new `bench/claims.js` modes (`geoencode`, `geocoalesce`, `geoprecision`,
+`geoprefetch`).
+**Evidence:** `node bench/claims.js geoencode|geocoalesce|geoprecision|geoprefetch`,
+run 2026-10-10. All four modes were added for this decision; before they existed
+the questions had no answers either way.
 
 ## Context
 
@@ -120,6 +121,39 @@ per coordinate whatever the value, so rounding does not shrink it at all. The
 saving is entirely on the JSON side, and it is shape-dependent: 40.6% on
 line-heavy data, only 10.8% on point-heavy data.
 
+### `geoprefetch` — what in-flight window should a camera prefetch use?
+
+GEO-049's UC4 needs a priority cursor bounded by an in-flight window. MapLibre PR
+#8670 measures 12 as optimal against Chromium's ~6 connections per origin and
+states the ratio explicitly — but that ratio is host-dependent, so a recipe that
+hard-codes it is a claim without a number. The mode sweeps the window against a
+simulated per-tile latency and reports requests issued, requests abandoned
+mid-flight, and work still outstanding at arrival.
+
+| window | issued | abandoned | outstanding | landed late | waste % |
+| -----: | -----: | --------: | ----------: | ----------: | ------: |
+|      6 |     30 |         0 |           6 |           0 |     0.0 |
+|     12 |     60 |         0 |          12 |           0 |     0.0 |
+|     24 |     96 |         0 |           0 |           0 |     0.0 |
+
+**The determinant is lead vs latency, not the window.** With the defaults — 60
+frames of read-ahead, 1 002 ms, against 600 ms per tile — the lead covers the
+latency, so no tile can land late and none can be abandoned: every window reads
+0.0 % waste, and the window controls only how far ahead you read and how much is
+still in flight when the camera lands. A window that is too small puts the churn
+back; one that is too large holds requests that queue behind the render loop.
+
+Drop the lead below the latency and the waste appears, and **a larger window makes
+it worse, not better**: at 2 000 ms per tile over a 10 s flight, windows 6 and 12
+both waste 77.8 % and window 24 wastes 87.5 %. The window cannot fix a lead that
+is too short — raise the read-ahead first.
+
+**This is a simulation, not a measurement of a real browser.** It cannot discover
+the host's connection limit, so the limit is injected and the crossover is
+host-dependent even though the shape of the trade-off is not. PR #8670's 23
+abandoned at window 6 came from a real browser whose sampled path and actual path
+diverge; this model uses one path for both, so it cannot reproduce that term.
+
 ## Decision
 
 **One helper change, one guide, and a set of recorded rejections.**
@@ -152,7 +186,7 @@ it.
 | A columnar binary carrier (`powerGeoColumns`)                  | **The transport already exists.** `powerMessageCodec` ships `CODECS.RAW`, which stores an `ArrayBuffer` or typed array _"verbatim, with no serialization at all"_, plus `isRawPayload()` for realm-independent detection and `collectTransferables()`, which walks an arbitrary object graph and returns every `ArrayBuffer` in it precisely so they can be transferred rather than copied. That is the whole transport half, already hardened against the cross-realm defect class twice (WRK-006, AUD-011). What was left was a struct-of-arrays _column store_ — a data structure, and building geo data structures is what this library said it would not do — and a _declared layout_, which is a convention worth five lines of JSDoc. There is also a consumer problem: MapLibre's `GeoJSONSource` takes GeoJSON or a URL and deck.gl has its own binary attribute layout, so our format would need an adapter on the far side in both cases. |
 | A generic time/frame-bounded coalescer (`powerCoalesce`)       | **Measured, and the rejection condition fired.** See the `geocoalesce` table above. `PowerBatch` + a `Map` wins on work and on fidelity, and it is a recipe.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | A standalone coordinate-precision helper (`powerGeoPrecision`) | **The host owns this feature.** turf.js owns `truncate`. A typed-array variant is a _performance variant of a filled gap_, not a filled gap, and it makes the DX worse: a second truncate to choose between, with different duplicate-collapse and ring re-closing behaviour. `geoprecision` shows why — the saving is 0% on a flat buffer, so the win is representation choice, not a rounding pass.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| A camera-movement prefetch helper (`powerGeoPrefetch`)         | **The host owns this feature.** MapLibre PR #8670 adds `preload: true` to core, sampling the movement's own path and requesting tiles through a priority cursor bounded by an in-flight window. Duplicating that is the definition of "building an owned maplibre feature". The recipe survives, scoped to where core prefetch does not reach: custom sources registered through `addSourceType`, and deck.gl layers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| A camera-movement prefetch helper (`powerGeoPrefetch`)         | **The host owns this feature.** MapLibre PR #8670 adds `preload: true` to core, sampling the movement's own path and requesting tiles through a priority cursor bounded by an in-flight window. Duplicating that is the definition of "building an owned maplibre feature". The recipe survives, scoped to where core prefetch does not reach: custom sources registered through `addSourceType`, and deck.gl layers. `geoprefetch` measures the recipe's one tunable — the in-flight window — and finds the determinant is read-ahead lead vs per-tile latency, not the window: with the lead covering the latency every window reads 0.0 % waste, and with the lead too short a _larger_ window wastes more, not less.                                                                                                                                                                                                                             |
 | A fixed-timestep game-loop helper (`powerFixedStep`)           | **Not a geospatial feature.** It is not a gap maplibre or turf leaves, and it is not one this library is unusually placed to fill: the pattern is ~50 lines with many existing implementations. It may belong on the _general_ roadmap as a scheduling primitive, but it does not belong in a geo proposal.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Spatial analysis (distance, area, buffer, intersection)        | turf.js is 10.4k stars, MIT, and modular. `buffer` delegates to JSTS, a large transitive dependency we cannot vendor under the zero-dependency rule (`REJ-008`). No measured premise.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | A spatial index (R-tree / KD-tree / packed Hilbert)            | flatbush indexes 1M rectangles in 109 ms and kdbush is 5–8x faster than rbush at indexing. We would be reimplementing a solved, benchmarked data structure and losing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -195,4 +229,4 @@ applied deliberately.
 - `guides/metaGuide.md` — the "Geospatial" section and quick-chooser rows
 - ADR 0009 — which clock a helper subtracts
 - ADR 0012, 0013 — measured-and-rejected, the pattern this ADR follows
-- `bench/claims.js` modes `geoencode`, `geocoalesce`, `geoprecision`
+- `bench/claims.js` modes `geoencode`, `geocoalesce`, `geoprecision`, `geoprefetch`

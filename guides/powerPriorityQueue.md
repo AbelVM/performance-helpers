@@ -42,11 +42,13 @@ queue is already full.
 
 ### new PowerPriorityQueue(initialCapacity)
 
-- `initialCapacity` (number|object, optional): initial backing store size; rounded up. If passed `{ initialCapacity }`, known options asserted.
+- `initialCapacity` (number|object, optional): initial backing store size; rounded **down** to a whole number, with a floor of 2. If passed `{ initialCapacity }`, known options asserted.
 
 ### Methods
 
 - `push(item)` — Enqueue item; returns new size. Item priority is taken from `item.priority` (number, finite) else `item.weight` else `0`.
+- `pushMany(items)` — Enqueue several items in one call; returns the new size. A loop over `push()`, deliberately: each push is already O(log n), so the bulk call is O(k log n) with no shared setup to amortise.
+- `toArray()` — A shallow snapshot **in dispatch order** — highest priority first, FIFO among equal priorities. Dispatch order rather than insertion order, because "what would I get if I drained this" is the useful question for a priority queue.
 - `shift()` — Dequeue highest priority item; returns item or `undefined` if empty. FIFO on ties.
 - `popLowest()` — Dequeue the item that would be delivered **last**, and return it. The exact mirror of `shift()`: lowest priority, and among equal priorities the most recently inserted. See below.
 - `peek()` — View highest priority item without removal.
