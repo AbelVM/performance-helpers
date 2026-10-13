@@ -111,6 +111,15 @@
  *   and `getStats().performance` reports `percentiles`, `queueWaitPercentiles` and
  *   `utilization`. Off by default, and the default path allocates no histogram and
  *   pays one boolean test per recording site.
+ * @property {boolean|string} [ready] - PISC-005. Readiness gate. A string names
+ *   the field a worker posts to signal it has finished async init; `true` uses the
+ *   default `'ready'`. Until a worker signals, it is held out of dispatch entirely,
+ *   so a task is never posted to something that cannot answer it. `null` (the
+ *   default) disables the gate and costs one boolean test per dispatch.
+ * @property {number} [readyTimeout] - PISC-005. Fail-open bound for the readiness
+ *   gate: a worker that never signals is dispatched anyway after this many ms, so a
+ *   misbehaving worker degrades to the old behaviour rather than wedging the pool.
+ *   `0` (the default) waits forever.
  * @property {function(Array<Object>): (number|Object|null|undefined)} [loadBalancer] -
  *   Caller-supplied worker-selection policy (PISC-006). Called with a frozen array
  *   of per-worker views — `{ id, tasks, latencyEwma, lastActive }` — and returns the
@@ -276,6 +285,13 @@
  * @property {number} [exitCode] - The exit code the runtime reported, where it
  *   reports one. Carried on the entry and echoed in the `pool:worker:exit` event
  *   payload. PISC-001.
+ * @property {boolean} [ready] - Whether this worker has signalled readiness
+ *   (PISC-005). `true` when there is no gate, so the dispatch checks are a single
+ *   boolean test on the common path. A worker still running async init is held out
+ *   of dispatch entirely, so a task is never posted to something that cannot answer
+ *   it.
+ * @property {number} [createdAt] - When this worker was built, for the readiness
+ *   fail-open bound (PISC-005).
  */
 
 export {};

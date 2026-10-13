@@ -769,6 +769,19 @@ export class PowerPool {
      * @private
      */
     /**
+     * The workers eligible for dispatch: every worker when there is no readiness
+     * gate, otherwise only those that have signalled ready (PISC-005).
+     *
+     * A fresh array per call rather than a cached one, because readiness flips on a
+     * message and a cached list would be stale exactly when it mattered. The
+     * allocation is the price of the gate being off by default: with no gate this
+     * returns `this.workers` itself and allocates nothing.
+     *
+     * @returns {WorkerObj[]}
+     * @private
+     */
+    _selectWorker(): import("./jsdoc-types.js").WorkerObj | null;
+    /**
      * Build the frozen per-worker view handed to a `loadBalancer` and reported by
      * `getStats().workers`. **New in 2.0.1** (PISC-006).
      *

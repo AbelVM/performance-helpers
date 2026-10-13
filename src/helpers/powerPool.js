@@ -58,6 +58,28 @@ import {
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { markUntransferable } from '../utils/transferable.js';
 
+/**
+ * Whether a decoded inbound message is a worker readiness signal (PISC-005).
+ *
+ * Matches a plain object carrying the configured field set to a truthy value, so a
+ * worker can post `{ ready: true }` — or `{ ready: true, version: 3 }` and have the
+ * extra fields ignored. A bare `true` is accepted too, for a worker whose whole
+ * message is the signal.
+ *
+ * Deliberately narrow: matching on a *field name* rather than on shape means a task
+ * that happens to carry the same field is not mistaken for a signal, because the
+ * gate is opt-in and the field name is the caller's choice.
+ *
+ * @param {any} data - The decoded inbound payload.
+ * @param {string} field - The configured ready field.
+ * @returns {boolean}
+ */
+function isReadySignal(data, field) {
+  if (data === true) return true;
+  if (data === null || typeof data !== 'object') return false;
+  return Boolean(/** @type {any} */ (data)[field]);
+}
+
 /** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
 
 // Process-unique prefix for generated correlation ids, computed once per
@@ -430,6 +452,8 @@ export class PowerPool {
         'slowTaskThreshold',
         'recordTiming',
         'loadBalancer',
+        'ready',
+        'readyTimeout',
         'maxListeners',
         'messageCodec',
         'encodeCacheLimit',
@@ -471,6 +495,13 @@ export class PowerPool {
       // Caller-supplied worker-selection policy (PISC-006). Omit it and the
       // built-in least-loaded-plus-EWMA rule runs, exactly as before.
       loadBalancer = null,
+      // Readiness gate (PISC-005). A string names the field a worker posts to
+      // signal it has finished async init; 'ready' is the default when `true`.
+      // `null` (the default) disables the gate entirely.
+      ready = null,
+      // Fail-open bound: a worker that never signals is dispatched anyway after
+      // this many ms. `0` means wait forever.
+      readyTimeout = 0,
       autoScale = false,
       priorityAgingMs = 0,
     } = options;
@@ -638,6 +669,12 @@ export class PowerPool {
       throw new TypeError('PowerPool: `loadBalancer` must be a function');
     }
     this._loadBalancer = loadBalancer ?? null;
+    // Readiness gate (PISC-005). `_readyField` is the message field a worker
+    // posts to say it has finished async init; `null` means no gate.
+    this._readyField =
+      ready === true ? 'ready' : typeof ready === 'string' && ready.length > 0 ? ready : null;
+    this._readyTimeout =
+      Number.isFinite(readyTimeout) && readyTimeout > 0 ? Math.floor(readyTimeout) : 0;
     this._taskDurationHistogram = this._recordTiming ? new PowerHistogram() : null;
     this._queueWaitHistogram = this._recordTiming ? new PowerHistogram() : null;
     // optional autoscaling configuration (disabled by default)
@@ -2732,6 +2769,11 @@ export class PowerPool {
       // a worker that failed to load, and a pool that keeps replacing those is in
       // a respawn storm rather than recovering. PISC-001.
       everCompletedTask: false,
+      // Readiness (PISC-005). `true` when there is no gate, so the dispatch
+      // checks below are a single boolean test on the common path.
+      ready: this._readyField == null,
+      // When this worker was built, for the readiness fail-open bound (PISC-005).
+      createdAt: nowMs(),
     };
     this.workers.push(workerObj);
     this._totalWorkersCreated++;
@@ -3033,6 +3075,24 @@ export class PowerPool {
         if (inboundMeta.correlationId != null) ev.correlationId = inboundMeta.correlationId;
         if (typeof inboundMeta.duration === 'number') ev.duration = inboundMeta.duration;
       }
+      // Readiness signal (PISC-005), checked on the **unwrapped** payload.
+      //
+      // The first draft checked `data` before the decode block, and matched nothing:
+      // the codec wraps a payload as `{ version, codec, value, byteLength }`, so
+      // `data.ready` was `undefined` for every real signal. Pool-internal protocol
+      // traffic like the capability announcement: consumed here, not forwarded to
+      // `message` listeners, and not a task so it must not touch the accounting below.
+      if (
+        this._readyField != null &&
+        !workerObj.ready &&
+        isReadySignal(decoded, this._readyField)
+      ) {
+        workerObj.ready = true;
+        this._bus.emit('pool:worker:ready', { id: workerObj.id });
+        // A worker becoming ready may unblock queued work, so kick the dispatcher.
+        this._dispatchQueuedTasks();
+        return;
+      }
       if (typeof worker.onmessage === 'function') {
         try {
           worker.onmessage(ev);
@@ -3265,9 +3325,45 @@ export class PowerPool {
    * @returns {WorkerObj|null}
    * @private
    */
+  /**
+   * The workers eligible for dispatch: every worker when there is no readiness
+   * gate, otherwise only those that have signalled ready (PISC-005).
+   *
+   * A fresh array per call rather than a cached one, because readiness flips on a
+   * message and a cached list would be stale exactly when it mattered. The
+   * allocation is the price of the gate being off by default: with no gate this
+   * returns `this.workers` itself and allocates nothing.
+   *
+   * @returns {WorkerObj[]}
+   * @private
+   */
+  _readyWorkers() {
+    if (this._readyField == null) return this.workers;
+    const now = nowMs();
+    const out = [];
+    for (let i = 0; i < this.workers.length; i++) {
+      const w = this.workers[i];
+      // Fail-open: a worker that never signals is dispatched anyway once the
+      // bound passes, so a misbehaving worker degrades to the old behaviour
+      // rather than wedging the pool forever.
+      const born = w.createdAt ?? now;
+      if (!w.ready && this._readyTimeout > 0 && now - born >= this._readyTimeout) {
+        w.ready = true;
+      }
+      if (w.ready) out.push(w);
+    }
+    return out;
+  }
+
   _selectWorker() {
     if (!this.workers.length) return null;
-    if (typeof this._loadBalancer !== 'function') return this._findLeastLoadedWorker();
+    // Readiness gate (PISC-005). A worker still running async init is held out of
+    // dispatch entirely, so a task is never posted to something that cannot answer
+    // it. `null` when every worker is ready, which is the common case and costs
+    // one comparison.
+    const ready = this._readyWorkers();
+    if (!ready.length) return null;
+    if (typeof this._loadBalancer !== 'function') return this._findLeastLoadedWorker(ready);
 
     /** @type {any} */
     let chosen;
@@ -3333,13 +3429,13 @@ export class PowerPool {
    * @private
    * @returns {WorkerObj|null}
    */
-  _findLeastLoadedWorker() {
-    if (!this.workers.length) return null;
+  _findLeastLoadedWorker(pool = this.workers) {
+    if (!pool.length) return null;
     let best = null;
     let bestTasks = Infinity;
     let bestLat = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < this.workers.length; i++) {
-      const w = this.workers[i];
+    for (let i = 0; i < pool.length; i++) {
+      const w = pool[i];
       const lat = w.latencyEwma != null ? w.latencyEwma : Number.POSITIVE_INFINITY;
       if (w.tasks < bestTasks || (w.tasks === bestTasks && lat < bestLat)) {
         best = w;
@@ -3614,8 +3710,21 @@ export class PowerPool {
     }
     // support explicit per-worker targeting via `options.workerId`
     const targetWorkerId = options?.workerId != null ? options.workerId : null;
+    //
+    // **`&& this._readyField == null` is load-bearing (PISC-005).** Without it a
+    // single-worker pool takes this path and `least` becomes `this.workers[0]`
+    // directly, never reaching `_selectWorker()` — so the readiness gate is bypassed
+    // entirely and a task is posted to a worker still running async init. Measured:
+    // a `size: 1` pool with `ready: true` delivered the first post to a worker whose
+    // `ready` was still `false`.
+    //
+    // The condition also keeps the fast path free on the common path, because
+    // `_readyField == null` is the default and is a single property read.
     const singleWorkerDirectFastPath =
-      targetWorkerId == null && this.workers.length === 1 && this._maxTasksPerWorker === Infinity;
+      targetWorkerId == null &&
+      this.workers.length === 1 &&
+      this._maxTasksPerWorker === Infinity &&
+      this._readyField == null;
     // prefer an existing idle/least-loaded worker
     //
     // A caller-supplied `loadBalancer` replaces the *choice*, not the policy: it is
@@ -3781,12 +3890,29 @@ export class PowerPool {
       return this._enqueueOrReject(prepared, wantResponse, correlationId, pendingPromise, options);
     }
 
-    // fallback: round-robin dispatch. Use modulo to keep `_nextIndex` bounded
-    if (!this.workers.length) return wantResponse ? pendingPromise : false;
-    const idx = this._nextIndex % this.workers.length;
+    // Fallback: round-robin dispatch. Use modulo to keep `_nextIndex` bounded.
+    //
+    // **Over the ready set, not over `this.workers` (PISC-005).** The first draft
+    // left this path reading `this.workers` directly, so a post that reached the
+    // fallback was round-robined straight to a worker still running async init —
+    // the exact thing the gate exists to prevent, reached only when the pool was
+    // saturated and the queue was off.
+    const readySet = this._readyWorkers();
+    if (!readySet.length) {
+      // Nothing is ready and nothing can be queued. Refuse rather than post to a
+      // worker that cannot answer, which is the whole point of the gate.
+      if (wantResponse && correlationId) {
+        this._cleanupPendingResponse(correlationId, {
+          rejectWith: new Error('no worker is ready'),
+        });
+        return pendingPromise;
+      }
+      return false;
+    }
+    const idx = this._nextIndex % readySet.length;
     // advance and wrap to avoid unbounded integer growth
-    this._nextIndex = (this._nextIndex + 1) % this.workers.length;
-    const fallback = this.workers[idx];
+    this._nextIndex = (this._nextIndex + 1) % readySet.length;
+    const fallback = readySet[idx];
     try {
       const startTime = now;
       const prepared = this._prepareForTransfer(message, transfer, options);

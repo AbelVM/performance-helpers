@@ -404,6 +404,41 @@ Three things to know:
 The same frozen view is reported per worker by `getStats().workers`, so debugging a
 custom policy reads exactly what the policy read.
 
+## Worker readiness
+
+**New in 2.0.1.** `options.ready` holds a worker out of dispatch until it signals it has
+finished async init.
+
+```js
+const pool = new PowerPool(WorkerScript, { ready: true });
+// in the worker:
+postMessage({ ready: true }); // once async setup is done
+```
+
+Without this, a task can be dispatched to a worker still running its constructor's async
+work. The worker receives the message, cannot answer it, and the caller waits for a
+response that will never come — which surfaces as a timeout rather than as a failure to
+start.
+
+Three things to know:
+
+- **The field name is yours.** Pass a string to name it (`ready: 'initialised'`), or
+  `true` for the default `'ready'`. A worker posting `{ ready: true, version: 3 }` has
+  signalled; the extra fields are ignored. A bare `true` works too.
+- **The signal is pool-internal traffic.** It is consumed by the pool and deliberately
+  _not_ forwarded to `message` listeners, which never sent it and would have to
+  recognise it to be correct. It is also not a task, so it does not touch the task
+  accounting.
+- **`readyTimeout` fails open.** A worker that never signals is dispatched anyway after
+  that many ms, so a misbehaving worker degrades to the old behaviour rather than
+  wedging the pool forever. `0` (the default) waits forever.
+
+**What happens to a post that arrives while nothing is ready.** With the task queue on —
+the default — the work is _held_, not refused: the caller is not told "no" for a
+condition that resolves in milliseconds. With `taskQueue: false` and no ready worker, the
+post is refused instead, because the round-robin fallback would otherwise dispatch
+straight past the gate.
+
 ## Autoscaling
 
 `PowerPool` supports an optional autoscaling mode that grows or shrinks the worker pool based on recent observed task latency (EWMA) and queue pressure. Enable it by passing `options.autoScale` to the constructor.

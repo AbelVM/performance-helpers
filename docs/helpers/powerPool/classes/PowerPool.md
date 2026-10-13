@@ -447,6 +447,18 @@ whether queued dispatch is paused
 
 ***
 
+### \_readyField
+
+> **\_readyField**: `string` \| `null`
+
+***
+
+### \_readyTimeout
+
+> **\_readyTimeout**: `number`
+
+***
+
 ### \_reaperInterval
 
 > **\_reaperInterval**: `any`
@@ -853,6 +865,16 @@ A worker count in `[1, ceiling]`.
 #### Returns
 
 `void`
+
+***
+
+### \_selectWorker()
+
+> **\_selectWorker**(): `WorkerObj` \| `null`
+
+#### Returns
+
+`WorkerObj` \| `null`
 
 ***
 
