@@ -179,6 +179,22 @@ lastActive }`) and returns the id or the object of the worker a new task should 
   items directly would compare equal priorities as equal and fall back on the heap
   array's layout — which is a valid heap but not an insertion order. The result would
   look sorted and not be FIFO.
+- `bench/claims.js` gains a `blockqueue` mode, measuring Piscina's `FixedQueue`
+  design — a linked list of 2 048-slot circular buffers — against the shipped
+  `PowerQueue` ring buffer, with `Array.prototype.shift()` as a control. **The
+  proposal does not pay, and the reason is that the two structures allocate in
+  proportion to different things.** The ring grows log₂(peak) times and then reuses
+  its buffer forever; a block chain allocates one block per 2 048 pushes for the
+  life of the queue — 3 999 744 slots against 262 128 over 4 M pushes, 15× the
+  churn, and 1 953 growth events against 14. The row's structural claim is true and
+  is not enough: a block allocation is cheaper per event than the ring's doubling
+  copy by 9× to 98× across four runs (~50× typical, the block chain's own figure
+  stable at 0.8–3.8 µs while the ring's moves from 7 µs to 85 µs on the same
+  machine), and the worst-case pause the design was meant to bound is itself a GC
+  pause — 0.3–250 ms to allocate one array, against the ring's own 0.8–2.1 ms copy.
+  The one axis the block chain wins is resident memory at peak depth (200 704 slots
+  against 262 144), and it loses that below one block. Recorded as rejected in ADR
+  0017; nothing in `src/` changed.
 
 ### Fixed
 

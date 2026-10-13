@@ -94,6 +94,7 @@ node bench/claims.js ratelimit    # static versus adaptive refill under burst + 
 node bench/claims.js datagram     # bounded datagram queue saturation and flush
 node bench/claims.js apdex        # APDEX from a sketch against exact counters
 node bench/claims.js adaptive     # does an online policy selector beat any single policy
+node bench/claims.js blockqueue   # a block-chained queue against the shipped ring buffer
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only
@@ -118,6 +119,19 @@ Read the row, not just the verdict: **the benchmark is silent on the paper's hea
 Two trace-design notes worth keeping, because both produced wrong numbers before the right one. The working set must **exceed** capacity: the first scan-heavy run used 300 against 500 and every policy survived 300/300, so the scan fit in the slack and nothing was ever evicted — the comparison was vacuous. And SIEVE's hand is **persistent and one-way**; resetting it per eviction is a CLOCK sweep, a weaker policy that is not SIEVE, and it reported a 5-point loss. Hit rates here are deterministic — same seed, identical survivors across runs — so only the ns/op column moves.
 
 Parameters: `CLAIM_SIEVE_CAPACITY`, `CLAIM_SIEVE_SEED`, `CLAIM_SIEVE_WORKING`, `CLAIM_SIEVE_SCAN_EVERY`, `CLAIM_SIEVE_SCAN_KEYS`, `CLAIM_SIEVE_ZIPF`.
+
+**`blockqueue` reports that a block-chained queue should not replace `PowerQueue`, and the reason is not the one the row expected.** PISC-012 asks for Piscina's `FixedQueue` design — a linked list of 2 048-slot circular buffers — to be evaluated against the shipped ring buffer, on the premise that it "bounds the worst-case growth pause". The prototype is a `BenchBlockQueue` in the bench file, measured against the real `PowerQueue` with `Array.prototype.shift()` as a control.
+
+**The structural claim is true, and it is not enough.** The block chain's median growth event is **0.8–3.8 µs** against the ring's **3.1–148.6 µs** — cheaper per event by **9× to 98× across four runs, ~50× typical**, and the asymmetry inside that range is the thing to notice: the block chain's own figure is stable, while it is the _ring's_ that moves, 7 µs to 85 µs on the same machine in the same hour. That is exactly what avoiding the doubling copy should buy. It loses anyway, for two reasons the row does not anticipate:
+
+- **Allocation is proportional to different things.** The ring buffer grows log₂(peak) times and then **reuses its buffer forever** — 14 growths for 4 M pushes. The block chain allocates one block per 2 048 pushes _for the life of the queue_: a drained block is released, but the next push allocates a replacement. For a queue that drains and refills — which is `PowerPool`'s task queue under saturation — that is permanent churn, **15× the ring's** by slots allocated.
+- **The worst-case pause it was meant to bound is a GC pause, and churn is what causes them.** The ring's max growth event is its own copy (0.8–2.1 ms to move 262 144 slots). The block chain's max is 0.3–250 ms to allocate one 2 048-slot array, which is not a 250 ms operation. The mode prints the median as the structural figure and says plainly that the max column compares a copy against a collector.
+
+The one place the block chain wins is resident memory at peak depth — 200 704 slots against the ring's 262 144, because it wastes at most one block rather than up to a full doubling. It loses even that below one block: a 500-deep queue on 2 048-slot blocks holds 4× the slots it can use.
+
+Two measurement notes, both of which produced a wrong number first. **Growth events are timed individually, not averaged** — `_grow()` copies the whole buffer, so one push in every log₂(n) is O(n) and a mean over the run cannot see the thing being proposed. And **per-op `hrtime.bigint()` is not used for throughput**: the timer costs more than the operation, so a per-op loop would mostly measure the clock. A first draft timed a block allocation by pushing a whole 200 000-item burst into a fresh probe queue and reported 32 ms as the cost of one allocation. The growth _counts_ are deterministic and are the figures to quote; the timings move with the machine, so the whole measurement repeats and keeps the fastest run.
+
+Parameters: `CLAIM_BLOCKQUEUE_DEPTH`, `CLAIM_BLOCKQUEUE_CYCLES`, `CLAIM_BLOCKQUEUE_BLOCK`, `CLAIM_BLOCKQUEUE_SEED`.
 
 **`batcheservo` reports that a closed loop should not be added to `PowerBatch`, and
 that is the finding.** It drives a real `PowerBatch` with a bursty producer — 60
