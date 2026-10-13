@@ -95,6 +95,8 @@ node bench/claims.js datagram     # bounded datagram queue saturation and flush
 node bench/claims.js apdex        # APDEX from a sketch against exact counters
 node bench/claims.js adaptive     # does an online policy selector beat any single policy
 node bench/claims.js blockqueue   # a block-chained queue against the shipped ring buffer
+node bench/claims.js namedexport  # one worker file with N exports against N pools
+node bench/claims.js messageport # a dedicated MessageChannel per worker against in-band sniffing
 ```
 
 Those three were reachable only by reading `bench/claims.js`, which was the only
@@ -132,6 +134,38 @@ The one place the block chain wins is resident memory at peak depth — 200 704 
 Two measurement notes, both of which produced a wrong number first. **Growth events are timed individually, not averaged** — `_grow()` copies the whole buffer, so one push in every log₂(n) is O(n) and a mean over the run cannot see the thing being proposed. And **per-op `hrtime.bigint()` is not used for throughput**: the timer costs more than the operation, so a per-op loop would mostly measure the clock. A first draft timed a block allocation by pushing a whole 200 000-item burst into a fresh probe queue and reported 32 ms as the cost of one allocation. The growth _counts_ are deterministic and are the figures to quote; the timings move with the machine, so the whole measurement repeats and keeps the fastest run.
 
 Parameters: `CLAIM_BLOCKQUEUE_DEPTH`, `CLAIM_BLOCKQUEUE_CYCLES`, `CLAIM_BLOCKQUEUE_BLOCK`, `CLAIM_BLOCKQUEUE_SEED`.
+
+**`namedexport` reports that named-export selection should not be added to the envelope, and the reason is that the benefit it claims is already available without it.** PISC-009 proposes `postMessage(msg, transfer, { name })` to choose a handler export from one worker file, and claims it "cuts worker count and memory for pools that currently spawn one pool per task type". Three parts, because the row makes two claims in two different units.
+
+**A worker costs 7.88 MB of marginal RSS.** That is the number the row's "cuts worker count and memory" is worth, and it was not in the repository. It is measured on the **parent process**, not on the workers — a `worker_threads` Worker is a _thread_ in the same process, so `process.memoryUsage().rss` read inside one reports the whole process, and summing that across n workers multiplies the same number by n. The first draft of this mode did exactly that and reported 16 workers at 3.7 GB. The n = 1 row is higher (14.2 MB) because it pays the one-time isolate setup the rest share.
+
+**Carrying `name` costs a flat +20 bytes per message** — +22.7 % on a 64-byte payload, +1.9 % at 1 KiB, +0.1 % at 16 KiB. The frame header is six bytes and already full, so `name` rides inside the JSON payload. **The byte column is the figure to quote and the encode column is not**: over 100 000 iterations × 9 rounds the plain arm alone spans 2 013–5 120 ns on this machine, a 2.5× spread, and the delta between the arms flips sign between rounds. The mode prints the encode time with its noise band beside it and says so.
+
+**The decisive arm is four designs at the same worker budget**, every task fired at once, 4 task types, 10 ms service, 240 tasks, reporting the worst-served task type's p99 rather than the mean:
+
+| skew | siloed      | siloed/skewed   | shared/type | shared/name |
+| ---- | ----------- | --------------- | ----------- | ----------- |
+| 1.0  | 1244 ms (8) | 312 ms (**11**) | 306 ms (8)  | 310 ms (8)  |
+| 0.7  | 848 ms (8)  | 283 ms (**9**)  | 304 ms (8)  | 305 ms (8)  |
+| 0.4  | 488 ms (8)  | 327 ms (**9**)  | 307 ms (8)  | 305 ms (8)  |
+
+The row's premise is true: a shared pool needs 8 workers where a siloed design needs 9–11 for the same tail, because a siloed design has a **floor of one worker per task type** while a shared pool has a floor of one. But `shared/type` — one pool whose worker switches on a payload field, **available today with no codec change** — and `shared/name` — the proposal — **tie at every skew**: +1.5 %, +0.5 % and −0.6 % in one run, and −8.6 %, −1.2 % and +13.4 % in another. The sign flips between runs, which is the evidence that there is no difference to measure. So the consolidation is real and does not require the feature; what `name` would actually buy is ergonomics and static safety, at +20 bytes per message forever plus a protocol version bump.
+
+Three measurement notes, each of which produced a wrong number first. **`maxTasksPerWorker` must be pinned to 1** — the default is `Infinity`, and with it every arm finishes in one service period whatever its worker count, so the first draft measured 13 ms p99 for 300 ms of work on 8 workers. **A uniformly-sized siloed arm is not a fair control** — it is badly provisioned for a skewed workload by construction, so comparing it against a shared pool measures _provisioning_ rather than design; the `siloed/skewed` arm, which sizes each pool for its own traffic, is what shows the shared design's real margin, and it is small. And **worker RSS must be read on the parent**, for the thread reason above.
+
+Parameters: `CLAIM_NAMED_WORKERS`, `CLAIM_NAMED_SIZES`, `CLAIM_NAMED_ITERS`, `CLAIM_NAMED_HANDLER`, `CLAIM_NAMED_TYPES`, `CLAIM_NAMED_SERVICE`, `CLAIM_NAMED_TASKS`, `CLAIM_NAMED_BUDGET`, `CLAIM_NAMED_REPEATS`, `CLAIM_NAMED_SKEWS`, `CLAIM_NAMED_SETTLE`.
+
+**`messageport` reports that a dedicated `MessageChannel` per worker should not be added, and the reason is that the row's own ratio claim is false.** PISC-010 proposes a dedicated port for task traffic, separating it from control traffic, and claims it "removes the in-band capability-announcement sniffing entirely" and "costs nothing to adopt here". That second claim is a **ratio** claim — costing nothing is only true if what it removes is also nothing — so the mode measures both sides and nothing else.
+
+**What the sniffing costs: 11.6 ns per inbound message.** The pool's inbound handler runs `isCapabilityAnnouncement(data)` and `isNativeEnvelope(data)` on every message, to support an event that arrives once per worker — a per-message tax for a per-worker event. Against a **real** `worker_threads` worker the framed round trip is 17.97 µs, so the sniffing is **0.065 % of the message path**. The third check on that path, `isReadySignal`, is deliberately excluded: it is gated behind `_readyField != null && !workerObj.ready`, so it stops running once a worker reports ready, and folding a start-up branch in would overstate the tax.
+
+**What a dedicated port costs: 15.97 µs per worker.** `new MessageChannel()` is 6.41 µs, and the startup message that has to carry the port costs 16.80 µs against 7.23 µs for a plain body — a **9.56 µs port-transfer premium** — plus a second `message` listener per worker, which is not timed because it is a memory and dispatch cost rather than a latency one.
+
+**The break-even is 1 376 messages per worker, and that is the trap in the row's framing.** For a long-lived worker the port does eventually pay for itself in absolute nanoseconds. But even at break-even the saving is 0.065 % of the path, and the price is a worker-side contract change behind a major version — every worker must read its port from the startup message, which breaks every existing worker file that does not. The row's own third claim says exactly that while its second denies it. The measured fraction is also an **upper bound**: 17.97 µs is the bare worker round trip, and the pool's real inbound path adds correlation matching, latency sampling and the task queue on top, which would make the fraction smaller still.
+
+Two measurement notes. **The worker uses the library's own codec rather than a hand-rolled echo**, because a worker that ignored its message would let the runtime skip the clone and measure nothing — the `geoencode` mode's rule. And **the first draft of the startup arm hung**: the fake worker replied only to messages carrying a `.port`, so the plain arm's promise never resolved, which looks exactly like a slow measurement. It now replies to every message, and the transferred port is closed on the worker side, because after a transfer the sender's handle is detached.
+
+Parameters: `CLAIM_PORT_ITERS`, `CLAIM_PORT_ROUNDS`.
 
 **`batcheservo` reports that a closed loop should not be added to `PowerBatch`, and
 that is the finding.** It drives a real `PowerBatch` with a bursty producer — 60

@@ -128,6 +128,8 @@ node bench/claims.js cardinality # what the HLL sketch actually costs, and its b
 node bench/claims.js flowloop    # does latency feedback beat a fixed rate, and at what gain
 node bench/claims.js adaptive    # does an online policy selector beat any single policy
 node bench/claims.js blockqueue  # a block-chained queue against the shipped ring buffer
+node bench/claims.js namedexport # one worker file with N exports against N pools
+node bench/claims.js messageport # a dedicated MessageChannel per worker against in-band sniffing
 node bench/claims.js geoencode   # flat typed array vs object graph, four arms on one payload
 node bench/claims.js geocoalesce # a coalescer against PowerBatch + a Map
 node bench/claims.js geoprecision # what coordinate rounding actually saves, on two payload shapes
@@ -137,7 +139,7 @@ npm run bench:baseline           # record this machine's regression baseline
 npm run bench:gate               # check against it
 ```
 
-That is **all thirty** modes, not the six this file used to list: eleven
+That is **all thirty-five** modes, not the six this file used to list: eleven
 measurements were reachable only by reading `bench/claims.js`, and six of them
 were named in neither this file nor `bench/README.md`. Seven more (`defer`,
 `codec`, `envelopepool`, `sabring`, `keyshape`, `ratelimit`, `datagram`) landed
@@ -146,6 +148,8 @@ about — so they are listed now rather than left for the next reader to discove
 Four more (`geoencode`, `geocoalesce`, `geoprecision`, `geoprefetch`) landed the
 same way and were caught by `npm run check:bench-list` — the gate doing exactly
 the job it was built for, on the first batch of modes added after it existed.
+Three more (`blockqueue`, `namedexport`, `messageport`) landed the same way again,
+and were caught by the same gate rather than by this paragraph.
 
 The list above is still hand-maintained, so it is now **checked rather than
 trusted**: `npm run check:bench-list` (step 13 of `verify`) runs the harness with

@@ -195,6 +195,40 @@ lastActive }`) and returns the id or the object of the worker a new task should 
   The one axis the block chain wins is resident memory at peak depth (200 704 slots
   against 262 144), and it loses that below one block. Recorded as rejected in ADR
   0017; nothing in `src/` changed.
+- `bench/claims.js` gains a `namedexport` mode, measuring PISC-009's proposal that
+  `postMessage(msg, transfer, { name })` "cuts worker count and memory for pools
+  that currently spawn one pool per task type". **The premise is true and is not
+  attributable to the feature.** A worker costs **7.88 MB of marginal RSS** on
+  this machine, measured on the parent process — a `worker_threads` Worker is a
+  thread in the same process, so reading RSS inside one reports the whole process
+  and summing it across n workers multiplies by n, which is how the first draft
+  reported 16 workers at 3.7 GB. A shared pool does need fewer workers than a
+  siloed design for the same tail (8 against 9–11, because a siloed design has a
+  floor of one worker per task type), but `shared/type` — one pool whose worker
+  switches on a payload field, **available today with no codec change** — and
+  `shared/name`, the proposal, **tie at every skew**: +1.5 %, +0.5 % and −0.6 % in
+  one run and −8.6 %, −1.2 % and +13.4 % in another, so the sign flips between
+  runs and there is no difference to measure. What `name` would actually buy is
+  ergonomics and static safety, at a flat **+20 bytes per message** (+22.7 % on a
+  64-byte payload) plus a protocol version bump. Recorded as rejected in ADR 0018;
+  nothing in `src/` changed.
+- `bench/claims.js` gains a `messageport` mode, measuring PISC-010's proposal for a
+  dedicated `MessageChannel` per worker, which the row says "costs nothing to adopt
+  here" and "removes the in-band capability-announcement sniffing entirely". **That
+  is a ratio claim and it is false on both halves.** The sniffing it removes is
+  **11.6 ns per inbound message** — `isCapabilityAnnouncement` plus
+  `isNativeEnvelope`, run on every message to support an event that arrives once
+  per worker — which is **0.065 % of the 17.97 µs framed round trip** measured
+  against a real `worker_threads` worker. The port it adds costs **15.97 µs per
+  worker**: 6.41 µs for the `MessageChannel` and a **9.56 µs port-transfer premium**
+  on the startup message that has to carry it, plus a second listener per worker.
+  The break-even is 1 376 messages per worker, and even there the saving is 0.065 %
+  of the path — bought with a worker-side contract change behind a major version,
+  which the row's own third claim identifies while its second denies it. The
+  measured fraction is an upper bound, since 17.97 µs is the bare worker round trip
+  and the pool's real inbound path adds correlation matching, latency sampling and
+  the task queue on top. Recorded as rejected in ADR 0019; nothing in `src/`
+  changed.
 
 ### Fixed
 

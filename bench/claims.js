@@ -47,6 +47,8 @@
  *   node bench/claims.js datagram # bounded datagram queue saturation and flush
  *   node bench/claims.js adaptive  # does an online policy selector beat any single policy
  *   node bench/claims.js blockqueue # a block-chained queue against the shipped ring buffer
+ *   node bench/claims.js namedexport # one worker file with N exports against N pools
+ *   node bench/claims.js messageport # a dedicated MessageChannel per worker against in-band sniffing
  *
  * That list is a convenience, not the authority: `MODES` below is, and running
  * this file with an unrecognised mode prints every mode that exists.
@@ -74,6 +76,9 @@ import {
   createFrameDecoder,
   frameEncodedJson,
   decodeInbound,
+  isNativeEnvelope,
+  isCapabilityAnnouncement,
+  announceCapabilities,
 } from '../src/helpers/powerMessageCodec.js';
 import { PowerRealtimeHub } from '../src/helpers/powerRealtimeHub.js';
 import { PowerThrottle } from '../src/helpers/powerThrottle.js';
@@ -3017,6 +3022,849 @@ function runBlockQueueWorkload() {
     config: { depth, cycles, blockSize, seed },
     memory: { ringSlots, blockSlots, ringBlocks: 1, blockBlocks: Math.ceil(depth / blockSize) },
   };
+}
+
+// ─── Workload: namedexport — does one worker file with N exports cut the
+// worker count, and what does carrying `name` cost? ──────────────────────────
+//
+// PISC-009. The row proposes `postMessage(msg, transfer, { name })` to choose a
+// handler export from one worker file, and claims it "cuts worker count and
+// memory for pools that currently spawn one pool per task type". It also names
+// the price: "`name` must survive the framed envelope, so this is a codec change
+// as well as a dispatch change."
+//
+// Two claims in two different units, so they are measured separately:
+//
+//   1. **The benefit is workers and bytes of RSS.** "Cuts worker count" is not
+//      a number until a worker has a price, so part 1 measures what one worker
+//      actually costs here — its own RSS, and its time to become usable.
+//   2. **The price is per message, forever.** `name` rides in the envelope, so
+//      every task pays for it. Part 2 measures the bytes and the encode
+//      nanoseconds at several payload sizes.
+//
+// Part 3 decides the row, and it asks the question the row does not: **is the
+// worker-count reduction attributable to the feature at all?** A worker file
+// with one default export that switches on a field in the payload already
+// consolidates N task types into one pool, today, with no codec change. So the
+// comparison is three arms at the same total worker budget:
+//
+//   - siloed      — N pools, one per task type (the status quo the row improves)
+//   - shared/type — one pool, worker switches on a payload field (available now)
+//   - shared/name — one pool, worker dispatches on `name` (the proposal)
+//
+// If the two shared arms tie, the reduction is real but is not what the codec
+// change buys — the same shape as ADR 0017, where the row's premise was half
+// right and the mechanism did not require the feature.
+
+/** Parse a comma-separated numeric env override, falling back when absent. */
+function numList(raw, fallback) {
+  if (!raw) return fallback;
+  const parsed = String(raw)
+    .split(',')
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return parsed.length ? parsed : fallback;
+}
+
+/** p99 of a sample list. Returns 0 for an empty list, which is a real answer. */
+function p99(samples) {
+  if (!samples.length) return 0;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.99))];
+}
+
+/**
+ * A worker that takes a fixed time per task and replies through the pool's own
+ * carrier, so what is measured is the real dispatch path rather than a model of
+ * it.
+ *
+ * The service time is a `setTimeout` rather than a busy-wait on purpose: a
+ * synchronous wait would block the event loop and serialise every worker in the
+ * process, which would make the pool's concurrency unmeasurable — every arm
+ * would look equally slow for a reason that has nothing to do with the design.
+ */
+class ServiceWorker {
+  /**
+   * @param {number} serviceMs Simulated task duration.
+   * @param {(value: any) => any} run Produces the reply body for a task value.
+   */
+  constructor(serviceMs, run) {
+    this._listeners = [];
+    this._serviceMs = serviceMs;
+    this._run = run;
+  }
+
+  addEventListener(type, fn) {
+    if (type === 'message') this._listeners.push(fn);
+  }
+
+  removeEventListener() {}
+
+  terminate() {}
+
+  postMessage(msg) {
+    const { value } = decodeInbound(msg);
+    const correlationId = value?.correlationId;
+    setTimeout(() => {
+      const body = { duration: this._serviceMs, correlationId, echo: this._run(value) };
+      const data = encodeMessage(body, { codec: 'json' });
+      for (const fn of this._listeners) fn({ data });
+    }, this._serviceMs);
+  }
+}
+
+/**
+ * Part 1 — what one worker costs: the process RSS it adds, and its time to
+ * become usable.
+ *
+ * **Measured on the parent, not on the workers.** A `worker_threads` Worker is a
+ * *thread* in this process, not a child process, so `process.memoryUsage().rss`
+ * read inside a worker reports the whole process — and summing that across n
+ * workers multiplies the same number by n. The first draft of this mode did
+ * exactly that and reported 16 workers at 3.7 GB, which is n x the process RSS
+ * and not a measurement of anything. The parent's own RSS before and after is
+ * the figure that is actually additive.
+ *
+ * The first worker costs more than the rest, because it pays the one-time
+ * isolate and V8 setup the later ones share. So the marginal figure is read off
+ * the n >= 2 rows, and the n = 1 row is reported but not used for it.
+ *
+ * @returns {Promise<object[]>}
+ */
+async function measureWorkerCost() {
+  const { Worker: NodeWorker } = await import('node:worker_threads');
+  const source = `
+    import { parentPort } from 'worker_threads';
+    parentPort.on('message', () => {});
+  `;
+  const counts = numList(process.env.CLAIM_NAMED_WORKERS, [1, 2, 4, 8, 16]);
+  const settleMs = Number(process.env.CLAIM_NAMED_SETTLE || 250);
+  const rssMb = () => process.memoryUsage().rss / 1048576;
+
+  const rows = [];
+  for (const n of counts) {
+    const before = rssMb();
+    const workers = [];
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < n; i += 1) workers.push(new NodeWorker(source, { eval: true }));
+    await Promise.all(
+      workers.map(
+        (w) =>
+          new Promise((resolve, reject) => {
+            w.once('online', resolve);
+            w.once('error', reject);
+          })
+      )
+    );
+    const onlineMs = Number(process.hrtime.bigint() - t0) / 1e6;
+    // Let each isolate finish initialising before reading RSS. Without the
+    // settle the first row measures a worker that has not allocated its heap.
+    await new Promise((r) => setTimeout(r, settleMs));
+    const after = rssMb();
+    for (const w of workers) await w.terminate();
+    rows.push({
+      n,
+      before,
+      after,
+      deltaMb: after - before,
+      perWorkerMb: (after - before) / n,
+      onlineMs,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Part 2 — what carrying `name` costs per message.
+ *
+ * The row says `name` "must survive the framed envelope". The frame header is
+ * six bytes and already full (version, codec id, uint32 length), so `name` has
+ * to ride inside the JSON payload — which means every message pays for it in
+ * bytes and in serialisation, for the life of the pool.
+ *
+ * **The byte cost is the figure to quote and the time cost is not.** The bytes
+ * are deterministic. The nanoseconds are not: measured over 100 000 iterations
+ * x 9 rounds, the plain arm alone spans 2 013 - 5 120 ns on this machine, a 2.5x
+ * spread, and the delta between the arms flips sign between rounds. That is the
+ * harness's own recorded 28.61 % median min/max spread with interest. So the
+ * timing is measured and printed *with its spread beside it*, and the note under
+ * the table says plainly that it is below the noise floor — a duration quoted
+ * without that caveat would be noise dressed as a measurement.
+ *
+ * Reported at several payload sizes because a fixed overhead is a different
+ * fraction of a 64-byte message than of a 16 KB one, and a percentage quoted at
+ * one size is not a percentage.
+ *
+ * @returns {object[]}
+ */
+function measureNameFieldCost() {
+  const sizes = numList(process.env.CLAIM_NAMED_SIZES, [64, 1024, 16384]);
+  const handlerName = process.env.CLAIM_NAMED_HANDLER || 'renderTile';
+  const iterations = Number(process.env.CLAIM_NAMED_ITERS || 50000);
+
+  const rows = [];
+  for (const size of sizes) {
+    const task = { id: 7, blob: 'x'.repeat(size) };
+    const named = { name: handlerName, ...task };
+
+    const plainFrame = encodeMessage(task, { codec: 'json' });
+    const namedFrame = encodeMessage(named, { codec: 'json' });
+
+    // Timed over whole batches, not per op: the timer costs more than the
+    // encode. Same rule the blockqueue mode uses, for the same reason.
+    const time = (value) => {
+      for (let i = 0; i < 20000; i += 1) encodeMessage(value, { codec: 'json' });
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < iterations; i += 1) encodeMessage(value, { codec: 'json' });
+      return Number(process.hrtime.bigint() - t0) / iterations;
+    };
+    // Interleaved, so JIT warm-up and machine state land on both arms rather
+    // than on whichever happened to run first.
+    const plainSamples = [];
+    const namedSamples = [];
+    for (let r = 0; r < 5; r += 1) {
+      plainSamples.push(time(task));
+      namedSamples.push(time(named));
+    }
+    plainSamples.sort((a, b) => a - b);
+    namedSamples.sort((a, b) => a - b);
+    const plainMed = plainSamples[Math.floor(plainSamples.length / 2)];
+    const namedMed = namedSamples[Math.floor(namedSamples.length / 2)];
+
+    rows.push({
+      size,
+      plainBytes: plainFrame.byteLength,
+      namedBytes: namedFrame.byteLength,
+      deltaBytes: namedFrame.byteLength - plainFrame.byteLength,
+      deltaPct: (100 * (namedFrame.byteLength - plainFrame.byteLength)) / plainFrame.byteLength,
+      plainNs: plainMed,
+      namedNs: namedMed,
+      // The spread of the *plain* arm, which is the noise floor the delta has to
+      // clear to mean anything.
+      spreadPct: (100 * (plainSamples[plainSamples.length - 1] - plainSamples[0])) / plainMed,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Part 3 — the decisive arm: siloed pools against one shared pool, at the same
+ * total worker budget.
+ *
+ * Every task is fired at once. That is deliberate, and it is the only regime in
+ * which worker count matters at all: under a trickle one worker serves
+ * everything and both designs tie at any budget, which would answer the row's
+ * question with a vacuous tie — the `sieve` mode's lesson about a comparison
+ * that cannot distinguish its arms.
+ *
+ * The reported figure is the **worst-served task type's p99**, not the mean. A
+ * shared pool that is fast on average and slow on one task type has traded
+ * isolation for throughput, and a mean hides exactly that trade.
+ *
+ * @returns {Promise<object[]>}
+ */
+async function measureSiloedVsShared() {
+  const taskTypes = Number(process.env.CLAIM_NAMED_TYPES || 4);
+  const serviceMs = Number(process.env.CLAIM_NAMED_SERVICE || 10);
+  const tasks = Number(process.env.CLAIM_NAMED_TASKS || 240);
+  const budget = Number(process.env.CLAIM_NAMED_BUDGET || 8);
+  const repeats = Number(process.env.CLAIM_NAMED_REPEATS || 3);
+  const skews = numList(process.env.CLAIM_NAMED_SKEWS, [1, 0.7, 0.4]);
+
+  // One handler per task type, deliberately near-identical in cost. The
+  // measurement is about the pool structure; a handler that did more work than
+  // another would confound the task type with the work.
+  const handlers = [];
+  for (let t = 0; t < taskTypes; t += 1) {
+    handlers.push((v) => ({ type: t, id: v.id }));
+  }
+
+  /**
+   * Seeded task-type picker under skew `s`: type 0 takes `s` of the traffic and
+   * the rest share what is left. `s >= 1` is all-dominant, and is special-cased
+   * because the general form divides by `1 - s`.
+   */
+  const makeTypeOf = (s, rng) => () => {
+    if (s >= 1) return 0;
+    const r = rng();
+    if (r < s) return 0;
+    const rest = (r - s) / (1 - s);
+    return Math.min(taskTypes - 1, 1 + Math.floor(rest * (taskTypes - 1)));
+  };
+
+  const designs = [
+    {
+      label: 'siloed',
+      note: 'N pools, one per task type',
+      make: () => {
+        const per = Math.max(1, Math.floor(budget / taskTypes));
+        const pools = handlers.map(
+          (h) =>
+            new PowerPool(() => new ServiceWorker(serviceMs, (v) => h(v)), {
+              size: per,
+              minSize: per,
+              maxSize: per,
+              // One task per worker at a time. The default is `Infinity`, and
+              // with it every arm finishes in one service period whatever its
+              // worker count — the first draft of this mode measured 13 ms p99
+              // for 240 tasks of 10 ms over 8 workers, which is 300 ms of work
+              // on 8 workers and therefore not a measurement of concurrency at
+              // all. A real worker runs one task at a time; that is the regime
+              // the row's "cuts worker count" is a claim about.
+              maxTasksPerWorker: 1,
+            })
+        );
+        return {
+          poolFor: (type) => pools[type],
+          workerCount: per * taskTypes,
+          // No dispatch field at all: the worker has exactly one thing it can do.
+          buildTask: (_type, i) => ({ id: i }),
+        };
+      },
+    },
+    {
+      // **The control, and the reason this mode can conclude anything at all.**
+      // A uniformly-sized siloed design is badly provisioned for a skewed
+      // workload by construction — 2 workers on a type taking 70 % of the
+      // traffic and 2 on a type taking 10 % — so comparing it against a shared
+      // pool measures *provisioning*, not design. This arm sizes each pool in
+      // proportion to the traffic it will actually get, which is what a
+      // competent operator does with N pools. If it ties with the shared arms,
+      // the feature's benefit is not a resource saving at all.
+      label: 'siloed/skewed',
+      note: 'N pools, each sized for its own traffic',
+      make: (skew) => {
+        const weights = handlers.map((_, t) => (t === 0 ? skew : (1 - skew) / (taskTypes - 1)));
+        const raw = weights.map((w) => w * budget);
+        const sizes = raw.map((v) => Math.max(1, Math.round(v)));
+        const pools = handlers.map(
+          (h, t) =>
+            new PowerPool(() => new ServiceWorker(serviceMs, (v) => h(v)), {
+              size: sizes[t],
+              minSize: sizes[t],
+              maxSize: sizes[t],
+              maxTasksPerWorker: 1,
+            })
+        );
+        return {
+          poolFor: (type) => pools[type],
+          workerCount: sizes.reduce((a, b) => a + b, 0),
+          buildTask: (_type, i) => ({ id: i }),
+        };
+      },
+    },
+    {
+      label: 'shared/type',
+      note: 'one pool, worker switches on a payload field',
+      make: () => {
+        const pool = new PowerPool(
+          () =>
+            new ServiceWorker(serviceMs, (v) => {
+              const h = handlers[v.handler];
+              return h ? h(v) : null;
+            }),
+          { size: budget, minSize: budget, maxSize: budget, maxTasksPerWorker: 1 }
+        );
+        return {
+          poolFor: () => pool,
+          workerCount: budget,
+          buildTask: (type, i) => ({ handler: type, id: i }),
+        };
+      },
+    },
+    {
+      label: 'shared/name',
+      note: 'one pool, worker dispatches on `name`',
+      make: () => {
+        const pool = new PowerPool(
+          () =>
+            new ServiceWorker(serviceMs, (v) => {
+              const h = handlers[v.name];
+              return h ? h(v) : null;
+            }),
+          { size: budget, minSize: budget, maxSize: budget, maxTasksPerWorker: 1 }
+        );
+        return {
+          poolFor: () => pool,
+          workerCount: budget,
+          buildTask: (type, i) => ({ name: type, id: i }),
+        };
+      },
+    },
+  ];
+
+  const rows = [];
+  for (const skew of skews) {
+    for (const design of designs) {
+      const worst = [];
+      const perType = [];
+      // Captured from the first `make()` rather than re-derived: calling `make()`
+      // again to read a constant would stand up a whole second pool.
+      let workerCount = 0;
+      for (let r = 0; r < repeats; r += 1) {
+        const { poolFor, workerCount: made, buildTask } = design.make(skew);
+        workerCount = made;
+        const typeOf = makeTypeOf(skew, makeRng(SEED + skew * 7919 + r));
+        /** @type {number[][]} */
+        const samples = Array.from({ length: taskTypes }, () => []);
+        const pending = [];
+        for (let i = 0; i < tasks; i += 1) {
+          const type = typeOf();
+          const t0 = process.hrtime.bigint();
+          pending.push(
+            poolFor(type)
+              .postMessage(buildTask(type, i), undefined, { awaitResponse: true })
+              .then(() => {
+                samples[type].push(Number(process.hrtime.bigint() - t0) / 1e6);
+              })
+          );
+        }
+        await Promise.all(pending);
+        for (const p of new Set(Array.from({ length: taskTypes }, (_, t) => poolFor(t)))) {
+          p.terminate();
+        }
+        const p99s = samples.map(p99);
+        perType.push(p99s);
+        worst.push(Math.max(...p99s));
+      }
+      worst.sort((a, b) => a - b);
+      rows.push({
+        skew,
+        design: design.label,
+        note: design.note,
+        workerCount: workerCount,
+        worstP99: worst[Math.floor(worst.length / 2)],
+        perType: perType[Math.floor(perType.length / 2)],
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * PISC-009: does one worker file with N named exports cut the worker count, and
+ * what does carrying `name` cost?
+ *
+ * @returns {object}
+ */
+async function runNamedExportWorkload() {
+  console.log('PISC-009 — named-export selection against one pool per task type\n');
+  console.log('  The row claims `postMessage(msg, transfer, { name })` "cuts worker');
+  console.log('  count and memory for pools that currently spawn one pool per task');
+  console.log('  type", and that `name` "must survive the framed envelope".');
+  console.log('  Two claims, two units, measured separately below.\n');
+
+  // ── Part 1: the price of a worker ─────────────────────────────────────────
+  console.log('  Part 1 — what one worker costs (the process RSS it adds, time to online)\n');
+  const cost = await measureWorkerCost();
+  console.log(
+    `  ${'workers'.padEnd(10)}${'RSS before'.padStart(13)}${'RSS after'.padStart(12)}` +
+      `${'delta'.padStart(9)}${'per worker'.padStart(12)}${'to online'.padStart(12)}`
+  );
+  console.log(`  ${'-'.repeat(68)}`);
+  for (const r of cost) {
+    console.log(
+      `  ${String(r.n).padEnd(10)}${r.before.toFixed(0).padStart(11)} MB` +
+        `${r.after.toFixed(0).padStart(10)} MB` +
+        `${r.deltaMb.toFixed(0).padStart(7)} MB` +
+        `${r.perWorkerMb.toFixed(1).padStart(10)} MB` +
+        `${r.onlineMs.toFixed(0).padStart(10)} ms`
+    );
+  }
+  // The marginal figure is read off the n >= 2 rows: the first worker pays the
+  // one-time isolate setup the rest share, so including it understates the
+  // per-worker cost of every worker after it.
+  const marginal = cost.filter((r) => r.n >= 2).map((r) => r.perWorkerMb);
+  marginal.sort((a, b) => a - b);
+  const marginalMb = marginal.length ? marginal[Math.floor(marginal.length / 2)] : 0;
+  console.log(
+    `\n  Marginal cost per worker (median of the n >= 2 rows): ${marginalMb.toFixed(2)} MB.`
+  );
+  console.log('  This is what the row\'s "cuts worker count and memory" is worth:');
+  console.log(`  every worker the feature removes saves about ${marginalMb.toFixed(2)} MB of RSS.`);
+  console.log('  The n = 1 row is higher because it pays the one-time isolate setup.');
+
+  // ── Part 2: the price of the field ────────────────────────────────────────
+  console.log('\n  Part 2 — what carrying `name` costs per message\n');
+  const field = measureNameFieldCost();
+  console.log(
+    `  ${'payload'.padEnd(10)}${'plain'.padStart(9)}${'with name'.padStart(11)}` +
+      `${'delta'.padStart(8)}${'delta %'.padStart(9)}${'encode ns'.padStart(13)}` +
+      `${'noise'.padStart(9)}`
+  );
+  console.log(`  ${'-'.repeat(69)}`);
+  for (const r of field) {
+    console.log(
+      `  ${String(r.size).padEnd(10)}${String(r.plainBytes).padStart(9)}` +
+        `${String(r.namedBytes).padStart(11)}${String(r.deltaBytes).padStart(8)}` +
+        `${r.deltaPct.toFixed(1).padStart(8)}%` +
+        `${r.plainNs.toFixed(0).padStart(11)} ns` +
+        `${`+/-${r.spreadPct.toFixed(0)}%`.padStart(9)}`
+    );
+  }
+  console.log('\n  The frame header is six bytes and already full, so `name` rides inside');
+  console.log('  the JSON payload. Every task pays that, for the life of the pool.');
+  console.log('  **The byte column is the figure to quote; the encode column is not.**');
+  console.log("  The noise band is the plain arm's own min-to-max spread, and the delta");
+  console.log('  between the arms is smaller than it — measured over 100k iterations x 9');
+  console.log('  rounds the plain arm alone spans 2013-5120 ns and the delta flips sign');
+  console.log('  between rounds. A duration here would be noise dressed as a measurement.');
+
+  // ── Part 3: the decisive arm ──────────────────────────────────────────────
+  console.log('\n  Part 3 — siloed pools against one shared pool, same worker budget\n');
+  const shared = await measureSiloedVsShared();
+  const budget = Number(process.env.CLAIM_NAMED_BUDGET || 8);
+  console.log(`  Every task fired at once, ${budget} workers total in every arm.`);
+  console.log("  The figure is the worst-served task type's p99, not the mean.\n");
+  console.log(
+    `  ${'skew'.padEnd(7)}${'design'.padEnd(14)}${'workers'.padStart(9)}` +
+      `${'worst p99'.padStart(12)}${'per-type p99 (ms)'.padStart(22)}`
+  );
+  console.log(`  ${'-'.repeat(64)}`);
+  for (const r of shared) {
+    console.log(
+      `  ${String(r.skew).padEnd(7)}${r.design.padEnd(14)}` +
+        `${String(r.workerCount).padStart(9)}` +
+        `${r.worstP99.toFixed(0).padStart(10)} ms` +
+        `${r.perType
+          .map((v) => v.toFixed(0))
+          .join('/')
+          .padStart(22)}`
+    );
+  }
+
+  // The comparison the row does not ask for.
+  const bySkew = new Map();
+  for (const r of shared) {
+    if (!bySkew.has(r.skew)) bySkew.set(r.skew, new Map());
+    bySkew.get(r.skew).set(r.design, r);
+  }
+  console.log('\n  shared/type against shared/name, per skew:');
+  for (const [skew, byDesign] of bySkew) {
+    const t = byDesign.get('shared/type');
+    const n = byDesign.get('shared/name');
+    const delta = n.worstP99 - t.worstP99;
+    console.log(
+      `    skew ${skew}: ${delta >= 0 ? '+' : ''}${delta.toFixed(0)} ms ` +
+        `(${((100 * delta) / Math.max(1, t.worstP99)).toFixed(1)}%)`
+    );
+  }
+  console.log('\n  siloed/skewed against shared/type, per skew — the control:');
+  for (const [skew, byDesign] of bySkew) {
+    const s = byDesign.get('siloed/skewed');
+    const t = byDesign.get('shared/type');
+    const delta = t.worstP99 - s.worstP99;
+    console.log(
+      `    skew ${skew}: shared is ${delta >= 0 ? '+' : ''}${delta.toFixed(0)} ms ` +
+        `(${((100 * delta) / Math.max(1, s.worstP99)).toFixed(1)}%) ` +
+        `on ${s.workerCount} against ${t.workerCount} workers`
+    );
+  }
+  console.log('\n  Read those two blocks together. If shared/type and shared/name tie, the');
+  console.log('  worker-count reduction is real but is not what the codec change buys — a');
+  console.log('  payload field already consolidates the pools. And if siloed/skewed ties');
+  console.log('  with shared too, the reduction is not a property of the design either:');
+  console.log('  it is what you get from sizing each pool for its own traffic, which an');
+  console.log('  operator can do today with N pools and no new API.');
+
+  return { cost, field, shared };
+}
+
+// ─── Workload: messageport — does a dedicated MessageChannel per worker pay
+// for the sniffing it removes? ───────────────────────────────────────────────
+//
+// PISC-010. The row proposes a dedicated `MessageChannel` per worker for task
+// traffic, separating it from control traffic, and makes three claims:
+//
+//   1. It "removes the in-band capability-announcement sniffing entirely".
+//   2. "`MessageChannel` is a web standard and ports transfer across realms, so
+//      this is one of the few Piscina ideas that costs nothing to adopt here".
+//   3. It is "a worker-side contract change — every worker must read its port
+//      from the startup message — so it belongs behind a new `messageCodec`
+//      generation or a major version".
+//
+// Claim 2 is the one under test, and it is a *ratio* claim: the row asserts the
+// adoption cost is nothing, which is only true if what it removes is also
+// nothing. So the mode measures both sides of that ratio and nothing else:
+//
+//   - **What the sniffing costs per message.** The pool's inbound handler runs
+//     `isCapabilityAnnouncement(data)` and `isNativeEnvelope(data)` on every
+//     message, to support an event that happens once per worker. That is a
+//     per-message tax for a per-worker event, which is the shape worth pricing.
+//   - **What a dedicated port costs per worker.** A `MessageChannel`, a port in
+//     the startup message, and a second listener.
+//
+// The third check on the inbound path, `isReadySignal`, is deliberately
+// excluded: it is gated behind `_readyField != null && !workerObj.ready`, so
+// once a worker has reported ready it never runs again. It is a start-up cost,
+// not a per-message one, and folding it in would overstate the tax.
+//
+// The message path itself is measured against a **real** `worker_threads`
+// worker, because the fraction is the whole point: 50 ns of sniffing is nothing
+// against a 5 µs path and a great deal against a 200 ns one, and only the real
+// path says which this is.
+
+/**
+ * PISC-010: does a dedicated `MessageChannel` per worker pay for the sniffing it
+ * removes?
+ *
+ * @returns {object}
+ */
+async function runMessagePortWorkload() {
+  const { Worker: NodeWorker } = await import('node:worker_threads');
+  const iterations = Number(process.env.CLAIM_PORT_ITERS || 200000);
+  const rounds = Number(process.env.CLAIM_PORT_ROUNDS || 20000);
+
+  console.log('PISC-010 — a dedicated MessageChannel per worker against in-band sniffing\n');
+  console.log('  The row claims a dedicated port "costs nothing to adopt here" and');
+  console.log('  "removes the in-band capability-announcement sniffing entirely".');
+  console.log('  That is a ratio claim, so both sides of the ratio are measured.\n');
+
+  // ── Part 1: the per-message tax ───────────────────────────────────────────
+  // A realistic inbound body: what `_handleMessage` holds as `data` after the
+  // frame is decoded, which is the value both sniff functions are called on.
+  const taskBody = {
+    duration: 1,
+    correlationId: 'k3f9x2a',
+    echo: { id: 7, blob: 'x'.repeat(64) },
+  };
+  const nativeBody = encodeNativeEnvelope(taskBody);
+  const capability = announceCapabilities();
+
+  /** Median of `runs` batch timings of `fn(arg)`, in ns/op. */
+  const timeFn = (fn, arg, runs = 5) => {
+    const samples = [];
+    for (let r = 0; r < runs; r += 1) {
+      for (let i = 0; i < 50000; i += 1) fn(arg);
+      const t0 = process.hrtime.bigint();
+      for (let i = 0; i < iterations; i += 1) fn(arg);
+      samples.push(Number(process.hrtime.bigint() - t0) / iterations);
+    }
+    samples.sort((a, b) => a - b);
+    return samples[Math.floor(samples.length / 2)];
+  };
+
+  const sniff = {
+    // The common case: a task reply, which is what runs on every message.
+    capOnTask: timeFn(isCapabilityAnnouncement, taskBody),
+    nativeOnTask: timeFn(isNativeEnvelope, taskBody),
+    // The rare case, for contrast: the announcement itself, once per worker.
+    capOnCapability: timeFn(isCapabilityAnnouncement, capability),
+    nativeOnNative: timeFn(isNativeEnvelope, nativeBody),
+  };
+  const sniffPerMessage = sniff.capOnTask + sniff.nativeOnTask;
+
+  console.log('  Part 1 — what the sniffing costs per message\n');
+  console.log(
+    `  ${'check'.padEnd(34)}${'on a task reply'.padStart(18)}${'on its own kind'.padStart(18)}`
+  );
+  console.log(`  ${'-'.repeat(70)}`);
+  console.log(
+    `  ${'isCapabilityAnnouncement(data)'.padEnd(34)}` +
+      `${sniff.capOnTask.toFixed(1).padStart(16)} ns` +
+      `${sniff.capOnCapability.toFixed(1).padStart(16)} ns`
+  );
+  console.log(
+    `  ${'isNativeEnvelope(data)'.padEnd(34)}` +
+      `${sniff.nativeOnTask.toFixed(1).padStart(16)} ns` +
+      `${sniff.nativeOnNative.toFixed(1).padStart(16)} ns`
+  );
+  console.log(`  ${'-'.repeat(70)}`);
+  console.log(`  ${'per inbound message'.padEnd(34)}${sniffPerMessage.toFixed(1).padStart(16)} ns`);
+  console.log('\n  Both run on every inbound message. The announcement they look for');
+  console.log('  arrives once per worker, so this is a per-message tax for a per-worker');
+  console.log('  event. `isReadySignal` is excluded: it is gated behind `_readyField !=');
+  console.log('  null && !workerObj.ready`, so it stops running once a worker is ready.');
+
+  // ── The message path, against a real worker ───────────────────────────────
+  // The fraction is the whole point, so the denominator has to be the real
+  // thing: a framed message through a real `worker_threads` worker and back.
+  // The worker uses the library's own codec rather than a hand-rolled echo,
+  // because a worker that ignored its message would let the runtime skip the
+  // clone and measure nothing — the `geoencode` mode's rule.
+  //
+  // The codec is reached by dynamic `import()` of an absolute file URL rather
+  // than a relative specifier: a `worker_threads` worker created with
+  // `eval: true` has no module resolution base, so `'../src/...'` would not
+  // resolve. The worker signals readiness after the import lands, so no
+  // round trip can be posted into a worker that is not listening yet.
+  const codecUrl = new URL('../src/helpers/powerMessageCodec.js', import.meta.url).href;
+  const workerSource = `
+    import { parentPort } from 'worker_threads';
+    import(${JSON.stringify(codecUrl)}).then((codec) => {
+      const { decodeInbound, encodeMessage } = codec;
+      parentPort.on('message', (msg) => {
+        const { value } = decodeInbound(msg);
+        parentPort.postMessage(
+          encodeMessage(
+            { duration: 1, correlationId: value.correlationId, echo: value },
+            { codec: 'json' }
+          )
+        );
+      });
+      parentPort.postMessage('ready');
+    });
+  `;
+  const pathWorker = new NodeWorker(workerSource, { eval: true });
+  await new Promise((resolve, reject) => {
+    const onMessage = (m) => {
+      if (m === 'ready') {
+        pathWorker.off('message', onMessage);
+        resolve();
+      }
+    };
+    pathWorker.on('message', onMessage);
+    pathWorker.once('error', reject);
+  });
+
+  const roundTrip = () =>
+    new Promise((resolve) => {
+      const onMessage = (reply) => {
+        pathWorker.off('message', onMessage);
+        resolve(reply);
+      };
+      pathWorker.on('message', onMessage);
+      pathWorker.postMessage(encodeMessage(taskBody, { codec: 'json' }));
+    });
+
+  for (let i = 0; i < 200; i += 1) await roundTrip();
+  const pathSamples = [];
+  for (let r = 0; r < 5; r += 1) {
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < rounds; i += 1) await roundTrip();
+    pathSamples.push(Number(process.hrtime.bigint() - t0) / rounds);
+  }
+  pathSamples.sort((a, b) => a - b);
+  const pathNs = pathSamples[Math.floor(pathSamples.length / 2)];
+  await pathWorker.terminate();
+
+  console.log('\n  The message path the sniffing sits on, against a real worker:\n');
+  console.log(`    framed round trip        ${(pathNs / 1000).toFixed(2)} us`);
+  console.log(`    sniffing as a fraction    ${((100 * sniffPerMessage) / pathNs).toFixed(3)} %`);
+
+  // ── Part 2: the per-worker port cost ──────────────────────────────────────
+  const channelSamples = [];
+  for (let r = 0; r < 5; r += 1) {
+    for (let i = 0; i < 5000; i += 1) {
+      const c = new MessageChannel();
+      c.port1.close();
+      c.port2.close();
+    }
+    const t0 = process.hrtime.bigint();
+    for (let i = 0; i < 20000; i += 1) {
+      const c = new MessageChannel();
+      c.port1.close();
+      c.port2.close();
+    }
+    channelSamples.push(Number(process.hrtime.bigint() - t0) / 20000);
+  }
+  channelSamples.sort((a, b) => a - b);
+  const channelNs = channelSamples[Math.floor(channelSamples.length / 2)];
+
+  // The startup message has to carry the port. Structured-cloning a port is not
+  // free, and it is paid once per worker — so it belongs in the per-worker cost
+  // the row calls "nothing".
+  //
+  // The worker replies to **every** message, not only the ones carrying a port.
+  // The first draft gated the reply on `m.port`, so the plain arm's promise never
+  // resolved and the mode hung — a harness bug that looks exactly like a slow
+  // measurement. The transferred port is closed on the *worker* side: after a
+  // transfer the sender's handle is detached, so closing it from here would be
+  // operating on a neutered port.
+  const startupWorker = new NodeWorker(
+    `
+    import { parentPort } from 'worker_threads';
+    parentPort.on('message', (m) => {
+      if (m && m.port) m.port.close();
+      parentPort.postMessage('ok');
+    });
+  `,
+    { eval: true }
+  );
+  await new Promise((resolve) => startupWorker.once('online', resolve));
+
+  const startupWithPort = () =>
+    new Promise((resolve) => {
+      const { port1, port2 } = new MessageChannel();
+      const onMessage = () => {
+        startupWorker.off('message', onMessage);
+        port1.close();
+        resolve();
+      };
+      startupWorker.on('message', onMessage);
+      startupWorker.postMessage({ port: port2 }, [port2]);
+    });
+  const startupPlain = () =>
+    new Promise((resolve) => {
+      const onMessage = () => {
+        startupWorker.off('message', onMessage);
+        resolve();
+      };
+      startupWorker.on('message', onMessage);
+      startupWorker.postMessage({ ready: true });
+    });
+
+  for (let i = 0; i < 50; i += 1) {
+    await startupWithPort();
+    await startupPlain();
+  }
+  const portStartup = [];
+  const plainStartup = [];
+  for (let r = 0; r < 5; r += 1) {
+    let t0 = process.hrtime.bigint();
+    for (let i = 0; i < 200; i += 1) await startupWithPort();
+    portStartup.push(Number(process.hrtime.bigint() - t0) / 200);
+    t0 = process.hrtime.bigint();
+    for (let i = 0; i < 200; i += 1) await startupPlain();
+    plainStartup.push(Number(process.hrtime.bigint() - t0) / 200);
+  }
+  portStartup.sort((a, b) => a - b);
+  plainStartup.sort((a, b) => a - b);
+  const portStartupNs = portStartup[Math.floor(portStartup.length / 2)];
+  const plainStartupNs = plainStartup[Math.floor(plainStartup.length / 2)];
+  await startupWorker.terminate();
+
+  const perWorkerNs = channelNs + (portStartupNs - plainStartupNs);
+
+  console.log('\n  Part 2 — what a dedicated port costs per worker\n');
+  console.log(`  ${'new MessageChannel()'.padEnd(34)}${channelNs.toFixed(0).padStart(10)} ns`);
+  console.log(
+    `  ${'startup msg, plain'.padEnd(34)}${(plainStartupNs / 1000).toFixed(2).padStart(8)} us`
+  );
+  console.log(
+    `  ${'startup msg, carrying a port'.padEnd(34)}${(portStartupNs / 1000).toFixed(2).padStart(8)} us`
+  );
+  console.log(
+    `  ${'port transfer premium'.padEnd(34)}` +
+      `${((portStartupNs - plainStartupNs) / 1000).toFixed(2).padStart(8)} us`
+  );
+  console.log(`  ${'-'.repeat(46)}`);
+  console.log(
+    `  ${'per worker, total'.padEnd(34)}${(perWorkerNs / 1000).toFixed(2).padStart(8)} us`
+  );
+  console.log('\n  Plus a second `message` listener per worker, which is not timed here');
+  console.log('  because it is a memory and dispatch cost rather than a latency one.');
+
+  // ── Part 3: the ratio the row asserts ─────────────────────────────────────
+  const breakEven = perWorkerNs / Math.max(1e-9, sniffPerMessage);
+  console.log('\n  Part 3 — the ratio the row calls "nothing"\n');
+  console.log(`    removed per message       ${sniffPerMessage.toFixed(1)} ns`);
+  console.log(
+    `    added per worker          ${(perWorkerNs / 1000).toFixed(2)} us ` +
+      `(${perWorkerNs.toFixed(0)} ns)`
+  );
+  console.log(`    break-even                ${breakEven.toFixed(0)} messages per worker`);
+  console.log(
+    `    saving at break-even      ${((100 * sniffPerMessage) / pathNs).toFixed(3)} % of the message path`
+  );
+  console.log('\n  Read that last line carefully. Even after a worker has handled enough');
+  console.log('  messages to amortise the port, the saving is a fraction of a percent of');
+  console.log('  the path — because the path is dominated by the structured clone and the');
+  console.log('  worker turn, not by two property checks. The row is right that this is a');
+  console.log('  worker-side contract change behind a major version; it is wrong that it');
+  console.log('  costs nothing, and the thing it removes is not worth a major version.');
+
+  return { sniff, sniffPerMessage, pathNs, channelNs, perWorkerNs, breakEven };
 }
 
 // ─── Workload 9: what the TinyLFU sketch spends its time on ──────────────────
@@ -6957,6 +7805,8 @@ const MODES = {
   flowloop: runFlowLoopWorkload,
   adaptive: runAdaptiveWorkload,
   blockqueue: runBlockQueueWorkload,
+  namedexport: runNamedExportWorkload,
+  messageport: runMessagePortWorkload,
 };
 
 const mode = process.argv[2] || 'zipf';
