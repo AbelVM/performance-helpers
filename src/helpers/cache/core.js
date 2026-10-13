@@ -2209,9 +2209,36 @@ export class PowerCache {
     if (existing !== undefined) {
       this._updateExisting(existing, value, w, expiresAt);
     } else if (!this._insertNew(key, value, w, expiresAt, this._map.size)) {
-      // Refused by the admission filter. The key is deliberately *not*
-      // recorded in the sketch: it did not reach the cache, and counting a
-      // refusal would let a scan inflate its own estimate by being refused.
+      // Refused by the admission filter — and the key is **still recorded in
+      // the sketch**, which is the fix for a deadlock this branch used to
+      // contain.
+      //
+      // It used to `return this` here without recording, on the reasoning that
+      // "counting a refusal would let a scan inflate its own estimate by being
+      // refused". That reasoning is wrong about what a scan does, and the
+      // consequence was total. A one-shot scan key is requested *once*, so it
+      // reaches estimate 1 whether or not refusals are counted, and 1 loses to
+      // a working-set key at 15 — scan resistance never depended on this. What
+      // the early return actually prevented was a **repeatedly requested but
+      // refused** key from ever accumulating any evidence at all, and `get()`
+      // only increments on a hit, which a refused key never gets. So the two
+      // paths together meant a key the filter had refused was invisible to the
+      // filter forever.
+      //
+      // Measured, before the fix: a 200-entry cache warmed on working set A
+      // for 20 000 requests, then worked on a disjoint set B for 60 000.
+      // `rejectedAdmission` 60 000, `evictions` 0, hit rate 99.0 % → 49.5 % →
+      // 33.0 % → 24.8 % and still falling. Every set-B key sat at estimate 0
+      // and every set-A key at 15, so `15 >= 0` refused every insert and the
+      // cache was frozen on a working set that would never be requested again.
+      // Plain LRU on the same trace recovers to 99 % immediately. This is not
+      // the cold-start collapse ADR 0003 records — that is a *cold* sketch
+      // refusing a new working set; this is a *saturated* one refusing it
+      // permanently, with no recovery path.
+      //
+      // `_evictIfNeeded()` is still skipped, and correctly: a refused insert
+      // added nothing, so there is nothing to evict.
+      this._sketch?.increment(key);
       return this;
     }
     // The key is recorded even when the insert was admitted, so the sketch

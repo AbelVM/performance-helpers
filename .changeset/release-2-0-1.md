@@ -418,3 +418,70 @@ SharedArrayBuffer`, false for a foreign SAB, so it fell through to the platform
   library's declared floor. The accumulator is Neumaier-compensated instead,
   which is the technique an incremental sum requires. Measured after: absolute
   error 0.
+
+- **`PowerCache { admission: 'tinylfu' }` could never adapt to a working set that
+  had changed, and froze permanently on the retired one.** Two defects, both
+  required, both in the admission path:
+
+  - **A refused key was never recorded in the sketch.** `set()` returned early
+    when the admission filter refused a key, and `get()` only increments on a
+    _hit_ — which a refused key never gets. So a key the filter had refused was
+    invisible to the filter forever. The comment justifying this claimed counting
+    a refusal "would let a scan inflate its own estimate by being refused"; that
+    is wrong about what a scan does, because a one-shot key is requested _once_
+    and reaches estimate 1 whether or not refusals are counted.
+  - **The half-life clock stopped at saturation.** `SmallLfuSketch.increment()`
+    advanced its sample counter only on an _effective_ increment — one that
+    actually moved a counter. Once every counter saturates at the 4-bit maximum
+    of 15, no increment is effective, so the clock stops and the sketch can never
+    reset. Halving is the only thing that lets a counter fall below 15, and the
+    admission rule refuses on `estimate(incumbent) >= estimate(challenger)`, so a
+    counter pinned at 15 is unbeatable by construction.
+
+  Measured before, on a 200-entry cache warmed on working set A for 20 000
+  requests and then worked on a disjoint set B: hit rate 99.0 % → 49.5 % → 33.0 %
+  → 24.8 % and still falling, with `evictions` 0, `rejectedAdmission` 60 000, and
+  200 keys from the retired set resident against 0 from the new one. Plain LRU on
+  the same trace recovers to 99 % immediately. After: the cache turns over exactly
+  once — 200 evictions, ~20 200 refusals during the transition — and settles at
+  65.7 % then 74.3 %.
+
+  **The second defect is the one worth recording as a lesson rather than a bug.**
+  The rule that caused it read as a refinement and had a precedent: Caffeine also
+  advances only on an effective increment. The flaw is that a decay mechanism
+  which stops when the data stops changing is not a decay mechanism. The "resets
+  far more often than `sampleSize` describes" complaint was about the _rate_, and
+  the fix for a rate is `sampleSize` — which ALG-005 already auto-tunes from
+  observed cardinality, and which could not fire while the clock was frozen, so
+  the auto-tune was dead in exactly the case it was needed.
+
+  **Scan resistance was verified, not assumed.** The obvious risk of recording
+  refusals is that a scan inflates its own estimate. It does not: on a properly
+  warmed working set, retention is 100 % at every capacity from 4 to 200, before
+  and after. An earlier probe that appeared to show a regression (100 % → 89 % at
+  `maxEntries: 40`) was itself wrong — it warmed the "hot" keys with 30 reads over
+  40 keys, leaving them at estimate 2 and indistinguishable from a one-shot key at
+  1 plus collision noise. It measured the sketch's inability to discriminate in a
+  workload where nothing was actually hot.
+
+  **A first-sight exemption was implemented, measured, and rejected.** Making a
+  key's first increment free — so a flood of one-shot keys cannot age the working
+  set out — bought nothing: identical 100 % retention at every capacity, within
+  noise on cold start (22.2 % against 22.9 % mean over 300 seeds), marginally
+  _worse_ on the shift above (0.480 against 0.490), and it silently disabled the
+  reset for any all-distinct stream, which is what made three existing tests
+  fail. The reasoning is recorded in `SmallLfuSketch.increment()` so it is not
+  re-derived.
+
+  **What this does not fix, stated plainly.** On the sustained Zipf + scan
+  workload `lru` + `tinylfu` now reads **93.0 %** working-set hit rate and
+  **37.0/40** survivors, where it used to read 70.8 % and 15.0/40 — it now beats
+  `policy: 'slru'` (89.4 %, 33.0/40) rather than losing to it. **The cold-start
+  case is still far behind plain LRU and ADR 0003's first acceptance criterion is
+  still not met:** 22.2 % mean hit rate against plain LRU's 80.0 %, over 300
+  seeds, with a range of 2.5 % to 37.5 %. The collapse is no longer total — the
+  working set now survives, at 36.5/40 mean against 0/40 before — and that is
+  all. `admission: 'tinylfu'` therefore **stays off by default**, and the
+  corrected figures replace the single-draw numbers the guide and ADR 0003
+  previously quoted, because that workload draws a random sketch seed and 0.0 %
+  was the bottom of a distribution rather than the value.

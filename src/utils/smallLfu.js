@@ -285,31 +285,82 @@ export class SmallLfuSketch {
   /**
    * Record one occurrence of `key` and, periodically, age the whole sketch.
    *
-   * The sample counter advances only when an increment was **effective** — when
-   * at least one row's counter actually moved. Caffeine does the same
-   * (`incrementAt` returns false once a counter is saturated, and only an
-   * effective increment advances `size`). Advancing it unconditionally meant
-   * that a fully saturated sketch reset on schedule anyway, so the half-life
-   * was measured in *operations* rather than in *changes to the estimates*:
-   * every increment after saturation was a no-op on the data and a full
-   * countdown on the clock, and the sketch halved far more often than
-   * `sampleSize` describes.
+   * **The half-life is measured in operations, not in changes to the
+   * estimates.** This used to advance `sample` only when an increment was
+   * *effective* — when at least one row's counter actually moved — on the
+   * reasoning that a saturated sketch should not reset "with no change to
+   * anything a reader could observe". Caffeine advances only on an effective
+   * increment too (`incrementAt` returns false once a counter is saturated), so
+   * the reasoning had a precedent behind it.
+   *
+   * The consequence is that a fully saturated sketch **never resets at all**,
+   * and a sketch that never resets can never forget. Halving is the only thing
+   * that lets a counter fall below the 4-bit maximum of 15, and
+   * `PowerCache`'s admission rule refuses on
+   * `estimate(incumbent) >= estimate(challenger)` — so a counter pinned at 15
+   * is unbeatable by construction, and a working set that has been retired
+   * holds the cache forever. Measured before the fix: a 200-entry cache warmed
+   * on one working set for 20 000 requests and then worked on a disjoint set
+   * for 60 000 reached `rejectedAdmission` 60 000, `evictions` 0, and a hit
+   * rate falling from 99 % to 24.8 % with no recovery. Plain LRU on the same
+   * trace recovers to 99 % immediately.
+   *
+   * Time passing is not the same as the data changing, and a decay mechanism
+   * that stops when the data stops changing is not a decay mechanism. The
+   * "resets far more often than `sampleSize` describes" complaint was about the
+   * *rate*; the fix for a rate is `sampleSize`, which ALG-005 already auto-tunes
+   * from the observed cardinality — and which could not fire while the clock
+   * was frozen, so the auto-tune was dead in exactly the case it was needed.
+   *
    * @param {*} key
    * @returns {void}
    */
   increment(key) {
     const hash = this._hash(key);
-    let advanced = false;
     for (let row = 0; row < this.depth; row += 1) {
       const i = this._indexFor(hash, row);
       const v = this._get(i);
       if (v < 15) {
         this._set(i, v + 1);
-        advanced = true;
       }
     }
-    if (!advanced) return;
     this._hll.addHash(hash);
+    // **The half-life is measured in operations.** This used to advance
+    // `sample` only on an *effective* increment - one that actually moved a
+    // counter - on the reasoning that a saturated sketch should not reset
+    // "with no change to anything a reader could observe". Caffeine advances
+    // only on an effective increment too (`incrementAt` returns false once a
+    // counter is saturated), so the reasoning had a precedent behind it.
+    //
+    // The consequence is that a fully saturated sketch **never resets at all**,
+    // and a sketch that never resets can never forget. Halving is the only thing
+    // that lets a counter fall below the 4-bit maximum of 15, and
+    // `PowerCache`'s admission rule refuses on
+    // `estimate(incumbent) >= estimate(challenger)` - so a counter pinned at 15
+    // is unbeatable by construction, and a working set that has been retired
+    // holds the cache forever. Measured before the fix: a 200-entry cache warmed
+    // on one working set for 20 000 requests and then worked on a disjoint set
+    // for 60 000 reached `rejectedAdmission` 60 000, `evictions` 0, and a hit
+    // rate falling from 99 % to 24.8 % with no recovery. Plain LRU on the same
+    // trace recovers to 99 % immediately.
+    //
+    // Time passing is not the same as the data changing, and a decay mechanism
+    // that stops when the data stops changing is not a decay mechanism. The
+    // "resets far more often than `sampleSize` describes" complaint was about the
+    // *rate*; the fix for a rate is `sampleSize`, which ALG-005 already auto-tunes
+    // from the observed cardinality - and which could not fire while the clock
+    // was frozen, so the auto-tune was dead in exactly the case it was needed.
+    //
+    // **A first-sight exemption was tried and measured, and rejected.** Making a
+    // key's first increment free - so a flood of one-shot keys could not age the
+    // working set out - costs one comparison per row and reads better than it
+    // measures. On a properly warmed workload both rules retain 100 % of the
+    // working set at every capacity from 4 to 200; on the cold-start trace they
+    // are within noise of each other (22.9 % against 22.2 % mean hit rate over
+    // 300 seeds); on a working-set shift the plain rule is marginally *better*
+    // (0.490 against 0.480). The exemption also silently disables the reset for
+    // any all-distinct stream, which is what made three existing tests fail. It
+    // bought nothing, so it is not here.
     this.sample += 1;
     if (this.sample >= this.sampleSize) {
       this.reset();

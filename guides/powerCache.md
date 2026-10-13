@@ -607,34 +607,48 @@ larger key space evicts the entire working set — every scan key is the _most
 recently used_ by definition. A frequency filter asks a different question: is
 the thing I would evict still wanted?
 
-> **Experimental, and currently a net loss.**
-> On a cold 40-entry cache preceded by a 460-key scan burst,
-> `admission: 'tynilfu'` admits **0 of 40** working-set keys, against plain LRU's
-> 40/40. On the sustained Zipf + scan mix below it is a mild loss. **Do not enable it
-> on the strength of the theory — measure your workload first**, and prefer
-> `policy: 'slru'`, which resists the same scan and is not experimental.
+> **Experimental, and the trade has moved.**
+> On the sustained Zipf + scan mix below, `admission: 'tinylfu'` now **beats
+> `policy: 'slru'`** — 93.0 % working-set hit rate and 37.0/40 survivors against
+> SLRU's 89.4 % and 33.0/40. It still loses badly on a **cold** cache: on a cold
+> 40-entry cache preceded by a 460-key scan burst it retains ~36 of 40
+> working-set keys against plain LRU's 40/40, at a ~22 % hit rate against LRU's
+> 80.0 %. **Measure your workload before enabling it**, and note that the
+> cold-start figure is seed-dependent — see the distribution below rather than
+> reading a single number.
 
 Sustained Zipf + scan workload — 40-key working set, a 25-key one-shot scan
 every 40 hot accesses, 5 paired repeats so every variant sees a byte-identical
 key stream:
 
-| Configuration                            | Working-set hit rate |     Survivors |
-| ---------------------------------------- | -------------------: | ------------: |
-| `policy: 'lru'`                          |               75.0 % |     17.2 / 40 |
-| `policy: 'lru'`, `admission: 'tinylfu'`  |               70.8 % |     15.0 / 40 |
-| **`policy: 'slru'`**                     |           **89.4 %** | **33.0 / 40** |
-| `policy: 'slru'`, `admission: 'tinylfu'` |           **89.4 %** | **33.0 / 40** |
+| Configuration                               | Working-set hit rate |     Survivors |
+| ------------------------------------------- | -------------------: | ------------: |
+| `policy: 'lru'`                             |               75.0 % |     17.2 / 40 |
+| **`policy: 'lru'`, `admission: 'tinylfu'`** |           **93.0 %** | **37.0 / 40** |
+| `policy: 'slru'`                            |               89.4 % |     33.0 / 40 |
+| `policy: 'slru'`, `admission: 'tinylfu'`    |               89.4 % |     33.0 / 40 |
 
-`slru` wins outright. The last row is the same measurement as the one above it
-for a reason worth knowing: **`admission` is ignored under `policy: 'slru'`**,
-because the SLRU probation segment already does the job the filter is for, so
-the sketch is never built (`policy !== 'lru'` leaves it `null`) and the two rows
-are the same configuration. It previously read 70.9 % / 15.2 here, which was
-stale — a measured number that described a build where the sketch was still
-constructed for SLRU. Restated from a re-run rather than edited.
+**The ranking inverted, and this is the number to be careful with.** `tinylfu`
+used to read 70.8 % / 15.0 here — a mild loss against plain LRU — and now beats
+every other row including `slru`. Two defects were behind that, both fixed in
+this release and both described under [a working set that moves](#a-working-set-that-moves):
+a refused key was never recorded in the sketch, and the sketch's half-life clock
+stopped once its counters saturated. The second is why the filter could not
+_forget_: a counter pinned at the 4-bit maximum of 15 can never be beaten, so
+whatever the cache warmed on first held it forever.
 
-That is the result to act on: on this workload the scan-resistant behaviour people want
-comes from `slru`, which shipped earlier and is not experimental.
+The last row is the same measurement as the one above it for a reason worth
+knowing: **`admission` is ignored under `policy: 'slru'`**, because the SLRU
+probation segment already does the job the filter is for, so the sketch is never
+built (`policy !== 'lru'` leaves it `null`) and the two rows are the same
+configuration. It previously read 70.9 % / 15.2 here, which was stale — a
+measured number that described a build where the sketch was still constructed
+for SLRU. Restated from a re-run rather than edited.
+
+That is the result to act on: on this workload the scan-resistant behaviour
+people want now comes from `tinylfu`, which is still experimental and still
+costs a hash and a table per access. `slru` remains the answer when you want
+scan resistance without either.
 
 **Off by default**, and the numbers above are the reason to leave it there. The
 sketch costs memory and a hash per access; the mechanism is right and the wiring
@@ -650,7 +664,7 @@ above:
 | Configuration                            | Working-set hit rate |     Survivors |
 | ---------------------------------------- | -------------------: | ------------: |
 | `policy: 'slru'`                         |               89.4 % |     33.0 / 40 |
-| `policy: 'slru'`, `admission: 'tynilfu'` |           **89.4 %** | **33.0 / 40** |
+| `policy: 'slru'`, `admission: 'tinylfu'` |           **89.4 %** | **33.0 / 40** |
 
 Before this, the combination measured **70.9 %** — worse than plain LRU — so
 composing "the two scan-resistant options" produced the worse of each rather
@@ -666,7 +680,7 @@ The admission check refuses when the incumbent's estimate is `>=` the
 challenger's. A brand-new key's estimate is 0, so in a cold sketch — where every
 estimate is 0 — **every admission is refused**. A cache that filled with one-shot
 scan keys while below capacity therefore cannot recover: the working set is
-refused every time, which is the 0.0 % above.
+refused every time, which is the bottom of the cold-start distribution above.
 
 The fix is **not** a comparison operator. Changing `>=` to `>` was implemented
 and measured: it improved the sustained mix (70.9 % → 77.0 %, finally beating
@@ -683,10 +697,10 @@ not recommended, because it fixes the sustained case and not the cold one:
 | variant                | sustained ws hit rate | cold-start hit rate |
 | ---------------------- | --------------------: | ------------------: |
 | `lru`                  |                75.0 % |          **80.0 %** |
-| `admission: 'tinylfu'` |                70.8 % |               0.0 % |
-| + `windowSize: 1`      |            **77.7 %** |               1.0 % |
+| `admission: 'tinylfu'` |            **93.0 %** |               0.0 % |
+| + `windowSize: 1`      |                77.7 % |               1.0 % |
 | + `windowSize: 16`     |                70.6 % |               1.5 % |
-| `policy: 'slru'`       |            **89.4 %** |                   — |
+| `policy: 'slru'`       |                89.4 % |                   — |
 
 Both columns are the sustained Zipf + scan workload and the cold-start scan
 workload. The window beats plain LRU on the sustained mix and does nothing for the
@@ -696,6 +710,16 @@ frequency that would let it win. `policy: 'slru'` remains the answer to scan
 resistance. `adr/0003-tinylfu-admission-window.md` has the full sweep, the
 four acceptance criteria, and the two boundary bugs the experiment found.
 
+**The cold-start column above is stale and is restated here rather than edited in
+place, because the way it was measured was also wrong.** It read 0.0 %, from a
+single run of a workload that draws a random sketch seed. Over 300 seeds the
+fixed build gives a **mean of 22.2 % hit rate and 36.5/40 survivors, with a range
+of 2.5 % to 37.5 % and 6 to 40 survivors** — so 0.0 % was the bottom of the
+distribution, not the value. Plain LRU is 80.0 % and 40/40 on every seed. The
+criterion ADR 0003 set — "cold start beats plain LRU" — is **still not met**, and
+the gap is still large. What changed is that the collapse is no longer total:
+the working set now survives instead of being locked out permanently.
+
 Two numbers here moved when the sketch was resized from its fixed 256 counters
 to Caffeine's 16-per-entry and the key was hashed once instead of four times
 (`CACHE-005`, `CACHE-007`, `ALGO-011`). Restated from a re-run rather than
@@ -704,6 +728,59 @@ criterion the window ever passed in the sustained mix, and `windowSize: 16` went
 70.7 % → 70.6 %. **The ranking did not move**, and the cold-start column is
 unchanged — which is the answer: three defects in the filter were worth fixing on
 their own terms, and fixing them did not make the feature earn its keep.
+
+#### A working set that moves
+
+The failure this section is about is not the cold start. It is a cache that has
+already warmed on one working set and is then asked to serve a **different** one
+— a deploy, a config change, a shifting popularity distribution. Before this
+release such a cache never adapted at all.
+
+Measured on a 200-entry cache warmed on working set A for 20 000 requests and
+then worked on a disjoint set B:
+
+| requests into B | hit rate, before | hit rate, after |
+| --------------: | ---------------: | --------------: |
+|          20 000 |           49.5 % |          49.5 % |
+|          40 000 |           33.0 % |      **65.7 %** |
+|          60 000 |           24.8 % |      **74.3 %** |
+
+Before, the hit rate fell monotonically and asymptoted to zero: `evictions` 0,
+`rejectedAdmission` 60 000, and 200 keys from the retired set still resident
+against 0 from the new one. The cache was frozen on a working set that would
+never be requested again. Plain LRU on the same trace recovers to 99 %
+immediately. After, the cache turns over exactly once — 200 evictions, ~20 200
+refusals during the transition — and settles at the new working set.
+
+Two defects produced it, and **both were required**:
+
+1. **A refused key was never recorded in the sketch.** `set()` returned early
+   when the admission filter refused a key, and `get()` only increments on a
+   hit — which a refused key never gets. So a key the filter had refused was
+   invisible to the filter forever. The comment justifying this said counting a
+   refusal "would let a scan inflate its own estimate by being refused"; that is
+   wrong about what a scan does, because a one-shot key is requested _once_ and
+   reaches estimate 1 whether or not refusals are counted. Scan resistance was
+   verified unchanged: on a properly warmed working set, 100 % retention at every
+   capacity from 4 to 200, before and after.
+2. **The half-life clock stopped at saturation.** `SmallLfuSketch.increment()`
+   advanced its sample counter only on an _effective_ increment — one that
+   actually moved a counter. Once every counter saturates at 15, no increment is
+   effective, so the clock stops and the sketch can never reset. Halving is the
+   only thing that lets a counter fall below 15, and the admission rule refuses
+   whenever the incumbent's estimate is greater than or equal to the challenger's
+   — so a counter pinned at 15 is unbeatable by construction.
+
+The second is the more interesting of the two, because the rule that caused it
+read as a refinement and had a precedent: Caffeine also advances only on an
+effective increment. The flaw is that a decay mechanism which stops when the data
+stops changing is not a decay mechanism. A first-sight exemption — making a key's
+first increment free so a one-shot flood cannot age the working set out — was
+implemented and measured, and **rejected**: it retained 100 % of the working set
+at every capacity, exactly as the plain rule does, was within noise on cold start
+(22.2 % against 22.9 % mean over 300 seeds), was marginally _worse_ on the shift
+above (0.480 against 0.490), and silently disabled the reset for any all-distinct
+stream. It bought nothing, so it is not shipped.
 
 #### What the sketch itself gets right
 
@@ -846,7 +923,10 @@ ADR 0003 set **four acceptance criteria, all or nothing**, and the mechanism
 meets **three** of them. The one it misses is the case the window was built for:
 cold start, where the best size scores 1.0 % against plain LRU's 80.0 %. So the
 window stays **off by default** (`windowSize: 0`), documented as not
-recommended, and `policy: 'slru'` remains the answer to scan resistance.
+recommended. For scan resistance without opting into an experimental filter,
+`policy: 'slru'` remains the answer; on the sustained workload above,
+`admission: 'tinylfu'` now beats it, at the cost of a hash and a table per
+access and a cold start that is still far behind plain LRU.
 
 **What is kept is the evidence.** The mechanism stays reachable behind the
 opt-in flag, the sweep stays in the admission-window tests, the cold-start case

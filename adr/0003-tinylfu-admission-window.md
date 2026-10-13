@@ -697,3 +697,89 @@ cannot work here, only that this one, on this workload, does not earn its keep
 over a segmented LRU that already ships. A workload with a long-lived hot set
 and a bounded scan would be a different measurement, and `zipf`'s 40-key working
 set equal to `maxEntries` is a deliberately brutal one.
+
+---
+
+## Amendment (2.0.1) — two defects found and fixed; the decision stands, two of its numbers do not
+
+**Status of this amendment:** the decision above is **not reopened**. The window
+stays off by default and `windowSize` stays `0`. What follows records that two of
+the measurements the decision rested on were wrong, why, and what the corrected
+numbers are — because a decision whose evidence has moved should say so rather
+than leave the next reader to reconcile a stale table.
+
+### What was wrong
+
+Two defects, both in the admission path, both required for the failure:
+
+1. **A refused key was never recorded in the sketch.** `PowerCache.set()`
+   returned early when the admission filter refused a key, and `get()` only
+   increments on a hit — which a refused key never gets. A key the filter had
+   refused was therefore invisible to the filter forever. The comment justifying
+   this claimed counting a refusal "would let a scan inflate its own estimate by
+   being refused"; that is wrong about what a scan does, because a one-shot key
+   is requested _once_ and reaches estimate 1 whether or not refusals are
+   counted.
+2. **The half-life clock stopped at saturation.** `SmallLfuSketch.increment()`
+   advanced its sample counter only on an _effective_ increment. Once every
+   counter saturates at the 4-bit maximum of 15, no increment is effective, so
+   the clock stops and the sketch can never reset. Halving is the only thing that
+   lets a counter fall below 15, and the admission rule refuses on
+   `estimate(incumbent) >= estimate(challenger)` — so a counter pinned at 15 is
+   unbeatable by construction.
+
+The second is the one worth recording as a lesson rather than a bug. The rule
+that caused it read as a refinement and had a precedent: Caffeine also advances
+only on an effective increment. The flaw is that **a decay mechanism which stops
+when the data stops changing is not a decay mechanism.** The "resets far more
+often than `sampleSize` describes" complaint was about the _rate_, and the fix
+for a rate is `sampleSize` — which ALG-005 already auto-tunes from observed
+cardinality, and which could not fire while the clock was frozen, so the
+auto-tune was dead in exactly the case it was needed.
+
+### The corrected numbers
+
+| Measurement                                    | Recorded above | Corrected                                  |
+| ---------------------------------------------- | -------------- | ------------------------------------------ |
+| `zipf`, `lru` + `tinylfu` working-set hit rate | 70.8 %         | **93.0 %**                                 |
+| `zipf`, `lru` + `tinylfu` survivors            | 15.0 / 40      | **37.0 / 40**                              |
+| `zipf`, `slru` working-set hit rate            | 89.4 %         | 89.4 % (unchanged)                         |
+| `coldstart`, `lru` + `tinylfu` hit rate        | 0.0 %          | **22.2 % mean, 2.5–37.5 % over 300 seeds** |
+| `coldstart`, `lru` + `tinylfu` survivors       | 0 / 40         | **36.5 / 40 mean, 6–40 over 300 seeds**    |
+
+**The ranking on the sustained workload inverted.** `tinylfu` now beats `slru`
+(93.0 % against 89.4 %), where the table above has `slru` winning outright. That
+does not reopen the decision, because the decision was about the _window_, and
+the window's numbers did not move: `windowSize: 1` is still 77.7 % on the
+sustained mix and still ~1 % on cold start.
+
+**The cold-start figure was also measured wrongly, independently of the
+defects.** It was a single run of a workload that draws a random sketch seed, so
+0.0 % was the bottom of a distribution rather than the value. The corrected
+figure is a mean over 300 seeds with the range stated. **ADR 0003's first
+acceptance criterion — "cold start beats plain LRU" — is still not met**: 22.2 %
+against plain LRU's 80.0 %, on every seed. The collapse is no longer total, and
+that is all.
+
+### What was tried and rejected
+
+A **first-sight exemption** — making a key's first increment free, so a flood of
+one-shot keys cannot age the working set out — was implemented and measured. It
+was rejected because it bought nothing: 100 % working-set retention at every
+capacity from 4 to 200, exactly as the plain rule; within noise on cold start
+(22.2 % against 22.9 % mean over 300 seeds); marginally _worse_ on a working-set
+shift (0.480 against 0.490); and it silently disabled the reset for any
+all-distinct stream, which is what made three existing tests fail. The reasoning
+is recorded in `SmallLfuSketch.increment()` so the next person does not re-derive
+it.
+
+### Scan resistance was verified, not assumed
+
+The obvious risk of recording refusals is that a scan inflates its own estimate.
+It does not, and this was measured rather than argued: on a properly warmed
+working set, retention is **100 % at every capacity from 4 to 200, before and
+after the fix**. An earlier probe that appeared to show a regression (100 % →
+89 % at `maxEntries: 40`) was itself wrong — it warmed the "hot" keys with 30
+reads over 40 keys, leaving them at estimate 2 and indistinguishable from a
+one-shot key at 1 plus collision noise. It measured the sketch's inability to
+discriminate in a workload where nothing was actually hot.

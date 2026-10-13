@@ -107693,7 +107693,15 @@
 											},
 											{
 												"kind": "text",
-												"text": " and, periodically, age the whole sketch.\n\nThe sample counter advances only when an increment was **effective** — when\nat least one row's counter actually moved. Caffeine does the same\n("
+												"text": " and, periodically, age the whole sketch.\n\n**The half-life is measured in operations, not in changes to the\nestimates.** This used to advance "
+											},
+											{
+												"kind": "code",
+												"text": "`sample`"
+											},
+											{
+												"kind": "text",
+												"text": " only when an increment was\n*effective* — when at least one row's counter actually moved — on the\nreasoning that a saturated sketch should not reset \"with no change to\nanything a reader could observe\". Caffeine advances only on an effective\nincrement too ("
 											},
 											{
 												"kind": "code",
@@ -107701,15 +107709,39 @@
 											},
 											{
 												"kind": "text",
-												"text": " returns false once a counter is saturated, and only an\neffective increment advances "
+												"text": " returns false once a counter is saturated), so\nthe reasoning had a precedent behind it.\n\nThe consequence is that a fully saturated sketch **never resets at all**,\nand a sketch that never resets can never forget. Halving is the only thing\nthat lets a counter fall below the 4-bit maximum of 15, and\n"
 											},
 											{
 												"kind": "code",
-												"text": "`size`"
+												"text": "`PowerCache`"
 											},
 											{
 												"kind": "text",
-												"text": "). Advancing it unconditionally meant\nthat a fully saturated sketch reset on schedule anyway, so the half-life\nwas measured in *operations* rather than in *changes to the estimates*:\nevery increment after saturation was a no-op on the data and a full\ncountdown on the clock, and the sketch halved far more often than\n"
+												"text": "'s admission rule refuses on\n"
+											},
+											{
+												"kind": "code",
+												"text": "`estimate(incumbent) >= estimate(challenger)`"
+											},
+											{
+												"kind": "text",
+												"text": " — so a counter pinned at 15\nis unbeatable by construction, and a working set that has been retired\nholds the cache forever. Measured before the fix: a 200-entry cache warmed\non one working set for 20 000 requests and then worked on a disjoint set\nfor 60 000 reached "
+											},
+											{
+												"kind": "code",
+												"text": "`rejectedAdmission`"
+											},
+											{
+												"kind": "text",
+												"text": " 60 000, "
+											},
+											{
+												"kind": "code",
+												"text": "`evictions`"
+											},
+											{
+												"kind": "text",
+												"text": " 0, and a hit\nrate falling from 99 % to 24.8 % with no recovery. Plain LRU on the same\ntrace recovers to 99 % immediately.\n\nTime passing is not the same as the data changing, and a decay mechanism\nthat stops when the data stops changing is not a decay mechanism. The\n\"resets far more often than "
 											},
 											{
 												"kind": "code",
@@ -107717,7 +107749,15 @@
 											},
 											{
 												"kind": "text",
-												"text": " describes."
+												"text": " describes\" complaint was about the\n*rate*; the fix for a rate is "
+											},
+											{
+												"kind": "code",
+												"text": "`sampleSize`"
+											},
+											{
+												"kind": "text",
+												"text": ", which ALG-005 already auto-tunes\nfrom the observed cardinality — and which could not fire while the clock\nwas frozen, so the auto-tune was dead in exactly the case it was needed."
 											}
 										],
 										"blockTags": [
