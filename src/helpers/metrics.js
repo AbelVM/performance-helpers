@@ -476,7 +476,38 @@ export class MetricsCollector {
  * merge. The default is off everywhere, so a process that never asks for this
  * never allocates a collector or a closure.
  */
-export const defaultMetrics = new MetricsCollector();
+let _defaultMetrics = null;
+function _getDefaultMetrics() {
+  if (_defaultMetrics === null) _defaultMetrics = new MetricsCollector();
+  return _defaultMetrics;
+}
+/** @type {MetricsCollector} */
+export const defaultMetrics = new Proxy(
+  {},
+  {
+    get(_target, prop, receiver) {
+      const m = _getDefaultMetrics();
+      const value = Reflect.get(m, prop, receiver);
+      return typeof value === 'function' ? value.bind(m) : value;
+    },
+    set(_target, prop, value) {
+      const m = _getDefaultMetrics();
+      return Reflect.set(m, prop, value);
+    },
+    has(_target, prop) {
+      return Reflect.has(_getDefaultMetrics(), prop);
+    },
+    ownKeys() {
+      return Reflect.ownKeys(_getDefaultMetrics());
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      return Object.getOwnPropertyDescriptor(_getDefaultMetrics(), prop);
+    },
+    getPrototypeOf() {
+      return Object.getPrototypeOf(_getDefaultMetrics());
+    },
+  }
+);
 
 /**
  * Wire a helper's `stats()` into a collector, and hand back the receipt that

@@ -101,4 +101,37 @@ describe('PowerCircuit', () => {
     expect(() => cb.dispose(), 'a second dispose is a no-op').not.toThrow();
     expect(() => cb.reset(), 'and so is a late reset').not.toThrow();
   });
+
+  it('allows multiple concurrent probes when halfOpenProbes > 1', async () => {
+    const cb = new PowerCircuit({ threshold: 1, timeout: 10, halfOpenProbes: 2 });
+    await expect(cb.call(() => Promise.reject(new Error('first')))).rejects.toThrow('first');
+    expect(cb.state).toBe('open');
+    await new Promise((r) => setTimeout(r, 15));
+    expect(cb.state).toBe('half-open');
+
+    let resolveFirst;
+    const p1 = cb.call(
+      () =>
+        new Promise((res) => {
+          resolveFirst = res;
+        })
+    );
+    let resolveSecond;
+    const p2 = cb.call(
+      () =>
+        new Promise((res) => {
+          resolveSecond = res;
+        })
+    );
+    await expect(cb.call(() => Promise.resolve('third'))).rejects.toHaveProperty(
+      'code',
+      'ECIRCUITOPEN'
+    );
+
+    resolveFirst('ok1');
+    resolveSecond('ok2');
+    await expect(p1).resolves.toBe('ok1');
+    await expect(p2).resolves.toBe('ok2');
+    expect(cb.state).toBe('closed');
+  });
 });

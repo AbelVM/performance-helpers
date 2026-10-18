@@ -203,14 +203,7 @@ export class MetricsCollector {
     /** @returns {Promise<void>} */
     [Symbol.asyncDispose](): Promise<void>;
 }
-/**
- * A process-wide collector, used by `observability: true`.
- *
- * Deliberately shared rather than per-helper: a caller who opts nine helpers
- * in wants nine series in *one* snapshot, not nine snapshots they have to
- * merge. The default is off everywhere, so a process that never asks for this
- * never allocates a collector or a closure.
- */
+/** @type {MetricsCollector} */
 export const defaultMetrics: MetricsCollector;
 export type PrometheusBucket = {
     le: number;

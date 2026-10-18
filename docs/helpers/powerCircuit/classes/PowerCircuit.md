@@ -63,6 +63,12 @@ Reset to 0 whenever the circuit proves the dependency is healthy again.
 
 ***
 
+### \_halfOpenProbes
+
+> **\_halfOpenProbes**: `number`
+
+***
+
 ### \_maxTimeout
 
 > **\_maxTimeout**: `number`
@@ -169,7 +175,7 @@ make the window fluctuate, so the breaker would flap instead of holding.
 
 ### \_trialInFlight
 
-> **\_trialInFlight**: `boolean`
+> **\_trialInFlight**: `number`
 
 ***
 

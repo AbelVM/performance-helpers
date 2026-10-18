@@ -82,7 +82,7 @@ export class PowerCircuit {
   constructor(options = {}) {
     assertKnownOptions(
       options,
-      ['threshold', 'timeout', 'maxTimeout', 'onStateChange', 'eventBus', 'now'],
+      ['threshold', 'timeout', 'maxTimeout', 'onStateChange', 'eventBus', 'now', 'halfOpenProbes'],
       'PowerCircuit'
     );
     const {
@@ -92,6 +92,7 @@ export class PowerCircuit {
       onStateChange = null,
       eventBus = null,
       now,
+      halfOpenProbes = 1,
     } = options;
     // GEO-039. `PowerCircuit` was the one clock-driven helper with *no*
     // injection point at all — it read `monoMs()` directly at three sites, so a
@@ -147,7 +148,13 @@ export class PowerCircuit {
     this.lastError = null;
     /** @type {?number} */
     this._openedAt = null;
-    this._trialInFlight = false;
+    this._halfOpenProbes = assertLimitRequired(halfOpenProbes, {
+      name: 'halfOpenProbes',
+      className: 'PowerCircuit',
+      min: 1,
+      fallback: 1,
+    });
+    this._trialInFlight = 0;
     // Whether the *logical* `open -> half-open` transition has already been
     // announced. `_state` stays `'open'` until a call is attempted, so the
     // `state` getter can observe the drawn window elapsing any number of times
@@ -224,7 +231,7 @@ export class PowerCircuit {
       }
     }
     // only keep trial flag true when in half-open; otherwise clear it
-    if (newState !== 'half-open') this._trialInFlight = false;
+    if (newState !== 'half-open') this._trialInFlight = 0;
 
     this._notifyState(newState, reason);
   }
@@ -319,10 +326,10 @@ export class PowerCircuit {
     }
 
     if (this._state === 'half-open') {
-      if (this._trialInFlight) {
+      if (this._trialInFlight >= this._halfOpenProbes) {
         throw circuitOpenError();
       }
-      this._trialInFlight = true;
+      this._trialInFlight++;
     }
 
     try {
@@ -347,6 +354,11 @@ export class PowerCircuit {
         this._failures = 0;
       }
       throw err;
+    } finally {
+      if (this._state === 'half-open' || this._state === 'open') {
+        // decrement the in-flight trial counter; clamp at 0
+        if (this._trialInFlight > 0) this._trialInFlight--;
+      }
     }
   }
 
@@ -360,7 +372,7 @@ export class PowerCircuit {
     this._failures = 0;
     this.lastError = null;
     this._openedAt = null;
-    this._trialInFlight = false;
+    this._trialInFlight = 0;
     this._consecutiveOpens = 0;
     this._openWindowMs = this._timeout;
   }

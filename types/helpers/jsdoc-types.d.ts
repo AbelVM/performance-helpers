@@ -884,12 +884,6 @@ export type PowerHeartbeatOptions = {
     onTimeout?: ((missedBeats: number, lastBeatAt: number) => void) | undefined;
     onBeat?: ((lastBeatAt: number) => void) | undefined;
     /**
-     * Minimum duration (ms) for a
-     * `PerformanceObserver` long-task entry to be recorded into the drift
-     * histogram. No-op in environments without `PerformanceObserver`.
-     */
-    longTaskThreshold?: number | undefined;
-    /**
      * Injected clock, as the limiters take (PERF-007).
      */
     now?: (() => number) | undefined;
@@ -903,12 +897,6 @@ export type PowerTTLMapOptions = {
      */
     defaultTTL?: number | undefined;
     onExpire?: ((key: any, value: any) => void) | undefined;
-    /**
-     * Minimum duration (ms) for a
-     * `PerformanceObserver` long-task entry to be recorded into the drift
-     * histogram. No-op in environments without `PerformanceObserver`.
-     */
-    longTaskThreshold?: number | undefined;
     /**
      * Injected clock, as the limiters take (PERF-007).
      * Expiry is the one behaviour in this class that cannot be observed without
@@ -1560,6 +1548,13 @@ export type PowerCircuitOptions = {
      */
     maxTimeout?: number | undefined;
     /**
+     * How many concurrent trial calls are
+     * allowed while the circuit is `half-open`. `1` (the default) preserves the
+     * classic single-probe behaviour; raise it to let several callers probe a
+     * recovering dependency in parallel.
+     */
+    halfOpenProbes?: number | undefined;
+    /**
      * - Called as
      * `(state, reason)` on every transition. `reason` is one of `success`,
      * `thresholdExceeded`, `timeoutElapsed`, `trialFailed`, `reset` or
@@ -1571,12 +1566,6 @@ export type PowerCircuitOptions = {
      * given, transitions are also emitted on it as `stateChange`.
      */
     eventBus?: import("./powerEventBus.js").PowerEventBus<Record<string, any>> | undefined;
-    /**
-     * Minimum duration (ms) for a
-     * `PerformanceObserver` long-task entry to be recorded into the drift
-     * histogram. No-op in environments without `PerformanceObserver`.
-     */
-    longTaskThreshold?: number | undefined;
     /**
      * Injected clock, as the limiters take
      * (PERF-007). GEO-039: this was the one clock-driven helper with no injection
@@ -1839,12 +1828,6 @@ export type PowerDeadlineOptions = {
     baseDelay?: number | undefined;
     maxDelay?: number | undefined;
     jitter?: boolean | undefined;
-    /**
-     * Minimum duration (ms) for a
-     * `PerformanceObserver` long-task entry to be recorded into the drift
-     * histogram. No-op in environments without `PerformanceObserver`.
-     */
-    longTaskThreshold?: number | undefined;
     /**
      * Injected clock, as the limiters take
      * (PERF-007). GEO-039: a deadline is arithmetic over `startedAt`, so a frozen
