@@ -70,6 +70,26 @@ verbatim, because they are not supposed to.
 - [powerThrottle](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerThrottle.md): A small token-bucket rate limiter useful for pacing work (API calls, renders, or cooperating with `PowerPool`).
 - [powerWebSocketClient](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerWebSocketClient.md): Reconnecting WebSocket client with **explicit back-pressure**, heartbeats, and `PowerMessageCodec` framing.
 - [traceContext](https://github.com/AbelVM/performance-helpers/blob/main/guides/traceContext.md): W3C `traceparent` propagation over `PowerPool` messages, as pool-level metadata that touches nothing in the payload.
+- [powerAdaptiveProposal](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerAdaptiveProposal.md): Bounded adaptation controller that turns feedback into explainable proposals with hysteresis, cooldown, and rollback.
+- [powerApdex](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerApdex.md): Exact SLO attainment scoring from three integer counters — not derived from a histogram.
+- [powerBroadcastBus](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBroadcastBus.md): Broadcast bus with per-subscriber bounded queues and an explicit slow-consumer policy.
+- [powerBrownout](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerBrownout.md): Optional-work shedding when normalized resource pressure crosses a threshold.
+- [powerCrossLock](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerCrossLock.md): Cross-process lock primitive for coordinating critical sections.
+- [powerDatagramChannel](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDatagramChannel.md): Bounded, drop-counting datagram wrapper with fragmentation support.
+- [powerDeduplication](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerDeduplication.md): Time-windowed duplicate suppression with a TTL and a `maxKeys` cap.
+- [powerFlowControl](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerFlowControl.md): Adaptive token bucket whose refill rate is the output of a `PowerServo`.
+- [powerFlowController](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerFlowController.md): Admission, queueing and latency feedback in one closed loop.
+- [powerHeartbeat](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerHeartbeat.md): Jittered liveness detection with unref support.
+- [powerMessagePort](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerMessagePort.md): Deliver hub frames over a `MessagePort` with native structured clone and transfer support.
+- [powerOperationContext](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerOperationContext.md): Explicit operation coordination — deadlines, cancellation, retry budgets, correlation ids, priority, trace context.
+- [powerPriorityQueue](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerPriorityQueue.md): Binary heap dequeuing highest priority first, FIFO on ties.
+- [powerSequencer](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSequencer.md): Gap detection and in-order reassembly for out-of-order datagrams.
+- [powerSseAdapter](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerSseAdapter.md): SSE adapter with reconnection and Last-Event-ID support.
+- [powerTaskGroup](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerTaskGroup.md): Structured concurrency scope — run async tasks under a shared AbortSignal.
+- [powerWebTransportAdapter](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerWebTransportAdapter.md): WebTransport adapter with stream prioritization and datagram fallback.
+- [powerWebTransportClient](https://github.com/AbelVM/performance-helpers/blob/main/guides/powerWebTransportClient.md): WebTransport client with QUIC stream priority and datagram support.
+- [geo](https://github.com/AbelVM/performance-helpers/blob/main/guides/geo.md): Geospatial scope and helpers.
+- [stats-naming](https://github.com/AbelVM/performance-helpers/blob/main/guides/stats-naming.md): Canonical `stats()` method naming convention.
 
 ## Why it is shaped this way
 
