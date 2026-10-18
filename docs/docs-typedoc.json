@@ -22278,7 +22278,55 @@
 							},
 							{
 								"kind": "text",
-								"text": ", etc.).\n\nUsage:\n"
+								"text": ", etc.).\n\n**Disposal.** The returned "
+							},
+							{
+								"kind": "code",
+								"text": "`PowerPool`"
+							},
+							{
+								"kind": "text",
+								"text": " is the disposable handle: it already\nimplements "
+							},
+							{
+								"kind": "code",
+								"text": "`dispose()`"
+							},
+							{
+								"kind": "text",
+								"text": ", "
+							},
+							{
+								"kind": "code",
+								"text": "`[Symbol.dispose]()`"
+							},
+							{
+								"kind": "text",
+								"text": " and "
+							},
+							{
+								"kind": "code",
+								"text": "`[Symbol.asyncDispose]()`"
+							},
+							{
+								"kind": "text",
+								"text": ",\nso "
+							},
+							{
+								"kind": "code",
+								"text": "`using pool = new PowerChunker(...)`"
+							},
+							{
+								"kind": "text",
+								"text": " (or "
+							},
+							{
+								"kind": "code",
+								"text": "`await using`"
+							},
+							{
+								"kind": "text",
+								"text": ") releases the\ninline workers at scope exit. There is no separate chunker instance to\ndispose — the pool *is* the chunker's handle.\n\nUsage:\n"
 							},
 							{
 								"kind": "code",

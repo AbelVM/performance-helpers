@@ -10,6 +10,12 @@
  * The constructor returns the created `PowerPool` instance so callers can
  * interact with it (listen `onmessage`, call `drain()`, `terminate()`, etc.).
  *
+ * **Disposal.** The returned `PowerPool` is the disposable handle: it already
+ * implements `dispose()`, `[Symbol.dispose]()` and `[Symbol.asyncDispose]()`,
+ * so `using pool = new PowerChunker(...)` (or `await using`) releases the
+ * inline workers at scope exit. There is no separate chunker instance to
+ * dispose — the pool *is* the chunker's handle.
+ *
  * Usage:
  * ```js
  * const pool = new PowerChunker(iterable, fn, options);
