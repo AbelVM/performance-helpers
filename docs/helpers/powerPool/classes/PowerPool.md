@@ -184,7 +184,7 @@ loop from accumulating listeners without limit. See
 
 ### \_idempotencyCursor
 
-> **\_idempotencyCursor**: `any`
+> **\_idempotencyCursor**: `string` \| `number` \| `null`
 
 ***
 

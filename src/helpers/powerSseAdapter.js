@@ -41,7 +41,7 @@ import { assertKnownOptions } from '../utils/options.js';
  *   whose body is a `WritableStream`. When omitted the adapter falls back to
  *   Node's `ServerResponse` shape if `subscriber.transport` exposes
  *   `writeHead`/`write`/`end`.
- * @property {function(Error, object):void} [onError] - Called when a write
+ * @property {function(unknown, object):void} [onError] - Called when a write
  *   to the stream throws, instead of leaving an unhandled rejection.
  */
 
@@ -142,7 +142,7 @@ export function createSseAdapter(options = {}) {
           });
         }
       }
-    } catch (/** @type {any} */ err) {
+    } catch (/** @type {unknown} */ err) {
       if (onError) onError(err, sub);
       throw err;
     }
@@ -195,12 +195,12 @@ export function createSseAdapter(options = {}) {
             writer = body.getWriter();
           }
         }
-      } catch (/** @type {any} */ error) {
+      } catch (/** @type {unknown} */ error) {
         if (onError) onError(error, sub);
         return;
       }
     } else if (/** @type {any} */ (sub).transport) {
-      writer = /** @type {any} */ (null);
+      writer = null;
     }
     subs.set(/** @type {any} */ (sub).id, {
       id: /** @type {any} */ (sub).id,

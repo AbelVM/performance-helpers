@@ -680,7 +680,7 @@ class WorkerAgnostic {
       if (this._nativeModel === 'property') {
         // The property native model is *defined* by these three names existing, so
         // the cast is a statement about the branch rather than an escape hatch.
-        const target = /** @type {Record<string, any>} */ (/** @type {any} */ (w));
+        const target = /** @type {Record<string, any>} */ (/** @type {unknown} */ (w));
         for (const [prop, previous] of this._wiredProperties ?? []) {
           if (target[prop] !== undefined || previous !== undefined) target[prop] = previous;
         }

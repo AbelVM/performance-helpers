@@ -41,7 +41,7 @@ Called when a write
 
 ##### arg0
 
-`Error`
+`unknown`
 
 ##### arg1
 

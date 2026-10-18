@@ -325,7 +325,7 @@ export class PowerSocketAdapter {
      */
     this._streamWriter = null;
     this._streamWritePending = 0;
-    /** @type {any} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
+    /** @type {ReturnType<typeof setTimeout> | null} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
     this._streamRetryTimer = null;
     /** @type {number} Current retry delay, so the backoff actually grows. */
     this._streamRetryDelay = STREAM_RETRY_MIN_MS;
@@ -746,8 +746,8 @@ export class PowerSocketAdapter {
       }
       try {
         this._streamReader = readable.getReader();
-      } catch (/** @type {any} */ e) {
-        this._handleClose(1006, e?.message ?? '');
+      } catch (/** @type {unknown} */ e) {
+        this._handleClose(1006, /** @type {{ message?: string }} */ (e)?.message ?? '');
         return;
       }
       // Armed and no longer needed. Resetting the backoff means a *second*
@@ -759,11 +759,11 @@ export class PowerSocketAdapter {
           if (done) break;
           this._handleMessage(value, typeof value !== 'string');
         }
-      } catch (/** @type {any} */ e) {
+      } catch (/** @type {unknown} */ e) {
         // An aborted or errored read is how a closed stream reports itself.
         // Not an adapter fault, so it is routed to `onClose` rather than
         // `onError`.
-        this._handleClose(1006, e?.message ?? '');
+        this._handleClose(1006, /** @type {{ message?: string }} */ (e)?.message ?? '');
         return;
       }
       this._handleClose(1000, '');

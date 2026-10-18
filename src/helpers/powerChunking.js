@@ -525,8 +525,11 @@ function streamIterableIntoPool(pool, it, csize, windowChunks, highWaterMark = I
  * @param {unknown} [cause]
  */
 function notifyChunkDispatchFailure(pool, failedChunks, mode, cause) {
-  /** @type {any} */
-  const err = new Error(`PowerChunker failed to dispatch ${failedChunks.length} chunk(s)`);
+  /** @type {Error & {code: string, failedChunks: unknown[], mode: unknown, cause?: unknown}} */
+  const err =
+    /** @type {Error & {code: string, failedChunks: unknown[], mode: unknown, cause?: unknown}} */ (
+      new Error(`PowerChunker failed to dispatch ${failedChunks.length} chunk(s)`)
+    );
   err.code = 'ECHUNKDISPATCH';
   err.failedChunks = failedChunks.slice();
   err.mode = mode;

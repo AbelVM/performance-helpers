@@ -69,7 +69,7 @@ export class PowerSocketAdapter {
      * until dispose. See `_writeStream` for why it cannot be per-call.
      * @type {any}
      */
-    /** @type {any} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
+    /** @type {ReturnType<typeof setTimeout> | null} Timer for re-arming the stream pump. See `STREAM_RETRY_MIN_MS`. */
     /** @type {number} Current retry delay, so the backoff actually grows. */
     _metrics: {
         unregister: () => boolean;

@@ -2409,7 +2409,7 @@ export class PowerCache {
         // value is genuinely untyped here - this is not a hole in the types but
         // the boundary they stop at. Annotated inline because the factory's own
         // return type is `any` and a named type would be a lie.
-        return res.then((/** @type {any} */ value) => {
+        return res.then((/** @type {unknown} */ value) => {
           try {
             this.set(key, value, { ttl, weight });
           } catch (err) {
@@ -2936,7 +2936,7 @@ export class PowerCache {
     for (const entry of snapshot) {
       let key;
       let value;
-      let opts = /** @type {any} */ ({});
+      let opts = /** @type {Record<string, unknown>} */ ({});
       if (Array.isArray(entry)) {
         key = entry[0];
         value = entry[1];
@@ -3710,7 +3710,7 @@ function deepEqual(a, b, state, depth = 0) {
     // a same-realm one produced `{__type:'Date'}`, so equal dates landed in
     // different buckets. That is the same defect class at lower severity, and
     // leaving it is how the original bug read as covered.
-    const trySignature = (/** @type {any} */ val) => {
+    const trySignature = (/** @type {unknown} */ val) => {
       try {
         return JSON.stringify(val, (k, v) => {
           if (isDate(v)) return { __type: 'Date', v: v.getTime() };

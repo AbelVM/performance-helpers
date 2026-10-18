@@ -445,7 +445,7 @@ export class PowerCron {
                 }
               }
             },
-            (/** @type {any} */ err) => this._report(err, 'task')
+            (/** @type {unknown} */ err) => this._report(err, 'task')
           )
           .then(finish, finish);
       } else if (this._onFire) {

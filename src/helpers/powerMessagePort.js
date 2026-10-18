@@ -280,6 +280,7 @@ export class PowerMessagePort {
    * @private
    */
   _detach() {
+    /** @type {any} */
     const port = this._port;
     if (!port) return;
     // AUD-010. Remove *our* listeners rather than nulling the `on*` slots, which

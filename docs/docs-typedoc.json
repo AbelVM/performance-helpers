@@ -46930,8 +46930,21 @@
 							"kind": 1024,
 							"flags": {},
 							"type": {
-								"type": "intrinsic",
-								"name": "any"
+								"type": "union",
+								"types": [
+									{
+										"type": "intrinsic",
+										"name": "string"
+									},
+									{
+										"type": "intrinsic",
+										"name": "number"
+									},
+									{
+										"type": "literal",
+										"value": null
+									}
+								]
 							}
 						},
 						{
@@ -68243,8 +68256,17 @@
 							"kind": 1024,
 							"flags": {},
 							"type": {
-								"type": "intrinsic",
-								"name": "any"
+								"type": "union",
+								"types": [
+									{
+										"type": "intrinsic",
+										"name": "number"
+									},
+									{
+										"type": "literal",
+										"value": null
+									}
+								]
 							}
 						},
 						{
@@ -98477,14 +98499,8 @@
 													"kind": 32768,
 													"flags": {},
 													"type": {
-														"type": "reference",
-														"target": {
-															"packageName": "typescript",
-															"packagePath": "lib/lib.es5.d.ts",
-															"qualifiedName": "Error"
-														},
-														"name": "Error",
-														"package": "typescript"
+														"type": "intrinsic",
+														"name": "unknown"
 													}
 												},
 												{

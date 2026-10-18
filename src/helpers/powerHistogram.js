@@ -141,7 +141,9 @@ export function isPowerHistogram(v) {
  */
 function isBucketIterable(b) {
   return (
-    !!b && typeof b === 'object' && typeof (/** @type {any} */ (b)[Symbol.iterator]) === 'function'
+    !!b &&
+    typeof b === 'object' &&
+    typeof (/** @type {Record<PropertyKey, unknown>} */ (b)[Symbol.iterator]) === 'function'
   );
 }
 

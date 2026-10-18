@@ -111,7 +111,7 @@ export class PowerGCRA {
     this._now = monoMs;
     /** @type {boolean} */
     this._nowExplicit = false;
-    attachLimiterClock(this, monoMs, /** @type {any} */ (options), 'PowerGCRA');
+    attachLimiterClock(this, monoMs, options, 'PowerGCRA');
     // The last clock reading this limiter saw, or `null` before the first one.
     // It is what `onError` compares against, so that a report means "the clock
     // moved backwards" rather than "the limiter is rate-limiting" — see the

@@ -309,7 +309,7 @@ A Node `ws` socket, a browser `WebSocket`, or a
 
 ### \_streamRetryTimer
 
-> **\_streamRetryTimer**: `any`
+> **\_streamRetryTimer**: `number` \| `null`
 
 ***
 

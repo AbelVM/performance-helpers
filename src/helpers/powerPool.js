@@ -77,7 +77,7 @@ import { markUntransferable } from '../utils/transferable.js';
 function isReadySignal(data, field) {
   if (data === true) return true;
   if (data === null || typeof data !== 'object') return false;
-  return Boolean(/** @type {any} */ (data)[field]);
+  return Boolean(data[field]);
 }
 
 /** @typedef {import('./jsdoc-types.js').WorkerLike} WorkerLike */
@@ -849,7 +849,7 @@ export class PowerPool {
     // AUD-008. Resume point for the sweep's rotating cursor: the last key the
     // previous sweep examined that is still in the ledger. `null` means "start
     // from the head", which is also the state after `clear()`.
-    /** @type {any} */
+    /** @type {string | number | null} */
     this._idempotencyCursor = null;
 
     // configure optional autoscaling
@@ -1203,8 +1203,7 @@ export class PowerPool {
     // for a non-function truthy value - a test spy, a half-constructed worker -
     // and then failed with a `TypeError: postMessage is not a function` that had
     // nothing to do with the caller's message.
-    const underlying =
-      obj?.worker instanceof WorkerWrapper ? /** @type {any} */ (obj.worker)._underlying : null;
+    const underlying = obj?.worker instanceof WorkerWrapper ? obj.worker._underlying : null;
     const canBypassWrapper =
       prepared != null &&
       prepared.message != null &&
@@ -3037,7 +3036,7 @@ export class PowerPool {
       // runtimes to drift apart again.
       const data = event?.data;
       let decoded = data;
-      /** @type {any} - the native envelope, when the reply arrived on that carrier */
+      /** @type {{ correlationId?: string; duration?: number } | null} - the native envelope, when the reply arrived on that carrier */
       let inboundMeta = null;
       // A capability announcement is pool-internal protocol traffic: it is
       // consumed here and deliberately *not* forwarded to `message` listeners,
@@ -3399,7 +3398,7 @@ export class PowerPool {
     if (!ready.length) return null;
     if (typeof this._loadBalancer !== 'function') return this._findLeastLoadedWorker(ready);
 
-    /** @type {any} */
+    /** @type {unknown} */
     let chosen;
     try {
       chosen = this._loadBalancer(this._workerViews());
@@ -3598,7 +3597,7 @@ export class PowerPool {
     if (!ledger || ledger.size === 0) {
       // Nothing to resume from, and a stale cursor would make the next sweep
       // skip the whole ledger looking for a key that is no longer there.
-      /** @type {any} */
+      /** @type {string | number | null} */
       this._idempotencyCursor = null;
       return;
     }
@@ -3621,7 +3620,7 @@ export class PowerPool {
     // first N keys every time means an in-flight entry parked at the head blocks
     // every settled key behind it forever. Resuming past the last examined key
     // walks the whole ledger over successive calls.
-    /** @type {any} */
+    /** @type {string | number | null} */
     let cursor = this._idempotencyCursor;
     // A cursor whose key has been deleted or released is stale. Detecting that
     // up front is O(1) and keeps the sweep from burning its whole budget
@@ -5522,7 +5521,7 @@ export class PowerPool {
 
     this._drainWaiters++;
     return new Promise((resolve, reject) => {
-      /** @type {any} */
+      /** @type {ReturnType<typeof setTimeout> | null} */
       let timer = null;
       let done = false;
 
@@ -5602,7 +5601,9 @@ export class PowerPool {
         // Deliberately *not* `setSafeTimeout`. An unref'd timer would let a
         // Node process exit while a caller is `await pool.drain({ timeout })`,
         // which is the one case where holding the loop open is the point.
-        timer = setTimeout(onTimeout, timeout);
+        timer = /** @type {ReturnType<typeof setTimeout>} */ (
+          /** @type {unknown} */ (setTimeout(onTimeout, timeout))
+        );
       }
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
       this.addEventListener('idle', onIdle);

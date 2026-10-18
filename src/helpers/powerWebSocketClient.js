@@ -1098,7 +1098,7 @@ export class PowerWebSocketClient {
   _open() {
     return new Promise((resolve, reject) => {
       let settled = false;
-      const done = (/** @type {any} */ err) => {
+      const done = (/** @type {unknown} */ err) => {
         if (settled) return;
         settled = true;
         this._clearConnectTimer();
@@ -1136,7 +1136,7 @@ export class PowerWebSocketClient {
               // earlier throws.
               this._startStreamPump(generation, socket);
             })
-            .catch((/** @type {any} */ e) => {
+            .catch((/** @type {unknown} */ e) => {
               if (generation !== this._connectionGeneration || this._socket !== socket) return;
               this._handleError(e);
               done(e);

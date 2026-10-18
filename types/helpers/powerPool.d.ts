@@ -140,7 +140,7 @@ export class PowerPool {
      * interval, pinning the Node.js process).
      * @type {boolean}
      */
-    /** @type {any} */
+    /** @type {string | number | null} */
     _metrics: {
         unregister: () => boolean;
         name: string;

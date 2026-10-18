@@ -46,5 +46,5 @@ export type SseAdapterOptions = {
      * - Called when a write
      * to the stream throws, instead of leaving an unhandled rejection.
      */
-    onError?: ((arg0: Error, arg1: object) => void) | undefined;
+    onError?: ((arg0: unknown, arg1: object) => void) | undefined;
 };
