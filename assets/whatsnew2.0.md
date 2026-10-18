@@ -1,3 +1,106 @@
+## What's new in v2.2.0
+
+Structured concurrency, a reusable buffer pool, async-local operation context,
+and a long list of smaller, measured improvements. The [changelog](../CHANGELOG.md)
+has the full list; this note covers what changes how you use the library.
+
+### New helpers
+
+- **`PowerTaskGroup`** (also called a `Scope`) — structured concurrency. Owns an
+  `AbortController` and a set of in-flight tasks; every task receives the scope's
+  `AbortSignal`, and on dispose (or on a task rejection with `cancelOnError`)
+  all siblings are aborted and awaited. Supports `using` / `await using`.
+- **`PowerBufferPool`** — a reusable `Uint8Array` buffer pool with size buckets,
+  `acquire(size)` / `release(buf)`, per-bucket and total caps, zeroing on reuse,
+  `stats()`, and `using` / `await using` support. A buffer must not be used after
+  `release()`.
+- **`createOperationContext`** — explicit operation coordination. Carries
+  deadlines, cancellation, retry budgets, correlation ids, priority, and trace
+  context (`traceId` / `spanId`) as plain data, with no hidden global state.
+- **`ReconnectPolicy`** — the shared decorrelated-jitter backoff curve the
+  reconnecting transports compose. Behaviour-preserving.
+
+### Worker pool
+
+- **`healthCheck()` / `ping()`** — per-worker `{ index, pending, alive }`, plus
+  a `healthCheckIntervalMs` option.
+- **`drain({ onProgress })`** — graceful shutdown with progress events reporting
+  `{ activeTasks, queueLength }`.
+- **`messageQueueSize`** on `PowerWebSocketClient` — buffers sends while closed,
+  flushes in order on open, drop-oldest on overflow with a
+  `droppedQueuedMessages` counter.
+- **`highWaterMark`** on `PowerChunker`'s streaming path — pauses pulling when
+  the pool queue reaches the threshold (default `Infinity`, disabled).
+
+### Caching
+
+- **`PowerCache.load(snapshot)`** — prefill from `[key, value]`,
+  `[key, value, { ttl, weight }]`, `{ key, value, ttl?, weight? }` or `Map`
+  entries. Routes through `set()` so admission policy, TTL and weight apply.
+- **`PowerTTLMap`** gains a `maxSize` option with LRU eviction on `set()`;
+  `get()` / `touch()` / re-`set()` mark a key most-recently-used. `0`
+  (default) keeps the map unbounded.
+
+### Realtime
+
+- **`PowerRealtimeHub.presence(topic?)`** / `getPresence(topic?)` — snapshot
+  array of `{ id, topic, transport }` for live subscribers, optionally filtered
+  by topic.
+- **`PowerDatagramChannel`** gains `fragmentSize` / `fragment` options — splits
+  oversize datagrams into chunks, counts `fragmentedDatagrams` / `fragmentsSent`.
+- **`PowerWebTransportClient`** gains QUIC stream prioritization
+  (`streamPriority` / `sendOrder`) and a datagram path
+  (`datagrams` / `datagramFallback` / `onDatagram` / `sendDatagram()`).
+- **`PowerServo`** gains `autoTune({ ku, pu, method })` (Ziegler-Nichols
+  classic and Tyreus-Luyben), plus `tune()` / `autoTuneZN()` aliases and an
+  `autoTune` constructor option.
+- **`PowerCron`** gains a `timezone` option accepting a validated IANA time
+  zone (throws `RangeError` on an invalid zone).
+- **`PowerMessagePort`** gains zero-copy transfer support — `send(sub, frame,
+transfer)`, `postMessage(value, transfer)`, `transferPort(port)`.
+
+### Observability
+
+- **`MetricsCollector.toOTLP()`** — an OTLP-shaped JSON export (pull-based, no
+  push); `createOperationContext` accepts `traceId` / `spanId` for trace context
+  propagation.
+- **Lazy `defaultMetrics`** allocation via `Proxy` — no module-load cost when
+  unused.
+- **`PowerEventLoopMonitor`** gains `longTaskThreshold` plus
+  `PerformanceObserver` long-task detection.
+- **`PowerCircuit`** gains a configurable `halfOpenProbes` for half-open trial
+  calls.
+- **`PowerBackpressure`** gains `highWaterMark` — queued waiters at or above the
+  threshold cause `acquire()` to reject with `ERR_QUEUE_FULL` instead of
+  queueing (default `Infinity`, disabled).
+
+### Concurrency and resilience
+
+- **`PowerDefer`** gains `cancel(reason?)` + a `cancelled` getter.
+- **`PowerBrownout`** gains an `adaptive` option (AIMD adjustment on
+  `setPressure`, EWMA tracking).
+- **`PowerBackpressure`** gains an async-iterable interface via
+  `[Symbol.asyncIterator]()` yielding release callbacks.
+
+### Cardinality
+
+- **`HyperLogLog`** gains a sparse representation for small cardinalities
+  (HLL++-style): exact distinct counting until the sparse threshold is reached,
+  then conversion to the dense register array. New `sparse` (default `true`) and
+  `sparseThreshold` (default `registerCount * 4`) constructor options, plus an
+  `isDense` getter. The dense phase, the public `registers` / `registerCount`
+  contract and validation are unchanged. Bias-correction tables and 6-bit packed
+  registers were measured and rejected — see the review notes.
+
+### Measurement
+
+- **`bench/claims.js cardinality`** is the gate for the HyperLogLog work: the
+  shipped sketch (m=64) reads 13.93 % relative error at n=100k against a
+  theoretical 13.00 %, and the bias-correction tables were measured to
+  over-correct in the transition region, so they are not shipped.
+
+---
+
 ## What's new in v2.1.0
 
 Seven new helpers, a worker pool that survives a dead worker, and a cache
