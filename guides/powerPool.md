@@ -513,9 +513,13 @@ Observability — `getStats().performance` gains:
 - `idleReapingActive` — whether the idle-worker reaper's interval is running.
 - `queueWait` — count and Welford statistics for time spent queued before dispatch; `timePerTask` remains worker service time.
 
-Notes:
-
-- **`autoScalePolicy: null` means "stopped", not "misconfigured".** Before 2.0 this
+- **`concurrencyLimit` is reported, not enforced.** The adaptive controller's
+  limit is exposed via `getStats().performance.concurrencyLimit` for
+  observability, but it is **not** used to gate admission: `bench/claims.js
+concurrency` measured that enforcing it does not beat a well-chosen constant
+  cap (within the noise floor, -1.6 %). Wiring it into the dispatch path would
+  change how work is admitted for a controller that cannot earn the getter, so
+  the limit stays informational. Treat it as a diagnostic, not a throttle.
   field reported the _stored configuration_, and `stopThePress(..., {
 recreateWorkers: false })` clears the interval without clearing the policy —
   correctly, since a pool stopped and recreated gets a working controller again.
