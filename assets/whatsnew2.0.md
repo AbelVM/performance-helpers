@@ -1,3 +1,64 @@
+## What's new in v2.3.0
+
+Cross-realm correctness, transport robustness, and a large type-safety pass. The
+[changelog](../CHANGELOG.md) has the full list; this note covers what changes how
+you use the library.
+
+### Realtime transports
+
+- **`PowerWebSocketClient` / `PowerWebTransportClient`**: the `rtt` option now
+  accepts a `PowerHistogram` from another realm (cross-realm `instanceof`
+  replaced with an internal-slot check).
+- **`PowerWebTransportClient`**: `streamPriority` is now actually applied to the
+  bidirectional stream.
+- **`PowerSocketAdapter`**: `_attachStream()` no longer produces an unhandled
+  rejection.
+- **`PowerDatagramChannel`**: `maxDatagramSizeBytes` is now enforced per chunk
+  during fragmentation; `dispose()` flushes the queue like `close()`.
+- **`PowerSseAdapter`**: Node `write()` backpressure honoured; `btoa` guarded
+  with a Buffer fallback.
+- **`PowerMessagePort`**: metrics detached on external close.
+- **`PowerRealtimeHub`**: `publish()` returns the accepted count.
+
+### Worker pool
+
+- Readiness guard added to `postMessageBatch` fast path.
+- `_dispatchQueuedTasks` now skips past-deadline/aborted items and iterates
+  ready workers.
+- `WorkerWrapper.postMessage` no longer synthesises a transfer list (silent data
+  loss fix).
+- `pool:scale` emitted on all removal paths; stable removal in
+  `_handleWorkerExit`; `healthCheck()` distinguishes crashed vs retired workers.
+
+### Caching
+
+- `PowerCache.clear()` clears `_inflightControllers`.
+- `size`/`entries()`/`invalidate()` agree under S3-FIFO (Small + Ghost walked).
+- Weight check in `_arbitrateWindow`.
+- `PowerTTLMap`: `_nextExpiryAt`/`_nextExpiryDirty` wired in.
+
+### Concurrency
+
+- `PowerPermitGate`: `FinalizationRegistry`-based lease cleanup (covers
+  `PowerSemaphore`, `PowerBulkhead`, `PowerPermitGate`).
+- TOCTOU fixes on waiter timeouts across `PowerBulkhead`, `PowerSemaphore`,
+  `PowerCrossLock`, `PowerPermitGate`.
+- `PowerCircuit`: atomic HALF_OPEN transition, listeners wrapped in try/catch,
+  reset timer cleared on dispose.
+- `PowerCircuit.call()` now accepts an `AbortSignal`.
+
+### Type safety
+
+- E2-02: replaced `@type {any}` escape hatches with precise types in
+  `powerSseAdapter` and `powerSocketAdapter`.
+
+### Measurement
+
+- Property-based (fast-check) invariants extended to `PowerPool` and
+  `PowerRealtimeHub`.
+
+---
+
 ## What's new in v2.2.0
 
 Structured concurrency, a reusable buffer pool, async-local operation context,

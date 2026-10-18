@@ -36,3 +36,9 @@
 - `nowMs`/`monoMs`: clock state grouped into a single resolver object (B2-089); BigInt fallback cost documented (B2-090); default export pinned by test (B2-091).
 - `PowerHeartbeat`: `timeout: 0` disables the deadline check (B2-044).
 - Guides: `using`/`await using` disposal examples added to 19 helpers (E2-01).
+
+- Property-based (fast-check) invariants extended to `PowerPool` and `PowerRealtimeHub` (S2-10): worker-count bounds and non-negative queued counts.
+
+- E2-02: replaced `@type {any}` escape hatches with precise types in `powerSseAdapter` (subscribers now typed as `{ id, transport? }`).
+
+- E2-02: replaced `@type {any}` escape hatches with precise types in `powerSocketAdapter` (event handlers and `_handleMessage`/`_handleClose`/`_emitError`/`_invoke` params).

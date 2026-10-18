@@ -97,6 +97,24 @@ export class PowerPermitGate {
             })
           );
     this._waiters = new PowerQueue(POWER_QUEUE_INITIAL_CAPACITY);
+    // S2-11: FinalizationRegistry-based lease cleanup. If a caller drops a
+    // release callback without invoking it, the registry fires on GC and
+    // returns the permit, preventing a leaked lease from wedging the gate.
+    // Guarded for runtimes without FinalizationRegistry.
+    this._released = typeof WeakSet === 'function' ? new WeakSet() : null;
+    this._finalizers =
+      typeof FinalizationRegistry === 'function'
+        ? new FinalizationRegistry((held) => {
+            if (!held || !held.releaseFn) return;
+            if (this._released && this._released.has(held.releaseFn)) return;
+            if (this._released) this._released.add(held.releaseFn);
+            try {
+              this.release(held.weight);
+            } catch {
+              // release during GC must never throw
+            }
+          })
+        : null;
     /**
      * Capacity units that have been granted and not yet returned.
      *
@@ -374,11 +392,27 @@ export class PowerPermitGate {
 
   _makeRelease(weight = 1) {
     let released = false;
-    return () => {
+    const release = () => {
       if (released) return;
       released = true;
+      if (this._released) this._released.add(release);
+      if (this._finalizers) {
+        try {
+          this._finalizers.unregister(release);
+        } catch {
+          // unregister is best-effort; a missing token is harmless
+        }
+      }
       this.release(weight);
     };
+    if (this._finalizers) {
+      try {
+        this._finalizers.register(release, { weight, releaseFn: release }, release);
+      } catch {
+        // register is best-effort; GC cleanup is optional
+      }
+    }
+    return release;
   }
 
   /**
@@ -512,6 +546,8 @@ export class PowerPermitGate {
    */
   dispose() {
     this.reset();
+    this._finalizers = null;
+    this._released = null;
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.
     neutralise(this, 'reset');

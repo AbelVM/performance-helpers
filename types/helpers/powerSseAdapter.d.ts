@@ -8,11 +8,26 @@
  * @param {SseAdapterOptions} [options]
  */
 export function createSseAdapter(options?: SseAdapterOptions): {
-    send: (sub: object, frame: Uint8Array) => Promise<void>;
-    close: (sub: object) => void;
-    register: (sub: object) => void;
-    lastEventId: (sub: object) => string | null;
-    lastSentId: (sub: object) => number;
+    send: (sub: {
+        id: string;
+        transport?: any;
+    }, frame: Uint8Array) => Promise<void>;
+    close: (sub: {
+        id: string;
+        transport?: any;
+    }) => void;
+    register: (sub: {
+        id: string;
+        transport?: any;
+    }) => void;
+    lastEventId: (sub: {
+        id: string;
+        transport?: any;
+    }) => string | null;
+    lastSentId: (sub: {
+        id: string;
+        transport?: any;
+    }) => number;
     dispose: () => void;
     [Symbol.dispose]: () => void;
     [Symbol.asyncDispose]: () => Promise<void>;

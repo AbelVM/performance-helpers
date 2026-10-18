@@ -144,3 +144,14 @@ describe('PowerPermitGate', () => {
     expect(new PowerPermitGate({ capacity: 2 }).capacity).toBe(2);
   });
 });
+
+describe('PowerPermitGate FinalizationRegistry (S2-11)', () => {
+  it('drops the FinalizationRegistry on dispose', () => {
+    if (typeof FinalizationRegistry === 'undefined') return;
+    const gate = new PowerPermitGate({ capacity: 1 });
+    expect(gate._finalizers).not.toBeNull();
+    gate.dispose();
+    expect(gate._finalizers).toBeNull();
+    expect(gate._released).toBeNull();
+  });
+});

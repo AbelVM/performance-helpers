@@ -88,7 +88,7 @@ function frameToSseLine(frame, seq) {
  * because a caller supplying their own transport shape is not bound by Node's
  * normalisation.
  *
- * @param {any} sub
+ * @param {{ transport?: any }} sub
  * @returns {string|null}
  */
 function readLastEventId(sub) {
@@ -116,13 +116,13 @@ export function createSseAdapter(options = {}) {
   const subs = new Map();
 
   /**
-   * @param {object} sub
+   * @param {{ id: string; transport?: any }} sub
    * @param {Uint8Array} frame
    * @returns {Promise<void>}
    */
   async function send(sub, frame) {
-    const sseSub = subs.get(/** @type {any} */ (sub).id);
-    if (!sseSub || /** @type {any} */ (sseSub).closed) return;
+    const sseSub = subs.get(sub.id);
+    if (!sseSub || sseSub.closed) return;
 
     // AUD-025. Advance the per-subscriber sequence *before* writing, so the id
     // the client remembers is the id of the event it actually received. Starting
@@ -132,13 +132,13 @@ export function createSseAdapter(options = {}) {
     sseSub.seq += 1;
     const line = frameToSseLine(frame, sseSub.seq);
     try {
-      if (/** @type {any} */ (sseSub).writer) {
-        await /** @type {any} */ (sseSub).writer.write(line);
-      } else if (typeof (/** @type {any} */ (sub).transport?.write) === 'function') {
-        const ok = /** @type {any} */ (sub).transport.write(line);
-        if (ok === false && typeof (/** @type {any} */ (sub).transport?.once) === 'function') {
+      if (sseSub.writer) {
+        await sseSub.writer.write(line);
+      } else if (typeof sub.transport?.write === 'function') {
+        const ok = sub.transport.write(line);
+        if (ok === false && typeof sub.transport?.once === 'function') {
           await new Promise((resolve) => {
-            /** @type {any} */ (sub).transport.once('drain', resolve);
+            sub.transport.once('drain', resolve);
           });
         }
       }
@@ -149,22 +149,22 @@ export function createSseAdapter(options = {}) {
   }
 
   /**
-   * @param {object} sub
+   * @param {{ id: string; transport?: any }} sub
    */
   function close(sub) {
-    const sseSub = subs.get(/** @type {any} */ (sub).id);
-    if (!sseSub || /** @type {any} */ (sseSub).closed) return;
-    /** @type {any} */ (sseSub).closed = true;
+    const sseSub = subs.get(sub.id);
+    if (!sseSub || sseSub.closed) return;
+    sseSub.closed = true;
     try {
-      if (/** @type {any} */ (sseSub).writer) {
-        /** @type {any} */ (sseSub).writer.close().catch(() => {});
-      } else if (typeof (/** @type {any} */ (sub).transport?.end) === 'function') {
-        /** @type {any} */ (sub).transport.end();
+      if (sseSub.writer) {
+        sseSub.writer.close().catch(() => {});
+      } else if (typeof sub.transport?.end === 'function') {
+        sub.transport.end();
       }
     } catch {
       // ignore; subscriber stream is already closed
     }
-    subs.delete(/** @type {any} */ (sub).id);
+    subs.delete(sub.id);
   }
 
   /**
@@ -179,18 +179,17 @@ export function createSseAdapter(options = {}) {
    * the caller cannot know where the client got to, and the gap is unfixable from
    * above.
    *
-   * @param {object} sub
+   * @param {{ id: string; transport?: any }} sub
    * @returns {void}
    */
   function register(sub) {
-    if (subs.has(/** @type {any} */ (sub).id)) return;
+    if (subs.has(sub.id)) return;
     let writer = null;
     if (createResponse) {
       try {
         const response = createResponse(sub);
-        const r = /** @type {any} */ (response);
-        if (r && r.body) {
-          const body = /** @type {any} */ (r.body);
+        if (response && response.body) {
+          const body = /** @type {{ getWriter?: () => any }} */ (response.body);
           if (typeof body.getWriter === 'function') {
             writer = body.getWriter();
           }
@@ -199,11 +198,11 @@ export function createSseAdapter(options = {}) {
         if (onError) onError(error, sub);
         return;
       }
-    } else if (/** @type {any} */ (sub).transport) {
+    } else if (sub.transport) {
       writer = null;
     }
-    subs.set(/** @type {any} */ (sub).id, {
-      id: /** @type {any} */ (sub).id,
+    subs.set(sub.id, {
+      id: sub.id,
       writer,
       closed: false,
       seq: 0,
@@ -218,11 +217,11 @@ export function createSseAdapter(options = {}) {
    * means the client reconnected after a gap and is telling the server where it
    * got to; the caller replays from there.
    *
-   * @param {object} sub
+   * @param {{ id: string; transport?: any }} sub
    * @returns {string|null}
    */
   function lastEventId(sub) {
-    const sseSub = subs.get(/** @type {any} */ (sub).id);
+    const sseSub = subs.get(sub.id);
     return sseSub ? sseSub.lastEventId : null;
   }
 
@@ -233,11 +232,11 @@ export function createSseAdapter(options = {}) {
    * against where the *client* got to. The difference between the two is exactly
    * the size of the gap a reconnect has to replay.
    *
-   * @param {object} sub
+   * @param {{ id: string; transport?: any }} sub
    * @returns {number}
    */
   function lastSentId(sub) {
-    const sseSub = subs.get(/** @type {any} */ (sub).id);
+    const sseSub = subs.get(sub.id);
     return sseSub ? sseSub.seq : 0;
   }
 
@@ -249,7 +248,7 @@ export function createSseAdapter(options = {}) {
       } catch {
         // Ignore cleanup errors when closing SSE writer; they are non-fatal.
       }
-      subs.delete(/** @type {any} */ (sub).id);
+      subs.delete(sub.id);
     }
     subs.clear();
   }

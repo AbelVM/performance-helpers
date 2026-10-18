@@ -46,7 +46,13 @@ the hub detaches the subscriber.
 
 ##### sub
 
-`object`
+###### id
+
+`string`
+
+###### transport?
+
+`any`
 
 #### Returns
 
@@ -74,7 +80,13 @@ got to; the caller replays from there.
 
 ##### sub
 
-`object`
+###### id
+
+`string`
+
+###### transport?
+
+`any`
 
 #### Returns
 
@@ -94,7 +106,13 @@ the size of the gap a reconnect has to replay.
 
 ##### sub
 
-`object`
+###### id
+
+`string`
+
+###### transport?
+
+`any`
 
 #### Returns
 
@@ -119,7 +137,13 @@ above.
 
 ##### sub
 
-`object`
+###### id
+
+`string`
+
+###### transport?
+
+`any`
 
 #### Returns
 
@@ -133,7 +157,13 @@ above.
 
 ##### sub
 
-`object`
+###### id
+
+`string`
+
+###### transport?
+
+`any`
 
 ##### frame
 

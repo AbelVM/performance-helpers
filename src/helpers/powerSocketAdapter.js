@@ -672,14 +672,15 @@ export class PowerSocketAdapter {
       return;
     }
     if (this.kind === 'websocket') {
-      const onMessage = (/** @type {any} */ e) => this._handleMessage(e.data, false);
+      const onMessage = (/** @type {{ data?: unknown }} */ e) => this._handleMessage(e.data, false);
       const onOpen = () => {
         this._state = READY_STATE.OPEN;
         this._resetIdleTimer();
         this._invoke(this._onOpen, this);
       };
-      const onClose = (/** @type {any} */ e) => this._handleClose(e?.code ?? 1006, e?.reason ?? '');
-      const onError = (/** @type {any} */ e) => this._emitError(e);
+      const onClose = (/** @type {{ code?: number; reason?: string }} */ e) =>
+        this._handleClose(e?.code ?? 1006, e?.reason ?? '');
+      const onError = (/** @type {unknown} */ e) => this._emitError(e);
       this.socket.addEventListener('message', onMessage);
       this.socket.addEventListener('open', onOpen);
       this.socket.addEventListener('close', onClose);
@@ -695,16 +696,16 @@ export class PowerSocketAdapter {
     // Node `ws`: `message` carries `(data, isBinary)`, which is the detail that
     // makes the two models incompatible - an `EventTarget` handler receives
     // one event object, not a data/isBinary pair.
-    const onMessage = (/** @type {any} */ data, /** @type {any} */ isBinary) =>
+    const onMessage = (/** @type {unknown} */ data, /** @type {unknown} */ isBinary) =>
       this._handleMessage(data, Boolean(isBinary));
     const onOpen = () => {
       this._state = READY_STATE.OPEN;
       this._resetIdleTimer();
       this._invoke(this._onOpen, this);
     };
-    const onClose = (/** @type {any} */ code, /** @type {any} */ reason) =>
-      this._handleClose(code ?? 1006, reason?.toString?.() ?? '');
-    const onError = (/** @type {any} */ e) => this._emitError(e);
+    const onClose = (/** @type {unknown} */ code, /** @type {unknown} */ reason) =>
+      this._handleClose(code ?? 1006, reason == null ? '' : String(reason));
+    const onError = (/** @type {unknown} */ e) => this._emitError(e);
     // `ws` emits `pong` when a pong *arrives* and `ping` when a ping arrives, so
     // it is `pong` that answers our liveness probe. Listening for `ping` instead
     // would never fire on a server, whose sockets receive pings from every
@@ -800,7 +801,7 @@ export class PowerSocketAdapter {
   /**
    * @private
    */
-  _handleMessage(/** @type {any} */ data, /** @type {any} */ isBinary) {
+  _handleMessage(/** @type {unknown} */ data, /** @type {unknown} */ isBinary) {
     this._lastActivityAt = nowMs();
     this._resetIdleTimer();
     this._handlePong();
@@ -840,7 +841,7 @@ export class PowerSocketAdapter {
     this._pending += 1;
     let result;
     try {
-      result = this._onMessage({ data, isBinary, adapter: this });
+      result = this._onMessage({ data, isBinary: Boolean(isBinary), adapter: this });
     } catch (e) {
       this._pending -= 1;
       this._flushDrainWaiters();
@@ -868,7 +869,7 @@ export class PowerSocketAdapter {
   /**
    * @private
    */
-  _handleClose(/** @type {any} */ code, /** @type {any} */ reason) {
+  _handleClose(/** @type {unknown} */ code, /** @type {unknown} */ reason) {
     if (this._state === READY_STATE.CLOSED) return;
     this._state = READY_STATE.CLOSED;
     this._clearTimers();
@@ -1088,7 +1089,7 @@ export class PowerSocketAdapter {
   /**
    * @private
    */
-  _emitError(/** @type {any} */ err) {
+  _emitError(/** @type {unknown} */ err) {
     if (typeof this._onError === 'function') {
       try {
         this._onError(err, this);
@@ -1101,10 +1102,10 @@ export class PowerSocketAdapter {
   /**
    * @private
    */
-  _invoke(/** @type {any} */ fn, /** @type {any} */ arg) {
+  _invoke(/** @type {unknown} */ fn, /** @type {unknown} */ arg) {
     if (typeof fn !== 'function') return;
     try {
-      fn(arg);
+      /** @type {(a: unknown) => void} */ (fn)(arg);
     } catch (e) {
       this._emitError(e);
     }

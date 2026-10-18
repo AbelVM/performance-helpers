@@ -115,6 +115,16 @@
 
 ***
 
+### \_finalizers
+
+> **\_finalizers**: `FinalizationRegistry`\<`any`\> \| `null`
+
+#### Inherited from
+
+[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_finalizers`](../../powerPermitGate/classes/PowerPermitGate.md#_finalizers)
+
+***
+
 ### \_held
 
 > `protected` **\_held**: `number`
@@ -188,6 +198,16 @@ a subclass reading a base field is precisely what the tag describes.
 ### \_refillTimer
 
 > **\_refillTimer**: `any`
+
+***
+
+### \_released
+
+> **\_released**: `WeakSet`\<`WeakKey`\> \| `null`
+
+#### Inherited from
+
+[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`_released`](../../powerPermitGate/classes/PowerPermitGate.md#_released)
 
 ***
 

@@ -50,6 +50,12 @@
 
 ***
 
+### \_finalizers
+
+> **\_finalizers**: `FinalizationRegistry`\<`any`\> \| `null`
+
+***
+
 ### \_held
 
 > `protected` **\_held**: `number`
@@ -79,6 +85,12 @@ a subclass reading a base field is precisely what the tag describes.
 ### \_queueCapacity
 
 > **\_queueCapacity**: `number`
+
+***
+
+### \_released
+
+> **\_released**: `WeakSet`\<`WeakKey`\> \| `null`
 
 ***
 
