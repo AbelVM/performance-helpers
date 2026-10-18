@@ -49,7 +49,7 @@ you use the library.
 
 ### Type safety
 
-- E2-02: replaced `@type {any}` escape hatches with precise types in
+- Replaced `@type {any}` escape hatches with precise types in
   `powerSseAdapter` and `powerSocketAdapter`.
 
 ### Measurement
