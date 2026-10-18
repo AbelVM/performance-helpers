@@ -22,7 +22,11 @@ worker pool that detects and replaces a dead worker, and a cache admission filte
 that finally adapts to a changing working set. v2.2 adds OTLP export and trace
 context propagation, WebTransport datagrams and QUIC stream priority, WebSocket
 message queueing while disconnected, chunker backpressure, cron timezones,
-datagram fragmentation, servo auto-tuning, and a worker health check. v2.0 added
+datagram fragmentation, servo auto-tuning, a worker health check, structured
+concurrency (PowerTaskGroup), a reusable buffer pool (PowerBufferPool),
+async-local operation context, PowerCache.load() prefill, PowerTTLMap bounded
+memory, PowerRealtimeHub presence, PowerDefer cancellation, and HyperLogLog
+sparse counting. v2.0 added
 versioned worker messaging, realtime transports, retry budgets, adaptive
 concurrency, event-loop monitoring, richer observability, and safer resource
 lifecycles. Read the [what’s new guide](assets/whatsnew2.0.md) for both.
@@ -168,7 +172,7 @@ The transport helpers split into two roles: **client-side** helpers dial out and
 
 ## Utils
 
-- [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
+- [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer), plus `PowerBufferPool` — a reusable `Uint8Array` buffer pool with size buckets, `acquire(size)`/`release(buf)`, per-bucket and total caps, zeroing on reuse, and `using`/`await using` support.
 - [PowerDefer: Deferred promise primitive](guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
 - [PowerPermitGate: Permit queue helper](guides/powerPermitGate.md). Low-level concurrency gate that manages permits and FIFO waiters for building semaphore or backpressure primitives.
 - [PowerScheduler: Work coalescing scheduler](guides/powerScheduler.md). Lightweight scheduler for batching deferred work into a single microtask or macrotask flush.
