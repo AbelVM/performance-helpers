@@ -39,7 +39,12 @@ export { detectWebTransportSupport } from './utils/webtransport.js';
 export { PowerCircuit } from './helpers/powerCircuit.js';
 export { PowerCron } from './helpers/powerCron.js';
 export { PowerRetry, PowerRetryBudget } from './helpers/powerRetry.js';
-export { createOperationContext } from './helpers/powerOperationContext.js';
+export {
+  createOperationContext,
+  runOperationContext,
+  getOperationContext,
+  withOperationContext,
+} from './helpers/powerOperationContext.js';
 export { PowerDeadline } from './helpers/powerDeadline.js';
 export { PowerHistogram } from './helpers/powerHistogram.js';
 export { PowerApdex } from './helpers/powerApdex.js';

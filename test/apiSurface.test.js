@@ -119,6 +119,7 @@ describe('API surface', () => {
         'collectTransferables',
         'createBroadcastBus',
         'createOperationContext',
+        'getOperationContext',
         'getResourcePressure',
         'createFrameDecoder',
         'createObservation',
@@ -148,10 +149,12 @@ describe('API surface', () => {
         'nowMs',
         'o2b',
         'o2u8',
+        'runOperationContext',
         'preloadNode',
         'selectCodec',
         'simpleArgsKey',
         'u82o',
+        'withOperationContext',
       ].sort()
     );
   });

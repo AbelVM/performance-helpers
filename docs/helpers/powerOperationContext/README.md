@@ -9,3 +9,6 @@
 ## Functions
 
 - [createOperationContext](functions/createOperationContext.md)
+- [getOperationContext](functions/getOperationContext.md)
+- [runOperationContext](functions/runOperationContext.md)
+- [withOperationContext](functions/withOperationContext.md)

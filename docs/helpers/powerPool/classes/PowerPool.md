@@ -921,7 +921,7 @@ Add an event listener for pool events. Supported types: 'message', 'error', 'mes
 
 ##### type
 
-`"message"` \| `"error"` \| `"messageerror"` \| `"idle"`
+`"message"` \| `"error"` \| `"messageerror"` \| `"idle"` \| `"drain:progress"`
 
 ##### cb
 
@@ -1063,6 +1063,12 @@ detaches on *every* exit path.
 #### Parameters
 
 ##### options?
+
+###### onProgress?
+
+(`progress`) => `void`
+
+Called with progress updates while draining.
 
 ###### signal?
 
@@ -1305,7 +1311,7 @@ Remove a previously added event listener.
 
 ##### type
 
-`"message"` \| `"error"` \| `"messageerror"` \| `"idle"`
+`"message"` \| `"error"` \| `"messageerror"` \| `"idle"` \| `"drain:progress"`
 
 ##### cb
 

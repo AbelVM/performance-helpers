@@ -156,6 +156,12 @@ Re-exports [frameTransferList](../powerMessageCodec/functions/frameTransferList.
 
 ***
 
+### getOperationContext
+
+Re-exports [getOperationContext](../helpers/powerOperationContext/functions/getOperationContext.md)
+
+***
+
 ### getResourcePressure
 
 Re-exports [getResourcePressure](../helpers/powerBrownout/functions/getResourcePressure.md)
@@ -576,6 +582,12 @@ Re-exports [READY_STATE](../helpers/constants/variables/READY_STATE.md)
 
 ***
 
+### runOperationContext
+
+Re-exports [runOperationContext](../helpers/powerOperationContext/functions/runOperationContext.md)
+
+***
+
 ### selectCodec
 
 Re-exports [selectCodec](../powerMessageCodec/functions/selectCodec.md)
@@ -597,3 +609,9 @@ Re-exports [toSeries](../helpers/metrics/functions/toSeries.md)
 ### u82o
 
 Re-exports [u82o](../helpers/powerBuffer/functions/u82o.md)
+
+***
+
+### withOperationContext
+
+Re-exports [withOperationContext](../helpers/powerOperationContext/functions/withOperationContext.md)

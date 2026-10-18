@@ -199,6 +199,8 @@ const CROSS_CLASS = new Set([
   'canUseNativeClone',
   'isRawPayload',
   'frameTransferList',
+  // PowerOperationContext standalone function, referenced from powerOperationContext.md.
+  'getOperationContext',
   // PowerPool, referenced from powerChunking and powerRealtimeHub.
   'postMessageBatch',
   'prepareBuffers',

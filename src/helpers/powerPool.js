@@ -5138,6 +5138,18 @@ export class PowerPool {
       // mark non-idle
       this._isIdle = false;
     }
+    // R-09: progress events for in-flight drains. Only emit while at least one
+    // caller is waiting on `drain()`, so an idle pool with no waiters stays quiet.
+    if (!allIdle && this._drainWaiters > 0) {
+      try {
+        this._bus.emit('drain:progress', {
+          activeTasks: this._activeTasks,
+          queueLength: this.queue.length,
+        });
+      } catch (e) {
+        /* best-effort */
+      }
+    }
   }
 
   /**
@@ -5416,10 +5428,12 @@ export class PowerPool {
    * @param {object} [options]
    * @param {AbortSignal} [options.signal] - Abandons the wait when aborted.
    * @param {number} [options.timeout] - Abandons the wait after this many ms.
+   * @param {(progress:{activeTasks:number,queueLength:number})=>void} [options.onProgress] - Called with progress updates while draining.
    * @returns {Promise<object>} Promise resolving to `getStats()`.
    */
   drain(options = {}) {
     const signal = options?.signal ?? null;
+    const onProgress = typeof options?.onProgress === 'function' ? options.onProgress : null;
     const rawTimeout = Number(options?.timeout);
     // A non-finite or non-positive `timeout` means "no timeout", matching every
     // other timeout option in the library.
@@ -5468,6 +5482,14 @@ export class PowerPool {
           this.removeEventListener('idle', onIdle);
         } catch (e) {
           this._debugLog?.(e, 'drain: removeEventListener failed');
+        }
+        const oph = release.__onProgressHandler;
+        if (oph) {
+          try {
+            this.removeEventListener('drain:progress', oph);
+          } catch (e) {
+            /* progress listener removal is best-effort during teardown */
+          }
         }
         // **The abort listener too.** `{ once: true }` auto-removes a listener
         // only when it *fires*; when the wait ends via `idle` or `timeout` the
@@ -5523,12 +5545,26 @@ export class PowerPool {
       }
       if (signal) signal.addEventListener('abort', onAbort, { once: true });
       this.addEventListener('idle', onIdle);
+      /** @type {((ev:any)=>void)|null} */
+      let onProgressHandler = null;
+      if (onProgress) {
+        onProgressHandler = (ev) => {
+          try {
+            onProgress({ activeTasks: ev.activeTasks, queueLength: ev.queueLength });
+          } catch (e) {
+            /* progress callback errors must not break drain */
+          }
+        };
+        this.addEventListener('drain:progress', onProgressHandler);
+      }
+      // store for cleanup
+      release.__onProgressHandler = onProgressHandler;
     });
   }
 
   /**
    * Add an event listener for pool events. Supported types: 'message', 'error', 'messageerror', 'idle'.
-   * @param {'message'|'error'|'messageerror'|'idle'} type
+   * @param {'message'|'error'|'messageerror'|'idle'|'drain:progress'} type
    * @param {Function} cb
    */
   addEventListener(type, cb) {
@@ -5553,7 +5589,7 @@ export class PowerPool {
 
   /**
    * Remove a previously added event listener.
-   * @param {'message'|'error'|'messageerror'|'idle'} type
+   * @param {'message'|'error'|'messageerror'|'idle'|'drain:progress'} type
    * @param {Function} cb
    */
   removeEventListener(type, cb) {

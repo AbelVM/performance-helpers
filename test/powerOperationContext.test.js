@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { createOperationContext } from '../src/index.js';
+import {
+  createOperationContext,
+  runOperationContext,
+  getOperationContext,
+  withOperationContext,
+} from '../src/index.js';
 
 describe('createOperationContext', () => {
   it('creates a frozen explicit coordination object', () => {
@@ -33,5 +38,55 @@ describe('createOperationContext', () => {
     expect(context.deadlineAt).toBeGreaterThanOrEqual(before + 100);
     expect(context.retryBudget).toBe(retryBudget);
     expect(context.priority).toBe(0);
+  });
+});
+
+describe('runOperationContext / getOperationContext / withOperationContext', () => {
+  it('runOperationContext returns fn result and binds context', async () => {
+    const ctx = createOperationContext({ correlationId: 'r-1' });
+    const result = runOperationContext(ctx, () => {
+      expect(getOperationContext()).toBe(ctx);
+      return 42;
+    });
+    expect(result).toBe(42);
+    expect(getOperationContext()).toBeUndefined();
+  });
+
+  it('propagates through async chains', async () => {
+    const ctx = createOperationContext({ correlationId: 'async-1' });
+    await runOperationContext(ctx, async () => {
+      await new Promise((r) => setTimeout(r, 1));
+      expect(getOperationContext()?.correlationId).toBe('async-1');
+    });
+    expect(getOperationContext()).toBeUndefined();
+  });
+
+  it('nested calls shadow outer context', async () => {
+    const outer = createOperationContext({ correlationId: 'outer' });
+    const inner = createOperationContext({ correlationId: 'inner' });
+    await runOperationContext(outer, async () => {
+      expect(getOperationContext()?.correlationId).toBe('outer');
+      runOperationContext(inner, () => {
+        expect(getOperationContext()?.correlationId).toBe('inner');
+      });
+      expect(getOperationContext()?.correlationId).toBe('outer');
+    });
+  });
+
+  it('withOperationContext creates and runs', async () => {
+    const result = await withOperationContext({ correlationId: 'w-1' }, async () => {
+      expect(getOperationContext()?.correlationId).toBe('w-1');
+      return 'ok';
+    });
+    expect(result).toBe('ok');
+  });
+
+  it('throws TypeError when fn is not a function', async () => {
+    const ctx = createOperationContext({});
+    expect(() => runOperationContext(ctx, 5)).toThrow(TypeError);
+  });
+
+  it('returns undefined outside any context', async () => {
+    expect(getOperationContext()).toBeUndefined();
   });
 });

@@ -16,7 +16,6 @@ export { PowerTTLMap } from "./helpers/powerTTLMap.js";
 export { detectWebTransportSupport } from "./utils/webtransport.js";
 export { PowerCircuit } from "./helpers/powerCircuit.js";
 export { PowerCron } from "./helpers/powerCron.js";
-export { createOperationContext } from "./helpers/powerOperationContext.js";
 export { PowerDeadline } from "./helpers/powerDeadline.js";
 export { PowerHistogram } from "./helpers/powerHistogram.js";
 export { PowerApdex } from "./helpers/powerApdex.js";
@@ -51,6 +50,7 @@ export { MetricsCollector, defaultMetrics, toSeries, createObservation, diffObse
 export { normalizeError, formatErrorObj } from "./utils/errors.js";
 export { nowMs, monoMs, measureSync, measureAsync } from "./utils/now.js";
 export { PowerRetry, PowerRetryBudget } from "./helpers/powerRetry.js";
+export { createOperationContext, runOperationContext, getOperationContext, withOperationContext } from "./helpers/powerOperationContext.js";
 export { PowerBrownout, getResourcePressure } from "./helpers/powerBrownout.js";
 export { PowerSocketAdapter, detectSocketKind, READY_STATE } from "./helpers/powerSocketAdapter.js";
 export { PowerMessageCodec, MESSAGE_PROTOCOL_VERSION, MESSAGE_CODECS, CODECS, HEADER_BYTES, encodeMessage, decodeMessage, createFrameDecoder, frameEncodedJson, encodeNative, canUseNativeClone, selectCodec, isRawPayload, frameTransferList, NATIVE_ENVELOPE_KEY, NATIVE_PROTOCOL_VERSION, isNativeEnvelope, isCapabilityAnnouncement, encodeNativeEnvelope, announceCapabilities, collectTransferables, decodeInbound } from "./helpers/powerMessageCodec.js";

@@ -43,3 +43,36 @@ Keep the total deadline outside retry, pass the same retry budget through every
 downstream call, and never convert caller cancellation into a retryable error.
 The exact adapter remains application-owned because only the caller knows which
 operation is idempotent and which helper owns admission.
+
+## Async-local propagation (S-37)
+
+When threading a context through every call is impractical, bind it to the
+current async execution with `runOperationContext` / `getOperationContext`:
+
+```js
+import {
+  createOperationContext,
+  runOperationContext,
+  getOperationContext,
+  withOperationContext,
+} from 'performance-helpers';
+
+const ctx = createOperationContext({ correlationId: 'request-42', deadlineMs: 250 });
+
+await runOperationContext(ctx, async () => {
+  // Any code in this async chain can read the context:
+  console.log(getOperationContext()?.correlationId); // 'request-42'
+  await doWork();
+});
+
+// Or create + run in one step:
+await withOperationContext({ correlationId: 'request-7' }, async () => {
+  await doWork();
+});
+```
+
+Propagation uses `node:async_hooks` `AsyncLocalStorage` when available (Node).
+In runtimes without it (browsers, stripped environments) the helpers degrade
+to running the function directly and `getOperationContext()` returns `undefined`,
+so callers must still pass the context explicitly there. Nested calls shadow
+the outer context.

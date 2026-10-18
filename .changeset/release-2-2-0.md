@@ -2,4 +2,5 @@
 'performance-helpers': minor
 ---
 
-Continue the review_beam.md implementation pass: close verified review rows (PowerDefer.cancel + cancelled getter, PowerEventLoopMonitor long-task detection via PerformanceObserver with longTaskThreshold option, asyncDispose symmetry for MetricsCollector/PowerMemoizer/WorkerAgnostic, PowerPriorityQueue._grow hole fill, collectTransferables fast-path for flat payloads, PowerCircuit configurable half-open probe count via halfOpenProbes, lazy defaultMetrics allocation via Proxy), consolidate the review document, and regenerate types/docs.
+- `PowerOperationContext`: async-local propagation via `runOperationContext` / `getOperationContext` / `withOperationContext` (S-37), using `node:async_hooks` `AsyncLocalStorage` with a browser fallback.
+- `PowerPool.drain()`: optional `onProgress` callback + `drain:progress` events reporting `{ activeTasks, queueLength }` (R-09).

@@ -1230,24 +1230,29 @@ export class PowerPool {
      * @param {object} [options]
      * @param {AbortSignal} [options.signal] - Abandons the wait when aborted.
      * @param {number} [options.timeout] - Abandons the wait after this many ms.
+     * @param {(progress:{activeTasks:number,queueLength:number})=>void} [options.onProgress] - Called with progress updates while draining.
      * @returns {Promise<object>} Promise resolving to `getStats()`.
      */
     drain(options?: {
         signal?: AbortSignal | undefined;
         timeout?: number | undefined;
+        onProgress?: ((progress: {
+            activeTasks: number;
+            queueLength: number;
+        }) => void) | undefined;
     }): Promise<object>;
     /**
      * Add an event listener for pool events. Supported types: 'message', 'error', 'messageerror', 'idle'.
-     * @param {'message'|'error'|'messageerror'|'idle'} type
+     * @param {'message'|'error'|'messageerror'|'idle'|'drain:progress'} type
      * @param {Function} cb
      */
-    addEventListener(type: "message" | "error" | "messageerror" | "idle", cb: Function): void;
+    addEventListener(type: "message" | "error" | "messageerror" | "idle" | "drain:progress", cb: Function): void;
     /**
      * Remove a previously added event listener.
-     * @param {'message'|'error'|'messageerror'|'idle'} type
+     * @param {'message'|'error'|'messageerror'|'idle'|'drain:progress'} type
      * @param {Function} cb
      */
-    removeEventListener(type: "message" | "error" | "messageerror" | "idle", cb: Function): void;
+    removeEventListener(type: "message" | "error" | "messageerror" | "idle" | "drain:progress", cb: Function): void;
     set onresize(cb: Function | null);
     /**
      * onresize handler called when the pool is resized and workers are terminated/added.
