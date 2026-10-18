@@ -13,3 +13,5 @@
 - `PowerRealtimeHub`: `presence(topic?)` / `getPresence(topic?)` alias returning a snapshot array of `{ id, topic, transport }` for live subscribers, optionally filtered by topic (S-19).
 
 - Status reconciliation (pass 3): P-10 and S-24 confirmed already implemented.
+
+- `PowerCache`: `load(snapshot)` prefill API accepting `[key, value]`, `[key, value, { ttl, weight }]`, `{ key, value, ttl?, weight? }` and `Map` entries; routes through `set()` so admission policy, TTL and weight apply; returns accepted count (M-05 / S-11).

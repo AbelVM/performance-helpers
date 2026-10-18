@@ -56,6 +56,8 @@ than entry count.
 
 - `clear()` — Remove all entries and return nodes to the internal pool (no return value).
 
+- `load(snapshot)` — **New in 2.2.** Prefill the cache from any iterable of entries (`[key, value]`, `[key, value, { ttl, weight }]`, `{ key, value, ttl?, weight? }`, or `Map` entries). Entries go through `set()`, so admission policy, TTL and weight all apply. Returns the number of entries accepted.
+
 - `cleanupExpiredUpTo(maxScan = Infinity)` — Scan up to `maxScan` nodes for expired entries and remove them; returns the number of nodes scanned in this pass.
 
 - `startCleanup(intervalOrOptions)` — Start a periodic, non-blocking cleanup loop. Accepts either a numeric interval (ms) or `{ interval, maxCleanupPerTick }` options.

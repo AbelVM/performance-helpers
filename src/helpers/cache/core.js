@@ -2906,9 +2906,49 @@ export class PowerCache {
   }
 
   /**
-   * Remove expired entries by scanning from least-recently used to most.
-   * @returns {void}
+   * Prefill the cache from a snapshot.
+   *
+   * Accepts any iterable of entries. Each entry may be:
+   *   - a two-or-three element array `[key, value]` or `[key, value, { ttl, weight }]`,
+   *   - an object `{ key, value, ttl?, weight? }`,
+   *   - a `Map` entry (which is a two-element array).
+   *
+   * Entries are inserted via `set()`, so admission policy, TTL and weight all
+   * apply. Returns the number of entries accepted.
+   *
+   * @param {Iterable<any>} snapshot
+   * @returns {number}
    */
+  load(snapshot) {
+    if (snapshot == null) return 0;
+    let accepted = 0;
+    for (const entry of snapshot) {
+      let key;
+      let value;
+      let opts = /** @type {any} */ ({});
+      if (Array.isArray(entry)) {
+        key = entry[0];
+        value = entry[1];
+        if (entry.length > 2 && entry[2] && typeof entry[2] === 'object') opts = entry[2];
+      } else if (entry && typeof entry === 'object') {
+        if ('key' in entry) {
+          key = entry.key;
+          value = entry.value;
+          if (typeof entry.ttl !== 'undefined') opts.ttl = entry.ttl;
+          if (typeof entry.weight !== 'undefined') opts.weight = entry.weight;
+        } else {
+          // Treat as a single key/value pair object? Skip unknown shapes.
+          continue;
+        }
+      } else {
+        continue;
+      }
+      const ok = this.set(key, value, opts);
+      if (ok !== false) accepted += 1;
+    }
+    return accepted;
+  }
+
   /**
    * @returns {number} How many expired entries the sweep removed.
    */
