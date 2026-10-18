@@ -49,13 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - E2-02: replaced `@type {any}` escape hatches with precise types in `powerSseAdapter` and `powerSocketAdapter`.
 - Guides: `using`/`await using` disposal examples; documented distinction between `PowerFlowControl` and `PowerFlowController` (B2-057, S2-07).
 
-### Fixed
-
-- Status reconciliation: S2-01 (HLL++ bias tables) confirmed rejected by measurement; S2-02, S2-09, S2-12 confirmed already implemented.
-
 ---
 
-## [2.2.0] - Unreleased
+## [2.2.0] - 2026-10-18
 
 ### Added
 
@@ -82,10 +78,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PowerEventLoopMonitor`: `longTaskThreshold` option + `PerformanceObserver` long-task detection (S-34).
 - `PowerCircuit`: configurable `halfOpenProbes` for half-open trial calls (R-10).
 - `PowerHeartbeat`: `keepProcessAlive`/unref support so the timer does not keep the process alive by default (BEAM-001).
-
-### Changed
-
-- Status reconciliation (pass 3): P-10 and S-24 confirmed already implemented.
 
 ## [2.1.0] - 2026-10-13
 
