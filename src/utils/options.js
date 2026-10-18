@@ -378,8 +378,8 @@ export function assertKnownOptions(options, known, className) {
     if (near) parts.push(`Did you mean \`${near}\`?`);
     parts.push(`Accepted options: ${[...allowed].sort().join(', ')}.`);
     const err = new TypeError(parts.join(' '));
-    /** @type {any} */ (err).code = 'ERR_UNKNOWN_OPTION';
-    /** @type {any} */ (err).option = key;
+    /** @type {TypeError & {code: string}} */ (err).code = 'ERR_UNKNOWN_OPTION';
+    /** @type {TypeError & {option: string}} */ (err).option = key;
     throw err;
   }
 }

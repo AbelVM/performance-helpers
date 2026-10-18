@@ -104,7 +104,7 @@ setInterval(() => {
 
 ### \_longTaskObserver
 
-> **\_longTaskObserver**: `any`
+> **\_longTaskObserver**: `PerformanceObserver` \| `null`
 
 ***
 

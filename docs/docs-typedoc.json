@@ -26286,8 +26286,17 @@
 							"kind": 1024,
 							"flags": {},
 							"type": {
-								"type": "intrinsic",
-								"name": "any"
+								"type": "union",
+								"types": [
+									{
+										"type": "intrinsic",
+										"name": "number"
+									},
+									{
+										"type": "literal",
+										"value": null
+									}
+								]
 							}
 						},
 						{
@@ -32673,8 +32682,23 @@
 							"kind": 1024,
 							"flags": {},
 							"type": {
-								"type": "intrinsic",
-								"name": "any"
+								"type": "union",
+								"types": [
+									{
+										"type": "reference",
+										"target": {
+											"packageName": "typescript",
+											"packagePath": "lib/lib.dom.d.ts",
+											"qualifiedName": "PerformanceObserver"
+										},
+										"name": "PerformanceObserver",
+										"package": "typescript"
+									},
+									{
+										"type": "literal",
+										"value": null
+									}
+								]
 							}
 						},
 						{
@@ -38828,8 +38852,17 @@
 													"kind": 1024,
 													"flags": {},
 													"type": {
-														"type": "intrinsic",
-														"name": "number"
+														"type": "union",
+														"types": [
+															{
+																"type": "intrinsic",
+																"name": "number"
+															},
+															{
+																"type": "literal",
+																"value": null
+															}
+														]
 													}
 												},
 												{
@@ -38839,8 +38872,17 @@
 													"kind": 1024,
 													"flags": {},
 													"type": {
-														"type": "intrinsic",
-														"name": "number"
+														"type": "union",
+														"types": [
+															{
+																"type": "intrinsic",
+																"name": "number"
+															},
+															{
+																"type": "literal",
+																"value": null
+															}
+														]
 													}
 												},
 												{

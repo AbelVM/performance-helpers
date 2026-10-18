@@ -13,7 +13,7 @@
  *
  * @type {{isError?: (value: unknown) => value is Error}}
  */
-const ErrorCtor = /** @type {any} */ (Error);
+const ErrorCtor = /** @type {{isError?: (value: unknown) => value is Error}} */ (Error);
 
 /**
  * @type {(value: unknown) => value is Error}
@@ -140,7 +140,7 @@ export function formatErrorObj(errObj) {
 export function queueFullError(className, queueCapacity) {
   const err = new Error(`${className} queue is full`);
   /** @type {Error & {code: 'ERR_QUEUE_FULL', queueCapacity: number}} */
-  const typed = /** @type {any} */ (err);
+  const typed = /** @type {Error & {code: 'ERR_QUEUE_FULL', queueCapacity: number}} */ (err);
   typed.code = 'ERR_QUEUE_FULL';
   typed.queueCapacity = queueCapacity;
   return typed;
@@ -178,7 +178,9 @@ export function oversizedFrameError(className, size, limit) {
       'payload at the peer that produces it.'
   );
   /** @type {Error & {code: 'ERR_FRAME_TOO_LARGE', size: number, limit: number}} */
-  const typed = /** @type {any} */ (err);
+  const typed = /** @type {Error & {code: 'ERR_FRAME_TOO_LARGE', size: number, limit: number}} */ (
+    err
+  );
   typed.code = 'ERR_FRAME_TOO_LARGE';
   typed.size = size;
   typed.limit = limit;
@@ -228,7 +230,9 @@ export function unsendableFrameError(className, size, limit) {
       'Bound the payload at the peer that produces it.'
   );
   /** @type {Error & {code: 'ERR_FRAME_TOO_LARGE', size: number, limit: number}} */
-  const typed = /** @type {any} */ (err);
+  const typed = /** @type {Error & {code: 'ERR_FRAME_TOO_LARGE', size: number, limit: number}} */ (
+    err
+  );
   typed.code = 'ERR_FRAME_TOO_LARGE';
   typed.size = size;
   typed.limit = limit;

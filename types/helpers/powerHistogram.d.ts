@@ -252,14 +252,14 @@ export class PowerHistogram {
     /**
      * Serializable representation, suitable for merging elsewhere or shipping to
      * a metrics backend.
-     * @returns {{relativeAccuracy:number, count:number, sum:number, min:number, max:number, zeroCount:number, infCount:number, outOfRangeCount:number, belowRangeCount:number, buckets:Array<[number, number]>}}
+     * @returns {{relativeAccuracy:number, count:number, sum:number, min:number|null, max:number|null, zeroCount:number, infCount:number, outOfRangeCount:number, belowRangeCount:number, buckets:Array<[number, number]>}}
      */
     toJSON(): {
         relativeAccuracy: number;
         count: number;
         sum: number;
-        min: number;
-        max: number;
+        min: number | null;
+        max: number | null;
         zeroCount: number;
         infCount: number;
         outOfRangeCount: number;

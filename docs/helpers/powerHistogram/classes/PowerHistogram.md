@@ -489,11 +489,11 @@ a metrics backend.
 
 ##### max
 
-> **max**: `number`
+> **max**: `number` \| `null`
 
 ##### min
 
-> **min**: `number`
+> **min**: `number` \| `null`
 
 ##### outOfRangeCount
 

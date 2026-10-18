@@ -28,7 +28,7 @@ export class PowerPriorityQueue {
    * @param {number | {initialCapacity?: number}} [initialCapacity]
    */
   constructor(initialCapacity = POWER_QUEUE_INITIAL_CAPACITY) {
-    /** @type {any} */ let capInput = initialCapacity;
+    /** @type {number | {initialCapacity?: number} | undefined} */ let capInput = initialCapacity;
     // Validate **any** object, not only one carrying `initialCapacity`. The
     // guard used to be inside the `'initialCapacity' in capInput` branch, so
     // `new PowerPriorityQueue({ initialCap: 4 })` skipped it entirely and fell

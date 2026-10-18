@@ -121,7 +121,7 @@ export class PowerEventLoopMonitor {
     this._handle = null;
     this._longTaskThreshold =
       Number.isFinite(longTaskThreshold) && longTaskThreshold > 0 ? longTaskThreshold : 50;
-    /** @type {any} */
+    /** @type {PerformanceObserver | null} */
     this._longTaskObserver = null;
 
     /**

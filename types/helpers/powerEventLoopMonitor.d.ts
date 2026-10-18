@@ -44,7 +44,7 @@ export class PowerEventLoopMonitor {
     intervalMs: number;
     /** @type {?function(number):void} */
     /** @type {boolean} */
-    /** @type {any} */
+    /** @type {PerformanceObserver | null} */
     /**
      * Resolves once the Node `perf_hooks` lookup has settled, if it was
      * attempted. Never rejects: a runtime without it simply leaves

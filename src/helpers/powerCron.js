@@ -162,7 +162,7 @@ export class PowerCron {
     }
     this._timezone = typeof tz === 'string' && tz !== '' ? tz : null;
 
-    /** @type {any} */
+    /** @type {ReturnType<typeof setTimeout> | null} */
     this._timer = null;
     this._running = false;
     /** Absolute timestamp the next fire is aimed at. */

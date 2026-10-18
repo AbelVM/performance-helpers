@@ -166,7 +166,7 @@ Milliseconds since epoch (floating point for higher resolution).
 
 ### \_timer
 
-> **\_timer**: `any`
+> **\_timer**: `number` \| `null`
 
 ***
 

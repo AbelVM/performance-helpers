@@ -79,7 +79,7 @@ import {
  */
 function isHistogramSketch(v) {
   if (!v || typeof v !== 'object') return false;
-  const s = /** @type {any} */ (v);
+  const s = /** @type {Record<string, unknown>} */ (v);
   const instanceShape =
     typeof s._alpha === 'number' &&
     typeof s._count === 'number' &&
@@ -112,7 +112,7 @@ function isHistogramSketch(v) {
  */
 export function isPowerHistogram(v) {
   if (!v || typeof v !== 'object') return false;
-  const s = /** @type {any} */ (v);
+  const s = /** @type {Record<string, unknown>} */ (v);
   return (
     typeof s._alpha === 'number' &&
     typeof s._count === 'number' &&
@@ -793,7 +793,7 @@ export class PowerHistogram {
   snapshot() {
     const sorted = this._sortedIndexList();
     const counts = [this._zeroCount];
-    for (let i = 0; i < sorted.length; i += 1) counts.push(this._buckets.get(sorted[i]));
+    for (let i = 0; i < sorted.length; i += 1) counts.push(this._buckets.get(sorted[i]) ?? 0);
     // The +Infinity bucket is *appended*. It used to be written into the last
     // slot, which silently clobbered a real bucket whenever the sketch held
     // both a +Inf and an indexed value.
@@ -804,7 +804,7 @@ export class PowerHistogram {
   /**
    * Serializable representation, suitable for merging elsewhere or shipping to
    * a metrics backend.
-   * @returns {{relativeAccuracy:number, count:number, sum:number, min:number, max:number, zeroCount:number, infCount:number, outOfRangeCount:number, belowRangeCount:number, buckets:Array<[number, number]>}}
+   * @returns {{relativeAccuracy:number, count:number, sum:number, min:number|null, max:number|null, zeroCount:number, infCount:number, outOfRangeCount:number, belowRangeCount:number, buckets:Array<[number, number]>}}
    */
   toJSON() {
     return {

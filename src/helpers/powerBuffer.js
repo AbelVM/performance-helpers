@@ -157,7 +157,7 @@ export function isSharedArrayBuffer(buf) {
   if (Object.prototype.toString.call(buf) !== '[object SharedArrayBuffer]') return false;
   try {
     return (
-      typeof Reflect.get(SharedArrayBuffer.prototype, 'byteLength', /** @type {any} */ (buf)) ===
+      typeof Reflect.get(SharedArrayBuffer.prototype, 'byteLength', /** @type {object} */ (buf)) ===
       'number'
     );
   } catch {
@@ -222,7 +222,7 @@ export function isDate(value) {
   if (value === null || typeof value !== 'object') return false;
   if (Object.prototype.toString.call(value) !== '[object Date]') return false;
   try {
-    Date.prototype.getTime.call(/** @type {any} */ (value));
+    Date.prototype.getTime.call(/** @type {object} */ (value));
     return true;
   } catch {
     return false;

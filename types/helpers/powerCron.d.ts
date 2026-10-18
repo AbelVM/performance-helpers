@@ -87,7 +87,7 @@ export class PowerCron {
      * @param {PowerCronOptions} [options]
      */
     constructor(task: () => any, options?: PowerCronOptions);
-    /** @type {any} */
+    /** @type {ReturnType<typeof setTimeout> | null} */
     /** Absolute timestamp the next fire is aimed at. */
     /**
      * Times the task was invoked. Exposed as `fireCount` so a caller can count

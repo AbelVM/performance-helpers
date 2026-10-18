@@ -80,7 +80,7 @@ export class PowerSequencer {
    */
   constructor(options = {}) {
     /** @type {PowerSequencerOptions} */
-    let opts = /** @type {any} */ (options);
+    let opts = /** @type {PowerSequencerOptions} */ (options);
     if (typeof options === 'number') {
       opts = { windowSize: options };
     }

@@ -29,7 +29,9 @@
  *   in browsers). Usable with `clearTimeout`.
  */
 export function setSafeTimeout(fn, ms, options = {}) {
-  const t = /** @type {any} */ (setTimeout(fn, ms));
+  const t = /** @type {ReturnType<typeof setTimeout>} */ (
+    /** @type {unknown} */ (setTimeout(fn, ms))
+  );
   // Probe the handle, not the runtime. This used to call a `_canUnref()`
   // helper that allocated a throwaway `setTimeout` on *every* invocation just
   // to ask whether `unref` existed, and never cleared it - so 200 000 calls
@@ -61,7 +63,9 @@ export function setSafeTimeout(fn, ms, options = {}) {
  * @returns {any} The underlying timer handle. Usable with `clearInterval`.
  */
 export function setSafeInterval(fn, ms, options = {}) {
-  const t = /** @type {any} */ (setInterval(fn, ms));
+  const t = /** @type {ReturnType<typeof setInterval>} */ (
+    /** @type {unknown} */ (setInterval(fn, ms))
+  );
   if (!options.keepProcessAlive && typeof t?.unref === 'function') t.unref();
   return t;
 }
