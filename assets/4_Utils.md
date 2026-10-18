@@ -1,6 +1,6 @@
 # Utils
 
-- [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](../guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer).
+- [PowerBuffer: Encode/decode JS objects to transferables for worker messaging](../guides/powerBuffer.md). Lightweight helpers for encoding/decoding JSON to/from binary (Uint8Array / ArrayBuffer / Node Buffer), plus `PowerBufferPool` for reusable buffers.
 - [PowerDefer: Deferred promise primitive](../guides/powerDefer.md). Small utility that separates a `Promise` from its `resolve`/`reject` functions.
 - [PowerPermitGate: Permit queue helper](../guides/powerPermitGate.md). Low-level concurrency gate that manages permits and FIFO waiters for building semaphore or backpressure primitives.
 - [PowerCron: Drift-free cron-like scheduler](../guides/powerCron.md). `setTimeout` chaining from an absolute target, so a long run cannot accumulate phase error or queue up missed fires. Catch-up policy, jitter, and `unref` by default.

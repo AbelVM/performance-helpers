@@ -1919,6 +1919,13 @@ export type PowerBackpressureOptions = {
      */
     lowWaterMark?: number | undefined;
     /**
+     * Number of queued waiters at or
+     * above which `acquire()` rejects with `ERR_QUEUE_FULL` instead of queueing,
+     * so a caller can shed load before the queue is completely full. `Infinity`
+     * (default) disables the check.
+     */
+    highWaterMark?: number | undefined;
+    /**
      * Permits added per refill tick while under
      * pressure. Defaults to `10 %` of `capacity`, at least 1.
      */

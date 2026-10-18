@@ -55,6 +55,7 @@ describe('API surface', () => {
         'PowerBackpressure',
         'PowerBatch',
         'PowerBrownout',
+        'PowerBufferPool',
         'PowerBulkhead',
         'PowerCache',
         'PowerChunker',

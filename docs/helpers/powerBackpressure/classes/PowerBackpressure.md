@@ -145,6 +145,12 @@ a subclass reading a base field is precisely what the tag describes.
 
 ***
 
+### \_highWaterMark
+
+> **\_highWaterMark**: `number`
+
+***
+
 ### \_lowWaterMark
 
 > **\_lowWaterMark**: `number`
@@ -604,6 +610,10 @@ Current pressure and recovery signals.
 ##### congestionSteps
 
 > **congestionSteps**: `number`
+
+##### highWaterMark
+
+> **highWaterMark**: `number`
 
 ##### pending
 

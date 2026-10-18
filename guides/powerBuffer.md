@@ -92,3 +92,23 @@ worker.onmessage = (e) => {
   handleResult(jsonOut);
 };
 ```
+
+## PowerBufferPool
+
+A pool of reusable `Uint8Array` buffers, keyed by size bucket, for hot encode/decode paths.
+
+```javascript
+import { PowerBufferPool } from 'performance-helpers/powerBuffer';
+
+const pool = new PowerBufferPool({ buckets: [256, 1024, 4096], maxPerBucket: 16 });
+const buf = pool.acquire(100); // Uint8Array, byteLength >= 100 (256 bucket)
+// ... use buf ...
+pool.release(buf); // returns true when retained
+pool.dispose();
+```
+
+- `acquire(size)` returns a `Uint8Array` whose `byteLength` is at least `size`. Reused buffers are zeroed before return.
+- `release(buf)` returns `true` when the buffer is retained, `false` when dropped (non-matching size, pool full, or disposed).
+- A buffer must not be used after `release()` — the pool may hand the same memory to another caller.
+- `stats()` reports `pooled`, `acquires`, `reuses`, `releases`, `drops`, `reuseRate`.
+- Implements `dispose()`, `[Symbol.dispose]`, `[Symbol.asyncDispose]`.

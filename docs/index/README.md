@@ -306,6 +306,12 @@ Re-exports [PowerBrownout](../helpers/powerBrownout/classes/PowerBrownout.md)
 
 ***
 
+### PowerBufferPool
+
+Re-exports [PowerBufferPool](../helpers/powerBuffer/classes/PowerBufferPool.md)
+
+***
+
 ### PowerBulkhead
 
 Re-exports [PowerBulkhead](../helpers/powerBulkhead/classes/PowerBulkhead.md)

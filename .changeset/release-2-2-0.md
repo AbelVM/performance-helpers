@@ -15,3 +15,6 @@
 - Status reconciliation (pass 3): P-10 and S-24 confirmed already implemented.
 
 - `PowerCache`: `load(snapshot)` prefill API accepting `[key, value]`, `[key, value, { ttl, weight }]`, `{ key, value, ttl?, weight? }` and `Map` entries; routes through `set()` so admission policy, TTL and weight apply; returns accepted count (M-05 / S-11).
+
+- `PowerBufferPool`: reusable `Uint8Array` buffer pool with size buckets, `acquire(size)`/`release(buf)`, per-bucket and total caps, zeroing on reuse, `stats()` and `using`/`await using` support (S-17).
+- `PowerBackpressure`: `highWaterMark` option — number of queued waiters at or above which `acquire()` rejects with `ERR_QUEUE_FULL` instead of queueing, for fail-fast overload protection. Default `Infinity` (disabled). Reported in `stats()` (S-30).

@@ -1341,6 +1341,10 @@ export {};
  *   legal and means "nothing may run until the first refill".
  * @property {number} [lowWaterMark] Available-permit level below which adaptive
  *   refill begins. Defaults to `25 %` of `capacity`.
+ * @property {number} [highWaterMark=Infinity] Number of queued waiters at or
+ *   above which `acquire()` rejects with `ERR_QUEUE_FULL` instead of queueing,
+ *   so a caller can shed load before the queue is completely full. `Infinity`
+ *   (default) disables the check.
  * @property {number} [refillAmount] Permits added per refill tick while under
  *   pressure. Defaults to `10 %` of `capacity`, at least 1.
  * @property {number} [refillInterval=200] Milliseconds between refill ticks.

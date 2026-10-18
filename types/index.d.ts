@@ -44,7 +44,7 @@ export { PowerRTCChannel } from "./helpers/powerRTCChannel.js";
 export { PowerDatagramChannel } from "./helpers/powerDatagramChannel.js";
 export { createBroadcastBus } from "./helpers/powerBroadcastBus.js";
 export { createSseAdapter } from "./helpers/powerSseAdapter.js";
-export { o2b, o2u8, u82o, b2o } from "./helpers/powerBuffer.js";
+export { o2b, o2u8, u82o, b2o, PowerBufferPool } from "./helpers/powerBuffer.js";
 export { PowerCache, PowerMemoizer, PowerTimedCache, simpleArgsKey } from "./helpers/powerCache.js";
 export { default as WorkerAgnostic, detectEnv, preloadNode } from "./helpers/WorkerAgnostic.js";
 export { MetricsCollector, defaultMetrics, toSeries, createObservation, diffObservation, formatPrometheus, METRICS_VERSION, OBSERVATION_VERSION } from "./helpers/metrics.js";

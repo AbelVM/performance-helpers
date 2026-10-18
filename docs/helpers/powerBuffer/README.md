@@ -6,6 +6,10 @@
 
 # helpers/powerBuffer
 
+## Classes
+
+- [PowerBufferPool](classes/PowerBufferPool.md)
+
 ## Functions
 
 - [b2o](functions/b2o.md)

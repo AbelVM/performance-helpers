@@ -17,7 +17,7 @@ export class PowerBackpressure extends PowerPermitGate {
     get refillAmount(): number;
     /**
      * Current pressure and recovery signals.
-     * @returns {{capacity:number, available:number, active:number, pending:number, pressure:number, refillAmount:number, adaptive:boolean, congestionSteps:number, recoverySteps:number}}
+     * @returns {{capacity:number, available:number, active:number, pending:number, pressure:number, refillAmount:number, highWaterMark:number, adaptive:boolean, congestionSteps:number, recoverySteps:number}}
      */
     stats(): {
         capacity: number;
@@ -26,6 +26,7 @@ export class PowerBackpressure extends PowerPermitGate {
         pending: number;
         pressure: number;
         refillAmount: number;
+        highWaterMark: number;
         adaptive: boolean;
         congestionSteps: number;
         recoverySteps: number;

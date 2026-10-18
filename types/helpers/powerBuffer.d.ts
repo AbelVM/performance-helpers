@@ -113,5 +113,98 @@ export function o2u8(obj: any, preStringified?: string): Uint8Array;
 export function u82o(buf: ArrayBuffer | ArrayBufferView): any;
 export function o2b(obj: any): ArrayBuffer;
 export function b2o(buf: ArrayBuffer | ArrayBufferView): any;
+/**
+ * A pool of reusable `Uint8Array` buffers, keyed by size bucket.
+ *
+ * ## Why
+ *
+ * Hot encode/decode paths (`o2u8`, message codecs, frame builders) allocate a
+ * fresh `Uint8Array` per call. For a steady-state workload the sizes are
+ * predictable, so the allocations are pure churn: the GC collects them a moment
+ * later and the allocator hands out the same memory again. A pool keeps the
+ * buffers alive and hands them back out, removing the allocation from the hot
+ * path entirely.
+ *
+ * ## Contract
+ *
+ * - `acquire(size)` returns a `Uint8Array` whose `byteLength` is at least
+ *   `size`. It may be a pooled buffer (reused) or a freshly allocated one.
+ *   The caller **owns** the returned buffer until it calls `release()`.
+ * - `release(buf)` returns a buffer to the pool. Buffers whose size does not
+ *   match a configured bucket, or that arrive when the pool is full, are
+ *   dropped (the caller's reference is the only one left, so it is collected).
+ * - A buffer handed out by `acquire()` must not be used after `release()`: the
+ *   pool may hand the same memory to another caller. This is the documented
+ *   footgun of every buffer pool; the saving has to be worth it.
+ *
+ * @class PowerBufferPool
+ * @public
+ */
+export class PowerBufferPool {
+    /**
+     * @param {Object} [options]
+     * @param {number[]} [options.buckets=[256,1024,4096,16384,65536]] - Size
+     *   buckets. A request is served from the smallest bucket that fits; a
+     *   request larger than every bucket is allocated fresh and never pooled.
+     * @param {number} [options.maxPerBucket=16] - Maximum buffers retained per
+     *   bucket.
+     * @param {number} [options.maxTotal=256] - Maximum buffers retained across all
+     *   buckets.
+     */
+    constructor(options?: {
+        buckets?: number[] | undefined;
+        maxPerBucket?: number | undefined;
+        maxTotal?: number | undefined;
+    });
+    /** @type {Map<number, Uint8Array[]>} */
+    /** @returns {number[]} The configured buckets, ascending. */
+    get buckets(): number[];
+    /** @returns {number} Buffers currently retained. */
+    get pooled(): number;
+    /**
+     * Pick the smallest bucket that fits `size`, or `null` when no bucket fits
+     * (the request is larger than every configured bucket).
+     * @param {number} size
+     * @returns {number|null}
+     * @private
+     */
+    /**
+     * Acquire a buffer of at least `size` bytes.
+     * @param {number} [size=0]
+     * @returns {Uint8Array}
+     */
+    acquire(size?: number): Uint8Array;
+    /**
+     * Return a buffer to the pool. Returns `true` when retained, `false` when
+     * dropped (wrong size, pool full, or disposed).
+     * @param {Uint8Array} buf
+     * @returns {boolean}
+     */
+    release(buf: Uint8Array): boolean;
+    /**
+     * Point-in-time statistics.
+     * @returns {{buckets:number[], pooled:number, maxPerBucket:number, maxTotal:number, acquires:number, reuses:number, releases:number, drops:number, reuseRate:number}}
+     */
+    stats(): {
+        buckets: number[];
+        pooled: number;
+        maxPerBucket: number;
+        maxTotal: number;
+        acquires: number;
+        reuses: number;
+        releases: number;
+        drops: number;
+        reuseRate: number;
+    };
+    /**
+     * Release all retained buffers.
+     * @returns {void}
+     */
+    dispose(): void;
+    /** @returns {void} */
+    [Symbol.dispose](): void;
+    /** @returns {Promise<void>} */
+    [Symbol.asyncDispose](): Promise<void>;
+}
 export type BufferEncoder = import("./jsdoc-types.js").BufferEncoder;
 export type BufferDecoder = import("./jsdoc-types.js").BufferDecoder;

@@ -9,6 +9,7 @@ import { PowerPermitGate } from './powerPermitGate.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { assertKnownOptions, assertLimitRequired } from '../utils/options.js';
 import { neutralise } from '../utils/neutralise.js';
+import { queueFullError } from '../utils/errors.js';
 import {
   DEFAULT_QUEUE_CAPACITY,
   DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
@@ -108,6 +109,7 @@ export class PowerBackpressure extends PowerPermitGate {
         'queueCapacity',
         'initialTokens',
         'lowWaterMark',
+        'highWaterMark',
         'refillAmount',
         'refillInterval',
         'adaptive',
@@ -118,6 +120,7 @@ export class PowerBackpressure extends PowerPermitGate {
       capacity = DEFAULT_QUEUE_CAPACITY,
       queueCapacity = DEFAULT_BACKPRESSURE_QUEUE_CAPACITY,
       lowWaterMark = null,
+      highWaterMark = null,
       refillAmount = null,
       refillInterval = DEFAULT_BACKPRESSURE_REFILL_INTERVAL_MS,
       adaptive = false,
@@ -132,6 +135,10 @@ export class PowerBackpressure extends PowerPermitGate {
       typeof lowWaterMark === 'number' && Number.isFinite(lowWaterMark)
         ? Math.min(Math.max(1, Math.floor(lowWaterMark)), normalizedCapacity - 1)
         : Math.max(1, Math.ceil(normalizedCapacity * 0.25));
+    const normalizedHighWaterMark =
+      typeof highWaterMark === 'number' && Number.isFinite(highWaterMark)
+        ? Math.max(1, Math.floor(highWaterMark))
+        : Infinity;
     const normalizedRefillAmount =
       typeof refillAmount === 'number' && Number.isFinite(refillAmount)
         ? Math.max(1, Math.min(Math.floor(refillAmount), normalizedCapacity))
@@ -150,6 +157,7 @@ export class PowerBackpressure extends PowerPermitGate {
     this._disposed = false;
     this._capacity = normalizedCapacity;
     this._lowWaterMark = normalizedLowWaterMark;
+    this._highWaterMark = normalizedHighWaterMark;
     this._refillAmount = normalizedRefillAmount;
     this._refillInterval = normalizedRefillInterval;
     this._refillTimer = null;
@@ -198,7 +206,7 @@ export class PowerBackpressure extends PowerPermitGate {
 
   /**
    * Current pressure and recovery signals.
-   * @returns {{capacity:number, available:number, active:number, pending:number, pressure:number, refillAmount:number, adaptive:boolean, congestionSteps:number, recoverySteps:number}}
+   * @returns {{capacity:number, available:number, active:number, pending:number, pressure:number, refillAmount:number, highWaterMark:number, adaptive:boolean, congestionSteps:number, recoverySteps:number}}
    */
   stats() {
     return {
@@ -209,6 +217,7 @@ export class PowerBackpressure extends PowerPermitGate {
       // A normalized signal for composing this helper with local policies.
       pressure: this.capacity > 0 ? 1 - this.available / this.capacity : 0,
       refillAmount: this._refillAmount,
+      highWaterMark: this._highWaterMark,
       adaptive: this._adaptive.enabled,
       congestionSteps: this._congestionSteps,
       recoverySteps: this._recoverySteps,
@@ -262,6 +271,13 @@ export class PowerBackpressure extends PowerPermitGate {
    * @returns {Promise<PowerReleaseFn>} Promise resolving to a release callback.
    */
   acquire(options = {}) {
+    // Fail-fast overload protection: when the number of queued waiters reaches
+    // the configured high-water mark, reject new acquires instead of queueing
+    // them, so a caller can shed load before the queue is completely full.
+    // Default `Infinity` disables the check (existing behaviour).
+    if (this.pending >= this._highWaterMark) {
+      return Promise.reject(queueFullError('PowerBackpressure', this._highWaterMark));
+    }
     // The admission decision is the parent's: an override that re-implements
     // its parent's `acquire` is two implementations of the same question, and
     // this one had already drifted - it rejected an already-aborted signal with
