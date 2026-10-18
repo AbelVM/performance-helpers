@@ -127,6 +127,31 @@ export class PowerRealtimeHub {
         list: HubSubscriberStat[];
     };
     /**
+     * Presence: the subscribers currently connected to the hub.
+     *
+     * Returns an array of `{ id, topic, transport }` for every live subscriber,
+     * or only those on `topic` when one is given. A snapshot, not a live view —
+     * re-call it after subscribe/unsubscribe to see the current set.
+     *
+     * @param {string} [topic] - Optional topic filter.
+     * @returns {Array<{id: string, topic: string, transport: any}>}
+     */
+    presence(topic?: string): Array<{
+        id: string;
+        topic: string;
+        transport: any;
+    }>;
+    /**
+     * Alias for {@link presence}.
+     * @param {string} [topic]
+     * @returns {Array<{id: string, topic: string, transport: any}>}
+     */
+    getPresence(topic?: string): Array<{
+        id: string;
+        topic: string;
+        transport: any;
+    }>;
+    /**
      * Close every subscription and release timers. The hub cannot be reused.
      * @returns {void}
      */

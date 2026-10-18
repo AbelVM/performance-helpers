@@ -29,7 +29,7 @@ export class PowerTTLMap {
    * @param {PowerTTLMapOptions} [options={}] Options object (used when the first arg is a number).
    */
   constructor(defaultTTL = 0, options = {}) {
-    assertKnownOptions(options, ['defaultTTL', 'onExpire', 'now'], 'PowerTTLMap');
+    assertKnownOptions(options, ['defaultTTL', 'onExpire', 'now', 'maxSize'], 'PowerTTLMap');
     // Allow `new PowerTTLMap({ defaultTTL, onExpire })` (options-object convention).
     // Reassigning the parameter lost the declared options type at the two reads
     // below, so the normalised value gets its own binding instead.
@@ -46,6 +46,12 @@ export class PowerTTLMap {
     // expiry means a real `setTimeout`, and a real `setTimeout` is a flake:
     // the assertion has to beat the clock rather than state what it means.
     this._now = typeof opts?.now === 'function' ? opts.now : nowMs;
+    // Bounded memory: when > 0, the map evicts least-recently-used entries
+    // once it exceeds this many resident keys. 0 (default) means unbounded,
+    // preserving the pre-2.2 behaviour.
+    const rawMax = opts?.maxSize;
+    this._maxSize =
+      typeof rawMax === 'number' && Number.isFinite(rawMax) && rawMax > 0 ? Math.floor(rawMax) : 0;
     /** @type {Map<any, TTLMapEntry>} */
     this._map = new Map();
     // Track keys that have an expiry to allow faster purging of expired
@@ -134,10 +140,35 @@ export class PowerTTLMap {
     // add a small slack (+1ms) to account for timer scheduling jitter
     const expiresAt = ms > 0 ? this._now() + ms + 1 : 0;
     const prevExpiry = this._expirations.get(key) || 0;
+    const isNew = !this._map.has(key);
     this._map.set(key, { value, expiresAt });
     if (expiresAt) this._expirations.set(key, expiresAt);
     else this._expirations.delete(key);
+    // LRU: a re-set of an existing key makes it most-recently-used.
+    if (!isNew && this._maxSize > 0) {
+      const node = this._map.get(key);
+      this._map.delete(key);
+      this._map.set(key, node);
+      if (expiresAt) {
+        const ex = this._expirations.get(key);
+        this._expirations.delete(key);
+        this._expirations.set(key, ex);
+      }
+    }
     this._updateNextExpiryOnWrite(prevExpiry, expiresAt);
+    // Bounded memory: evict least-recently-used entries when over maxSize.
+    if (this._maxSize > 0 && isNew) {
+      while (this._map.size > this._maxSize) {
+        const lruKey = this._map.keys().next().value;
+        if (lruKey === undefined) break;
+        const lruEntry = this._map.get(lruKey);
+        this._map.delete(lruKey);
+        this._expirations.delete(lruKey);
+        if (lruEntry && lruEntry.expiresAt && this._nextExpiryAt === lruEntry.expiresAt) {
+          this._nextExpiryDirty = true;
+        }
+      }
+    }
     return this;
   }
 
@@ -204,6 +235,16 @@ export class PowerTTLMap {
     // `_checkExpire` already reports a missing entry as expired, but it is not
     // a type guard, so the narrowing is stated here as well.
     if (entry === undefined || this._checkExpire(key, entry)) return undefined;
+    // LRU: a hit makes the key most-recently-used.
+    if (this._maxSize > 0) {
+      this._map.delete(key);
+      this._map.set(key, entry);
+      if (entry.expiresAt) {
+        const ex = this._expirations.get(key);
+        this._expirations.delete(key);
+        this._expirations.set(key, ex);
+      }
+    }
     return entry.value;
   }
 
@@ -276,6 +317,16 @@ export class PowerTTLMap {
     if (entry.expiresAt) this._expirations.set(key, entry.expiresAt);
     else this._expirations.delete(key);
     this._updateNextExpiryOnWrite(prevExpiry, entry.expiresAt);
+    // LRU: a touch makes the key most-recently-used.
+    if (this._maxSize > 0) {
+      this._map.delete(key);
+      this._map.set(key, entry);
+      if (entry.expiresAt) {
+        const ex = this._expirations.get(key);
+        this._expirations.delete(key);
+        this._expirations.set(key, ex);
+      }
+    }
     return true;
   }
 

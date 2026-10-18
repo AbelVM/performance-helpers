@@ -149,6 +149,7 @@ options against this list.
 - **One frame at a time per subscriber.** A second frame is not handed to the transport while the previous one is still outstanding, so frames for one subscription reach it in the order they were published. Work that arrives meanwhile waits for the outstanding send and is then drained; it is never dropped and never reordered.
 - `unsubscribe(id)` → `boolean`.
 - `stats()` → `{ subscribers, topics, published, delivered, dropped, disconnected, bytesOut, encoded, list }`, where `list` has per-subscriber `queued` / `dropped` / `bytesSent` / `inFlight`. `encoded` counts frame encodes rather than deliveries, so it is one per flush and does not grow with the subscriber count — see [the frame is read-only](#the-frame-is-read-only).
+- `presence(topic?)` → `Array<{ id, topic, transport }>`, snapshot of live subscribers (optionally filtered by topic). `getPresence(topic?)` is an alias. Mutating the returned array or objects does not affect the hub.
 - `close()` / `[Symbol.dispose]()` — detaches everything and calls your `close` adapter with a reason (`'unsubscribe'`, `'slow-consumer'`, `'hub-closed'`).
 - `await hub[Symbol.asyncDispose]()` — **flushes the pending batch, then closes**. The difference is not cosmetic, and it is the reason `await using` exists for this helper:
 

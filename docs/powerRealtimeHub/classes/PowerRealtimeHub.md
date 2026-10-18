@@ -262,6 +262,24 @@ Resolves once all subscribers have been drained.
 
 ***
 
+### getPresence()
+
+> **getPresence**(`topic?`): `object`[]
+
+Alias for [presence](#presence).
+
+#### Parameters
+
+##### topic?
+
+`string`
+
+#### Returns
+
+`object`[]
+
+***
+
 ### getStats()
 
 > **getStats**(): [`HubStats`](../interfaces/HubStats.md) & `object`
@@ -274,6 +292,30 @@ method is written out per class.
 #### Returns
 
 [`HubStats`](../interfaces/HubStats.md) & `object`
+
+***
+
+### presence()
+
+> **presence**(`topic?`): `object`[]
+
+Presence: the subscribers currently connected to the hub.
+
+Returns an array of `{ id, topic, transport }` for every live subscriber,
+or only those on `topic` when one is given. A snapshot, not a live view —
+re-call it after subscribe/unsubscribe to see the current set.
+
+#### Parameters
+
+##### topic?
+
+`string`
+
+Optional topic filter.
+
+#### Returns
+
+`object`[]
 
 ***
 

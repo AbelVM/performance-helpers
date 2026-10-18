@@ -617,6 +617,8 @@ export {};
  * @property {(missedBeats: number, lastBeatAt: number) => void} [onTimeout]
  * @property {(lastBeatAt: number) => void} [onBeat]
  * @property {() => number} [now] Injected clock, as the limiters take (PERF-007).
+ * @property {number} [maxSize=0] Maximum resident entries; when exceeded the
+ *   least-recently-used entry is evicted. 0 (default) means unbounded.
  */
 
 /**
@@ -625,6 +627,8 @@ export {};
  * @property {number} [defaultTTL] Default TTL in ms (0 = no expiry).
  * @property {(key:any,value:any)=>void} [onExpire]
  * @property {() => number} [now] Injected clock, as the limiters take (PERF-007).
+ * @property {number} [maxSize=0] Maximum resident entries; when exceeded the
+ *   least-recently-used entry is evicted. 0 (default) means unbounded.
  *   Expiry is the one behaviour in this class that cannot be observed without
  *   a clock, so a test that wants to assert "expired after 150 ms" had either
  *   to sleep or to be dropped. `new PowerTTLMap({ now: () => clock })` makes

@@ -1271,6 +1271,32 @@ Iterate keys in LRU or MRU order.
 
 ***
 
+### load()
+
+> **load**(`snapshot`): `number`
+
+Prefill the cache from a snapshot.
+
+Accepts any iterable of entries. Each entry may be:
+  - a two-or-three element array `[key, value]` or `[key, value, { ttl, weight }]`,
+  - an object `{ key, value, ttl?, weight? }`,
+  - a `Map` entry (which is a two-element array).
+
+Entries are inserted via `set()`, so admission policy, TTL and weight all
+apply. Returns the number of entries accepted.
+
+#### Parameters
+
+##### snapshot
+
+`Iterable`\<`any`, `any`, `any`\>
+
+#### Returns
+
+`number`
+
+***
+
 ### peek()
 
 > **peek**(`key`): `any`

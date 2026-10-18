@@ -65,6 +65,12 @@ Options object (used when the first arg is a number).
 
 ***
 
+### \_maxSize
+
+> **\_maxSize**: `number`
+
+***
+
 ### \_nextExpiryAt
 
 > **\_nextExpiryAt**: `number`

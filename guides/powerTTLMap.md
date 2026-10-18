@@ -9,6 +9,7 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 | `defaultTTL` |  `number` (ms) |         `0` | Default TTL applied when `set(key, value)` is called without a `ttl`. `0` disables expiry.                                                                                                                                                                                                     |
 | `onExpire`   |     `Function` | `undefined` | Optional callback called when an entry expires: `(key, value) => void`. Callback errors are swallowed.                                                                                                                                                                                         |
 | `now`        | `() => number` |   `nowMs()` | Injected clock in milliseconds, matching the rate limiters. Expiry is the one behaviour here that cannot be observed without a clock, so this is what turns "assert it expired after 150 ms" from a sleep into an exact assertion — see [Testing](#testing-expires-against-an-injected-clock). |
+| `maxSize`    |       `number` |         `0` | Maximum resident entries. When exceeded, the least-recently-used entry is evicted on the next `set()`. `0` (default) means unbounded. Access via `get()`/`touch()`/`set()` of an existing key makes it most-recently-used.                                                                     |
 
 ## API
 
@@ -26,6 +27,7 @@ A lightweight Map-like with per-key TTL (milliseconds). Keys expire lazily on ac
 
 - `touch(key, ttl?)` — Refresh the TTL of an existing key; returns `true` when the TTL was updated.
 
+- `maxSize` (constructor option) — When set to a positive number, the map evicts the least-recently-used entry whenever a new key would push it over the limit. `get()`, `touch()` and re-`set()` of an existing key mark it most-recently-used. `0` (default) keeps the map unbounded. Eviction does not fire `onExpire` (that callback is reserved for TTL expiry).
 - `size` (getter) — Number of **resident** entries, i.e. `Map.size`. Expired-but-not-yet-collected entries are resident and are counted, so this is an O(1) property read with no side effects. (Before 2.0 this getter swept expired entries and fired `onExpire` as a side effect; a property read with a callback side effect is an operation wearing a property's syntax. Use `purge()` when you mean to collect.)
 - `expiredCount` (getter) — How many resident entries are past their expiry and awaiting collection. The live count is `size - expiredCount`. Read-only: does not sweep and does not fire `onExpire`, so it is safe as a diagnostic. O(k) in the number of entries that have a TTL, which is why the hot path reads `size` and this is for reporting.
 - `purge()` — Collect every entry already past its expiry, firing `onExpire` for each. Returns how many were removed. The explicit form of what `size` used to do implicitly.

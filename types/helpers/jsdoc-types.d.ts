@@ -887,6 +887,11 @@ export type PowerHeartbeatOptions = {
      * Injected clock, as the limiters take (PERF-007).
      */
     now?: (() => number) | undefined;
+    /**
+     * Maximum resident entries; when exceeded the
+     * least-recently-used entry is evicted. 0 (default) means unbounded.
+     */
+    maxSize?: number | undefined;
 };
 /**
  * Queue options for `PowerTTLMap`.
@@ -899,12 +904,17 @@ export type PowerTTLMapOptions = {
     onExpire?: ((key: any, value: any) => void) | undefined;
     /**
      * Injected clock, as the limiters take (PERF-007).
+     */
+    now?: (() => number) | undefined;
+    /**
+     * Maximum resident entries; when exceeded the
+     * least-recently-used entry is evicted. 0 (default) means unbounded.
      * Expiry is the one behaviour in this class that cannot be observed without
      * a clock, so a test that wants to assert "expired after 150 ms" had either
      * to sleep or to be dropped. `new PowerTTLMap({ now: () => clock })` makes
      * the assertion exact.
      */
-    now?: (() => number) | undefined;
+    maxSize?: number | undefined;
 };
 /**
  * What `PowerTTLMap` stores per key: the value plus the absolute `nowMs()` at

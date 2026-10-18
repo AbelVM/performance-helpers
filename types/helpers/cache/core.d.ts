@@ -965,9 +965,20 @@ export class PowerCache {
      */
     clear(): void;
     /**
-     * Remove expired entries by scanning from least-recently used to most.
-     * @returns {void}
+     * Prefill the cache from a snapshot.
+     *
+     * Accepts any iterable of entries. Each entry may be:
+     *   - a two-or-three element array `[key, value]` or `[key, value, { ttl, weight }]`,
+     *   - an object `{ key, value, ttl?, weight? }`,
+     *   - a `Map` entry (which is a two-element array).
+     *
+     * Entries are inserted via `set()`, so admission policy, TTL and weight all
+     * apply. Returns the number of entries accepted.
+     *
+     * @param {Iterable<any>} snapshot
+     * @returns {number}
      */
+    load(snapshot: Iterable<any>): number;
     /**
      * @returns {number} How many expired entries the sweep removed.
      */

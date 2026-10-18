@@ -870,6 +870,39 @@ export class PowerRealtimeHub {
   }
 
   /**
+   * Presence: the subscribers currently connected to the hub.
+   *
+   * Returns an array of `{ id, topic, transport }` for every live subscriber,
+   * or only those on `topic` when one is given. A snapshot, not a live view —
+   * re-call it after subscribe/unsubscribe to see the current set.
+   *
+   * @param {string} [topic] - Optional topic filter.
+   * @returns {Array<{id: string, topic: string, transport: any}>}
+   */
+  presence(topic) {
+    const out = [];
+    for (const sub of this._subs.values()) {
+      // A subscriber that has been detached (unsubscribed, slow-consumer
+      // disconnect, or hub close) is removed from `_subs` by `_detach`, but
+      // guard against a closed record lingering so presence never reports a
+      // subscriber the hub no longer delivers to.
+      if (sub.closed) continue;
+      if (topic !== undefined && sub.topic !== topic) continue;
+      out.push({ id: sub.id, topic: sub.topic, transport: sub.transport });
+    }
+    return out;
+  }
+
+  /**
+   * Alias for {@link presence}.
+   * @param {string} [topic]
+   * @returns {Array<{id: string, topic: string, transport: any}>}
+   */
+  getPresence(topic) {
+    return this.presence(topic);
+  }
+
+  /**
    * Close every subscription and release timers. The hub cannot be reused.
    * @returns {void}
    */
