@@ -41,7 +41,7 @@ initial count required to release the latch
 
 ### \_abortReason
 
-> **\_abortReason**: `any`
+> **\_abortReason**: `Error` \| `null`
 
 ***
 

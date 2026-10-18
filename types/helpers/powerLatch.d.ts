@@ -16,7 +16,7 @@ export class PowerLatch {
      */
     constructor(count?: number, options?: import("./jsdoc-types.js").PowerLatchOptions);
     /** @type {Map<number, PowerLatchWaiter>} */
-    /** @type {any} */
+    /** @type {Error | null} */
     /** @type {?((reason:any)=>void)} */
     set onAbort(fn: ((reason: any) => void) | null);
     /**

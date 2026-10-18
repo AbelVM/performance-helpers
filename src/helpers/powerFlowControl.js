@@ -92,7 +92,7 @@ export class PowerFlowControl {
    */
   constructor(options = {}) {
     /** @type {PowerFlowControlOptions} */
-    let opts = /** @type {any} */ (options);
+    let opts = /** @type {PowerFlowControlOptions | number} */ (options);
     if (typeof options === 'number') {
       opts = { capacity: options };
     }

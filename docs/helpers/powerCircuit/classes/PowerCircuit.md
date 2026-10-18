@@ -181,7 +181,7 @@ make the window fluctuate, so the breaker would flap instead of holding.
 
 ### lastError
 
-> **lastError**: `any`
+> **lastError**: `Error` \| `null`
 
 ***
 

@@ -27,7 +27,7 @@ export class PowerHeartbeat {
    */
   constructor(options = {}) {
     /** @type {PowerHeartbeatOptions} */
-    let opts = /** @type {any} */ (options);
+    let opts = /** @type {PowerHeartbeatOptions | number} */ (options);
     if (typeof options === 'number') {
       opts = { interval: options };
     }

@@ -61,7 +61,7 @@ export class PowerLatch {
     this._waiters = new Map();
     this._nextWaiterToken = 1;
     this._aborted = false;
-    /** @type {any} */
+    /** @type {Error | null} */
     this._abortReason = null;
     // Terminal, unlike `_aborted`: `dispose()` is documented as releasing
     // every resource, and a teardown that can be undone by `reset()` is not

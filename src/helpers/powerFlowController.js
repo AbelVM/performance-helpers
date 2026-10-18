@@ -169,7 +169,7 @@ export class PowerFlowController {
     // threw `Cannot read properties of undefined`, which is a raw TypeError
     // where the caller is owed the message naming the option.
     /** @type {PowerFlowControllerOptions} */
-    const opts = /** @type {any} */ (options ?? {});
+    const opts = /** @type {PowerFlowControllerOptions} */ (options ?? {});
     assertKnownOptions(
       opts,
       [

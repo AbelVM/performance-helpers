@@ -28,8 +28,8 @@ export class PowerCircuit {
      * @type {number}
      */
     /** @type {CircuitState} */
-    /** @type {any} */
-    lastError: any;
+    /** @type {Error | null} */
+    lastError: Error | null;
     /** @type {?number} */
     /** @type {?((state: CircuitState, reason?: string) => void)} */
     onStateChange: ((state: CircuitState, reason?: string) => void) | null;

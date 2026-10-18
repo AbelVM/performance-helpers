@@ -145,7 +145,7 @@ export class PowerCircuit {
     /** @type {CircuitState} */
     this._state = 'closed';
     this._failures = 0; // consecutive failures
-    /** @type {any} */
+    /** @type {Error | null} */
     this.lastError = null;
     /** @type {?number} */
     this._openedAt = null;

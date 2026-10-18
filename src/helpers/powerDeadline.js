@@ -340,7 +340,10 @@ export class PowerDeadline {
 const createAbortError = (reason, startedAt, deadlineMs, now = nowMs) => {
   const err = new Error('Aborted');
   /** @type {Error & {code: 'EABORT', reason: any, attempts: number, elapsedMs: number, totalTimeout: number|null}} */
-  const typed = /** @type {any} */ (err);
+  const typed =
+    /** @type {Error & {code: 'EABORT', reason: any, attempts: number, elapsedMs: number, totalTimeout: number|null}} */ (
+      err
+    );
   typed.code = 'EABORT';
   typed.reason = reason;
   typed.attempts = 0;

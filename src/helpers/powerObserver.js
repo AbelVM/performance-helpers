@@ -47,7 +47,7 @@ function inheritedAsync(source) {
  * @private
  */
 function lazyChain(out, attach, detach) {
-  /** @type {any} */
+  /** @type {PowerObserver} */
   const target = out;
   const innerAdd = target.subscribe.bind(target);
   const baseDispose = target.dispose.bind(target);

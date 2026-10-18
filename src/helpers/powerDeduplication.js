@@ -18,7 +18,7 @@ export class PowerDeduplication {
    */
   constructor(options = {}) {
     /** @type {PowerDeduplicationOptions} */
-    let opts = /** @type {any} */ (options);
+    let opts = /** @type {PowerDeduplicationOptions | number} */ (options);
     if (typeof options === 'number') {
       opts = { ttl: options };
     }

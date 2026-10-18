@@ -32,7 +32,7 @@ function normalizeAdaptive(option) {
     return Math.min(hi, Math.max(lo, v));
   };
   return {
-    enabled: /** @type {any} */ (cfg).enabled !== false,
+    enabled: cfg.enabled !== false,
     alpha: clamp(cfg.alpha, 0.001, 1, 0.2),
     margin: clamp(cfg.margin, -1, 1, 0.1),
     min: clamp(cfg.min, 0, 1, 0),
