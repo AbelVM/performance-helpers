@@ -131,6 +131,7 @@ export class PowerObserver {
     _notifyError(err: any): void;
     /** Alias for {@link dispose}. */
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export default PowerObserver;
 export type PowerObserverOptions = import("./jsdoc-types.js").PowerObserverOptions;

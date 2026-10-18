@@ -112,6 +112,12 @@ by a fraction of itself decorrelates them without changing the mean rate.
 
 > **\_timer**: `number` \| `null`
 
+***
+
+### \_unref
+
+> **\_unref**: `boolean`
+
 ## Accessors
 
 ### lastBeatAt

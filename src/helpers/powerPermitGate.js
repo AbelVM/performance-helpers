@@ -520,4 +520,8 @@ export class PowerPermitGate {
   [Symbol.dispose]() {
     this.dispose();
   }
+
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
 }

@@ -31,6 +31,7 @@ import { encodeMessage, frameEncodedJson } from './powerMessageCodec.js';
 import { attach, detach } from './metrics.js';
 import { PowerPriorityQueue } from './powerPriorityQueue.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
+import { setSafeTimeout } from '../utils/timers.js';
 
 /**
  * A subscriber's pending queue, in its two shapes.
@@ -1013,7 +1014,7 @@ export class PowerRealtimeHub {
     if (this._flushScheduled) return;
     this._flushScheduled = true;
     if (this._batchDelayMs > 0) {
-      this._flushTimer = setTimeout(() => {
+      this._flushTimer = setSafeTimeout(() => {
         this._flushTimer = null;
         this._flushScheduled = false;
         this._drain();

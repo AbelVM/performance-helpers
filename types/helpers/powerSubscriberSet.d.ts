@@ -137,6 +137,7 @@ export class PowerSubscriberSet {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type SubscriberListener = import("./jsdoc-types.js").SubscriberListener;
 export type SubscriberEntry = import("./jsdoc-types.js").SubscriberEntry;

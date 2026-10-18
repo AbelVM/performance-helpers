@@ -193,6 +193,15 @@ export class MetricsCollector {
      * @returns {string[]}
      */
     names(): string[];
+    /**
+     * Release all registered sources. Idempotent.
+     * @returns {void}
+     */
+    dispose(): void;
+    /** @returns {void} */
+    [Symbol.dispose](): void;
+    /** @returns {Promise<void>} */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 /**
  * A process-wide collector, used by `observability: true`.

@@ -698,6 +698,11 @@ class WorkerAgnostic {
     this.dispose();
   }
 
+  /** @returns {Promise<void>} */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
+
   /**
    * Dispatch a native event to all registered unified listeners, normalizing
    * the payload shape so consumers see a consistent `{ data }` for `message`

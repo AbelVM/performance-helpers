@@ -219,6 +219,7 @@ export class PowerPermitGate {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type PowerReleaseFn = import("./jsdoc-types.js").PowerReleaseFn;
 export type PowerPermitGateOptions = import("./jsdoc-types.js").PowerPermitGateOptions;

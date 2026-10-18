@@ -149,5 +149,7 @@ declare class WorkerAgnostic {
     terminate(): Promise<void> | void;
     /** @returns {void} */
     [Symbol.dispose](): void;
+    /** @returns {Promise<void>} */
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export function detectEnv(): "browser" | "webworker" | "node" | "unknown";

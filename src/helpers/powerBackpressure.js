@@ -495,6 +495,10 @@ export class PowerBackpressure extends PowerPermitGate {
   [Symbol.dispose]() {
     this.dispose();
   }
+
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
 }
 
 export default PowerBackpressure;

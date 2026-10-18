@@ -448,6 +448,24 @@ export class MetricsCollector {
   names() {
     return [...this._sources.keys()];
   }
+
+  /**
+   * Release all registered sources. Idempotent.
+   * @returns {void}
+   */
+  dispose() {
+    this._sources.clear();
+  }
+
+  /** @returns {void} */
+  [Symbol.dispose]() {
+    this.dispose();
+  }
+
+  /** @returns {Promise<void>} */
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
 }
 
 /**

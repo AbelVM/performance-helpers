@@ -1,4 +1,5 @@
 import { assertKnownOptions, assertLimitRequired } from '../utils/options.js';
+import { setSafeTimeout } from '../utils/timers.js';
 
 /**
  * PowerHeartbeat
@@ -31,7 +32,7 @@ export class PowerHeartbeat {
     }
     assertKnownOptions(
       opts,
-      ['interval', 'jitter', 'timeout', 'onTimeout', 'onBeat', 'now'],
+      ['interval', 'jitter', 'timeout', 'onTimeout', 'onBeat', 'now', 'unref'],
       'PowerHeartbeat'
     );
     const interval = assertLimitRequired(opts.interval, {
@@ -69,6 +70,7 @@ export class PowerHeartbeat {
     this._onTimeout = typeof opts.onTimeout === 'function' ? opts.onTimeout : null;
     this._onBeat = typeof opts.onBeat === 'function' ? opts.onBeat : null;
     this._now = typeof opts.now === 'function' ? opts.now : () => Date.now();
+    this._unref = opts.unref !== false;
     /** @type {ReturnType<typeof setTimeout> | null} */
     this._timer = null;
     this._running = false;
@@ -181,10 +183,14 @@ export class PowerHeartbeat {
   _schedule() {
     if (!this._running || this._disposed) return;
     this._clearTimer();
-    this._timer = setTimeout(() => {
-      this._timer = null;
-      this._check();
-    }, this._nextDelay());
+    this._timer = setSafeTimeout(
+      () => {
+        this._timer = null;
+        this._check();
+      },
+      this._nextDelay(),
+      { keepProcessAlive: !this._unref }
+    );
   }
 
   _check() {

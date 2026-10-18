@@ -208,6 +208,7 @@ export class PowerMemoizer {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type PowerMemoizerOptions = import("../jsdoc-types.js").PowerMemoizerOptions;
 import { PowerCache } from './core.js';

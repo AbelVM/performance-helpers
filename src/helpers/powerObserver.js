@@ -464,6 +464,10 @@ export class PowerObserver {
     this.dispose();
   }
 
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
+
   /** Internal flush implementation */
   _flushPending() {
     if (!this._pending) return;

@@ -846,6 +846,11 @@ export function announceCapabilities(options = {}) {
  * @returns {ArrayBuffer[]} Unique buffers, in encounter order.
  */
 export function collectTransferables(value, maxDepth = 8) {
+  // Fast path: primitives and empty containers carry no buffers, so skip the
+  // Set/seen allocation and the recursive walk entirely on the common path.
+  if (value == null || typeof value !== 'object') return [];
+  if (Array.isArray(value) && value.length === 0) return [];
+  if (!Array.isArray(value) && Object.keys(value).length === 0) return [];
   /** @type {ArrayBuffer[]} */
   const found = [];
   const seen = new Set();

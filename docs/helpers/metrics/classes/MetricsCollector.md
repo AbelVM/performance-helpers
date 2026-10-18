@@ -64,6 +64,38 @@ Prepended to every series key, so two
 
 ## Methods
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### \[dispose\]()
+
+> **\[dispose\]**(): `void`
+
+#### Returns
+
+`void`
+
+***
+
+### dispose()
+
+> **dispose**(): `void`
+
+Release all registered sources. Idempotent.
+
+#### Returns
+
+`void`
+
+***
+
 ### names()
 
 > **names**(): `string`[]

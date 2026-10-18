@@ -424,6 +424,20 @@ How many units were served.
 
 ***
 
+### \[asyncDispose\]()
+
+> **\[asyncDispose\]**(): `Promise`\<`void`\>
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Overrides
+
+[`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`[asyncDispose]`](../../powerPermitGate/classes/PowerPermitGate.md#asyncdispose)
+
+***
+
 ### \[dispose\]()
 
 > **\[dispose\]**(): `void`

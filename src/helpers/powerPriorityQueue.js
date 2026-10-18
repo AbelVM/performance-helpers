@@ -261,7 +261,10 @@ export class PowerPriorityQueue {
 
   _grow() {
     const newCap = Math.max(4, this._capacity * 2);
-    const next = new Array(newCap);
+    // AUD-019. Fill the new backing store so it stays a packed array rather
+    // than a holey one: `new Array(n)` leaves holes, and copying only the
+    // used slots leaves the tail holey, which deoptimises later `push()`.
+    const next = new Array(newCap).fill(null);
     for (let i = 0; i < this._heap.length; i++) {
       next[i] = this._heap[i];
     }

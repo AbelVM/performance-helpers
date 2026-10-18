@@ -123,6 +123,7 @@ export class PowerCrossLock {
      * @returns {void}
      */
     [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
 }
 export type PowerCrossLockOptions = import("./jsdoc-types.js").PowerCrossLockOptions;
 export type PowerCrossLockRunOptions = import("./jsdoc-types.js").PowerCrossLockRunOptions;

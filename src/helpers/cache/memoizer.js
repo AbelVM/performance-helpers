@@ -439,6 +439,10 @@ export class PowerMemoizer {
     }
   }
 
+  async [Symbol.asyncDispose]() {
+    this.dispose();
+  }
+
   /**
    * Named alias for the `Symbol.dispose` implementation, so callers who do not
    * want to reach for the symbol still have something to call.

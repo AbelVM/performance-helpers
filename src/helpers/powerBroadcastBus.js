@@ -1,5 +1,6 @@
 import { isNativeEnvelope, decodeInbound } from './powerMessageCodec.js';
 import { assertKnownOptions } from '../utils/options.js';
+import { setSafeTimeout } from '../utils/timers.js';
 
 /**
  * @typedef {Object} PowerBroadcastBusOptions
@@ -141,7 +142,7 @@ export function createBroadcastBus(options) {
 
       channel.postMessage(message);
 
-      const timer = setTimeout(() => {
+      const timer = setSafeTimeout(() => {
         pending.delete(seq);
 
         const count = (receiverPendingCount.get(receiverId) || 0) - 1;
