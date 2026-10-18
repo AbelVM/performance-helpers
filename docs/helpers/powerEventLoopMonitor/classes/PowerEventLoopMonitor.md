@@ -102,6 +102,18 @@ setInterval(() => {
 
 ***
 
+### \_longTaskObserver
+
+> **\_longTaskObserver**: `any`
+
+***
+
+### \_longTaskThreshold
+
+> **\_longTaskThreshold**: `any`
+
+***
+
 ### \_max
 
 > **\_max**: `number`
@@ -236,12 +248,6 @@ a usable state and `clear()` would read as the opposite.
 ### dispose()
 
 > **dispose**(): `void`
-
-Stop sampling and release the timer. Safe to call more than once.
-
-This is the only thing that unregisters the metrics receipt, and it is
-terminal: after it, `getStats()` still answers but the monitor reports
-nothing, because the collector no longer calls it.
 
 #### Returns
 

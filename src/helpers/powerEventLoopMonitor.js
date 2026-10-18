@@ -58,6 +58,7 @@ export class PowerEventLoopMonitor {
         'keepProcessAlive',
         'utilizationProvider',
         'now',
+        'longTaskThreshold',
       ],
       'PowerEventLoopMonitor'
     );
@@ -68,6 +69,7 @@ export class PowerEventLoopMonitor {
       keepProcessAlive = false,
       utilizationProvider = null,
       now,
+      longTaskThreshold = 50,
     } = options;
     // GEO-039. Injected clock, matching the limiters (PERF-007), `PowerTTLMap`,
     // `cache/core`, `PowerDeadline`, `PowerCircuit` and `PowerCron`. The
@@ -117,6 +119,10 @@ export class PowerEventLoopMonitor {
     this._startedAt = this._now();
     this._running = false;
     this._handle = null;
+    this._longTaskThreshold =
+      Number.isFinite(longTaskThreshold) && longTaskThreshold > 0 ? longTaskThreshold : 50;
+    /** @type {any} */
+    this._longTaskObserver = null;
 
     /**
      * Resolves once the Node `perf_hooks` lookup has settled, if it was
@@ -145,6 +151,7 @@ export class PowerEventLoopMonitor {
   start() {
     if (this._running) return this;
     this._running = true;
+    this._attachLongTaskObserver();
     this._schedule();
     return this;
   }
@@ -171,6 +178,7 @@ export class PowerEventLoopMonitor {
       clearTimeout(this._handle);
       this._handle = null;
     }
+    this._detachLongTaskObserver();
     return this;
   }
 
@@ -420,10 +428,52 @@ export class PowerEventLoopMonitor {
    *
    * @returns {void}
    */
+  /**
+   * Attach a `PerformanceObserver` for long tasks, if available. Records each
+   * long task's duration into the drift histogram. No-op in environments
+   * without `PerformanceObserver` or the `longtask` entry type.
+   * @private
+   */
+  _attachLongTaskObserver() {
+    if (this._longTaskObserver) return;
+    const PO = typeof PerformanceObserver !== 'undefined' ? PerformanceObserver : null;
+    if (!PO) return;
+    try {
+      const obs = new PO((list) => {
+        for (const entry of list.getEntries()) {
+          const dur = Number(entry?.duration);
+          if (Number.isFinite(dur) && dur >= this._longTaskThreshold) {
+            this._delay.record(dur);
+          }
+        }
+      });
+      obs.observe({ entryTypes: ['longtask'] });
+      this._longTaskObserver = obs;
+    } catch (e) {
+      this._longTaskObserver = null;
+    }
+  }
+
+  /**
+   * Detach the long-task observer.
+   * @private
+   */
+  _detachLongTaskObserver() {
+    if (this._longTaskObserver) {
+      try {
+        this._longTaskObserver.disconnect();
+      } catch (e) {
+        /* ignore */
+      }
+      this._longTaskObserver = null;
+    }
+  }
+
   dispose() {
     // Detach before `stop()`, and not after: `stop()` is idempotent and
     // order-independent now, so this is only about the receipt being gone by
     // the time the timer is cancelled.
+    this._detachLongTaskObserver();
     detach(this._metrics);
     this._metrics = null;
     this.stop();

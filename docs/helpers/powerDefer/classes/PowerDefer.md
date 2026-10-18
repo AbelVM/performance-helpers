@@ -33,7 +33,7 @@ Useful when needing a promise whose resolution is controlled externally.
 
 ### \_status
 
-> **\_status**: `"pending"` \| `"fulfilled"` \| `"rejected"`
+> **\_status**: `"pending"` \| `"fulfilled"` \| `"rejected"` \| `"cancelled"`
 
 ***
 
@@ -42,6 +42,20 @@ Useful when needing a promise whose resolution is controlled externally.
 > **promise**: `Promise`\<`any`\>
 
 ## Accessors
+
+### cancelled
+
+#### Get Signature
+
+> **get** **cancelled**(): `boolean`
+
+Convenience boolean: true if cancelled.
+
+##### Returns
+
+`boolean`
+
+***
 
 ### fulfilled
 
@@ -98,6 +112,30 @@ Status of the deferred: 'pending' | 'fulfilled' | 'rejected'
 `"pending"` \| `"fulfilled"` \| `"rejected"`
 
 ## Methods
+
+### cancel()
+
+> **cancel**(`reason?`): `void`
+
+Cancel the deferred promise. Rejects it with an `AbortError` (or the
+supplied reason) and marks it cancelled. No-op if already settled.
+
+Useful for tearing down a barrier that is no longer needed: callers
+awaiting `defer.promise` receive the rejection instead of hanging.
+
+#### Parameters
+
+##### reason?
+
+`any`
+
+Rejection reason. Defaults to an `AbortError`.
+
+#### Returns
+
+`void`
+
+***
 
 ### reject()
 

@@ -24,7 +24,7 @@ export class PowerDefer {
    */
   constructor() {
     this._settled = false;
-    /** @type {'pending'|'fulfilled'|'rejected'} */
+    /** @type {'pending'|'fulfilled'|'rejected'|'cancelled'} */
     this._status = 'pending';
     /** @type {Promise<any>} */
     this.promise = new Promise((resolve, reject) => {
@@ -71,6 +71,36 @@ export class PowerDefer {
   reject(err) {
     const i = _deferInternals.get(this);
     if (typeof i?.reject === 'function') i.reject(err);
+  }
+
+  /**
+   * Cancel the deferred promise. Rejects it with an `AbortError` (or the
+   * supplied reason) and marks it cancelled. No-op if already settled.
+   *
+   * Useful for tearing down a barrier that is no longer needed: callers
+   * awaiting `defer.promise` receive the rejection instead of hanging.
+   *
+   * @param {any} [reason] - Rejection reason. Defaults to an `AbortError`.
+   * @returns {void}
+   */
+  cancel(reason) {
+    if (this._settled) return;
+    const err =
+      reason instanceof Error
+        ? reason
+        : new Error(typeof reason === 'string' ? reason : 'PowerDefer cancelled');
+    err.name = err.name === 'Error' ? 'AbortError' : err.name;
+    const i = _deferInternals.get(this);
+    if (typeof i?.reject === 'function') i.reject(err);
+    this._status = 'cancelled';
+  }
+
+  /**
+   * Convenience boolean: true if cancelled.
+   * @returns {boolean}
+   */
+  get cancelled() {
+    return this._status === 'cancelled';
   }
 
   /**

@@ -44,6 +44,7 @@ export class PowerEventLoopMonitor {
     intervalMs: number;
     /** @type {?function(number):void} */
     /** @type {boolean} */
+    /** @type {any} */
     /**
      * Resolves once the Node `perf_hooks` lookup has settled, if it was
      * attempted. Never rejects: a runtime without it simply leaves
@@ -238,6 +239,16 @@ export class PowerEventLoopMonitor {
      * nothing, because the collector no longer calls it.
      *
      * @returns {void}
+     */
+    /**
+     * Attach a `PerformanceObserver` for long tasks, if available. Records each
+     * long task's duration into the drift histogram. No-op in environments
+     * without `PerformanceObserver` or the `longtask` entry type.
+     * @private
+     */
+    /**
+     * Detach the long-task observer.
+     * @private
      */
     dispose(): void;
     /**

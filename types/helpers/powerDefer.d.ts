@@ -7,7 +7,7 @@
  * @class PowerDefer
  */
 export class PowerDefer {
-    /** @type {'pending'|'fulfilled'|'rejected'} */
+    /** @type {'pending'|'fulfilled'|'rejected'|'cancelled'} */
     /** @type {Promise<any>} */
     promise: Promise<any>;
     /**
@@ -28,6 +28,22 @@ export class PowerDefer {
      * @returns {void}
      */
     reject(err: any): void;
+    /**
+     * Cancel the deferred promise. Rejects it with an `AbortError` (or the
+     * supplied reason) and marks it cancelled. No-op if already settled.
+     *
+     * Useful for tearing down a barrier that is no longer needed: callers
+     * awaiting `defer.promise` receive the rejection instead of hanging.
+     *
+     * @param {any} [reason] - Rejection reason. Defaults to an `AbortError`.
+     * @returns {void}
+     */
+    cancel(reason?: any): void;
+    /**
+     * Convenience boolean: true if cancelled.
+     * @returns {boolean}
+     */
+    get cancelled(): boolean;
     /**
      * Whether the deferred has been settled.
      * @returns {boolean}
