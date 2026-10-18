@@ -110,7 +110,7 @@ setInterval(() => {
 
 ### \_longTaskThreshold
 
-> **\_longTaskThreshold**: `any`
+> **\_longTaskThreshold**: `number`
 
 ***
 

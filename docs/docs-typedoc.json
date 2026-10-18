@@ -30671,7 +30671,7 @@
 							"flags": {},
 							"type": {
 								"type": "intrinsic",
-								"name": "any"
+								"name": "number"
 							}
 						},
 						{

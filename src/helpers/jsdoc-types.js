@@ -616,6 +616,9 @@ export {};
  *   Defaults to `interval * 2`.
  * @property {(missedBeats: number, lastBeatAt: number) => void} [onTimeout]
  * @property {(lastBeatAt: number) => void} [onBeat]
+ * @property {number} [longTaskThreshold=50] Minimum duration (ms) for a
+ *   `PerformanceObserver` long-task entry to be recorded into the drift
+ *   histogram. No-op in environments without `PerformanceObserver`.
  * @property {() => number} [now] Injected clock, as the limiters take (PERF-007).
  */
 
@@ -624,6 +627,9 @@ export {};
  * @typedef {Object} PowerTTLMapOptions
  * @property {number} [defaultTTL] Default TTL in ms (0 = no expiry).
  * @property {(key:any,value:any)=>void} [onExpire]
+ * @property {number} [longTaskThreshold=50] Minimum duration (ms) for a
+ *   `PerformanceObserver` long-task entry to be recorded into the drift
+ *   histogram. No-op in environments without `PerformanceObserver`.
  * @property {() => number} [now] Injected clock, as the limiters take (PERF-007).
  *   Expiry is the one behaviour in this class that cannot be observed without
  *   a clock, so a test that wants to assert "expired after 150 ms" had either
@@ -973,6 +979,9 @@ export {};
  *   Supplies `utilization()` instead of resolving Node's `perf_hooks`. The
  *   argument exists so a browser build, a bundler, or a test can provide the
  *   reading without this module reaching for a Node built-in.
+ * @property {number} [longTaskThreshold=50] Minimum duration (ms) for a
+ *   `PerformanceObserver` long-task entry to be recorded into the drift
+ *   histogram. No-op in environments without `PerformanceObserver`.
  * @property {() => number} [now] Injected clock, as the limiters take
  *   (PERF-007). GEO-039: this helper's whole job is comparing *scheduled* time
  *   against *observed* time, so a frozen clock has to reach both sides or
@@ -1067,6 +1076,9 @@ export {};
  *   `hub-closed`.
  * @property {import("./powerEventBus.js").PowerEventBus} [eventBus] - When
  *   given, transitions are also emitted on it as `stateChange`.
+ * @property {number} [longTaskThreshold=50] Minimum duration (ms) for a
+ *   `PerformanceObserver` long-task entry to be recorded into the drift
+ *   histogram. No-op in environments without `PerformanceObserver`.
  * @property {() => number} [now] Injected clock, as the limiters take
  *   (PERF-007). GEO-039: this was the one clock-driven helper with no injection
  *   point at all, so a caller freezing time — MapLibre's `setNow()`, or a
@@ -1278,6 +1290,9 @@ export {};
  * @property {number} [baseDelay]
  * @property {number} [maxDelay]
  * @property {boolean} [jitter]
+ * @property {number} [longTaskThreshold=50] Minimum duration (ms) for a
+ *   `PerformanceObserver` long-task entry to be recorded into the drift
+ *   histogram. No-op in environments without `PerformanceObserver`.
  * @property {() => number} [now] Injected clock, as the limiters take
  *   (PERF-007). GEO-039: a deadline is arithmetic over `startedAt`, so a frozen
  *   clock has to reach it or `totalTimeout` cannot be exercised without real
