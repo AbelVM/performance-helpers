@@ -98,16 +98,72 @@ export class PowerMessagePort {
    * @returns {boolean} `false` when the port is already disposed. Throws only
    *   for a platform error.
    */
-  send(_sub, frame) {
+  /**
+   * The hub's `send(sub, frame)` adapter.
+   *
+   * Posts the hub's encoded `Uint8Array` frame to the port. An optional
+   * `transfer` list (transferable objects such as `ArrayBuffer`s or
+   * `MessagePort`s) is forwarded to the platform's `postMessage` so the
+   * payload can be handed over zero-copy. The frame is the hub's own buffer,
+   * handed over by reference — the platform serialises synchronously, so a
+   * transport that wrote into it would corrupt every other subscriber on the
+   * same topic. Copy it if you need to retain it.
+   *
+   * @param {object} _sub - The subscriber record (unused).
+   * @param {Uint8Array} frame - The hub's encoded frame.
+   * @param {any[]} [transfer] - Transferable objects to hand over zero-copy.
+   * @returns {boolean} `false` when the port is already disposed.
+   */
+  send(_sub, frame, transfer = []) {
     if (this._disposed) return false;
     try {
-      this._port.postMessage(frame);
+      if (Array.isArray(transfer) && transfer.length > 0) {
+        this._port.postMessage(frame, transfer);
+      } else {
+        this._port.postMessage(frame);
+      }
     } catch (e) {
       this._emitError(/** @type {Error} */ (e));
       return false;
     }
     this._sentCount++;
     return true;
+  }
+
+  /**
+   * Post an arbitrary value to the port, optionally transferring the listed
+   * objects zero-copy. Use this for hand-offs that are not hub frames — for
+   * example transferring a `MessagePort` to a peer (zero-copy port handoff).
+   *
+   * @param {any} value - The value to post.
+   * @param {any[]} [transfer] - Transferable objects to hand over zero-copy.
+   * @returns {boolean} `false` when the port is already disposed.
+   */
+  postMessage(value, transfer = []) {
+    if (this._disposed) return false;
+    try {
+      if (Array.isArray(transfer) && transfer.length > 0) {
+        this._port.postMessage(value, transfer);
+      } else {
+        this._port.postMessage(value);
+      }
+    } catch (e) {
+      this._emitError(/** @type {Error} */ (e));
+      return false;
+    }
+    this._sentCount++;
+    return true;
+  }
+
+  /**
+   * Transfer a `MessagePort` to the peer zero-copy. Convenience wrapper over
+   * {@link PowerMessagePort#postMessage}.
+   *
+   * @param {MessagePort} port - The port to hand over.
+   * @returns {boolean} `false` when this adapter is already disposed.
+   */
+  transferPort(port) {
+    return this.postMessage(port, [port]);
   }
 
   /**

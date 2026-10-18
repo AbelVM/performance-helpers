@@ -181,16 +181,49 @@ method is written out per class.
 
 ***
 
+### postMessage()
+
+> **postMessage**(`value`, `transfer?`): `boolean`
+
+Post an arbitrary value to the port, optionally transferring the listed
+objects zero-copy. Use this for hand-offs that are not hub frames — for
+example transferring a `MessagePort` to a peer (zero-copy port handoff).
+
+#### Parameters
+
+##### value
+
+`any`
+
+The value to post.
+
+##### transfer?
+
+`any`[] = `[]`
+
+Transferable objects to hand over zero-copy.
+
+#### Returns
+
+`boolean`
+
+`false` when the port is already disposed.
+
+***
+
 ### send()
 
-> **send**(`_sub`, `frame`): `boolean`
+> **send**(`_sub`, `frame`, `transfer?`): `boolean`
 
 The hub's `send(sub, frame)` adapter.
 
-Posts the hub's encoded `Uint8Array` frame to the port. The frame is the
-hub's own buffer, handed over by reference — the platform serialises
-synchronously, so a transport that wrote into it would corrupt every other
-subscriber on the same topic. Copy it if you need to retain it.
+Posts the hub's encoded `Uint8Array` frame to the port. An optional
+`transfer` list (transferable objects such as `ArrayBuffer`s or
+`MessagePort`s) is forwarded to the platform's `postMessage` so the
+payload can be handed over zero-copy. The frame is the hub's own buffer,
+handed over by reference — the platform serialises synchronously, so a
+transport that wrote into it would corrupt every other subscriber on the
+same topic. Copy it if you need to retain it.
 
 #### Parameters
 
@@ -198,8 +231,7 @@ subscriber on the same topic. Copy it if you need to retain it.
 
 `object`
 
-The subscriber record (unused; present so the hub's
-  `send(sub, frame)` signature is satisfied).
+The subscriber record (unused).
 
 ##### frame
 
@@ -207,12 +239,17 @@ The subscriber record (unused; present so the hub's
 
 The hub's encoded frame.
 
+##### transfer?
+
+`any`[] = `[]`
+
+Transferable objects to hand over zero-copy.
+
 #### Returns
 
 `boolean`
 
-`false` when the port is already disposed. Throws only
-  for a platform error.
+`false` when the port is already disposed.
 
 ***
 
@@ -225,3 +262,26 @@ A minimal snapshot for the metrics collector.
 #### Returns
 
 `object`
+
+***
+
+### transferPort()
+
+> **transferPort**(`port`): `boolean`
+
+Transfer a `MessagePort` to the peer zero-copy. Convenience wrapper over
+[PowerMessagePort#postMessage](#postmessage).
+
+#### Parameters
+
+##### port
+
+`MessagePort`
+
+The port to hand over.
+
+#### Returns
+
+`boolean`
+
+`false` when this adapter is already disposed.

@@ -109,6 +109,12 @@
 
 ***
 
+### \_disposed
+
+> **\_disposed**: `boolean`
+
+***
+
 ### \_held
 
 > `protected` **\_held**: `number`
@@ -435,6 +441,30 @@ How many units were served.
 #### Overrides
 
 [`PowerPermitGate`](../../powerPermitGate/classes/PowerPermitGate.md).[`[asyncDispose]`](../../powerPermitGate/classes/PowerPermitGate.md#asyncdispose)
+
+***
+
+### \[asyncIterator\]()
+
+> **\[asyncIterator\]**(): `AsyncGenerator`\<`PowerReleaseFn`, `void`, `unknown`\>
+
+Async-iterable interface (S-04). Yields a release callback for each
+acquired permit, so producers can be written as:
+
+```js
+for await (const release of backpressure) {
+  try { await doWork(); }
+  finally { release(); }
+}
+```
+
+Each iteration acquires one permit (waiting if necessary) and yields the
+release function returned by [PowerBackpressure#acquire](#acquire). Iteration
+stops when the instance is disposed.
+
+#### Returns
+
+`AsyncGenerator`\<`PowerReleaseFn`, `void`, `unknown`\>
 
 ***
 

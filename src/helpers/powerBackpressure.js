@@ -147,6 +147,7 @@ export class PowerBackpressure extends PowerPermitGate {
       initialTokens,
     });
 
+    this._disposed = false;
     this._capacity = normalizedCapacity;
     this._lowWaterMark = normalizedLowWaterMark;
     this._refillAmount = normalizedRefillAmount;
@@ -217,6 +218,38 @@ export class PowerBackpressure extends PowerPermitGate {
   /** True when the waiting queue is full. */
   get isFull() {
     return super.isFull;
+  }
+
+  /**
+   * Async-iterable interface (S-04). Yields a release callback for each
+   * acquired permit, so producers can be written as:
+   *
+   * ```js
+   * for await (const release of backpressure) {
+   *   try { await doWork(); }
+   *   finally { release(); }
+   * }
+   * ```
+   *
+   * Each iteration acquires one permit (waiting if necessary) and yields the
+   * release function returned by {@link PowerBackpressure#acquire}. Iteration
+   * stops when the instance is disposed.
+   *
+   * @returns {AsyncGenerator<PowerReleaseFn, void, unknown>}
+   */
+  async *[Symbol.asyncIterator]() {
+    while (!this._disposed) {
+      const release = await this.acquire();
+      if (this._disposed) {
+        try {
+          release();
+        } catch (e) {
+          /* ignore */
+        }
+        return;
+      }
+      yield release;
+    }
   }
 
   /**
@@ -481,6 +514,7 @@ export class PowerBackpressure extends PowerPermitGate {
    * @returns {void}
    */
   dispose() {
+    this._disposed = true;
     this.reset();
     // Neutralise the cleanup so a second dispose (or a late call) is a no-op
     // rather than a second teardown pass.

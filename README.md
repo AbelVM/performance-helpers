@@ -82,6 +82,7 @@ for fallback guidance and the legacy compatibility option.
 - [PowerDeadline: Timeout, retry budget, and cancellation](guides/powerDeadline.md). Wrap async work with per-attempt timeouts, overall deadlines, and retry policy.
 - [PowerHistogram: Lock-free percentile estimator](guides/powerHistogram.md). Compact in-process histogram for latency telemetry and estimated percentiles.
 - [PowerBackpressure: Producer-facing backpressure controller](guides/powerBackpressure.md). Gate producers with bounded waiting and an adaptive refill that self-tunes to unknown downstream capacity (`{ adaptive: true }` enables AIMD; off by default).
+- [PowerTaskGroup: Structured concurrency scope](guides/powerTaskGroup.md). Run async tasks under a shared AbortSignal; cancel all siblings on error or dispose. Supports `using` / `await using`.
 - [PowerBatch: Microtask coalescing dispatcher](guides/powerBatch.md). Coalesce synchronous calls into compact batches for bulk operations.
 - [PowerLatch: Counting barrier](guides/powerLatch.md). Simple barrier that resolves when a count reaches zero. Useful for coordinating out-of-band task completions.
 - [PowerThrottle: A token-bucket limiter](guides/powerThrottle.md). A tiny rate limiter useful for pacing external work or cooperating with `PowerPool`. Supports `reserve()`/`release()` for reservation-style workflows.

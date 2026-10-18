@@ -103,6 +103,7 @@ describe('API surface', () => {
         'defaultMetrics',
         'toSeries',
         'METRICS_VERSION',
+        'PowerTaskGroup',
         'PowerThrottle',
         'PowerTimedCache',
         'PowerWebSocketClient',
@@ -277,7 +278,7 @@ describe('API surface', () => {
     // point: this number is here so a subpath cannot be added or removed by
     // accident, and the only legitimate way past it is to edit this line on
     // purpose.
-    expect(subpaths.length).toBe(56);
+    expect(subpaths.length).toBe(57);
 
     for (const sub of subpaths) {
       const entry = p.exports[sub];

@@ -69,6 +69,11 @@
       "import": "./src/helpers/powerBackpressure.js",
       "default": "./src/helpers/powerBackpressure.js"
     },
+    "./powerTaskGroup": {
+      "types": "./types/helpers/powerTaskGroup.d.ts",
+      "import": "./src/helpers/powerTaskGroup.js",
+      "default": "./src/helpers/powerTaskGroup.js"
+    },
     "./powerBroadcastBus": {
       "types": "./types/helpers/powerBroadcastBus.d.ts",
       "import": "./src/helpers/powerBroadcastBus.js",

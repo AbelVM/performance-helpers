@@ -36,3 +36,32 @@ describe('PowerBrownout', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('PowerBrownout adaptive threshold', () => {
+  it('adapts threshold based on pressure history when enabled', () => {
+    const brownout = new PowerBrownout({ threshold: 0.5, adaptive: true });
+    // low pressure: threshold should rise (shed less)
+    brownout.setPressure(0.1);
+    const t1 = brownout.stats().threshold;
+    expect(t1).toBeGreaterThan(0.5);
+    // high pressure: threshold should fall (shed more)
+    brownout.setPressure(0.9);
+    const t2 = brownout.stats().threshold;
+    expect(t2).toBeLessThan(t1);
+    expect(brownout.stats().adaptive).toBe(true);
+    expect(brownout.stats().pressureEwma).toBeGreaterThan(0);
+  });
+
+  it('keeps threshold fixed when adaptive is disabled', () => {
+    const brownout = new PowerBrownout({ threshold: 0.5 });
+    brownout.setPressure(0.9);
+    expect(brownout.stats().threshold).toBe(0.5);
+    expect(brownout.stats().adaptive).toBe(false);
+  });
+
+  it('validates adaptive option shape', () => {
+    const b = new PowerBrownout({ adaptive: { min: 0.2, max: 0.8, alpha: 0.3 } });
+    expect(b.stats().adaptive).toBe(true);
+    expect(() => new PowerBrownout({ adaptive: 'x' })).not.toThrow();
+  });
+});

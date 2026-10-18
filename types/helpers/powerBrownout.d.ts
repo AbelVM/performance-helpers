@@ -6,26 +6,30 @@
 export function getResourcePressure(input?: {
     eventLoopPressure?: number;
 }): number | null;
-/**
- * Caller-controlled brownout policy for optional work.
- *
- * @class PowerBrownout
- * @public
- */
 export class PowerBrownout {
     /**
-     * @param {{threshold?:number, disabledKinds?:string[]}} [options]
+     * @param {{threshold?:number, disabledKinds?:string[], adaptive?:boolean|{alpha?:number, margin?:number, min?:number, max?:number}}} [options]
      */
     constructor(options?: {
         threshold?: number;
         disabledKinds?: string[];
+        adaptive?: boolean | {
+            alpha?: number;
+            margin?: number;
+            min?: number;
+            max?: number;
+        };
     });
+    /** @type {{enabled:boolean, alpha:number, margin:number, min:number, max:number, additiveIncrease:number, beta:number}} */
     threshold: number;
     /** Update pressure from a normalized local signal. */
     /** @param {number} pressure */
     setPressure(pressure: number): {
         pressure: number;
         threshold: number;
+        baseThreshold: number;
+        adaptive: boolean;
+        pressureEwma: any;
         active: boolean;
         disabledKinds: string[];
         decisions: number;
@@ -39,6 +43,9 @@ export class PowerBrownout {
     disable(kind: string, disabled?: boolean): {
         pressure: number;
         threshold: number;
+        baseThreshold: number;
+        adaptive: boolean;
+        pressureEwma: any;
         active: boolean;
         disabledKinds: string[];
         decisions: number;
@@ -48,6 +55,9 @@ export class PowerBrownout {
     stats(): {
         pressure: number;
         threshold: number;
+        baseThreshold: number;
+        adaptive: boolean;
+        pressureEwma: any;
         active: boolean;
         disabledKinds: string[];
         decisions: number;
@@ -56,6 +66,9 @@ export class PowerBrownout {
     getStats(): {
         pressure: number;
         threshold: number;
+        baseThreshold: number;
+        adaptive: boolean;
+        pressureEwma: any;
         active: boolean;
         disabledKinds: string[];
         decisions: number;

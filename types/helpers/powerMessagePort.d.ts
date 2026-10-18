@@ -43,7 +43,41 @@ export class PowerMessagePort {
      * @returns {boolean} `false` when the port is already disposed. Throws only
      *   for a platform error.
      */
-    send(_sub: object, frame: Uint8Array): boolean;
+    /**
+     * The hub's `send(sub, frame)` adapter.
+     *
+     * Posts the hub's encoded `Uint8Array` frame to the port. An optional
+     * `transfer` list (transferable objects such as `ArrayBuffer`s or
+     * `MessagePort`s) is forwarded to the platform's `postMessage` so the
+     * payload can be handed over zero-copy. The frame is the hub's own buffer,
+     * handed over by reference — the platform serialises synchronously, so a
+     * transport that wrote into it would corrupt every other subscriber on the
+     * same topic. Copy it if you need to retain it.
+     *
+     * @param {object} _sub - The subscriber record (unused).
+     * @param {Uint8Array} frame - The hub's encoded frame.
+     * @param {any[]} [transfer] - Transferable objects to hand over zero-copy.
+     * @returns {boolean} `false` when the port is already disposed.
+     */
+    send(_sub: object, frame: Uint8Array, transfer?: any[]): boolean;
+    /**
+     * Post an arbitrary value to the port, optionally transferring the listed
+     * objects zero-copy. Use this for hand-offs that are not hub frames — for
+     * example transferring a `MessagePort` to a peer (zero-copy port handoff).
+     *
+     * @param {any} value - The value to post.
+     * @param {any[]} [transfer] - Transferable objects to hand over zero-copy.
+     * @returns {boolean} `false` when the port is already disposed.
+     */
+    postMessage(value: any, transfer?: any[]): boolean;
+    /**
+     * Transfer a `MessagePort` to the peer zero-copy. Convenience wrapper over
+     * {@link PowerMessagePort#postMessage}.
+     *
+     * @param {MessagePort} port - The port to hand over.
+     * @returns {boolean} `false` when this adapter is already disposed.
+     */
+    transferPort(port: MessagePort): boolean;
     /**
      * The hub's `close(sub)` adapter.
      *

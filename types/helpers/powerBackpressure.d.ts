@@ -102,6 +102,24 @@ export class PowerBackpressure extends PowerPermitGate {
      * @returns {void}
      * @private
      */
+    /**
+     * Async-iterable interface (S-04). Yields a release callback for each
+     * acquired permit, so producers can be written as:
+     *
+     * ```js
+     * for await (const release of backpressure) {
+     *   try { await doWork(); }
+     *   finally { release(); }
+     * }
+     * ```
+     *
+     * Each iteration acquires one permit (waiting if necessary) and yields the
+     * release function returned by {@link PowerBackpressure#acquire}. Iteration
+     * stops when the instance is disposed.
+     *
+     * @returns {AsyncGenerator<PowerReleaseFn, void, unknown>}
+     */
+    [Symbol.asyncIterator](): AsyncGenerator<PowerReleaseFn, void, unknown>;
 }
 export default PowerBackpressure;
 export type BackpressureAdaptiveOptions = import("./jsdoc-types.js").BackpressureAdaptiveOptions;

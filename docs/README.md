@@ -62,6 +62,7 @@
 - [powerRealtimeHub](powerRealtimeHub/README.md)
 - [powerRetry](powerRetry/README.md)
 - [powerSseAdapter](powerSseAdapter/README.md)
+- [powerTaskGroup](powerTaskGroup/README.md)
 - [powerWebSocketClient](powerWebSocketClient/README.md)
 - [powerWebTransportAdapter](powerWebTransportAdapter/README.md)
 - [powerWebTransportClient](powerWebTransportClient/README.md)

@@ -355,3 +355,65 @@ describe('PowerMessagePort listener coexistence (AUD-010)', () => {
     expect(viaAdapter).toEqual([]);
   });
 });
+
+describe('PowerMessagePort transfer ports (S-27)', () => {
+  it('forwards a transfer list on send', () => {
+    const port = new FakePort();
+    const calls = [];
+    port.postMessage = (data, transfer) => {
+      calls.push({ data, transfer });
+    };
+    const adapter = new PowerMessagePort(port);
+    const frame = new Uint8Array([1, 2, 3]);
+    const buf = new ArrayBuffer(4);
+
+    const result = adapter.send({}, frame, [buf]);
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].data).toBe(frame);
+    expect(calls[0].transfer).toEqual([buf]);
+  });
+
+  it('posts an arbitrary value with transfer list via postMessage', () => {
+    const port = new FakePort();
+    const calls = [];
+    port.postMessage = (data, transfer) => {
+      calls.push({ data, transfer });
+    };
+    const adapter = new PowerMessagePort(port);
+    const inner = new FakePort();
+
+    const result = adapter.postMessage(inner, [inner]);
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].data).toBe(inner);
+    expect(calls[0].transfer).toEqual([inner]);
+  });
+
+  it('transfers a port zero-copy via transferPort', () => {
+    const port = new FakePort();
+    const calls = [];
+    port.postMessage = (data, transfer) => {
+      calls.push({ data, transfer });
+    };
+    const adapter = new PowerMessagePort(port);
+    const inner = new FakePort();
+
+    const result = adapter.transferPort(inner);
+
+    expect(result).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].data).toBe(inner);
+    expect(calls[0].transfer).toEqual([inner]);
+  });
+
+  it('returns false when disposed', () => {
+    const port = new FakePort();
+    const adapter = new PowerMessagePort(port);
+    adapter.dispose();
+    expect(adapter.postMessage('x', [])).toBe(false);
+    expect(adapter.transferPort(new FakePort())).toBe(false);
+  });
+});

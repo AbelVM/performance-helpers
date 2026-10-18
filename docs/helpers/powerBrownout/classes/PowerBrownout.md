@@ -6,10 +6,6 @@
 
 # Class: PowerBrownout
 
-Caller-controlled brownout policy for optional work.
-
- PowerBrownout
-
 ## Constructors
 
 ### Constructor
@@ -19,6 +15,10 @@ Caller-controlled brownout policy for optional work.
 #### Parameters
 
 ##### options?
+
+###### adaptive?
+
+`boolean` \| \{ `alpha?`: `number`; `margin?`: `number`; `max?`: `number`; `min?`: `number`; \}
 
 ###### disabledKinds?
 
@@ -33,6 +33,46 @@ Caller-controlled brownout policy for optional work.
 `PowerBrownout`
 
 ## Properties
+
+### \_adaptive
+
+> **\_adaptive**: `object`
+
+#### additiveIncrease
+
+> **additiveIncrease**: `number`
+
+#### alpha
+
+> **alpha**: `number`
+
+#### beta
+
+> **beta**: `number`
+
+#### enabled
+
+> **enabled**: `boolean`
+
+#### margin
+
+> **margin**: `number`
+
+#### max
+
+> **max**: `number`
+
+#### min
+
+> **min**: `number`
+
+***
+
+### \_baseThreshold
+
+> **\_baseThreshold**: `number`
+
+***
 
 ### \_decisions
 
@@ -49,6 +89,12 @@ Caller-controlled brownout policy for optional work.
 ### \_pressure
 
 > **\_pressure**: `number`
+
+***
+
+### \_pressureEwma
+
+> **\_pressureEwma**: `any`
 
 ***
 
@@ -102,6 +148,14 @@ Caller-controlled brownout policy for optional work.
 
 > **active**: `boolean`
 
+##### adaptive
+
+> **adaptive**: `boolean`
+
+##### baseThreshold
+
+> **baseThreshold**: `number`
+
 ##### decisions
 
 > **decisions**: `number`
@@ -113,6 +167,10 @@ Caller-controlled brownout policy for optional work.
 ##### pressure
 
 > **pressure**: `number`
+
+##### pressureEwma
+
+> **pressureEwma**: `any`
 
 ##### shed
 
@@ -136,6 +194,14 @@ Caller-controlled brownout policy for optional work.
 
 > **active**: `boolean`
 
+##### adaptive
+
+> **adaptive**: `boolean`
+
+##### baseThreshold
+
+> **baseThreshold**: `number`
+
 ##### decisions
 
 > **decisions**: `number`
@@ -147,6 +213,10 @@ Caller-controlled brownout policy for optional work.
 ##### pressure
 
 > **pressure**: `number`
+
+##### pressureEwma
+
+> **pressureEwma**: `any`
 
 ##### shed
 
@@ -176,6 +246,14 @@ Caller-controlled brownout policy for optional work.
 
 > **active**: `boolean`
 
+##### adaptive
+
+> **adaptive**: `boolean`
+
+##### baseThreshold
+
+> **baseThreshold**: `number`
+
 ##### decisions
 
 > **decisions**: `number`
@@ -187,6 +265,10 @@ Caller-controlled brownout policy for optional work.
 ##### pressure
 
 > **pressure**: `number`
+
+##### pressureEwma
+
+> **pressureEwma**: `any`
 
 ##### shed
 
@@ -212,6 +294,14 @@ Explain the current brownout state.
 
 > **active**: `boolean`
 
+##### adaptive
+
+> **adaptive**: `boolean`
+
+##### baseThreshold
+
+> **baseThreshold**: `number`
+
 ##### decisions
 
 > **decisions**: `number`
@@ -223,6 +313,10 @@ Explain the current brownout state.
 ##### pressure
 
 > **pressure**: `number`
+
+##### pressureEwma
+
+> **pressureEwma**: `any`
 
 ##### shed
 

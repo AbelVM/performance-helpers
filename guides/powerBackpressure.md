@@ -28,6 +28,7 @@ Producer-facing backpressure controller with adaptive refill.
 - `queueCapacity` — Maximum queued producers.
 - `isFull` — `true` when the waiting queue is saturated.
 - `dispose()` / `[Symbol.dispose]()` — Release resources and detach any internal timers. Supports `using` / `await using`. See [Disposal](#disposal).
+- `[Symbol.asyncIterator]()` — Async-iterable interface (S-04). Yields a release callback per acquired permit, so producers can be written as `for await (const release of backpressure) { ... }`.
 
 ## Disposal
 
@@ -202,6 +203,24 @@ function tryPublish(task) {
   return true;
 }
 ```
+
+## Async iteration (S-04)
+
+`PowerBackpressure` implements `[Symbol.asyncIterator]`, yielding one release
+callback per acquired permit. This lets a producer loop be written without
+manual `acquire()`/`release()` bookkeeping:
+
+```js
+for await (const release of backpressure) {
+  try {
+    await doWork();
+  } finally {
+    release();
+  }
+}
+```
+
+Iteration stops when the instance is disposed.
 
 ## Notes
 

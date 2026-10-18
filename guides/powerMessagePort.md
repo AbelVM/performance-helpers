@@ -58,3 +58,30 @@ hub.subscribe('ticks', onTick, { transport });
 - The adapter does **not** frame outbound messages. The hub's own `PowerMessageCodec` frame is posted as-is; the port's structured-clone boundary handles the serialisation.
 - Inbound frames are decoded through `decodeInbound`, which accepts both native envelopes and framed `Uint8Array` messages. A truncated or corrupt frame calls `onError` with a `RangeError` rather than throwing into the port's event loop.
 - `observability: true` opts this helper into the shared `MetricsCollector`. The prefix is `messagePort`.
+
+## Transfer ports (zero-copy handoff)
+
+`send`, `postMessage` and `transferPort` accept an optional transfer list so
+transferable objects (such as `ArrayBuffer`s or `MessagePort`s) can be handed
+over zero-copy instead of being structured-cloned:
+
+```js
+const adapter = new PowerMessagePort(port);
+
+// Hand a frame's backing buffer to the peer without copying.
+const frame = new Uint8Array([1, 2, 3]);
+adapter.send({}, frame, [frame.buffer]);
+
+// Hand an arbitrary value (e.g. a port) to the peer.
+const channel = new MessageChannel();
+adapter.postMessage(channel.port2, [channel.port2]);
+
+// Convenience wrapper for the common case.
+adapter.transferPort(channel.port2);
+```
+
+- `send(sub, frame, transfer = [])` — posts the hub's frame, forwarding `transfer` to the platform's `postMessage`.
+- `postMessage(value, transfer = [])` — posts an arbitrary value with an optional transfer list.
+- `transferPort(port)` — transfers a single `MessagePort` zero-copy.
+
+All three return `false` when the adapter is already disposed.

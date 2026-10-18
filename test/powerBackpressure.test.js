@@ -143,3 +143,39 @@ describe('PowerBackpressure', () => {
     expect(bp.available).toBe(3);
   });
 });
+
+describe('PowerBackpressure async iterable (S-04)', () => {
+  it('yields release functions and respects capacity', async () => {
+    const bp = new PowerBackpressure({ capacity: 2 });
+    const releases = [];
+    const iter = bp[Symbol.asyncIterator]();
+    const r1 = await iter.next();
+    expect(typeof r1.value).toBe('function');
+    releases.push(r1.value);
+    const r2 = await iter.next();
+    expect(typeof r2.value).toBe('function');
+    releases.push(r2.value);
+    expect(bp.available).toBe(0);
+
+    // release one, then next iteration acquires
+    releases[0]();
+    const r3 = await iter.next();
+    expect(typeof r3.value).toBe('function');
+    releases.push(r3.value);
+
+    // cleanup
+    for (const r of releases) r();
+    await iter.return();
+  });
+
+  it('stops iterating after dispose', async () => {
+    const bp = new PowerBackpressure({ capacity: 1 });
+    const iter = bp[Symbol.asyncIterator]();
+    const r = await iter.next();
+    expect(typeof r.value).toBe('function');
+    r.value();
+    bp.dispose();
+    const next = await iter.next();
+    expect(next.done).toBe(true);
+  });
+});

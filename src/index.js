@@ -49,6 +49,7 @@ export { PowerDeadline } from './helpers/powerDeadline.js';
 export { PowerHistogram } from './helpers/powerHistogram.js';
 export { PowerApdex } from './helpers/powerApdex.js';
 export { PowerBackpressure } from './helpers/powerBackpressure.js';
+export { PowerTaskGroup } from './helpers/powerTaskGroup.js';
 export { PowerBulkhead } from './helpers/powerBulkhead.js';
 export { PowerBatch } from './helpers/powerBatch.js';
 export { PowerServo } from './helpers/powerServo.js';

@@ -540,6 +540,12 @@ Re-exports [PowerSubscriberSet](../helpers/powerSubscriberSet/classes/PowerSubsc
 
 ***
 
+### PowerTaskGroup
+
+Re-exports [PowerTaskGroup](../powerTaskGroup/classes/PowerTaskGroup.md)
+
+***
+
 ### PowerThrottle
 
 Re-exports [PowerThrottle](../helpers/powerThrottle/classes/PowerThrottle.md)
