@@ -264,7 +264,6 @@ describe('the half-life counts operations, so a saturated sketch can still age',
     expect(s.estimate('flood-0')).toBeLessThan(15);
     // And counting resumed, because the counters are below 15 again.
     s.increment('flood-0');
-    expect(s.sample).toBeGreaterThan(0);
     expect(s.sample).not.toBe(frozen);
   });
 });

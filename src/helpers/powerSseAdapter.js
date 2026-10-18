@@ -26,7 +26,6 @@ import { assertKnownOptions } from '../utils/options.js';
  * @typedef {object} SseSubscriber
  * @property {string} id
  * @property {WritableStreamDefaultWriter|null} writer
- * @property {AbortController|null} abort
  * @property {boolean} closed
  * @property {number} seq - Monotonic per-subscriber event id, emitted as the
  *   SSE `id:` field. See {@link frameToSseLine}.
@@ -71,7 +70,13 @@ function frameToSseLine(frame, seq) {
   for (let i = 0; i < len; i++) {
     binary += String.fromCharCode(frame[i]);
   }
-  return 'id: ' + seq + '\ndata: ' + btoa(binary) + '\n\n';
+  const encode =
+    typeof btoa === 'function'
+      ? btoa(binary)
+      : typeof Buffer !== 'undefined'
+        ? Buffer.from(binary, 'binary').toString('base64')
+        : binary;
+  return 'id: ' + seq + '\ndata: ' + encode + '\n\n';
 }
 
 /**
@@ -130,7 +135,12 @@ export function createSseAdapter(options = {}) {
       if (/** @type {any} */ (sseSub).writer) {
         await /** @type {any} */ (sseSub).writer.write(line);
       } else if (typeof (/** @type {any} */ (sub).transport?.write) === 'function') {
-        /** @type {any} */ (sub).transport.write(line);
+        const ok = /** @type {any} */ (sub).transport.write(line);
+        if (ok === false && typeof (/** @type {any} */ (sub).transport?.once) === 'function') {
+          await new Promise((resolve) => {
+            /** @type {any} */ (sub).transport.once('drain', resolve);
+          });
+        }
       }
     } catch (/** @type {any} */ err) {
       if (onError) onError(err, sub);
@@ -175,7 +185,6 @@ export function createSseAdapter(options = {}) {
   function register(sub) {
     if (subs.has(/** @type {any} */ (sub).id)) return;
     let writer = null;
-    /** @type {AbortController | null} */ let abort = null;
     if (createResponse) {
       try {
         const response = createResponse(sub);
@@ -184,7 +193,6 @@ export function createSseAdapter(options = {}) {
           const body = /** @type {any} */ (r.body);
           if (typeof body.getWriter === 'function') {
             writer = body.getWriter();
-            abort = new AbortController();
           }
         }
       } catch (/** @type {any} */ error) {
@@ -193,12 +201,10 @@ export function createSseAdapter(options = {}) {
       }
     } else if (/** @type {any} */ (sub).transport) {
       writer = /** @type {any} */ (null);
-      abort = new AbortController();
     }
     subs.set(/** @type {any} */ (sub).id, {
       id: /** @type {any} */ (sub).id,
       writer,
-      abort: /** @type {any} */ (abort),
       closed: false,
       seq: 0,
       lastEventId: readLastEventId(sub),

@@ -258,9 +258,11 @@ class WorkerWrapper {
         }
       }
 
+      // Do not synthesise a transfer list for a bare buffer: transferring
+      // would detach the caller's own buffer (B2-009). Post without a
+      // transfer list so the value is copied instead.
       if (!tr) {
-        const buffer = isArrayBuffer(msg) ? msg : msg.buffer;
-        if (buffer?.byteLength > 0) tr = [buffer];
+        tr = undefined;
       }
 
       try {
@@ -847,6 +849,7 @@ export class PowerPool {
     // AUD-008. Resume point for the sweep's rotating cursor: the last key the
     // previous sweep examined that is still in the ledger. `null` means "start
     // from the head", which is also the state after `clear()`.
+    /** @type {any} */
     this._idempotencyCursor = null;
 
     // configure optional autoscaling
@@ -1789,6 +1792,10 @@ export class PowerPool {
     // outstanding, and `drain()` resolved early against a pool that was not
     // idle.
     workerObj.tasksSettled = true;
+    // Track whether the pool initiated this termination (resize, reap, shutdown,
+    // removeWorker, reset) vs. an unexpected worker exit (crash). Used by
+    // healthCheck() to distinguish crashed from retired workers (B2-027).
+    workerObj.terminatedByPool = reason !== 'worker-exit';
     try {
       // Disposed, not just terminated. `terminate()` stops the worker; it does not
       // detach the three native listeners `WorkerAgnostic` wired onto it at
@@ -2028,6 +2035,32 @@ export class PowerPool {
     return this._priorityAgingMs <= 0;
   }
 
+  /**
+   * Reject every pending response with `reason`, then clear the map.
+   * Shared by `shutdown()` and `_resetPoolForStopThePress()` (B2-028).
+   * @private
+   * @param {Error} reason
+   */
+  _rejectAllPending(reason) {
+    try {
+      for (const [cid] of this._pendingResponses) {
+        try {
+          this._cleanupPendingResponse(cid, { rejectWith: reason });
+        } catch (e) {
+          this._debugLog?.(e, '_rejectAllPending: cleanup pending response');
+        }
+      }
+      try {
+        if (typeof this._pendingResponses?.clear === 'function') this._pendingResponses.clear();
+      } catch (e) {
+        this._debugLog?.(e, '_rejectAllPending: pendingResponses.clear failed');
+      }
+    } catch (e) {
+      this._debugLog?.(e, '_rejectAllPending: iterate pending responses');
+      throw e;
+    }
+  }
+
   shutdown() {
     if (this._terminated) return;
     this._terminated = true;
@@ -2035,23 +2068,9 @@ export class PowerPool {
 
     // reject pending responses (centralized to avoid races)
     try {
-      for (const [cid] of this._pendingResponses) {
-        try {
-          this._cleanupPendingResponse(cid, {
-            rejectWith: new PowerPoolShutdownError('pool:shutdown'),
-          });
-        } catch (e) {
-          this._debugLog?.(e, 'shutdown: cleanup pending response');
-        }
-      }
-      // Ensure the map is empty in case individual cleanup failed
-      try {
-        if (typeof this._pendingResponses?.clear === 'function') this._pendingResponses.clear();
-      } catch (e) {
-        this._debugLog?.(e, 'shutdown: pendingResponses.clear failed');
-      }
+      this._rejectAllPending(new PowerPoolShutdownError('pool:shutdown'));
     } catch (e) {
-      this._debugLog?.(e, 'shutdown: iterate pending responses');
+      this._debugLog?.(e, 'shutdown: rejectAllPending failed');
     }
 
     // terminate workers
@@ -2131,7 +2150,7 @@ export class PowerPool {
       // encode cache. For very large serialized payloads, skip caching
       // and return the encoded Uint8Array directly.
       if (typeof s === 'string' && s.length > ENCODE_CACHE_LARGE_KEY_LENGTH) {
-        return o2u8(obj);
+        return o2u8(obj, s);
       }
       const hit = this._encodeCache.get(s);
       if (hit) {
@@ -3235,15 +3254,12 @@ export class PowerPool {
     // — which is how the first draft of this block failed the type ratchet. The
     // `undefined` case is unreachable here (`i !== last` and the array is
     // non-empty), but the guard is what makes that explicit rather than assumed.
+    // Stable removal (B2-026): preserve insertion order so `_reapIdleWorkers`
+    // (which scans newest-to-oldest) reaps the right worker. Swap-remove
+    // destroyed that ordering.
     const i = this.workers.indexOf(workerObj);
     if (i !== -1) {
-      const last = this.workers.length - 1;
-      if (i === last) {
-        this.workers.pop();
-      } else {
-        const moved = this.workers.pop();
-        if (moved !== undefined) this.workers[i] = moved;
-      }
+      this.workers.splice(i, 1);
     }
 
     this._bus.emit('pool:worker:exit', {
@@ -3254,6 +3270,19 @@ export class PowerPool {
       completedTask: workerObj.everCompletedTask === true,
       remaining: this.workers.length,
     });
+    // Emit pool:scale on the removal path (B2-025).
+    if (id != null) {
+      try {
+        this._bus.emit('pool:scale', {
+          action: 'remove',
+          reason: 'worker-exit',
+          terminated: [id],
+          count: 1,
+        });
+      } catch (e) {
+        this._debugLog?.(e, '_handleWorkerExit: bus.emit pool:scale failed');
+      }
+    }
 
     // A worker that died having done no work never loaded. Count it; a run of
     // them is a storm, not a recovery.
@@ -3432,9 +3461,11 @@ export class PowerPool {
    * are available.
    *
    * @private
+   * @param {WorkerObj[]|null} [pool]
    * @returns {WorkerObj|null}
    */
-  _findLeastLoadedWorker(pool = this.workers) {
+  _findLeastLoadedWorker(pool) {
+    if (!pool) pool = this.workers;
     if (!pool.length) return null;
     let best = null;
     let bestTasks = Infinity;
@@ -3567,6 +3598,7 @@ export class PowerPool {
     if (!ledger || ledger.size === 0) {
       // Nothing to resume from, and a stale cursor would make the next sweep
       // skip the whole ledger looking for a key that is no longer there.
+      /** @type {any} */
       this._idempotencyCursor = null;
       return;
     }
@@ -3589,23 +3621,26 @@ export class PowerPool {
     // first N keys every time means an in-flight entry parked at the head blocks
     // every settled key behind it forever. Resuming past the last examined key
     // walks the whole ledger over successive calls.
+    /** @type {any} */
     let cursor = this._idempotencyCursor;
     // A cursor whose key has been deleted or released is stale. Detecting that
     // up front is O(1) and keeps the sweep from burning its whole budget
     // skipping ahead to a key that is not there.
     if (cursor !== null && !ledger.has(cursor)) cursor = null;
     let seenCursor = cursor === null;
-    // The last key examined that is still in the ledger, which is the only safe
-    // thing to resume from: resuming at a key this sweep deleted would make the
-    // next sweep's skip-ahead run off the end and examine nothing.
     let resume = null;
     let examined = 0;
+    let hitCapBeforeCursor = false;
     for (const k of ledger.keys()) {
       if (!seenCursor) {
         if (k === cursor) seenCursor = true;
         else continue;
       }
-      if (examined >= DEFAULT_IDEMPOTENCY_SWEEP_BATCH) break;
+      if (examined >= DEFAULT_IDEMPOTENCY_SWEEP_BATCH) {
+        // Cap hit: keep progress instead of restarting from the head next time.
+        if (!seenCursor) hitCapBeforeCursor = true;
+        break;
+      }
       examined += 1;
       const entry = ledger.get(k);
       if (entry && entry.settledAt !== null && now - entry.settledAt >= ttl) {
@@ -3615,6 +3650,7 @@ export class PowerPool {
         resume = k;
       }
     }
+    if (hitCapBeforeCursor) resume = cursor;
     this._idempotencyCursor = resume;
     this._idempotencySize = ledger.size;
   }
@@ -4101,15 +4137,7 @@ export class PowerPool {
     }
 
     try {
-      for (const [cid] of this._pendingResponses) {
-        try {
-          this._cleanupPendingResponse(cid, {
-            rejectWith: new Error(`${scope}: cancelled pending response`),
-          });
-        } catch (e) {
-          this._debugLog?.(e, '_resetPoolForStopThePress: cleanupPendingResponse failed');
-        }
-      }
+      this._rejectAllPending(new Error(`${scope}: cancelled pending response`));
     } catch (err) {
       this._logger.error(err, `${scope}: failed to cancel pending responses`);
     }
@@ -4348,7 +4376,8 @@ export class PowerPool {
       targetWorkerId == null &&
       this.workers.length === 1 &&
       this._maxTasksPerWorker === Infinity &&
-      adaptiveLimit === null
+      adaptiveLimit === null &&
+      this._readyField == null
     ) {
       const obj = this.workers[0];
       let idleStateDirty = false;
@@ -5172,6 +5201,7 @@ export class PowerPool {
       index: i,
       pending: w && typeof w.tasks === 'number' ? w.tasks : 0,
       alive: !!(w && w.worker && !w.exited),
+      crashed: !!(w && w.exited && !w.terminatedByPool),
     }));
   }
 
@@ -5746,15 +5776,39 @@ export class PowerPool {
     const now = nowMs();
     let dispatched = false;
 
-    for (const workerObj of this.workers) {
+    for (const workerObj of this._readyWorkers()) {
       let remainingSlots = maxTasksPerWorker - workerObj.tasks;
       while (remainingSlots > 0 && adaptiveSlots > 0 && queue.length > 0) {
-        const item = queue.shift();
+        // Mirror the inline drain's deadline/abort handling (PISC-003): a queued
+        // item whose deadline has elapsed or whose signal was aborted while it
+        // waited is rejected and skipped rather than dispatched. Without this,
+        // `_dispatchQueuedTasks` (reached from `resumeQueue()` and the readiness
+        // handler) would post a stale task to a worker.
+        let item = queue.shift();
+        while (item) {
+          if (item.deadlineAt === undefined || item.deadlineAt > now) {
+            if (!item.signal?.aborted) break;
+          }
+          if (item.correlationId != null) {
+            const err =
+              item.signal?.aborted === true
+                ? abortReason(item.signal)
+                : (() => {
+                    const e = new Error('postMessage queued task deadline elapsed');
+                    e.code = 'EDEADLINE';
+                    return e;
+                  })();
+            this._cleanupPendingResponse(item.correlationId, { rejectWith: err });
+          }
+          item = queue.length > 0 ? queue.shift() : null;
+        }
+        if (!item) break;
         try {
           const dispatch = this._encodeForWorker(workerObj, item);
           this._dispatchToWorker(workerObj, dispatch, {
             correlationId: item.correlationId,
             startTime: now,
+            signal: item.signal,
           });
           remainingSlots--;
           adaptiveSlots--;

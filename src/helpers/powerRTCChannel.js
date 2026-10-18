@@ -209,7 +209,11 @@ export class PowerRTCChannel {
     // the caller's object. `detectSocketKind` refuses an unrecognised socket the
     // same way, and for the same reason: an unrecognised transport stored as-is
     // matches no branch and reports itself healthy.
-    if (expectUnreliable && (channel.ordered !== false || channel.maxRetransmits !== 0)) {
+    if (
+      expectUnreliable &&
+      ((channel.ordered !== undefined && channel.ordered !== false) ||
+        (channel.maxRetransmits !== undefined && channel.maxRetransmits !== 0))
+    ) {
       throw new TypeError(
         'PowerRTCChannel: `expectUnreliable` was set, but this channel is ' +
           `ordered=${String(channel.ordered)} maxRetransmits=${String(channel.maxRetransmits)}. ` +

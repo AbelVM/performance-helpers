@@ -32,20 +32,6 @@ export class PowerMessagePort {
     /**
      * The hub's `send(sub, frame)` adapter.
      *
-     * Posts the hub's encoded `Uint8Array` frame to the port. The frame is the
-     * hub's own buffer, handed over by reference — the platform serialises
-     * synchronously, so a transport that wrote into it would corrupt every other
-     * subscriber on the same topic. Copy it if you need to retain it.
-     *
-     * @param {object} _sub - The subscriber record (unused; present so the hub's
-     *   `send(sub, frame)` signature is satisfied).
-     * @param {Uint8Array} frame - The hub's encoded frame.
-     * @returns {boolean} `false` when the port is already disposed. Throws only
-     *   for a platform error.
-     */
-    /**
-     * The hub's `send(sub, frame)` adapter.
-     *
      * Posts the hub's encoded `Uint8Array` frame to the port. An optional
      * `transfer` list (transferable objects such as `ArrayBuffer`s or
      * `MessagePort`s) is forwarded to the platform's `postMessage` so the

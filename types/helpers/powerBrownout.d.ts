@@ -21,7 +21,6 @@ export class PowerBrownout {
         };
     });
     /** @type {{enabled:boolean, alpha:number, margin:number, min:number, max:number, additiveIncrease:number, beta:number}} */
-    threshold: number;
     /** Update pressure from a normalized local signal. */
     /** @param {number} pressure */
     setPressure(pressure: number): {
@@ -74,4 +73,6 @@ export class PowerBrownout {
         decisions: number;
         shed: number;
     };
+    set threshold(value: number);
+    get threshold(): number;
 }

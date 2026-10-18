@@ -282,3 +282,15 @@ per-worker decision is what keeps a pool from adopting it where it does not pay.
 - The `raw` codec respects a typed array's `byteOffset`/`byteLength`, so a `subarray` of a larger buffer encodes only its own window.
 - `strict: false` is there for a rolling upgrade, where a newer peer may send version 2 and a reader should decide for itself. It is off the default deliberately.
 - Every frame is written with a hand-rolled little-endian length rather than a `DataView`, to avoid allocating one per message on a hot path.
+
+## Cleanup with `using`
+
+`PowerMessageCodec` helpers are stateless functions; the frame decoder
+(`createFrameDecoder`) implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using decoder = createFrameDecoder();
+  decoder.push(chunk);
+} // decoder.dispose() runs here — buffered bytes released
+```

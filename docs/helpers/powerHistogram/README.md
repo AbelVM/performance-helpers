@@ -10,6 +10,10 @@
 
 - [PowerHistogram](classes/PowerHistogram.md)
 
+## Functions
+
+- [isPowerHistogram](functions/isPowerHistogram.md)
+
 ## References
 
 ### default

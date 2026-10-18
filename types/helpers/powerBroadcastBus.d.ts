@@ -7,6 +7,11 @@
  * the threshold or when an ack times out. Slow-consumer policy is driven by
  * the pending counter, not an invisible queue.
  *
+ * **Frame delivery is the caller's responsibility.** `handleMessage()` processes
+ * only ack frames; data frames posted via `send()` are delivered by the
+ * underlying `BroadcastChannel` to subscribers directly. The bus tracks acks
+ * and slow consumers but never routes data frames (B2-005).
+ *
  * @param {PowerBroadcastBusOptions} options
  */
 export function createBroadcastBus(options: PowerBroadcastBusOptions): {

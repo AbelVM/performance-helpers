@@ -260,8 +260,32 @@ export class PowerDatagramChannel {
    * @private
    */
   _sendFragmented(datagram, size) {
+    // Honour the open/queue contract: a closed transport queues the whole
+    // datagram instead of partially sending chunks (B2-030).
+    if (!this.isOpen) {
+      if (this._maxQueue > 0 && this._queue.length < this._maxQueue) {
+        this._queue.push(datagram);
+        return true;
+      }
+      if (this._maxQueue > 0 && this._queue.length > 0) {
+        this._queue.shift();
+        this._droppedCount += 1;
+      }
+      if (this._maxQueue > 0 && this._queue.length < this._maxQueue) {
+        this._queue.push(datagram);
+        return true;
+      }
+      this._droppedCount += 1;
+      return false;
+    }
     const bytes = this._toBytes(datagram);
-    const chunkSize = this._fragmentSize > 0 ? this._fragmentSize : size;
+    // Enforce the hard ceiling per chunk (B2-006): never hand a chunk larger
+    // than maxDatagramSizeBytes to the transport.
+    let chunkSize = this._fragmentSize > 0 ? this._fragmentSize : size;
+    if (this._maxDatagramSizeBytes > 0) {
+      chunkSize = Math.min(chunkSize, this._maxDatagramSizeBytes);
+      if (chunkSize <= 0) chunkSize = this._maxDatagramSizeBytes;
+    }
     const total = Math.ceil(bytes.length / chunkSize);
     this._fragmentedCount += 1;
     let sent = 0;
@@ -374,6 +398,14 @@ export class PowerDatagramChannel {
     detach(this._metrics);
     this._metrics = null;
     if (this._disposed) return;
+    // Align with close(): attempt one final flush of the queued datagrams
+    // before dropping them, so dispose() does not silently lose data that
+    // close() would have delivered (B2-031).
+    try {
+      this.flush();
+    } catch (e) {
+      /* ignore flush errors during dispose — nothing more to do */
+    }
     this._disposed = true;
     this._queue = [];
     this._transport = null;

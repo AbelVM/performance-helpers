@@ -203,3 +203,14 @@ synchronous observer delivers synchronously. The encoding is subtle and worth
 knowing if you construct derived observers by hand: the internal mode is the string
 `'sync'`, but the `async` **option** spells sync as `false` and rejects the string
 `'sync'` — it falls through to the default and you silently get a microtask.
+
+## Cleanup with `using`
+
+`PowerObserver` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using observer = new PowerObserver();
+  observer.observe(() => {});
+} // observer.dispose() runs here — listeners released
+```

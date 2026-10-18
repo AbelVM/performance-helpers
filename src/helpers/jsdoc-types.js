@@ -288,6 +288,9 @@
  * @property {number} [exitCode] - The exit code the runtime reported, where it
  *   reports one. Carried on the entry and echoed in the `pool:worker:exit` event
  *   payload. PISC-001.
+ * @property {boolean} [terminatedByPool] - Whether the pool initiated this
+ *   worker's termination (resize, reap, shutdown, removeWorker, reset) rather
+ *   than an unexpected exit (crash). B2-027.
  * @property {boolean} [ready] - Whether this worker has signalled readiness
  *   (PISC-005). `true` when there is no gate, so the dispatch checks are a single
  *   boolean test on the common path. A worker still running async init is held out

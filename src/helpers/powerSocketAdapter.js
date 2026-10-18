@@ -744,7 +744,12 @@ export class PowerSocketAdapter {
         this._armStreamRetry();
         return;
       }
-      this._streamReader = readable.getReader();
+      try {
+        this._streamReader = readable.getReader();
+      } catch (/** @type {any} */ e) {
+        this._handleClose(1006, e?.message ?? '');
+        return;
+      }
       // Armed and no longer needed. Resetting the backoff means a *second*
       // wait, after a reconnect, starts fast again.
       this._streamRetryDelay = STREAM_RETRY_MIN_MS;
@@ -763,7 +768,9 @@ export class PowerSocketAdapter {
       }
       this._handleClose(1000, '');
     };
-    this._streamPromise = this._pumpStream();
+    this._streamPromise = this._pumpStream().catch((e) => {
+      this._handleClose(1006, e?.message ?? '');
+    });
   }
 
   /**

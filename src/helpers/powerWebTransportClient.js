@@ -24,7 +24,7 @@
  * @public
  */
 import { encodeMessage, createFrameDecoder } from './powerMessageCodec.js';
-import { PowerHistogram } from './powerHistogram.js';
+import { PowerHistogram, isPowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { nowMs } from '../utils/now.js';
@@ -283,7 +283,7 @@ export class PowerWebTransportClient {
     });
     this._connectionGeneration = 0;
 
-    this.rtt = rtt instanceof PowerHistogram ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
+    this.rtt = isPowerHistogram(rtt) ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
     this._streamPriority = Number(streamPriority) || 0;
     this._sendOrder = Number(sendOrder) || 0;
     this._datagramFallback = datagramFallback !== false;
@@ -403,27 +403,25 @@ export class PowerWebTransportClient {
    * Send a message, applying back-pressure.
    *
    * @param {any} message
-   * @param {{dropOnBackpressure?: boolean}} [options]
    * @returns {Promise<boolean>} `true` when the frame was handed to the transport.
    */
-  async send(message, options = {}) {
-    return this._transmit(encodeMessage(message, { codec: this._codec }), options);
+  async send(message) {
+    return this._transmit(encodeMessage(message, { codec: this._codec }));
   }
 
   /**
    * Send an already-framed payload.
    * @param {Uint8Array} frame
-   * @param {Object} [options]
    * @returns {Promise<boolean>}
    */
-  async sendFrame(frame, options = {}) {
+  async sendFrame(frame) {
     if (this._state !== READY_STATE.OPEN || !this._writer) return false;
     if (!(frame instanceof Uint8Array)) {
       throw new TypeError(
         'PowerWebTransportClient.sendFrame() requires a Uint8Array. Use send() for a plain value.'
       );
     }
-    return this._transmit(frame, options);
+    return this._transmit(frame);
   }
 
   /**
@@ -632,6 +630,7 @@ export class PowerWebTransportClient {
     // Create a bidirectional stream for the data path.
     const streamOpts = {};
     if (this._sendOrder) streamOpts.sendOrder = this._sendOrder;
+    if (this._streamPriority) streamOpts.priority = this._streamPriority;
     const stream = await transport.createBidirectionalStream?.(streamOpts);
     if (generation !== this._connectionGeneration || transport !== this._transport) return;
     if (!stream) {
@@ -852,11 +851,16 @@ export class PowerWebTransportClient {
    * @param {'ping'|'pong'} kind
    * @private
    */
-  _sendHeartbeatFrame(kind) {
+  async _sendHeartbeatFrame(kind) {
     if (!this._writer) return;
     const heartbeat = encodeMessage({ __heartbeat: kind }, { codec: this._codec });
-    this._writer.write(heartbeat).catch(() => {});
-    this._counters.sent += 1;
+    try {
+      await this._writer.ready;
+      await this._writer.write(heartbeat);
+      this._counters.sent += 1;
+    } catch (e) {
+      this._emit('error', e);
+    }
   }
 
   /**

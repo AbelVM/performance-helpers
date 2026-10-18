@@ -759,6 +759,7 @@ export class PowerCache {
     // second map costs one `Map` and leaves the observable shape alone, so the
     // cancellation work does not gate on a migration of unrelated tests.
     this._inflightControllers = new Map();
+    this._disposed = false;
     this._defaultAsyncTimeout = Number.isFinite(Number(defaultAsyncTimeout))
       ? Math.max(0, Math.floor(Number(defaultAsyncTimeout)))
       : 30000;
@@ -1712,7 +1713,8 @@ export class PowerCache {
     // and not capacity on top of `maxEntries`. Excluding it makes a main-only
     // test read as never-full, admit every scan key, and churn through the
     // working set one key at a time.
-    const atCapacity = victim != null && previousSize >= this.maxEntries;
+    const atCapacity =
+      victim != null && (previousSize >= this.maxEntries || this._currentWeight > this.maxWeight);
     if (!atCapacity) {
       // Below capacity nothing is displaced — only the promotion happens. Doing
       // the eviction here too is what made a warm lose 35 of 40 keys: promoted,
@@ -1724,7 +1726,10 @@ export class PowerCache {
     /** @type {CacheNode} */
     const v = victim;
     const victimKey = v.key;
-    if (this._sketch.estimate(challenger.key) > this._sketch.estimate(victimKey)) {
+    if (
+      this._sketch.estimate(challenger.key) > this._sketch.estimate(victimKey) ||
+      this._currentWeight > this.maxWeight
+    ) {
       this._evictNode(victim);
       this._promoteFromWindow(challenger);
     } else {
@@ -2180,6 +2185,7 @@ export class PowerCache {
    * @returns {this|false} `this` on success, or `false` when insertion was rejected due to oversize.
    */
   set(key, value, { ttl = this.defaultTTL, weight = null } = {}) {
+    if (this._disposed) return false;
     const now = this._now();
     const expiresAt = this._expiresAt(ttl, now);
     // Compute weight once and validate it before mutating bookkeeping.
@@ -2785,8 +2791,12 @@ export class PowerCache {
     }
     /** @type {Array<CacheNode>} */
     const doomed = [];
-    for (let node = this._head; node; node = node.next) {
-      if (predicate(node.key, node.value)) doomed.push(node);
+    const heads =
+      this._policy === 's3fifo' ? [this._head, this._smallHead, this._ghostHead] : [this._head];
+    for (const head of heads) {
+      for (let node = head; node; node = node.next) {
+        if (predicate(node.key, node.value)) doomed.push(node);
+      }
     }
     let removed = 0;
     for (const node of doomed) {
@@ -2903,6 +2913,7 @@ export class PowerCache {
     // The `p.then(...)` late-write hook deliberately still populates the cache
     // with a value computed before the clear, which is the useful behaviour.
     this._inflightPromises.clear();
+    this._inflightControllers.clear();
   }
 
   /**
@@ -3083,6 +3094,7 @@ export class PowerCache {
   }
 
   [Symbol.dispose]() {
+    this._disposed = true;
     // The detach lives **here**, not in `dispose()`. `using cache = …` and
     // `await using` call the symbol and nothing else, so a detach that only
     // `dispose()` performed left the series registered for the life of the
@@ -3336,42 +3348,38 @@ export class PowerCache {
    */
   *entries(order = 'MRU') {
     const link = order === 'MRU' ? 'prev' : 'next';
-    let node = order === 'MRU' ? this._tail : this._head;
-    // The number of nodes this walk may visit, captured before the first yield.
-    // A recency mutation — `get()`, `touch()`, or `set()` on a key already in the
-    // list — relinks the node the caller is standing on to the *tail*, which is
-    // behind an MRU-first cursor, so the walk arrives back at it and cycles
-    // forever. That is a hang, not a wrong answer, and it is reachable from the
-    // documented `get` in one line of loop body.
-    //
-    // The bound is a count of nodes, not a check for a repeat: a Set of visited
-    // nodes would be an allocation on every iteration call, and this class does
-    // not spend one to save a caller from its own loop body. Measured across the
-    // four list shapes, no walk that does *not* relink yields more entries than
-    // existed when it started — inserting during a walk lands the new entry
-    // behind the cursor, so additions are never visited (tinylfu 40 yields for 40
-    // entries, plain LRU 10 for 10, slru 15 for 20) and a truncation here cannot
-    // drop an entry a correct walk owed the caller.
+    // Under S3-FIFO, Small-queue residents are real entries (they hold values)
+    // and must be iterable alongside Main (B2-011). Walk Main first, then Small.
+    const queues =
+      this._policy === 's3fifo'
+        ? [
+            { head: () => this._head, tail: () => this._tail, budget: () => this._map.size },
+            {
+              head: () => this._smallHead,
+              tail: () => this._smallTail,
+              budget: () => this._smallSize,
+            },
+          ]
+        : [{ head: () => this._head, tail: () => this._tail, budget: () => this._map.size }];
     let budget = this.size;
-    while (node) {
-      if (budget-- <= 0) return;
-      // Read the continuation before handing control to the caller: the node we
-      // are standing on may be removed while the loop body runs, and `_remove`
-      // nulls both of its links on the way out.
-      const next = node[link];
-      yield [node.key, node.value];
-      if (!isLinked(node, this._head, this._tail)) {
-        // The node just yielded was removed. Its captured successor was not
-        // touched by that removal, so it is still the right place to resume — or
-        // the walk is genuinely over if the end of the list was reached.
-        node = isLinked(next, this._head, this._tail) ? next : null;
-      } else if (isLinked(next, this._head, this._tail)) {
-        node = next;
-      } else {
-        // The successor was removed before we reached it, so it is skipped. The
-        // removal repaired *our* link past it, so re-reading it is how the walk
-        // steps over the hole rather than stopping on it.
-        node = node[link];
+    for (const q of queues) {
+      let node = order === 'MRU' ? q.tail() : q.head();
+      const qBudget = q.budget();
+      let used = 0;
+      while (node && used < qBudget) {
+        if (budget-- <= 0) return;
+        used += 1;
+        const head = q.head();
+        const tail = q.tail();
+        const next = node[link];
+        yield [node.key, node.value];
+        if (!isLinked(node, head, tail)) {
+          node = isLinked(next, head, tail) ? next : null;
+        } else if (isLinked(next, head, tail)) {
+          node = next;
+        } else {
+          node = node[link];
+        }
       }
     }
   }

@@ -128,3 +128,18 @@ bus.on('stateChange', ({ state, reason }) => {
   console.info('circuit-change', state, reason);
 });
 ```
+
+## Cleanup with `using`
+
+`PowerCircuit` implements `Symbol.dispose` / `Symbol.asyncDispose`, so it works
+with the `using` / `await using` declarations:
+
+```javascript
+{
+  using circuit = new PowerCircuit({ threshold: 3, timeout: 1000 });
+  await circuit.call(() => fetch('/api'));
+} // circuit.dispose() runs here — state reset, no late calls admitted
+```
+
+Disposal is a state reset (the circuit holds no timer), so a disposed circuit
+rejects further `call()`s with `ECIRCUITDISPOSED` rather than silently no-oping.

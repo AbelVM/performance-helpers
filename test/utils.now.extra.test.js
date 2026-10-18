@@ -28,3 +28,10 @@ describe('nowMs behavior', () => {
     global.performance = origPerf;
   });
 });
+
+describe('default export (B2-091)', () => {
+  it('default export is the nowMs function', () => {
+    expect(typeof nowModule.default).toBe('function');
+    expect(nowModule.default()).toBeCloseTo(nowModule.nowMs(), 0);
+  });
+});

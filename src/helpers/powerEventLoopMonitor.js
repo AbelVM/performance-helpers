@@ -420,15 +420,6 @@ export class PowerEventLoopMonitor {
   }
 
   /**
-   * Stop sampling and release the timer. Safe to call more than once.
-   *
-   * This is the only thing that unregisters the metrics receipt, and it is
-   * terminal: after it, `getStats()` still answers but the monitor reports
-   * nothing, because the collector no longer calls it.
-   *
-   * @returns {void}
-   */
-  /**
    * Attach a `PerformanceObserver` for long tasks, if available. Records each
    * long task's duration into the drift histogram. No-op in environments
    * without `PerformanceObserver` or the `longtask` entry type.

@@ -431,7 +431,9 @@ describe('PowerPool: a cross-realm ArrayBuffer reaches the worker untransformed'
 
     for (const { msg, transfer } of posted) {
       expect(msg, 'the caller buffer itself, not a slice').toBe(foreign);
-      expect(transfer, 'in the transfer list').toEqual([foreign]);
+      // B2-009: no synthesised transfer list — the buffer is copied, not
+      // detached, so it can be broadcast to every worker.
+      expect(transfer).toBeUndefined();
     }
   });
 
@@ -464,7 +466,8 @@ describe('PowerPool: a cross-realm ArrayBuffer reaches the worker untransformed'
 
     for (const { msg, transfer } of posted) {
       expect(msg).toBe(local);
-      expect(transfer).toEqual([local]);
+      // B2-009: no synthesised transfer list.
+      expect(transfer).toBeUndefined();
     }
   });
 

@@ -272,3 +272,14 @@ An unrecognised option **throws** rather than being ignored — an option that w
 - [`PowerRealtimeHub`](powerRealtimeHub.md) — the fan-out this is a transport for.
 - [`PowerWebSocketClient`](powerWebSocketClient.md) — the dialling side, and the four watermark options this class does not need.
 - [`PowerMessageCodec`](powerMessageCodec.md) — the framing. `binaryType` is `arraybuffer`, so a `Uint8Array` goes straight in.
+
+## Cleanup with `using`
+
+`PowerRTCChannel` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using channel = new PowerRTCChannel(peerConnection);
+  channel.send(data);
+} // channel.dispose() runs here — data channels closed
+```

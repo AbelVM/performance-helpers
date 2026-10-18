@@ -228,6 +228,10 @@ leaving it open would be worse than losing the flush.
 
 Close every subscription and release timers. The hub cannot be reused.
 
+Synchronous and non-graceful: in-flight `_inflightChain` sends and any
+batched frames not yet flushed are dropped. Use `asyncDispose()` (or
+`await using`) to flush pending frames first (B2-037).
+
 #### Returns
 
 `void`

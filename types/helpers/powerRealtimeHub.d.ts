@@ -153,6 +153,10 @@ export class PowerRealtimeHub {
     }>;
     /**
      * Close every subscription and release timers. The hub cannot be reused.
+     *
+     * Synchronous and non-graceful: in-flight `_inflightChain` sends and any
+     * batched frames not yet flushed are dropped. Use `asyncDispose()` (or
+     * `await using`) to flush pending frames first (B2-037).
      * @returns {void}
      */
     close(): void;
@@ -175,7 +179,7 @@ export class PowerRealtimeHub {
      * @param {number} [priority] - Message ordering, higher first. Ignored unless
      *   the hub was built with `messagePriority`; `publish()` refuses to supply one
      *   on a hub that is not, so this is unreachable rather than silently dropped.
-     * @returns {void}
+     * @returns {boolean}
      */
     /**
      * Retain a message for future subscribers of a topic.

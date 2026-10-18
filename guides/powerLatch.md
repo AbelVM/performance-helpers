@@ -107,3 +107,15 @@ complete, whose `wait()` resolves immediately — and is kept. What changed in
 passed a computed count got a latch that silently did not latch: `wait()`
 returned at once and nothing was ever waited for. A negative, non-finite, or
 `Infinity` count now throws.
+
+## Cleanup with `using`
+
+`PowerLatch` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using latch = new PowerLatch(3);
+  latch.countDown();
+  await latch.wait();
+} // latch.dispose() runs here
+```

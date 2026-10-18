@@ -212,6 +212,7 @@ export class PowerCache {
     _probationEnd: CacheNode | null;
     _inflightPromises: Map<any, any>;
     _inflightControllers: Map<any, any>;
+    _disposed: boolean;
     _defaultAsyncTimeout: number;
     _metrics: {
         unregister: () => boolean;

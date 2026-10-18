@@ -104,9 +104,35 @@
 
 ***
 
+### \_threshold
+
+> **\_threshold**: `number`
+
+## Accessors
+
 ### threshold
 
-> **threshold**: `number`
+#### Get Signature
+
+> **get** **threshold**(): `number`
+
+##### Returns
+
+`number`
+
+#### Set Signature
+
+> **set** **threshold**(`value`): `void`
+
+##### Parameters
+
+###### value
+
+`number`
+
+##### Returns
+
+`void`
 
 ## Methods
 

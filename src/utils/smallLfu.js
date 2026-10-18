@@ -442,7 +442,10 @@ export class SmallLfuSketch {
     // tracks the current half-life window's cardinality, not the all-time total.
     const cardinality = this._hll.cardinality();
     this._hll.reset();
-    this.sampleSize = Math.max(10, Math.round(10 * cardinality));
+    this.sampleSize = Math.min(
+      Math.max(10, Math.round(10 * cardinality)),
+      4 * this.width * this.depth
+    );
   }
 
   /**

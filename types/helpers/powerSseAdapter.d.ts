@@ -20,7 +20,6 @@ export function createSseAdapter(options?: SseAdapterOptions): {
 export type SseSubscriber = {
     id: string;
     writer: WritableStreamDefaultWriter | null;
-    abort: AbortController | null;
     closed: boolean;
     /**
      * - Monotonic per-subscriber event id, emitted as the

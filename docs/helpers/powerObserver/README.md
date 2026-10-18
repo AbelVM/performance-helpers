@@ -10,6 +10,10 @@
 
 - [PowerObserver](classes/PowerObserver.md)
 
+## Functions
+
+- [isPowerObserver](functions/isPowerObserver.md)
+
 ## References
 
 ### default

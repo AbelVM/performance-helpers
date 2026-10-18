@@ -13,13 +13,4 @@
  * @returns {boolean} `true` if the buffer is marked or the platform has no marker to apply.
  */
 export function markUntransferable(buffer: ArrayBufferLike | null | undefined): boolean;
-/**
- * Whether {@link markUntransferable} can do anything on this platform.
- *
- * Exposed for the guide and for a test that asserts the *documented* difference between a
- * marked and an unmarked platform, rather than leaving that difference to be discovered on
- * a browser.
- *
- * @returns {boolean}
- */
 export function canMarkUntransferable(): boolean;

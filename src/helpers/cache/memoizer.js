@@ -14,7 +14,6 @@ export class PowerMemoizer {
    * @param {PowerMemoizerOptions} [options]
    */
   constructor(fn, options = {}) {
-    assertKnownOptions(options, ['keyResolver', 'cacheOptions', 'ttl', 'weight'], 'PowerMemoizer');
     assertKnownOptions(
       options,
       [

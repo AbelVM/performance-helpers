@@ -114,19 +114,15 @@ export class PowerWebTransportClient {
      * Send a message, applying back-pressure.
      *
      * @param {any} message
-     * @param {{dropOnBackpressure?: boolean}} [options]
      * @returns {Promise<boolean>} `true` when the frame was handed to the transport.
      */
-    send(message: any, options?: {
-        dropOnBackpressure?: boolean;
-    }): Promise<boolean>;
+    send(message: any): Promise<boolean>;
     /**
      * Send an already-framed payload.
      * @param {Uint8Array} frame
-     * @param {Object} [options]
      * @returns {Promise<boolean>}
      */
-    sendFrame(frame: Uint8Array, options?: Object): Promise<boolean>;
+    sendFrame(frame: Uint8Array): Promise<boolean>;
     /**
      * Send a datagram (unreliable, unordered) when the transport supports it.
      * Falls back to the bidirectional stream when datagrams are unavailable and

@@ -4,6 +4,7 @@
  * Liveness detector for a peer that is expected to check in on a schedule.
  * The helper owns the timer: it schedules a check at `interval` (plus jitter)
  * and declares the peer dead when no `beat()` has arrived within `timeout`.
+ * `timeout: 0` disables the timeout check entirely (the peer is never declared dead).
  *
  * The jitter is the reason this exists rather than a bare `setInterval`. A
  * fleet of peers that all start from the same clock fires in lockstep, so the

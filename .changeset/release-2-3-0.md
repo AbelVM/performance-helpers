@@ -1,0 +1,38 @@
+---
+'performance-helpers': minor
+---
+
+- `PowerWebSocketClient` / `PowerWebTransportClient`: `rtt` option now accepts a `PowerHistogram` from another realm (cross-realm `instanceof` replaced with an internal-slot check) (B2-001, B2-002).
+- `PowerWebTransportClient`: `streamPriority` option is now actually applied to the bidirectional stream (B2-003).
+- `PowerSocketAdapter`: `_attachStream()` no longer produces an unhandled rejection — `getReader()` is wrapped in try/catch and `_streamPromise` has a `.catch()` (B2-004).
+- `PowerBroadcastBus`: frame-delivery split documented — `handleMessage()` processes only acks; data frames are delivered by the underlying `BroadcastChannel` (B2-005). Late acks after a timeout now clear the slow-consumer mark (B2-042).
+- `PowerDatagramChannel`: `maxDatagramSizeBytes` is now enforced per chunk during fragmentation; fragmented sends honour the open/queue contract; `dispose()` flushes the queue like `close()` (B2-006, B2-030, B2-031).
+- `PowerPool`: readiness guard added to `postMessageBatch` fast path; `_dispatchQueuedTasks` now skips past-deadline/aborted items and iterates ready workers; `WorkerWrapper.postMessage` no longer synthesises a transfer list (B2-007, B2-008, B2-009). `pool:scale` emitted on all removal paths; stable removal in `_handleWorkerExit`; `healthCheck()` distinguishes crashed vs retired workers; `_rejectAllPending` extracted (B2-025, B2-026, B2-027, B2-028). Idempotency sweep cursor now makes progress when the batch cap is hit (B2-023). Pre-stringified `s` passed to `o2u8` on the large-key branch (B2-024).
+- `PowerCache`: `clear()` clears `_inflightControllers`; `_disposed` guard in `set()`; `size`/`entries()`/`invalidate()` agree under S3-FIFO (Small + Ghost walked); weight check in `_arbitrateWindow` (B2-010, B2-011, B2-012, B2-015, B2-022).
+- `PowerTTLMap`: `_nextExpiryAt`/`_nextExpiryDirty` wired in (B2-016, B2-086).
+- `PowerMemoizer`: redundant `assertKnownOptions` call removed (B2-017).
+- `ReconnectPolicy`: JSDoc curve description corrected (B2-018).
+- `SmallLfuSketch`: auto-tuned `sampleSize` capped at `4 * width * depth` (B2-019).
+- `HyperLogLog`: `Math.clz32` guarded with a fallback (B2-020).
+- `raceWithAbort`: non-signal objects treated like `!signal` (B2-021, B2-094).
+- `PowerSseAdapter`: Node `write()` backpressure honoured; `btoa` guarded with Buffer fallback; dead `abort` field removed (B2-032, B2-033, B2-041).
+- `PowerMessagePort`: metrics detached on external close; duplicate `send()` JSDoc merged; `send()`/`postMessage()` consolidated (B2-034, B2-040, B2-043).
+- `PowerRTCChannel`: `expectUnreliable` guard fixed for channels lacking `ordered`/`maxRetransmits` (B2-035).
+- `PowerRealtimeHub`: `publish()` returns accepted count; `close()` documented as non-graceful (B2-037, B2-045).
+- `PowerWebSocketClient`: `sendFrame()` type-checks before state check (B2-038).
+- `PowerWebTransportClient`: heartbeat write awaited; `_transmit` `options` param dropped; `streamPriority` applied (B2-036, B2-039).
+- `PowerPermitGate`: TOCTOU settled flag on waiter timeouts; `available` clamped to `maxPermits`; `n > maxPermits` validated at acquire (B2-049, B2-052, B2-053).
+- `PowerBulkhead` / `PowerSemaphore` / `PowerCrossLock`: TOCTOU and retention findings resolved by delegation to the permit gate / platform scoping (B2-046, B2-047, B2-048, B2-050, B2-051).
+- `PowerCircuit`: listeners wrapped in try/catch; reset timer cleared on dispose; atomic HALF_OPEN transition (B2-054, B2-055, B2-056).
+- `PowerBackpressure`: `lowWaterMark > highWaterMark` validated (B2-072).
+- `PowerBrownout`: `threshold` validated via setter (B2-081).
+- `PowerCron`: `setTimeout` delay capped at 2^31-1 (B2-082).
+- `PowerEventBus`: wildcard regex cached; `notified` only on live listener (B2-079, B2-083).
+- `PowerObserver`: realm-independent `combineLatest` check (B2-080).
+- `PowerCircuit`: `call(fn, options)` now accepts an `AbortSignal` (via `options.signal` or a bare signal) — rejects with an `AbortError` when already aborted or aborted during execution, and does not count the abort as a failure (S2-08).
+- Guides: `using`/`await using` disposal examples added to `powerSseAdapter`, `powerWebTransportAdapter`, and `powerWebTransportClient` (E2-01). `powerServo.md` example corrected to use `step()` instead of the non-existent `update()`.
+- Status reconciliation: S2-01 (HLL++ bias tables) confirmed rejected by measurement; S2-02 (monotonic clock for all limiters), S2-09 (WeakRef subscriber sets), S2-12 (structuredClone fast path in codec) confirmed already implemented.
+
+- `nowMs`/`monoMs`: clock state grouped into a single resolver object (B2-089); BigInt fallback cost documented (B2-090); default export pinned by test (B2-091).
+- `PowerHeartbeat`: `timeout: 0` disables the deadline check (B2-044).
+- Guides: `using`/`await using` disposal examples added to 19 helpers (E2-01).

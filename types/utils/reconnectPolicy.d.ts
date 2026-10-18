@@ -54,8 +54,8 @@ export class ReconnectPolicy {
     _maxMs: number;
     _random: () => number;
     /**
-     * The cursor, in ms. `null` until the first `next()`, which is what makes the
-     * first delay exactly `baseMs` rather than a jittered value derived from
+     * The cursor, in ms. `null` until the first `next()`, after which the first
+     * delay is drawn from `[baseMs/2, baseMs]`.
      * nothing.
      * @type {number|null}
      */
@@ -89,8 +89,9 @@ export class ReconnectPolicy {
      * still lets a cohort re-form, whereas decorrelated jitter does not.
      *
      * The cursor then grows by `* 3` and is clamped, so the *next* draw is from a
-     * wider band. Growth is applied after the draw, which is what makes the first
-     * delay exactly `baseMs`.
+     * wider band. Growth is applied after the draw, so the first delay is drawn
+     * from `[baseMs/2, baseMs]` (i.e. `baseMs` only when the jitter source
+     * returns 1), not exactly `baseMs`.
      *
      * @returns {number} An integer number of ms, in `(0, maxMs]`.
      */

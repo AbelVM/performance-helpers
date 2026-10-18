@@ -112,3 +112,14 @@ pool.dispose();
 - A buffer must not be used after `release()` — the pool may hand the same memory to another caller.
 - `stats()` reports `pooled`, `acquires`, `reuses`, `releases`, `drops`, `reuseRate`.
 - Implements `dispose()`, `[Symbol.dispose]`, `[Symbol.asyncDispose]`.
+
+## Cleanup with `using`
+
+`PowerBuffer` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using buf = new PowerBuffer(1024);
+  buf.write(new Uint8Array([1, 2, 3]));
+} // buf.dispose() runs here
+```

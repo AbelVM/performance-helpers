@@ -1,3 +1,5 @@
+/** @param {any} v */
+export function isPowerObserver(v: any): boolean;
 export class PowerObserver {
     /**
      * Combine several observers into one that emits whenever **any** of them

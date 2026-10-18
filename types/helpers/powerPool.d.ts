@@ -140,6 +140,7 @@ export class PowerPool {
      * interval, pinning the Node.js process).
      * @type {boolean}
      */
+    /** @type {any} */
     _metrics: {
         unregister: () => boolean;
         name: string;
@@ -508,6 +509,12 @@ export class PowerPool {
      * @private
      */
     private get _usesPriorityHeap();
+    /**
+     * Reject every pending response with `reason`, then clear the map.
+     * Shared by `shutdown()` and `_resetPoolForStopThePress()` (B2-028).
+     * @private
+     * @param {Error} reason
+     */
     shutdown(): void;
     /**
      * Encode a plain object to a Uint8Array, using a small cache to avoid
@@ -804,6 +811,7 @@ export class PowerPool {
      * are available.
      *
      * @private
+     * @param {WorkerObj[]|null} [pool]
      * @returns {WorkerObj|null}
      */
     /**

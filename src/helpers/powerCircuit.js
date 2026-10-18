@@ -22,6 +22,7 @@
  */
 import { PowerEventBus } from './powerEventBus.js';
 import { monoMs } from '../utils/now.js';
+import { abortReason } from '../utils/abort.js';
 import { assertLimitRequired, assertKnownOptions } from '../utils/options.js';
 import { neutralise } from '../utils/neutralise.js';
 import {
@@ -302,11 +303,26 @@ export class PowerCircuit {
    * When in `half-open` state a single trial call is allowed.
    *
    * @param {() => Promise<any>|any} fn Async or sync function to execute.
+   * @param {{signal?: AbortSignal}} [options] Per-call options. `signal` aborts the wait/run.
    * @returns {Promise<any>} Resolves with the function's result.
    * @throws {Error} If the circuit is open or if `fn` throws/rejects.
    */
-  async call(fn) {
+  async call(fn, options = {}) {
     if (typeof fn !== 'function') throw new TypeError('fn must be a function');
+
+    // AbortSignal support (S2-08): accept an options object or a bare signal.
+    const signal =
+      options instanceof AbortSignal
+        ? options
+        : options && typeof options === 'object'
+          ? (options.signal ?? null)
+          : null;
+    const validSignal =
+      signal && (signal instanceof AbortSignal || typeof signal.addEventListener === 'function')
+        ? signal
+        : null;
+
+    if (validSignal?.aborted) throw abortReason(validSignal);
 
     // short-circuit when open and the drawn window has not elapsed. `_openedAt`
     // is stamped by `_setState` on every entry to `open`, so it is set whenever
@@ -332,14 +348,36 @@ export class PowerCircuit {
       this._trialInFlight++;
     }
 
+    // Track the abort listener so it can be removed in `finally`.
+    let abortHandler = null;
+    if (validSignal) {
+      abortHandler = () => {};
+    }
+
     try {
-      const res = await fn();
+      let res;
+      if (validSignal) {
+        const resultPromise = Promise.resolve().then(() => fn());
+        const abortPromise = new Promise((_, reject) => {
+          const h = () => reject(abortReason(validSignal));
+          abortHandler = h;
+          validSignal.addEventListener('abort', h, { once: true });
+        });
+        res = await Promise.race([resultPromise, abortPromise]);
+      } else {
+        res = await fn();
+      }
       // success: reset
       this._failures = 0;
       this.lastError = null;
       this._setState('closed', 'success');
       return res;
     } catch (err) {
+      if (validSignal?.aborted) {
+        // Abort path: do not count as a failure.
+        this.lastError = err;
+        throw abortReason(validSignal);
+      }
       this.lastError = err;
       // on failure, if half-open -> open again
       if (this._state === 'half-open') {
@@ -355,6 +393,9 @@ export class PowerCircuit {
       }
       throw err;
     } finally {
+      if (abortHandler && validSignal) {
+        validSignal.removeEventListener('abort', abortHandler);
+      }
       if (this._state === 'half-open' || this._state === 'open') {
         // decrement the in-flight trial counter; clamp at 0
         if (this._trialInFlight > 0) this._trialInFlight--;

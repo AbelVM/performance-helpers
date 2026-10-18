@@ -35,8 +35,9 @@ describe('PowerEventBus uncovered branches', () => {
   it('emit cleans up dead weak refs while emitting', () => {
     const bus = new PowerEventBus({ weak: true });
     bus._listeners.set('z', new Set([{ deref: () => null }]));
-    // emit should process the set, delete the dead ref and return true
-    expect(bus.emit('z', 1)).toBe(true);
+    // emit processes the set, deletes the dead ref; with no live listener it
+    // returns false (B2-083: notified only when a live listener ran).
+    expect(bus.emit('z', 1)).toBe(false);
     expect(bus.listeners('z')).toEqual([]);
   });
 

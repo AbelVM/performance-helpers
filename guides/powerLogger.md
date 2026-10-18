@@ -204,3 +204,18 @@ import { PowerLogger as PowerLoggerLite } from 'performance-helpers/powerLogger'
 const logger = new PowerLoggerLite(2);
 logger.warn(() => `Expensive message: ${compute()}`);
 ```
+
+## Cleanup with `using`
+
+`PowerLogger` implements `Symbol.dispose` / `Symbol.asyncDispose`, so it works
+with the `using` / `await using` declarations:
+
+```javascript
+{
+  using logger = new PowerLogger(2, { format: 'json' });
+  logger.info(() => ({ event: 'start' }));
+} // logger.dispose() runs here — metrics registration released
+```
+
+Disposal is a state reset (the logger holds no timer of its own); it releases
+any metrics registration so a disposed logger is not sampled forever.

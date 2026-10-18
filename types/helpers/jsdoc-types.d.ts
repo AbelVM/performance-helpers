@@ -420,6 +420,12 @@ export type WorkerObj = {
      */
     exitCode?: number | undefined;
     /**
+     * - Whether the pool initiated this
+     * worker's termination (resize, reap, shutdown, removeWorker, reset) rather
+     * than an unexpected exit (crash). B2-027.
+     */
+    terminatedByPool?: boolean | undefined;
+    /**
      * - Whether this worker has signalled readiness
      * (PISC-005). `true` when there is no gate, so the dispatch checks are a single
      * boolean test on the common path. A worker still running async init is held out

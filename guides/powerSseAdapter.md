@@ -84,3 +84,18 @@ const hub = new PowerRealtimeHub({
 `register(sub)` is called when a subscriber is added. It creates the writer from `createResponse` or falls back to `sub.transport.write`/`sub.transport.end` in Node. `close(sub)` marks the subscriber closed and closes the writer or transport end.
 
 If `createResponse` throws, `register(sub)` reports the error through `onError` and does not retain a dead subscriber.
+
+## Disposal
+
+`PowerSseAdapter` implements `dispose()` and `[Symbol.dispose]`, so it works with
+`using` / `await using` and with a DI container's teardown.
+
+```javascript
+{
+  using adapter = createSseAdapter({ ... });
+  // ...
+} // dispose() runs here, closing every subscriber writer
+```
+
+`dispose()` closes all retained subscriber writers and clears the subscriber set.
+It is idempotent and safe while idle.

@@ -47,3 +47,14 @@ dedup.has('msg-1'); // false (mark)
 dedup.has('msg-1'); // true (duplicate)
 setTimeout(() => dedup.has('msg-1'), 1500); // false
 ```
+
+## Cleanup with `using`
+
+`PowerDeduplication` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using dedup = new PowerDeduplication({ ttlMs: 1000 });
+  dedup.has('msg-1');
+} // dedup.dispose() runs here — timers cleared
+```

@@ -85,3 +85,14 @@ adapter.transferPort(channel.port2);
 - `transferPort(port)` — transfers a single `MessagePort` zero-copy.
 
 All three return `false` when the adapter is already disposed.
+
+## Cleanup with `using`
+
+`PowerMessagePort` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using port = new PowerMessagePort(channel);
+  port.postMessage({ hello: 'world' });
+} // port.dispose() runs here — port closed
+```

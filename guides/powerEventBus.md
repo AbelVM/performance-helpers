@@ -172,3 +172,14 @@ await bus.emitAsync('user:signup', { id: 'u1', email: 'a@b.com' }, { concurrency
 ```
 
 Use `emitAsync` when you need to await listeners (for ordering, crash-safety, or to limit concurrency). The regular `emit` remains cheaper when you only need fire-and-forget behavior.
+
+## Cleanup with `using`
+
+`PowerEventBus` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using bus = new PowerEventBus();
+  bus.on('event', () => {});
+} // bus.dispose() runs here — listeners released
+```

@@ -227,3 +227,14 @@ defaultMetrics.snapshot().series;
 ```
 
 An unmeasured scorer reports `apdex.score` as `null` rather than dropping the key, so "no samples yet" is distinguishable from "scored zero".
+
+## Cleanup with `using`
+
+`PowerApdex` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using apdex = new PowerApdex({ targetMs: 100 });
+  apdex.sample(42);
+} // apdex.dispose() runs here
+```

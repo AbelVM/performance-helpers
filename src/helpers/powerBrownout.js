@@ -59,7 +59,7 @@ export class PowerBrownout {
     /** @type {{enabled:boolean, alpha:number, margin:number, min:number, max:number, additiveIncrease:number, beta:number}} */
     this._adaptive = normalizeAdaptive(adaptive);
     this._pressureEwma = null;
-    this.threshold = threshold;
+    this._threshold = threshold;
     this._disabledKinds = new Set(disabledKinds);
     this._pressure = 0;
     this._decisions = 0;
@@ -82,15 +82,15 @@ export class PowerBrownout {
       // decrease) to shed more aggressively next time. When pressure is below
       // the threshold we are allowing work, so raise it (additive increase) to
       // shed less. Clamped to [min, max].
-      if (pressure >= this.threshold) {
-        this.threshold = Math.max(this._adaptive.min, this.threshold * this._adaptive.beta);
+      if (pressure >= this._threshold) {
+        this._threshold = Math.max(this._adaptive.min, this._threshold * this._adaptive.beta);
       } else {
-        this.threshold = Math.min(
+        this._threshold = Math.min(
           this._adaptive.max,
-          this.threshold + this._adaptive.additiveIncrease
+          this._threshold + this._adaptive.additiveIncrease
         );
       }
-      this.threshold = Math.max(this._adaptive.min, Math.min(this._adaptive.max, this.threshold));
+      this._threshold = Math.max(this._adaptive.min, Math.min(this._adaptive.max, this._threshold));
     }
     return this.stats();
   }
@@ -100,7 +100,7 @@ export class PowerBrownout {
   allows(kind) {
     if (typeof kind !== 'string') throw new TypeError('PowerBrownout kind must be a string');
     this._decisions += 1;
-    const allowed = this._pressure < this.threshold && !this._disabledKinds.has(kind);
+    const allowed = this._pressure < this._threshold && !this._disabledKinds.has(kind);
     if (!allowed) this._shed += 1;
     return allowed;
   }
@@ -118,11 +118,11 @@ export class PowerBrownout {
   stats() {
     return {
       pressure: this._pressure,
-      threshold: this.threshold,
+      threshold: this._threshold,
       baseThreshold: this._baseThreshold,
       adaptive: this._adaptive.enabled,
       pressureEwma: this._pressureEwma,
-      active: this._pressure >= this.threshold,
+      active: this._pressure >= this._threshold,
       disabledKinds: [...this._disabledKinds],
       decisions: this._decisions,
       shed: this._shed,
@@ -131,6 +131,16 @@ export class PowerBrownout {
 
   getStats() {
     return this.stats();
+  }
+
+  get threshold() {
+    return this._threshold;
+  }
+  set threshold(value) {
+    if (!Number.isFinite(value) || value < 0 || value > 1) {
+      throw new RangeError('PowerBrownout threshold must be between 0 and 1');
+    }
+    this._threshold = value;
   }
 }
 

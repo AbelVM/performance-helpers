@@ -237,3 +237,14 @@ schedulers alive — which it was not.
 If you need a _deadline_ rather than a macrotask, reach for
 [PowerDeadline](powerDeadline.md). And if you want a recurring schedule rather
 than a per-turn flush, see [PowerCron](powerCron.md).
+
+## Cleanup with `using`
+
+`PowerScheduler` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using scheduler = new PowerScheduler();
+  scheduler.schedule(() => work());
+} // scheduler.dispose() runs here — pending tasks cleared
+```

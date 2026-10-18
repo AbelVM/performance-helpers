@@ -7,6 +7,7 @@ import { setSafeTimeout } from '../utils/timers.js';
  * Liveness detector for a peer that is expected to check in on a schedule.
  * The helper owns the timer: it schedules a check at `interval` (plus jitter)
  * and declares the peer dead when no `beat()` has arrived within `timeout`.
+ * `timeout: 0` disables the timeout check entirely (the peer is never declared dead).
  *
  * The jitter is the reason this exists rather than a bare `setInterval`. A
  * fleet of peers that all start from the same clock fires in lockstep, so the
@@ -52,7 +53,7 @@ export class PowerHeartbeat {
         ? assertLimitRequired(opts.timeout, {
             name: 'timeout',
             className: 'PowerHeartbeat',
-            min: 1,
+            min: 0,
             fallback: interval * 2,
           })
         : interval * 2;
@@ -197,7 +198,7 @@ export class PowerHeartbeat {
     if (!this._running || this._disposed) return;
     const now = this._now();
     const since = this._lastBeatAt === 0 ? Infinity : now - this._lastBeatAt;
-    if (since >= this._timeout) {
+    if (this._timeout > 0 && since >= this._timeout) {
       this._missedBeats += 1;
       this._timedOut = true;
       if (this._onTimeout) {

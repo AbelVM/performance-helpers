@@ -139,6 +139,15 @@ export class PowerBackpressure extends PowerPermitGate {
       typeof highWaterMark === 'number' && Number.isFinite(highWaterMark)
         ? Math.max(1, Math.floor(highWaterMark))
         : Infinity;
+    if (
+      typeof lowWaterMark === 'number' &&
+      Number.isFinite(lowWaterMark) &&
+      typeof highWaterMark === 'number' &&
+      Number.isFinite(highWaterMark) &&
+      lowWaterMark > highWaterMark
+    ) {
+      throw new RangeError('PowerBackpressure: `lowWaterMark` must not exceed `highWaterMark`.');
+    }
     const normalizedRefillAmount =
       typeof refillAmount === 'number' && Number.isFinite(refillAmount)
         ? Math.max(1, Math.min(Math.floor(refillAmount), normalizedCapacity))

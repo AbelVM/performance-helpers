@@ -32,8 +32,6 @@
  * unaffected. It makes one specific mistake loud: listing the buffer for transfer.
  */
 
-import { isSharedArrayBuffer } from '../helpers/powerBuffer.js';
-
 /**
  * Whether the platform provides `markAsUntransferable`.
  *
@@ -69,8 +67,23 @@ export function markUntransferable(buffer) {
   // realm, and a foreign SAB that fell through to the marker below was reported as
   // marked — the one case where this function's answer is wrong rather than merely
   // conservative.
-  if (isSharedArrayBuffer(buffer)) {
-    return false;
+  if (typeof SharedArrayBuffer !== 'undefined') {
+    // Realm-independent SAB check (mirrors isSharedArrayBuffer in powerBuffer.js)
+    // so a cross-realm SAB is still recognised as untransferable.
+    if (buffer instanceof SharedArrayBuffer) return false;
+    if (
+      buffer !== null &&
+      typeof buffer === 'object' &&
+      Object.prototype.toString.call(buffer) === '[object SharedArrayBuffer]'
+    ) {
+      try {
+        if (typeof Reflect.get(SharedArrayBuffer.prototype, 'byteLength', buffer) === 'number') {
+          return false;
+        }
+      } catch (e) {
+        /* not a real SAB */
+      }
+    }
   }
   if (!probed) {
     probed = true;
@@ -103,9 +116,13 @@ export function markUntransferable(buffer) {
  *
  * @returns {boolean}
  */
+/** @type {boolean | null} */
+let _canMarkCache = null;
 export function canMarkUntransferable() {
+  if (_canMarkCache !== null) return _canMarkCache;
   // Probe without marking: the cheap answer is worth more than a second call site that
   // has to remember to check.
   markUntransferable(new ArrayBuffer(0));
-  return impl !== null;
+  _canMarkCache = impl !== null;
+  return _canMarkCache;
 }

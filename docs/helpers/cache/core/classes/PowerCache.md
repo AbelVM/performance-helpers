@@ -84,6 +84,12 @@ When a non-object is provided as the options argument.
 
 ***
 
+### \_disposed
+
+> **\_disposed**: `boolean`
+
+***
+
 ### \_evictionCandidate
 
 > **\_evictionCandidate**: `CacheNode` \| `null`

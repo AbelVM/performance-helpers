@@ -123,7 +123,7 @@ and is not one now.
 **The guarantee is by source, not by clamping.** Both sources this can reach -
 `performance.now()` and `process.hrtime.bigint()` - are monotonic by
 specification, and the epoch offsets (`performance.timeOrigin`,
-`_hrtimeEpochOffset`) are fixed for the module's lifetime. A last-value floor
+`_clockState.hrtimeEpochOffset`) are fixed for the module's lifetime. A last-value floor
 was considered and rejected: it would prevent the value going *backwards*
 while still permitting the forward jumps that are the actual defect, so it
 would cost a branch on the hot path and a module-level mutable to fix the
@@ -290,7 +290,7 @@ deterministically at scope exit.
 
 ### call()
 
-> **call**(`fn`): `Promise`\<`any`\>
+> **call**(`fn`, `options?`): `Promise`\<`any`\>
 
 Execute a function under circuit-breaker protection.
 
@@ -304,6 +304,14 @@ When in `half-open` state a single trial call is allowed.
 () => `any`
 
 Async or sync function to execute.
+
+##### options?
+
+Per-call options. `signal` aborts the wait/run.
+
+###### signal?
+
+`AbortSignal`
 
 #### Returns
 

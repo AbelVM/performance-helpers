@@ -234,3 +234,14 @@ Pass `autoTune: { ku, pu }` in the constructor to tune at construction time. `au
 - [PowerBackpressure](powerBackpressure.md) — loss-based AIMD on an outstanding count, for the case with no setpoint.
 - [PowerPool autoscaling](powerPool.md#autoscaling) — delay-based controllers on a latency signal.
 - [ADR 0005](../adr/0005-feedback-signal-picks-the-controller.md) — the signal taxonomy and the two rejected consolidations.
+
+## Cleanup with `using`
+
+`PowerServo` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using servo = new PowerServo({ setpoint: 100 });
+  servo.step(95, 1);
+} // servo.dispose() runs here
+```

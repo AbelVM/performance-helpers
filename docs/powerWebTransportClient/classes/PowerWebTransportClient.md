@@ -521,7 +521,7 @@ Send an application-level ping.
 
 ### send()
 
-> **send**(`message`, `options?`): `Promise`\<`boolean`\>
+> **send**(`message`): `Promise`\<`boolean`\>
 
 Send a message, applying back-pressure.
 
@@ -530,12 +530,6 @@ Send a message, applying back-pressure.
 ##### message
 
 `any`
-
-##### options?
-
-###### dropOnBackpressure?
-
-`boolean`
 
 #### Returns
 
@@ -567,7 +561,7 @@ Falls back to the bidirectional stream when datagrams are unavailable and
 
 ### sendFrame()
 
-> **sendFrame**(`frame`, `options?`): `Promise`\<`boolean`\>
+> **sendFrame**(`frame`): `Promise`\<`boolean`\>
 
 Send an already-framed payload.
 
@@ -576,10 +570,6 @@ Send an already-framed payload.
 ##### frame
 
 `Uint8Array`\<`ArrayBufferLike`\>
-
-##### options?
-
-`Object` = `{}`
 
 #### Returns
 

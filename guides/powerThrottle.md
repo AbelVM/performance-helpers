@@ -253,3 +253,14 @@ many requests arrived is yours to count. The same reasoning is why
 `dispose()` detaches, so a torn-down throttle stops being sampled — and one still
 answers `stats()` afterwards, so a missed detach would be a series that looks
 live and is not, with no error anywhere.
+
+## Cleanup with `using`
+
+`PowerThrottle` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using throttle = new PowerThrottle({ capacity: 10, refillRate: 5 });
+  throttle.tryConsume(1);
+} // throttle.dispose() runs here — state reset, metrics detached
+```

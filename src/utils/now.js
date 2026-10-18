@@ -1,40 +1,33 @@
 // High-resolution now in milliseconds, mapped to epoch time.
 // Use performance.timeOrigin+performance.now() when available, or derive an
 // epoch offset for hrtime to keep timestamps comparable with Date.now().
-let _hrtimeEpochOffset = null;
-if (
-  typeof process !== 'undefined' &&
-  process?.hrtime &&
-  typeof process.hrtime.bigint === 'function'
-) {
-  try {
-    const hr = Number(process.hrtime.bigint() / 1000000n);
-    _hrtimeEpochOffset = Date.now() - hr;
-  } catch (e) {
-    _hrtimeEpochOffset = null;
+//
+// Both clock sources are resolved together, once, into a single state object so
+// that a future reorder of the declarations cannot leave one of them
+// uninitialized when the other is read (B2-089). `_clockState` is the only
+// module-level clock state; everything else reads through it.
+const _clockState = (() => {
+  let hrtimeEpochOffset = null;
+  if (
+    typeof process !== 'undefined' &&
+    process?.hrtime &&
+    typeof process.hrtime.bigint === 'function'
+  ) {
+    try {
+      const hr = Number(process.hrtime.bigint() / 1000000n);
+      hrtimeEpochOffset = Date.now() - hr;
+    } catch (e) {
+      hrtimeEpochOffset = null;
+    }
   }
-}
-
-// Decide whether to use high-resolution performance/hrt-based time or
-// fallback to Date.now(). Under test harnesses that fake timers,
-// `Date.now()` may be advanced by the fake timer while `performance.now()`
-// or `process.hrtime()` remain tied to real time. To keep tests reliable
-// prefer performance/hrt only when it's close to Date.now() (small delta).
-/**
- * The high-resolution clock, resolved once.
- *
- * `() => performance.timeOrigin + performance.now()`, or `null` where
- * `performance` is absent or does not carry a `timeOrigin`. Resolved at module
- * load rather than per call - see the note inside `nowMs`.
- *
- * @type {(() => number)|null}
- */
-const _perfNow =
-  typeof performance !== 'undefined' &&
-  typeof performance?.now === 'function' &&
-  typeof performance?.timeOrigin === 'number'
-    ? () => performance.timeOrigin + performance.now()
-    : null;
+  const perfNow =
+    typeof performance !== 'undefined' &&
+    typeof performance?.now === 'function' &&
+    typeof performance?.timeOrigin === 'number'
+      ? () => performance.timeOrigin + performance.now()
+      : null;
+  return { hrtimeEpochOffset, perfNow };
+})();
 
 /**
  * One clock-reading body, shared by {@link nowMs} and {@link monoMs}.
@@ -72,9 +65,9 @@ function _clockReading(wallDateNow) {
   // The bound source can still throw or go stale (a test harness replacing
   // `globalThis.performance`, a torn-down sandbox), so the `try` and the
   // closeness check stay: only the *resolution* moved out of the hot path.
-  if (_perfNow) {
+  if (_clockState.perfNow) {
     try {
-      const perfVal = _perfNow();
+      const perfVal = _clockState.perfNow();
       // If perf-based time is close to Date.now(), prefer it for higher resolution.
       if (wallDateNow === undefined || Math.abs(perfVal - wallDateNow) < 1000) return perfVal;
       return wallDateNow;
@@ -83,9 +76,13 @@ function _clockReading(wallDateNow) {
     }
   }
 
-  if (_hrtimeEpochOffset != null) {
+  if (_clockState.hrtimeEpochOffset != null) {
     try {
-      const hrVal = Number(process.hrtime.bigint() / 1000000n) + _hrtimeEpochOffset;
+      // BigInt division here is the one non-plain-number op on this hot path.
+      // It is unreachable on the supported Node floor (22.12+), where the
+      // `performance` branch above is taken; it exists only as a fallback for
+      // runtimes without `performance.timeOrigin`. Acceptable cost (B2-090).
+      const hrVal = Number(process.hrtime.bigint() / 1000000n) + _clockState.hrtimeEpochOffset;
       if (wallDateNow === undefined || Math.abs(hrVal - wallDateNow) < 1000) return hrVal;
       return wallDateNow;
     } catch (e) {
@@ -163,7 +160,7 @@ export const nowMs = () => _clockReading(Date.now());
  * **The guarantee is by source, not by clamping.** Both sources this can reach -
  * `performance.now()` and `process.hrtime.bigint()` - are monotonic by
  * specification, and the epoch offsets (`performance.timeOrigin`,
- * `_hrtimeEpochOffset`) are fixed for the module's lifetime. A last-value floor
+ * `_clockState.hrtimeEpochOffset`) are fixed for the module's lifetime. A last-value floor
  * was considered and rejected: it would prevent the value going *backwards*
  * while still permitting the forward jumps that are the actual defect, so it
  * would cost a branch on the hot path and a module-level mutable to fix the

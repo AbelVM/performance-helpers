@@ -74,6 +74,12 @@
 
 ***
 
+### \_wildcardRegexCache
+
+> **\_wildcardRegexCache**: `Map`\<`any`, `any`\>
+
+***
+
 ### \_wildcards
 
 > **\_wildcards**: `Map`\<`string`, [`EventBusBucket`](../type-aliases/EventBusBucket.md)\>

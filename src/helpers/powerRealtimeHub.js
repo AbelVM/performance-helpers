@@ -797,8 +797,7 @@ export class PowerRealtimeHub {
     let queued = 0;
     for (const sub of bucket.values()) {
       if (sub.closed) continue;
-      this._enqueue(sub, message, priority);
-      queued += 1;
+      if (this._enqueue(sub, message, priority)) queued += 1;
     }
     if (queued > 0) this._scheduleFlush();
     return queued;
@@ -904,6 +903,10 @@ export class PowerRealtimeHub {
 
   /**
    * Close every subscription and release timers. The hub cannot be reused.
+   *
+   * Synchronous and non-graceful: in-flight `_inflightChain` sends and any
+   * batched frames not yet flushed are dropped. Use `asyncDispose()` (or
+   * `await using`) to flush pending frames first (B2-037).
    * @returns {void}
    */
   close() {
@@ -983,7 +986,7 @@ export class PowerRealtimeHub {
    * @param {number} [priority] - Message ordering, higher first. Ignored unless
    *   the hub was built with `messagePriority`; `publish()` refuses to supply one
    *   on a hub that is not, so this is unreachable rather than silently dropped.
-   * @returns {void}
+   * @returns {boolean}
    */
   _enqueue(sub, message, priority = 0) {
     // maxQueue 0 means no buffering: the policy is evaluated immediately.
@@ -1004,21 +1007,22 @@ export class PowerRealtimeHub {
         // would hold one message, quietly exceeding a capacity of zero.
         this._counters.dropped += 1;
         sub.dropped += 1;
-        return;
+        return false;
       }
       if (sub.slowConsumer === 'drop-newest') {
         this._counters.dropped += 1;
         sub.dropped += 1;
-        return;
+        return false;
       }
       // 'disconnect'
       this._counters.dropped += 1;
       sub.dropped += 1;
       this._counters.disconnected += 1;
       this._detach(sub, { close: true, reason: 'slow-consumer' });
-      return;
+      return false;
     }
     sub.queue.push(message, priority);
+    return true;
   }
 
   /**

@@ -366,6 +366,7 @@ export class PowerTTLMap {
    */
   get expiredCount() {
     if (!this._map.size || !this._expirations.size) return 0;
+    if (this._nextExpiryAt && !this._nextExpiryDirty && this._now() < this._nextExpiryAt) return 0;
     const now = this._now();
     let expired = 0;
     for (const exp of this._expirations.values()) {
@@ -385,6 +386,7 @@ export class PowerTTLMap {
    */
   purge() {
     if (!this._map.size || !this._expirations.size) return 0;
+    if (this._nextExpiryAt && !this._nextExpiryDirty && this._now() < this._nextExpiryAt) return 0;
     // One clock read for both the count and the sweep, so an entry that expires
     // between the two cannot make the returned number disagree with what was
     // actually removed.

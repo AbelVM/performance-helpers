@@ -105,6 +105,17 @@ function derived(source, map, emit, name) {
   );
 }
 
+/** @param {any} v */
+export function isPowerObserver(v) {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    typeof v.subscribe === 'function' &&
+    '_value' in v &&
+    '_subs' in v
+  );
+}
+
 export class PowerObserver {
   /**
    * Create a new PowerObserver.
@@ -406,7 +417,7 @@ export class PowerObserver {
       throw new TypeError('PowerObserver.combineLatest() needs at least two sources');
     }
     for (const src of sources) {
-      if (!(src instanceof PowerObserver)) {
+      if (!isPowerObserver(src)) {
         throw new TypeError('PowerObserver.combineLatest() takes PowerObserver instances only');
       }
     }

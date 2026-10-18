@@ -258,12 +258,13 @@ export class PowerPermitGate {
         signal: signal ?? null,
         onAbort: /** @type {?EventListener} */ (null),
         cancelled: false,
+        settled: false,
         weight,
       };
       this._waiters.push(entry);
       if (signal) {
         entry.onAbort = () => {
-          if (entry.cancelled) return;
+          if (entry.cancelled || entry.settled) return;
           entry.cancelled = true;
           this._cancelledWaiters += 1;
           detach(entry);
@@ -488,6 +489,10 @@ export class PowerPermitGate {
       // would otherwise accumulate one listener per acquire and trip
       // MaxListenersExceededWarning, and the signal would retain every settled
       // closure.
+      // Mark settled before detaching/granting so a late abort (firing in
+      // the gap between shift and resolve) cannot increment _cancelledWaiters
+      // for a waiter that has already been granted a permit (B2-046/048/049).
+      next.settled = true;
       this._waiters.shift();
       detach(next);
       this._grantTo(next, fromAvailable);

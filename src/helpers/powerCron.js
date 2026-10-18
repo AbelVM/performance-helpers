@@ -315,7 +315,10 @@ export class PowerCron {
    */
   _arm() {
     if (!this._running) return;
-    const delay = Math.max(0, this._nextAt - this._now()) + this._jitterDelay();
+    const delay = Math.min(
+      2147483647,
+      Math.max(0, this._nextAt - this._now()) + this._jitterDelay()
+    );
     this._timer = setTimeout(() => {
       this._timer = null;
       this._onTimer();

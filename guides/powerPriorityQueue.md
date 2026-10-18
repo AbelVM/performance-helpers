@@ -82,3 +82,14 @@ pq.push('second'); // priority 0, seq 1
 pq.shift(); // 'first'
 pq.shift(); // 'second'
 ```
+
+## Cleanup with `using`
+
+`PowerPriorityQueue` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using pq = new PowerPriorityQueue();
+  pq.push('task', 1);
+} // pq.dispose() runs here
+```

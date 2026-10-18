@@ -36,7 +36,7 @@
  * @public
  */
 import { decodeMessage, encodeMessage } from './powerMessageCodec.js';
-import { PowerHistogram } from './powerHistogram.js';
+import { PowerHistogram, isPowerHistogram } from './powerHistogram.js';
 import { setSafeTimeout } from '../utils/timers.js';
 import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { nowMs } from '../utils/now.js';
@@ -706,7 +706,7 @@ export class PowerWebSocketClient {
       maxMs: this._reconnectMaxMs,
     });
 
-    this.rtt = rtt instanceof PowerHistogram ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
+    this.rtt = isPowerHistogram(rtt) ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
     this._counters = {
       sent: 0,
       received: 0,
@@ -970,12 +970,12 @@ export class PowerWebSocketClient {
    * @returns {Promise<boolean>} `true` when the frame was handed to the socket.
    */
   async sendFrame(frame, options = {}) {
-    if (this._state !== READY_STATE.OPEN || !this._socket) return false;
     if (!(frame instanceof Uint8Array)) {
       throw new TypeError(
         'PowerWebSocketClient.sendFrame() requires a Uint8Array. Use send() for a plain value.'
       );
     }
+    if (this._state !== READY_STATE.OPEN || !this._socket) return false;
     return this._transmit(frame, options);
   }
 

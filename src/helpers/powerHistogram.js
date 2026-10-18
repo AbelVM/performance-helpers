@@ -98,6 +98,32 @@ function isHistogramSketch(v) {
 }
 
 /**
+ * Realm-independent check for a `PowerHistogram` *instance* (as opposed to a
+ * JSON sketch). Used instead of `instanceof PowerHistogram`, which compares
+ * against this realm's prototype and silently rejects a histogram from another
+ * `vm` context, iframe or worker (B2-001/B2-002).
+ *
+ * The check is structural on the instance's private fields, which is the same
+ * shape `isHistogramSketch`'s instance branch tests — so a cross-realm
+ * instance is accepted and a plain object sketch is not.
+ *
+ * @param {unknown} v
+ * @returns {v is PowerHistogram}
+ */
+export function isPowerHistogram(v) {
+  if (!v || typeof v !== 'object') return false;
+  const s = /** @type {any} */ (v);
+  return (
+    typeof s._alpha === 'number' &&
+    typeof s._count === 'number' &&
+    typeof s._zeroCount === 'number' &&
+    typeof s._infCount === 'number' &&
+    typeof s._sum === 'number' &&
+    isBucketIterable(s._buckets)
+  );
+}
+
+/**
  * Whether `b` can be iterated as `[index, count]` pairs.
  *
  * **Iterability, not `instanceof Map` or `Array.isArray`** — and that is the

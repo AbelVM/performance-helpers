@@ -67,11 +67,10 @@ describe('PowerPool message path', () => {
     const { msg, transfer } = worker._underlying.sent[0];
     // No re-encoding: a real ArrayBuffer is already the wire format.
     expect(msg).toBe(buf);
-    // With no transfer list supplied, the buffer the caller just allocated is
-    // added to one. That is the point of the branch - the bytes were produced
-    // here and are going nowhere else, so transferring them avoids a copy.
-    expect(Array.isArray(transfer)).toBe(true);
-    expect(transfer).toEqual([buf]);
+    // B2-009: with no transfer list supplied, the buffer is NOT transferred
+    // (copy instead) — synthesising a transfer list would detach the caller's
+    // own buffer. So `transfer` stays undefined.
+    expect(transfer).toBeUndefined();
     pool.dispose();
   });
 

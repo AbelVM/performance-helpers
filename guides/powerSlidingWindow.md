@@ -146,3 +146,14 @@ feature that is off by default.
 
 `dispose()` detaches as well as releasing the ring, so a torn-down window stops
 being sampled.
+
+## Cleanup with `using`
+
+`PowerSlidingWindow` implements `Symbol.dispose` / `Symbol.asyncDispose`:
+
+```javascript
+{
+  using window = new PowerSlidingWindow({ capacity: 100, windowMs: 60_000 });
+  window.tryConsume(1);
+} // window.dispose() runs here — ring released, metrics detached
+```

@@ -22,7 +22,12 @@ import { isError } from './errors.js';
  * @private
  */
 export function raceWithAbort(promise, signal) {
-  if (!signal) return promise;
+  if (
+    !signal ||
+    typeof signal.addEventListener !== 'function' ||
+    typeof signal.aborted !== 'boolean'
+  )
+    return promise;
   if (signal.aborted) return Promise.reject(abortReason(signal));
 
   return new Promise((resolve, reject) => {

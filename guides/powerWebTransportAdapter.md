@@ -54,3 +54,18 @@ All three swallow locked-stream errors, because the writer and reader are held b
 ## What this is not
 
 It is **a stream adapter, not a WebTransport stack**. There is no connection establishment, no certificate handling, no datagram support. Bring an open — or opening — `WebTransport` session with `createBidirectionalStreams: true`. This normalises its stream so the rest of your code does not know it is not a socket.
+
+## Disposal
+
+`PowerWebTransportAdapter` implements `dispose()` and `[Symbol.dispose]`, so it
+works with `using` / `await using` and with a DI container's teardown.
+
+```javascript
+{
+  using adapter = new PowerWebTransportAdapter(session);
+  // ...
+} // dispose() runs here, closing the session
+```
+
+`dispose(code, reason)` closes the session, the writable side, and cancels the
+readable side. It is idempotent and safe while idle.

@@ -102,6 +102,7 @@ export class PowerEventBus {
     this._eventFinalizationRefs = new Map();
     /** @type {Map<string, EventBusBucket>} */
     this._wildcards = new Map();
+    this._wildcardRegexCache = new Map();
   }
 
   /**
@@ -124,8 +125,13 @@ export class PowerEventBus {
    * @private
    */
   _wildcardRegex(pattern) {
-    const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^:]*');
-    return new RegExp(`^${escaped}$`);
+    let re = this._wildcardRegexCache.get(pattern);
+    if (!re) {
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^:]*');
+      re = new RegExp(`^${escaped}$`);
+      this._wildcardRegexCache.set(pattern, re);
+    }
+    return re;
   }
 
   /**
@@ -423,7 +429,6 @@ export class PowerEventBus {
           this._listeners.delete(event);
         }
       } else {
-        const hadEntries = bucket.size > 0;
         for (const entry of [...bucket]) {
           const fn = 'deref' in entry ? entry.deref() : entry;
           if (!fn) {
@@ -437,7 +442,6 @@ export class PowerEventBus {
           this._clearWeakListenerEvent(event);
           this._listeners.delete(event);
         }
-        if (hadEntries) notified = true;
       }
     }
 

@@ -42,6 +42,36 @@ function alphaFor(m) {
   return 0.7213 / (1 + 1.079 / m);
 }
 
+/** Count leading zeros of a 32-bit unsigned integer, with a fallback for
+ * runtimes without `Math.clz32` (B2-020).
+ * @param {number} x */
+function clz32(x) {
+  if (typeof Math.clz32 === 'function') return Math.clz32(x);
+  x = x >>> 0;
+  if (x === 0) return 32;
+  let n = 0;
+  if ((x & 0xffff0000) === 0) {
+    n += 16;
+    x <<= 16;
+  }
+  if ((x & 0xff000000) === 0) {
+    n += 8;
+    x <<= 8;
+  }
+  if ((x & 0xf0000000) === 0) {
+    n += 4;
+    x <<= 4;
+  }
+  if ((x & 0xc0000000) === 0) {
+    n += 2;
+    x <<= 2;
+  }
+  if ((x & 0x80000000) === 0) {
+    n += 1;
+  }
+  return n;
+}
+
 /** @param {number} h */
 function finalise(h) {
   h = (h + 0x9e3779b1) | 0;
@@ -119,8 +149,7 @@ export class HyperLogLog {
     const bucket = h & (this.registerCount - 1);
     const shift = this._shift;
     const bits = h >>> shift;
-    const rank =
-      bits === 0 ? this._maxRank : Math.min(this._maxRank - 1, Math.clz32(bits) - shift + 1);
+    const rank = bits === 0 ? this._maxRank : Math.min(this._maxRank - 1, clz32(bits) - shift + 1);
     const current = this.registers[bucket];
     if (rank > current) {
       this.registers[bucket] = rank;
@@ -141,7 +170,7 @@ export class HyperLogLog {
       const shift = this._shift;
       const bits = h >>> shift;
       const rank =
-        bits === 0 ? this._maxRank : Math.min(this._maxRank - 1, Math.clz32(bits) - shift + 1);
+        bits === 0 ? this._maxRank : Math.min(this._maxRank - 1, clz32(bits) - shift + 1);
       const current = this.registers[bucket];
       if (rank > current) {
         this.registers[bucket] = rank;

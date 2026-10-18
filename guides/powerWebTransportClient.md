@@ -99,3 +99,18 @@ Unexpected closes trigger decorrelated-jitter backoff, bounded by `maxReconnectA
 ## Pairing with PowerRealtimeHub
 
 Pass `client.send` as the hub's `send` adapter and `client.close` as the hub's `close` adapter. The hub's `codec: 'json'` path batches values into one JSON array frame, which the client writes as a single stream write.
+
+## Disposal
+
+`PowerWebTransportClient` implements `dispose()` and `[Symbol.dispose]`, so it
+works with `using` / `await using` and with a DI container's teardown.
+
+```javascript
+{
+  using client = new PowerWebTransportClient({ url });
+  // ...
+} // dispose() runs here, closing the connection
+```
+
+`dispose()` detaches metrics and closes the connection. It is idempotent and
+safe while idle.

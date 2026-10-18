@@ -8,12 +8,6 @@
 
 ## Properties
 
-### abort
-
-> **abort**: `AbortController` \| `null`
-
-***
-
 ### closed
 
 > **closed**: `boolean`
