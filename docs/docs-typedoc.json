@@ -109539,15 +109539,7 @@
 					},
 					{
 						"kind": "text",
-						"text": "; once the number of\ndistinct values exceeds a threshold the sparse set is flushed into the\nstandard dense register array and the sketch switches to the usual\nFlajolet–Martin / HyperLogLog harmonic-mean estimate.\n\nThe dense phase keeps the existing behaviour (linear counting for small\nranges, bias constant per register count, internal finalisation of raw\ninputs). The empirical bias-correction table that HLL++ applies to the\n*raw* estimate in the mid range is **not** shipped: it is a measured\nartefact (one table per precision "
-					},
-					{
-						"kind": "code",
-						"text": "`p`"
-					},
-					{
-						"kind": "text",
-						"text": ") and embedding an unmeasured\napproximation would be worse than the linear-counting fallback already in\nplace. "
+						"text": "; once the number of\ndistinct values exceeds a threshold the sparse set is flushed into the\nstandard dense register array and the sketch switches to the usual\nFlajolet–Martin / HyperLogLog harmonic-mean estimate.\n\nThe dense phase keeps the existing behaviour (linear counting for small\nranges, bias constant per register count, internal finalisation of raw\ninputs). The empirical bias-correction table that HLL++ applies to the\n*raw* estimate in the mid range was **measured and rejected**: a 500-trial\nbias study ("
 					},
 					{
 						"kind": "code",
@@ -109555,7 +109547,7 @@
 					},
 					{
 						"kind": "text",
-						"text": " is the gate for adding it.\n\n6-bit packed registers (the memory half of HLL++) are also deferred: the\npublic "
+						"text": " is the gate) showed the empirical\ntables are noisy and over-correct in the transition region (e.g. m=1024,\nn=10k: -24 % over-correction), so they do not improve the error constant\nand are not shipped. The linear-counting fallback already in place is\npreferred.\n\n6-bit packed registers (the memory half of HLL++) are also rejected: the\npublic "
 					},
 					{
 						"kind": "code",
@@ -109587,7 +109579,7 @@
 					},
 					{
 						"kind": "text",
-						"text": " keep\nworking for existing callers and tests. Packing would change that contract."
+						"text": " keep\nworking for existing callers and tests. Packing would change that contract\nfor a 25 % memory saving a caller can equivalently obtain by choosing a\nsmaller register count."
 					}
 				]
 			},
