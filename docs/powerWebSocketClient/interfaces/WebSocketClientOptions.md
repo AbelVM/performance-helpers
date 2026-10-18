@@ -150,6 +150,19 @@ Wall-clock ceiling on
 
 ***
 
+### messageQueueSize?
+
+> `optional` **messageQueueSize?**: `number`
+
+Maximum messages buffered while the
+  socket is not open, so a send during a brief disconnect is not lost. `0`
+  (default) disables queueing and preserves the previous behaviour (send
+  returns `false` while closed). When the queue is full the oldest entry is
+  dropped and `stats().droppedQueuedMessages` is incremented. Queued messages
+  are flushed in order when the socket opens.
+
+***
+
 ### nonRetryableCloseCodes?
 
 > `optional` **nonRetryableCloseCodes?**: `number`[]

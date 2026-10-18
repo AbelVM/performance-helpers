@@ -441,6 +441,60 @@ export class MetricsCollector {
   }
 
   /**
+   * Export the current snapshot in OTLP (OpenTelemetry Protocol) JSON shape.
+   *
+   * This is a *hook*, not a push exporter: it returns a serialisable object the
+   * caller hands to their own transport. The collector stays pull-based (see the
+   * class docblock) — nothing is sent unless the caller asks.
+   *
+   * @param {Object} [options]
+   * @param {string} [options.serviceName='performance-helpers'] - Resource attribute.
+   * @param {number} [options.timestampMs=Date.now()] - Observation timestamp.
+   * @returns {object} An OTLP `ExportMetricsServiceRequest`-shaped object.
+   */
+  toOTLP(options = {}) {
+    assertKnownOptions(options, ['serviceName', 'timestampMs'], 'MetricsCollector.toOTLP');
+    const serviceName =
+      typeof options.serviceName === 'string' && options.serviceName !== ''
+        ? options.serviceName
+        : 'performance-helpers';
+    const timestampMs = options.timestampMs ?? Date.now();
+    const snap = this.snapshot();
+    const metrics = [];
+    for (const [key, value] of Object.entries(snap.series)) {
+      if (typeof value === 'boolean') {
+        metrics.push({
+          name: key,
+          gauge: { dataPoints: [{ asBool: value, timeUnixNano: timestampMs * 1e6 }] },
+        });
+      } else if (typeof value === 'number' && Number.isFinite(value)) {
+        metrics.push({
+          name: key,
+          gauge: { dataPoints: [{ asDouble: value, timeUnixNano: timestampMs * 1e6 }] },
+        });
+      } else if (typeof value === 'string') {
+        metrics.push({
+          name: key,
+          gauge: { dataPoints: [{ asString: value, timeUnixNano: timestampMs * 1e6 }] },
+        });
+      } else {
+        metrics.push({
+          name: key,
+          gauge: { dataPoints: [{ timeUnixNano: timestampMs * 1e6 }] },
+        });
+      }
+    }
+    return {
+      resourceMetrics: [
+        {
+          resource: { attributes: [{ key: 'service.name', value: { stringValue: serviceName } }] },
+          scopeMetrics: [{ scope: { name: 'performance-helpers' }, metrics }],
+        },
+      ],
+    };
+  }
+
+  /**
    * The registered source names.
    *
    * @returns {string[]}
@@ -482,32 +536,29 @@ function _getDefaultMetrics() {
   return _defaultMetrics;
 }
 /** @type {MetricsCollector} */
-export const defaultMetrics = new Proxy(
-  {},
-  {
-    get(_target, prop, receiver) {
-      const m = _getDefaultMetrics();
-      const value = Reflect.get(m, prop, receiver);
-      return typeof value === 'function' ? value.bind(m) : value;
-    },
-    set(_target, prop, value) {
-      const m = _getDefaultMetrics();
-      return Reflect.set(m, prop, value);
-    },
-    has(_target, prop) {
-      return Reflect.has(_getDefaultMetrics(), prop);
-    },
-    ownKeys() {
-      return Reflect.ownKeys(_getDefaultMetrics());
-    },
-    getOwnPropertyDescriptor(_target, prop) {
-      return Object.getOwnPropertyDescriptor(_getDefaultMetrics(), prop);
-    },
-    getPrototypeOf() {
-      return Object.getPrototypeOf(_getDefaultMetrics());
-    },
-  }
-);
+export const defaultMetrics = new Proxy(/** @type {any} */ ({}), {
+  get(_target, prop, receiver) {
+    const m = _getDefaultMetrics();
+    const value = Reflect.get(m, prop, receiver);
+    return typeof value === 'function' ? value.bind(m) : value;
+  },
+  set(_target, prop, value) {
+    const m = _getDefaultMetrics();
+    return Reflect.set(m, prop, value);
+  },
+  has(_target, prop) {
+    return Reflect.has(_getDefaultMetrics(), prop);
+  },
+  ownKeys() {
+    return Reflect.ownKeys(_getDefaultMetrics());
+  },
+  getOwnPropertyDescriptor(_target, prop) {
+    return Object.getOwnPropertyDescriptor(_getDefaultMetrics(), prop);
+  },
+  getPrototypeOf() {
+    return Object.getPrototypeOf(_getDefaultMetrics());
+  },
+});
 
 /**
  * Wire a helper's `stats()` into a collector, and hand back the receipt that

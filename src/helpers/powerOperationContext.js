@@ -10,14 +10,25 @@
  * @param {number} [options.deadlineMs] Relative deadline from this call.
  * @param {Object} [options.retryBudget] Shared retry budget.
  * @param {string} [options.correlationId]
+ * @param {string} [options.traceId] W3C trace id (32 hex chars).
+ * @param {string} [options.spanId] W3C span id (16 hex chars).
  * @param {number} [options.priority=0]
- * @returns {{signal?: AbortSignal, deadlineAt?: number, retryBudget?: Object, correlationId?: string, priority: number}}
+ * @returns {{signal?: AbortSignal, deadlineAt?: number, retryBudget?: Object, correlationId?: string, traceId?: string, spanId?: string, priority: number}}
  */
 export function createOperationContext(options = {}) {
   if (options == null || typeof options !== 'object' || Array.isArray(options)) {
     throw new TypeError('operation context options must be an object');
   }
-  const { signal, deadlineAt, deadlineMs, retryBudget, correlationId, priority = 0 } = options;
+  const {
+    signal,
+    deadlineAt,
+    deadlineMs,
+    retryBudget,
+    correlationId,
+    traceId,
+    spanId,
+    priority = 0,
+  } = options;
   if (signal !== undefined && (signal === null || typeof signal !== 'object')) {
     throw new TypeError('operation context signal must be an AbortSignal');
   }
@@ -33,14 +44,22 @@ export function createOperationContext(options = {}) {
   if (correlationId !== undefined && typeof correlationId !== 'string') {
     throw new TypeError('operation context correlationId must be a string');
   }
+  if (traceId !== undefined && typeof traceId !== 'string') {
+    throw new TypeError('operation context traceId must be a string');
+  }
+  if (spanId !== undefined && typeof spanId !== 'string') {
+    throw new TypeError('operation context spanId must be a string');
+  }
   if (!Number.isFinite(priority)) throw new TypeError('operation context priority must be finite');
-  /** @type {{priority:number, signal?:AbortSignal, deadlineAt?:number, retryBudget?:*, correlationId?:string}} */
+  /** @type {{priority:number, signal?:AbortSignal, deadlineAt?:number, retryBudget?:*, correlationId?:string, traceId?:string, spanId?:string}} */
   const context = { priority };
   if (signal !== undefined) context.signal = signal;
   if (deadlineAt !== undefined) context.deadlineAt = deadlineAt;
   if (deadlineMs !== undefined) context.deadlineAt = Date.now() + deadlineMs;
   if (retryBudget !== undefined) context.retryBudget = retryBudget;
   if (correlationId !== undefined) context.correlationId = correlationId;
+  if (traceId !== undefined) context.traceId = traceId;
+  if (spanId !== undefined) context.spanId = spanId;
   return Object.freeze(context);
 }
 

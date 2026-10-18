@@ -170,6 +170,12 @@ loop from accumulating listeners without limit. See
 
 ***
 
+### \_healthCheckIntervalMs
+
+> **\_healthCheckIntervalMs**: `number`
+
+***
+
 ### \_idempotency
 
 > **\_idempotency**: `Map`\<`any`, `any`\> \| `null`
@@ -1142,6 +1148,22 @@ Return stats for debugging and telemetry.
 
 ***
 
+### healthCheck()
+
+> **healthCheck**(): `object`[]
+
+Run a health check over the pool's workers.
+
+Returns an array of `{ index, pending, alive }` describing each worker.
+`alive` is `true` when the underlying worker object is present and not
+terminated. This is a read-only snapshot; it does not send a ping.
+
+#### Returns
+
+`object`[]
+
+***
+
 ### pause()
 
 > **pause**(): `void`
@@ -1166,6 +1188,18 @@ are temporarily unable to accept more work.
 #### Returns
 
 `void`
+
+***
+
+### ping()
+
+> **ping**(): `object`[]
+
+Alias for [PowerPool#healthCheck](#healthcheck).
+
+#### Returns
+
+`object`[]
 
 ***
 

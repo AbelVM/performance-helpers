@@ -234,6 +234,12 @@ export type PowerPoolOptions = {
      * side effect twice, exactly as it would with no ledger at all.
      */
     idempotencyTtlMs?: number | undefined;
+    /**
+     * Interval (ms) for the worker
+     * health-check ping. `0` (default) disables periodic checks; use
+     * `healthCheck()`/`ping()` for on-demand checks.
+     */
+    healthCheckIntervalMs?: number | undefined;
 };
 /**
  * Adaptive-concurrency configuration for `PowerPool` (`autoScale`).
@@ -1816,6 +1822,10 @@ export type PowerChunkingOptions = {
     postOptions?: PostMessageOptions | undefined;
     chunkSize?: number | undefined;
     fnComplexity?: "light" | "medium" | "heavy" | undefined;
+    /**
+     * - Backpressure: pause pulling from a streaming iterable when the pool's queue reaches this depth.
+     */
+    highWaterMark?: number | undefined;
 };
 /**
  * Options for the PowerDeadline helper.
@@ -2390,4 +2400,10 @@ export type PowerServoOptions = {
      * `dt = 1`, for one set of gains on a 200 ms lag with 300 ms of delay.
      */
     dt?: number | undefined;
+    /**
+     * - Auto-tune gains at construction time.
+     * Either `{ ku, pu, method? }` or a number treated as `ku` (with `pu` from
+     * the second argument). See {@link PowerServo#autoTune}.
+     */
+    autoTune?: number | object | undefined;
 };

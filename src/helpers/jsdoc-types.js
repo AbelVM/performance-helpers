@@ -156,6 +156,9 @@
  *   exceed the longest window in which a caller might retry — a caller that
  *   retries after the TTL has elapsed is refused by nothing and will apply its
  *   side effect twice, exactly as it would with no ledger at all.
+ * @property {number} [healthCheckIntervalMs=0] Interval (ms) for the worker
+ *   health-check ping. `0` (default) disables periodic checks; use
+ *   `healthCheck()`/`ping()` for on-demand checks.
  */
 
 /**
@@ -1270,6 +1273,7 @@ export {};
  * @property {PostMessageOptions} [postOptions]
  * @property {number} [chunkSize]
  * @property {'light'|'medium'|'heavy'} [fnComplexity]
+ * @property {number} [highWaterMark=Infinity] - Backpressure: pause pulling from a streaming iterable when the pool's queue reaches this depth.
  */
 
 /**
@@ -1681,4 +1685,7 @@ export {};
  *   them at a much finer interval still converges, but the output is rewritten
  *   far more often. Measured: 128 output changes at `dt = 100` against 5997 at
  *   `dt = 1`, for one set of gains on a 200 ms lag with 300 ms of delay.
+ * @property {object|number} [autoTune] - Auto-tune gains at construction time.
+ *   Either `{ ku, pu, method? }` or a number treated as `ku` (with `pu` from
+ *   the second argument). See {@link PowerServo#autoTune}.
  */

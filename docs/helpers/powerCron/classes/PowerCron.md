@@ -170,6 +170,12 @@ Milliseconds since epoch (floating point for higher resolution).
 
 ***
 
+### \_timezone
+
+> **\_timezone**: `string` \| `null`
+
+***
+
 ### \_unref
 
 > **\_unref**: `boolean`
@@ -245,6 +251,20 @@ Epoch ms the next fire is aimed at.
 `boolean`
 
 Whether the schedule is armed.
+
+***
+
+### timezone
+
+#### Get Signature
+
+> **get** **timezone**(): `string` \| `null`
+
+##### Returns
+
+`string` \| `null`
+
+The configured IANA time zone, or `null`.
 
 ## Methods
 

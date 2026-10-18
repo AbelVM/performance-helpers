@@ -138,6 +138,7 @@ export class PowerServo {
         'feedforward',
         'feedforwardGain',
         'dt',
+        'autoTune',
       ],
       'PowerServo'
     );
@@ -219,8 +220,11 @@ export class PowerServo {
     this._output = 0;
     this._error = 0;
     this._saturated = false;
-  }
 
+    if (options && options.autoTune) {
+      this.autoTune(options.autoTune);
+    }
+  }
   /**
    * The reference `r`. Writable at any time.
    *
@@ -494,6 +498,76 @@ export class PowerServo {
    */
   get saturated() {
     return this._saturated;
+  }
+
+  /**
+   * Auto-tune the controller gains using a Ziegler-Nichols (or Tyreus-Luyben)
+   * rule from an ultimate gain `ku` and ultimate period `pu`.
+   *
+   * @param {any} input - Either `{ ku, pu, method? }` or a number
+   *   treated as `ku` (with `pu` from the second argument).
+   * @param {number} [pu] - Ultimate period (only when `input` is a number).
+   * @returns {this}
+   */
+  autoTune(input, pu) {
+    let ku;
+    let period;
+    let method = 'zn';
+    if (typeof input === 'number') {
+      ku = input;
+      period = pu;
+    } else if (input && typeof input === 'object') {
+      ku = input.ku ?? input.ultimateGain ?? input.Ku;
+      period = input.pu ?? input.ultimatePeriod ?? input.Pu;
+      method = input.method ?? input.rule ?? 'zn';
+    }
+    if (typeof ku !== 'number' || !Number.isFinite(ku) || ku <= 0) {
+      throw new TypeError(
+        'PowerServo.autoTune: `ku` (ultimate gain) must be a finite positive number'
+      );
+    }
+    if (typeof period !== 'number' || !Number.isFinite(period) || period <= 0) {
+      throw new TypeError(
+        'PowerServo.autoTune: `pu` (ultimate period) must be a finite positive number'
+      );
+    }
+    const m = String(method).toLowerCase();
+    let kp;
+    let ki;
+    let kd;
+    if (m === 'tyreus' || m === 'tyreus-luyben' || m === 'tl') {
+      kp = 0.45 * ku;
+      ki = (0.45 * ku) / (2.2 * period); // Ti = 2.2*Pu -> Ki = Kp/Ti
+      kd = (0.45 * ku * period) / 6.3; // Td = Pu/6.3 -> Kd = Kp*Td
+    } else {
+      // Ziegler-Nichols classic.
+      kp = 0.6 * ku;
+      ki = (1.2 * ku) / period;
+      kd = 0.075 * ku * period;
+    }
+    this._kp = kp;
+    this._ki = ki;
+    this._kd = kd;
+    return this;
+  }
+
+  /**
+   * Alias for {@link PowerServo#autoTune}.
+   * @param {...any} args
+   * @returns {this}
+   */
+  tune(...args) {
+    return this.autoTune.apply(this, args);
+  }
+
+  /**
+   * Alias for {@link PowerServo#autoTune}.
+   * @param {number} ku
+   * @param {number} [pu]
+   * @returns {this}
+   */
+  autoTuneZN(ku, pu) {
+    return this.autoTune({ ku, pu, method: 'zn' });
   }
 
   /**

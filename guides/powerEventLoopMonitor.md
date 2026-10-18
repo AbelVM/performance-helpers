@@ -33,6 +33,7 @@ Two consequences worth internalising:
 | `onDrift`             | `function`\|`null` |  `null` | Called with each sample in ms, for hook-based alerting. A throwing hook is swallowed.                                                   |
 | `keepProcessAlive`    |          `boolean` | `false` | The internal timer is `unref()`d by default, so a monitor you forget to dispose cannot hang a CLI. Set `true` to hold the process open. |
 | `utilizationProvider` | `function`\|`null` |  `null` | Supplies `utilization()` instead of resolving Node's `perf_hooks`. See below.                                                           |
+| `longTaskThreshold`   |           `number` |    `50` | Minimum duration (ms) for a `PerformanceObserver` long-task entry to be recorded. Set `0` to disable long-task detection.               |
 
 ## API
 

@@ -114,6 +114,8 @@ on are left in the queue for the next flush, and `errorCount` is incremented.
 | `onError`              | `Function`                      | `undefined` | Called when the underlying transport throws or when an oversize datagram is refused. Receives `(err, ctx)` where `ctx` includes `channel` and, for oversize refusals, `datagramSize` and `limit`. |
 | `maxDatagramSizeBytes` | `number`                        | `65535`     | Hard ceiling on outbound datagram size. A datagram larger than this is refused with a `TypeError` before it reaches the transport. `0` disables the check.                                        |
 | `maxQueue`             | `number`                        | `64`        | Maximum datagrams buffered for sending when the transport is not ready. `0` disables queueing: a datagram arriving while the transport is closed is refused immediately.                          |
+| `fragmentSize`         | `number`                        | `0`         | Fragment size for large datagrams. `0` disables fragmentation. When set, datagrams larger than this are split into chunks of this size.                                                           |
+| `fragment`             | `boolean`                       | `false`     | Shorthand: enables fragmentation with a default fragment size of 1024 bytes.                                                                                                                      |
 | `observability`        | `boolean` \| `MetricsCollector` | `false`     | Opt in to metrics: `true` registers under the prefix `datagramChannel`, or pass a collector of your own. See `guides/metrics.md`.                                                                 |
 
 An unrecognised option **throws** rather than being ignored.
@@ -141,6 +143,8 @@ An unrecognised option **throws** rather than being ignored.
   queued: number,           // datagrams currently in the internal queue
   maxQueue: number,         // configured queue capacity
   maxDatagramSizeBytes: number, // configured size ceiling
+  fragmentedDatagrams: number,  // datagrams split into fragments
+  fragmentsSent: number,       // total fragments sent
   disposed: boolean,        // whether close() or dispose() was called
 }
 ```

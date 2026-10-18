@@ -53,6 +53,10 @@ import { frameByteLength } from '../utils/frameSize.js';
  *   while the transport is closed is refused immediately.
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] -
  *   Opt in to metrics. See `guides/metrics.md`.
+ * @property {number} [fragmentSize] - Fragment size for large datagrams. `0`
+ *   disables fragmentation. Defaults to `1024` when `fragment` is true.
+ * @property {boolean} [fragment] - Enable fragmentation with the default
+ *   fragment size.
  */
 
 /**
@@ -79,10 +83,16 @@ export class PowerDatagramChannel {
   constructor(transport, options = /** @type {PowerDatagramChannelOptions} */ ({})) {
     assertKnownOptions(
       options,
-      ['onError', 'maxDatagramSizeBytes', 'maxQueue', 'observability'],
+      ['onError', 'maxDatagramSizeBytes', 'maxQueue', 'observability', 'fragmentSize', 'fragment'],
       'PowerDatagramChannel'
     );
-    const { onError, maxDatagramSizeBytes = 65535, maxQueue = 64 } = options || {};
+    const {
+      onError,
+      maxDatagramSizeBytes = 65535,
+      maxQueue = 64,
+      fragmentSize,
+      fragment,
+    } = options || {};
 
     if (!transport || typeof transport.send !== 'function') {
       throw new TypeError('PowerDatagramChannel: expected a transport with a `send(data)` method');
@@ -111,6 +121,20 @@ export class PowerDatagramChannel {
      * @type {number}
      */
     this._maxQueue = Math.max(0, Math.floor(Number(maxQueue)));
+
+    /**
+     * Fragment size for large datagrams. `0` disables fragmentation.
+     * @type {number}
+     */
+    this._fragmentSize = Math.max(
+      0,
+      Math.floor(Number(fragmentSize !== undefined ? fragmentSize : fragment ? 1024 : 0))
+    );
+
+    /** @type {number} */
+    this._fragmentedCount = 0;
+    /** @type {number} */
+    this._fragmentsSent = 0;
 
     /**
      * Datagrams waiting to be sent. A plain array — the class reads `.length`,
@@ -176,6 +200,10 @@ export class PowerDatagramChannel {
 
     // Hard size check before the transport sees the datagram.
     if (this._maxDatagramSizeBytes > 0 && size > this._maxDatagramSizeBytes) {
+      // Fragmentation: split an oversize datagram into chunks instead of refusing.
+      if (this._fragmentSize > 0) {
+        return this._sendFragmented(datagram, size);
+      }
       this._oversizeCount += 1;
       const err = new TypeError(
         `PowerDatagramChannel: datagram is ${size} bytes, exceeding the ` +
@@ -183,6 +211,12 @@ export class PowerDatagramChannel {
       );
       this._emitError(err, { datagramSize: size, limit: this._maxDatagramSizeBytes });
       throw err;
+    }
+
+    // Fragmentation for datagrams larger than the fragment size even when under
+    // the platform ceiling.
+    if (this._fragmentSize > 0 && size > this._fragmentSize) {
+      return this._sendFragmented(datagram, size);
     }
 
     // If the transport is not open, queue or refuse.
@@ -216,6 +250,57 @@ export class PowerDatagramChannel {
     this._sentCount += 1;
     this._bytesOut += size;
     return true;
+  }
+
+  /**
+   * Fragment a large datagram into chunks and send each.
+   * @param {any} datagram
+   * @param {number} size
+   * @returns {boolean}
+   * @private
+   */
+  _sendFragmented(datagram, size) {
+    const bytes = this._toBytes(datagram);
+    const chunkSize = this._fragmentSize > 0 ? this._fragmentSize : size;
+    const total = Math.ceil(bytes.length / chunkSize);
+    this._fragmentedCount += 1;
+    let sent = 0;
+    for (let i = 0; i < total; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, bytes.length);
+      const chunk = bytes.slice(start, end);
+      try {
+        this._transport.send(chunk);
+      } catch (e) {
+        this._errorCount += 1;
+        this._emitError(e, { datagramSize: chunk.length, fragment: i, total });
+        continue;
+      }
+      this._sentCount += 1;
+      this._bytesOut += chunk.length;
+      this._fragmentsSent += 1;
+      sent += 1;
+    }
+    return sent === total;
+  }
+
+  /**
+   * Coerce a datagram to a Uint8Array.
+   * @param {any} datagram
+   * @returns {Uint8Array}
+   * @private
+   */
+  _toBytes(datagram) {
+    if (datagram instanceof Uint8Array) return datagram;
+    if (datagram instanceof ArrayBuffer) return new Uint8Array(datagram);
+    if (ArrayBuffer.isView(datagram)) {
+      return new Uint8Array(datagram.buffer, datagram.byteOffset, datagram.byteLength);
+    }
+    if (typeof datagram === 'string') {
+      return new TextEncoder().encode(datagram);
+    }
+    if (Array.isArray(datagram)) return new Uint8Array(datagram);
+    return new Uint8Array(0);
   }
 
   /**
@@ -326,6 +411,9 @@ export class PowerDatagramChannel {
       queued: this._queue.length,
       maxQueue: this._maxQueue,
       maxDatagramSizeBytes: this._maxDatagramSizeBytes,
+      fragmentSize: this._fragmentSize,
+      fragmentedDatagrams: this._fragmentedCount,
+      fragmentsSent: this._fragmentsSent,
       disposed: this._disposed,
     };
   }

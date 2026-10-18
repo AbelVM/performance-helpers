@@ -46,6 +46,11 @@ export const READY_STATE: Readonly<{
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
  *   metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Off by default.
+ * @property {number} [streamPriority=0] - QUIC stream send priority (higher = more urgent).
+ * @property {number} [sendOrder=0] - QUIC send order hint for partial reliability.
+ * @property {boolean} [datagrams=false] - Enable the datagram path when available.
+ * @property {boolean} [datagramFallback=true] - Fall back to the bidirectional stream when datagrams are unavailable.
+ * @property {Function} [onDatagram] - Called with each received datagram.
  */
 /**
  * RT-002: a `PowerWebTransportClient` that mirrors the `PowerWebSocketClient`
@@ -123,7 +128,14 @@ export class PowerWebTransportClient {
      */
     sendFrame(frame: Uint8Array, options?: Object): Promise<boolean>;
     /**
-     * Register a lifecycle handler.
+     * Send a datagram (unreliable, unordered) when the transport supports it.
+     * Falls back to the bidirectional stream when datagrams are unavailable and
+     * `datagramFallback` is enabled.
+     * @param {any} data
+     * @returns {Promise<boolean>}
+     */
+    sendDatagram(data: any): Promise<boolean>;
+    /**
      * @param {'message'|'open'|'close'|'error'} type
      * @param {Function} handler
      * @returns {function():void}
@@ -164,6 +176,11 @@ export class PowerWebTransportClient {
      */
     /** @param {number} generation */
     _startStreamPump(generation: number): Promise<void>;
+    /**
+     * Start a datagram receive pump when the transport exposes datagrams.
+     * @param {number} generation
+     * @private
+     */
     /**
      * @param {any} error
      * @param {number} generation
@@ -324,6 +341,26 @@ export type WebTransportClientOptions = {
      * collector of your own. Off by default.
      */
     observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
+    /**
+     * - QUIC stream send priority (higher = more urgent).
+     */
+    streamPriority?: number | undefined;
+    /**
+     * - QUIC send order hint for partial reliability.
+     */
+    sendOrder?: number | undefined;
+    /**
+     * - Enable the datagram path when available.
+     */
+    datagrams?: boolean | undefined;
+    /**
+     * - Fall back to the bidirectional stream when datagrams are unavailable.
+     */
+    datagramFallback?: boolean | undefined;
+    /**
+     * - Called with each received datagram.
+     */
+    onDatagram?: Function | undefined;
 };
 import { ReconnectPolicy } from '../utils/reconnectPolicy.js';
 import { PowerHistogram } from './powerHistogram.js';

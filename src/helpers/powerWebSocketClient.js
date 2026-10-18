@@ -197,6 +197,12 @@ export { READY_STATE };
  *   while nothing gets through.
  * @property {boolean} [dropOnBackpressure=false] - Drop frames when the
  *   producer is paused by the high-water mark instead of queueing them.
+ * @property {number} [messageQueueSize=0] - Maximum messages buffered while the
+ *   socket is not open, so a send during a brief disconnect is not lost. `0`
+ *   (default) disables queueing and preserves the previous behaviour (send
+ *   returns `false` while closed). When the queue is full the oldest entry is
+ *   dropped and `stats().droppedQueuedMessages` is incremented. Queued messages
+ *   are flushed in order when the socket opens.
  * @property {Function} [onMessage] - Called with each decoded message.
  * @property {Function} [onOpen] - Called once the socket reaches `OPEN`.
  * @property {Function} [onClose] - Called with the close code and reason.
@@ -342,6 +348,7 @@ export class PowerWebSocketClient {
         'nonRetryableCloseCodes',
         'socketOptions',
         'reconnectOnHeartbeatTimeout',
+        'messageQueueSize',
         'dropOnBackpressure',
         'onMessage',
         'onOpen',
@@ -375,6 +382,7 @@ export class PowerWebSocketClient {
       nonRetryableCloseCodes = [],
       socketOptions = {},
       reconnectOnHeartbeatTimeout = true,
+      messageQueueSize = 0,
       onMessage,
       onOpen,
       onClose,
@@ -603,6 +611,18 @@ export class PowerWebSocketClient {
     });
     this._reconnectOnHeartbeatTimeout = reconnectOnHeartbeatTimeout !== false;
 
+    this._messageQueueSize = assertLimitRequired(messageQueueSize, {
+      name: 'messageQueueSize',
+      className: 'PowerWebSocketClient',
+      min: 0,
+      integer: true,
+      allowInfinity: true,
+      fallback: 0,
+    });
+    /** @type {any[]} */
+    this._messageQueue = [];
+    this._droppedQueuedMessages = 0;
+
     this._on = {
       message: typeof onMessage === 'function' ? onMessage : null,
       open: typeof onOpen === 'function' ? onOpen : null,
@@ -821,6 +841,9 @@ export class PowerWebSocketClient {
     // connection, so there is nothing to reset that is not already handled.
     this._paused = false;
     this._state = READY_STATE.CLOSED;
+    // A user-initiated close is terminal: drop any queued messages so they are
+    // not flushed on a later reconnect that will never come.
+    this._messageQueue = [];
   }
 
   /**
@@ -886,7 +909,20 @@ export class PowerWebSocketClient {
    * @returns {Promise<boolean>}
    */
   async _transmit(frame, options = {}) {
-    if (this._state !== READY_STATE.OPEN || !this._socket) return false;
+    if (this._state !== READY_STATE.OPEN || !this._socket) {
+      // Message queue while disconnected (S-22): buffer the frame so a send
+      // during a brief disconnect is not lost. `0` (default) disables this and
+      // preserves the previous behaviour of returning `false`.
+      if (this._messageQueueSize > 0 && !this._closedByUser) {
+        if (this._messageQueue.length >= this._messageQueueSize) {
+          this._messageQueue.shift();
+          this._droppedQueuedMessages += 1;
+        }
+        this._messageQueue.push({ frame, options: options || {} });
+        return true;
+      }
+      return false;
+    }
 
     if (this._writer) {
       // Streams tier: `ready` is the real back-pressure signal.
@@ -1001,6 +1037,10 @@ export class PowerWebSocketClient {
       // exhausted budget overwrites `'attempts'`.
       reconnectExhaustedBy: this._reconnectExhaustedBy ?? null,
       ...this._counters,
+      // S-22: message queue while disconnected.
+      messageQueueSize: this._messageQueueSize,
+      queuedMessages: this._messageQueue.length,
+      droppedQueuedMessages: this._droppedQueuedMessages,
       rtt: {
         count: this.rtt.count,
         p50: this.rtt.count ? this.rtt.percentile(50) : undefined,
@@ -1277,7 +1317,32 @@ export class PowerWebSocketClient {
     this._schedulePoll();
     this._scheduleHeartbeat();
     this._emit('open', this);
+    // Flush any messages queued while disconnected (S-22).
+    this._flushMessageQueue();
     done();
+  }
+
+  /**
+   * Flush messages buffered while the socket was not open, in the order they
+   * were queued. Fire-and-forget: each `_transmit` is awaited in sequence so
+   * ordering and back-pressure are preserved, but `_handleOpen` does not wait
+   * for the flush to finish before resolving `connect()`.
+   *
+   * @private
+   * @returns {void}
+   */
+  _flushMessageQueue() {
+    if (!this._messageQueue.length) return;
+    const queued = this._messageQueue.splice(0);
+    (async () => {
+      for (const { frame, options } of queued) {
+        try {
+          await this._transmit(frame, options);
+        } catch (e) {
+          this._emit('error', e);
+        }
+      }
+    })();
   }
 
   /**

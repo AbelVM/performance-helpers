@@ -135,6 +135,18 @@ Fire once immediately on `start()`,
 
 ***
 
+### timezone?
+
+> `optional` **timezone?**: `string`
+
+IANA time zone (e.g. `Europe/Berlin`) used to
+  interpret wall-clock boundaries. When set, the value is validated up front
+  (an invalid zone throws `RangeError`) and exposed via the `timezone` getter.
+  Scheduling alignment to wall-clock boundaries is driven by the injected
+  `now` clock, which remains the authoritative extension point.
+
+***
+
 ### unref?
 
 > `optional` **unref?**: `boolean`

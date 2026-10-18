@@ -11,6 +11,8 @@ const context = createOperationContext({
   retryBudget,
   correlationId: 'request-42',
   priority: 1,
+  traceId: '0af7651916cd43dd8448eb211c80319c',
+  spanId: 'b7ad6b7169203331',
 });
 ```
 
@@ -76,3 +78,11 @@ In runtimes without it (browsers, stripped environments) the helpers degrade
 to running the function directly and `getOperationContext()` returns `undefined`,
 so callers must still pass the context explicitly there. Nested calls shadow
 the outer context.
+
+## Trace context (S-05)
+
+`createOperationContext` accepts optional `traceId` and `spanId` fields for
+trace-context propagation. They are carried on the frozen context object and
+surfaced through `getOperationContext()`, so downstream helpers and exporters
+(e.g. `MetricsCollector.toOTLP()`) can correlate spans without a separate
+context channel.

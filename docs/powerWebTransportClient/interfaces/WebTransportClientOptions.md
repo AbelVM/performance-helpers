@@ -34,6 +34,22 @@ Abort the connect attempt after
 
 ***
 
+### datagramFallback?
+
+> `optional` **datagramFallback?**: `boolean`
+
+Fall back to the bidirectional stream when datagrams are unavailable.
+
+***
+
+### datagrams?
+
+> `optional` **datagrams?**: `boolean`
+
+Enable the datagram path when available.
+
+***
+
 ### heartbeatIntervalMs?
 
 > `optional` **heartbeatIntervalMs?**: `number`
@@ -98,6 +114,14 @@ Called with the close code and reason.
 
 ***
 
+### onDatagram?
+
+> `optional` **onDatagram?**: `Function`
+
+Called with each received datagram.
+
+***
+
 ### onError?
 
 > `optional` **onError?**: `Function`
@@ -153,6 +177,22 @@ Reconnect when a
 
 Histogram for heartbeat RTT. One is
   created when omitted.
+
+***
+
+### sendOrder?
+
+> `optional` **sendOrder?**: `number`
+
+QUIC send order hint for partial reliability.
+
+***
+
+### streamPriority?
+
+> `optional` **streamPriority?**: `number`
+
+QUIC stream send priority (higher = more urgent).
 
 ***
 

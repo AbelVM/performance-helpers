@@ -8,20 +8,26 @@
 
 HyperLogLog — probabilistic cardinality estimator.
 
-Uses 64 registers (b = 6). The standard error of a HyperLogLog sketch is
-1.04 / sqrt(m), so 64 registers give **~13 %**, not the ~1 % a reader
-expects from that sentence — reaching 1 % needs ~11k registers (the 1.5 KB
-the review budgeted for the companion admission filter). The footprint is
-64 bytes. Recorded here because the first draft of this header claimed 1 %
-and would have sent the next reader down a wrong path.
+This implementation follows the **sparse + dense** shape of HLL++ (Heule,
+Nunkesser, Hall 2013): for small cardinalities the sketch stores the
+distinct hashed values exactly (sparse representation), which removes the
+variance that dominates the HLL estimate at small `n`; once the number of
+distinct values exceeds a threshold the sparse set is flushed into the
+standard dense register array and the sketch switches to the usual
+Flajolet–Martin / HyperLogLog harmonic-mean estimate.
 
-The implementation follows the standard Flajolet–Martin / HyperLogLog
-algorithm:
-  1. Hash the element to a 32-bit value.
-  2. Use the first 6 bits to select a register.
-  3. Count leading zeros in the remaining 26 bits.
-  4. Store the maximum leading-zero count per register.
-  5. Estimate cardinality from the harmonic mean of 2^M_i.
+The dense phase keeps the existing behaviour (linear counting for small
+ranges, bias constant per register count, internal finalisation of raw
+inputs). The empirical bias-correction table that HLL++ applies to the
+*raw* estimate in the mid range is **not** shipped: it is a measured
+artefact (one table per precision `p`) and embedding an unmeasured
+approximation would be worse than the linear-counting fallback already in
+place. `bench/claims.js cardinality` is the gate for adding it.
+
+6-bit packed registers (the memory half of HLL++) are also deferred: the
+public `registers` property is a `Uint8Array` (one byte per register) so
+that `registers.length === registerCount` and `registers.every(...)` keep
+working for existing callers and tests. Packing would change that contract.
 
 ## Classes
 

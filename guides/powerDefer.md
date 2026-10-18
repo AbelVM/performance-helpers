@@ -16,7 +16,11 @@ A minimal deferred-promise primitive. Useful for coordination patterns where a p
 
 - `reject(err)` — Reject the associated promise with `err`. No-op if already settled.
 
-- `settled` (boolean) — `true` when either `resolve` or `reject` has been invoked.
+- `cancel(reason?)` — Cancel the pending defer: rejects the promise with an `Error` (or the supplied reason) and marks it cancelled. No-op if already settled. Sets `status` to `'cancelled'`.
+
+- `cancelled` (boolean) — `true` when the defer has been cancelled.
+
+- `settled` (boolean) — `true` when either `resolve`, `reject`, or `cancel` has been invoked.
 
 - `status` — One of `'pending' | 'fulfilled' | 'rejected'` reflecting the current lifecycle state. Initially `'pending'`.
 

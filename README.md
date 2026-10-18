@@ -19,10 +19,13 @@ ESM-only subpaths are available when you want smaller bundles.
 v2.1 adds seven helpers — a priority queue, deduplication, heartbeats, sequence
 reassembly, two closed-loop flow controllers and exact APDEX scoring — plus a
 worker pool that detects and replaces a dead worker, and a cache admission filter
-that finally adapts to a changing working set. v2.0 added versioned worker
-messaging, realtime transports, retry budgets, adaptive concurrency, event-loop
-monitoring, richer observability, and safer resource lifecycles. Read the
-[what’s new guide](assets/whatsnew2.0.md) for both.
+that finally adapts to a changing working set. v2.2 adds OTLP export and trace
+context propagation, WebTransport datagrams and QUIC stream priority, WebSocket
+message queueing while disconnected, chunker backpressure, cron timezones,
+datagram fragmentation, servo auto-tuning, and a worker health check. v2.0 added
+versioned worker messaging, realtime transports, retry budgets, adaptive
+concurrency, event-loop monitoring, richer observability, and safer resource
+lifecycles. Read the [what’s new guide](assets/whatsnew2.0.md) for both.
 
 ## Upgrade from v1.x
 

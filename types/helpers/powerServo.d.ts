@@ -117,6 +117,29 @@ export class PowerServo {
      */
     get saturated(): boolean;
     /**
+     * Auto-tune the controller gains using a Ziegler-Nichols (or Tyreus-Luyben)
+     * rule from an ultimate gain `ku` and ultimate period `pu`.
+     *
+     * @param {any} input - Either `{ ku, pu, method? }` or a number
+     *   treated as `ku` (with `pu` from the second argument).
+     * @param {number} [pu] - Ultimate period (only when `input` is a number).
+     * @returns {this}
+     */
+    autoTune(input: any, pu?: number): this;
+    /**
+     * Alias for {@link PowerServo#autoTune}.
+     * @param {...any} args
+     * @returns {this}
+     */
+    tune(...args: any[]): this;
+    /**
+     * Alias for {@link PowerServo#autoTune}.
+     * @param {number} ku
+     * @param {number} [pu]
+     * @returns {this}
+     */
+    autoTuneZN(ku: number, pu?: number): this;
+    /**
      * Restore the controller to its constructed state: no accumulated integral, no
      * remembered measurement, no output.
      *

@@ -49,6 +49,11 @@ import { assertFunction, assertLimitRequired, assertKnownOptions } from '../util
  *   exercised without real timers. Defaults to `nowMs()`.
  * @property {boolean} [unref=true] - Whether the pending timer is `unref`'d, so
  *   a running cron does not by itself keep a Node process alive.
+ * @property {string} [timezone] - IANA time zone (e.g. `Europe/Berlin`) used to
+ *   interpret wall-clock boundaries. When set, the value is validated up front
+ *   (an invalid zone throws `RangeError`) and exposed via the `timezone` getter.
+ *   Scheduling alignment to wall-clock boundaries is driven by the injected
+ *   `now` clock, which remains the authoritative extension point.
  */
 
 /**
@@ -101,6 +106,7 @@ export class PowerCron {
         'onFire',
         'unref',
         'now',
+        'timezone',
       ],
       'PowerCron'
     );
@@ -141,6 +147,20 @@ export class PowerCron {
     this._onError = typeof options.onError === 'function' ? options.onError : null;
     this._onFire = typeof options.onFire === 'function' ? options.onFire : null;
     this._unref = options.unref !== false;
+    const tz = options.timezone;
+    if (tz !== undefined && tz !== null) {
+      if (typeof tz !== 'string' || tz === '') {
+        throw new TypeError('PowerCron: `timezone` must be a non-empty string');
+      }
+      // Validate up front so a bad zone fails at construction rather than
+      // silently falling back to UTC at fire time.
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      } catch (e) {
+        throw new RangeError(`PowerCron: invalid timezone ${JSON.stringify(tz)}`, { cause: e });
+      }
+    }
+    this._timezone = typeof tz === 'string' && tz !== '' ? tz : null;
 
     /** @type {any} */
     this._timer = null;
@@ -217,6 +237,11 @@ export class PowerCron {
   /** @returns {number|null} Epoch ms the next fire is aimed at. */
   get nextRunAt() {
     return this._running ? this._nextAt : null;
+  }
+
+  /** @returns {string|null} The configured IANA time zone, or `null`. */
+  get timezone() {
+    return this._timezone;
   }
 
   /**

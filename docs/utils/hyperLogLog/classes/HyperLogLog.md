@@ -12,7 +12,7 @@ HyperLogLog cardinality estimator.
 
 ### Constructor
 
-> **new HyperLogLog**(`registerCount?`): `HyperLogLog`
+> **new HyperLogLog**(`registerCount?`, `options?`): `HyperLogLog`
 
 #### Parameters
 
@@ -21,14 +21,24 @@ HyperLogLog cardinality estimator.
 `number` = `DEFAULT_REGISTER_COUNT`
 
 Number of registers. Must be a power of
-  two. The relative error is `1.04/sqrt(m)`, so 256 registers give ~6.5 %
-  and 1024 give ~3.2 %, at one byte per register.
+  two.
 
-  **A parameter rather than a constant, because the shipped 64 is a
-  deliberate trade rather than a limit.** The audit that raised this
-  proposed replacing the sketch outright to reach a usable accuracy; raising
-  the register count reaches most of the way there for bytes this library
-  can afford, and `bench/claims.js cardinality` measures exactly how far.
+##### options?
+
+###### sparse?
+
+`boolean`
+
+Enable sparse representation for
+  small cardinalities (exact counting until the threshold is reached).
+
+###### sparseThreshold?
+
+`number`
+
+Distinct-count threshold at
+  which the sketch converts from sparse to dense. Defaults to
+  `registerCount * 4`.
 
 #### Returns
 
@@ -42,6 +52,12 @@ Number of registers. Must be a power of
 
 ***
 
+### \_dense
+
+> **\_dense**: `boolean`
+
+***
+
 ### \_maxRank
 
 > **\_maxRank**: `number`
@@ -52,9 +68,23 @@ Number of registers. Must be a power of
 
 > **\_shift**: `number`
 
-Bits consumed by the bucket index, and the widest rank the remainder can
-produce. Both derived from the register count rather than hardcoded, so a
-count other than 64 is calibrated rather than merely tolerated.
+***
+
+### \_sparseEnabled
+
+> **\_sparseEnabled**: `boolean`
+
+***
+
+### \_sparseSet
+
+> **\_sparseSet**: `Set`\<`number`\> \| `null`
+
+***
+
+### \_sparseThreshold
+
+> **\_sparseThreshold**: `number`
 
 ***
 
@@ -68,23 +98,33 @@ count other than 64 is calibrated rather than merely tolerated.
 
 > **registers**: `Uint8Array`\<`ArrayBufferLike`\>
 
+## Accessors
+
+### isDense
+
+#### Get Signature
+
+> **get** **isDense**(): `boolean`
+
+Whether the sketch is currently in dense mode.
+
+##### Returns
+
+`boolean`
+
 ## Methods
 
 ### addHash()
 
 > **addHash**(`hash`): `void`
 
-Add an element to the estimator. The argument may be a raw value: it is
-finalised internally, so `addHash(0)`, `addHash(1)` ... estimate correctly
-rather than saturating.
+Add an element to the estimator.
 
 #### Parameters
 
 ##### hash
 
 `any`
-
-A 32-bit hash value, or any value coercible to one.
 
 #### Returns
 
@@ -102,15 +142,13 @@ Estimate the number of distinct elements added.
 
 `number`
 
-Cardinality estimate.
-
 ***
 
 ### reset()
 
 > **reset**(): `void`
 
-Reset all registers to zero.
+Reset all registers to zero and return to sparse phase.
 
 #### Returns
 

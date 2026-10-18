@@ -147,6 +147,29 @@ Histogram buckets must already be cumulative; the formatter will not interpret
 arbitrary `snapshot().series` keys as histogram data. Keep label values bounded
 by using a fixed application-owned vocabulary, never request IDs or URLs.
 
+## OTLP export hook
+
+`MetricsCollector.toOTLP()` returns an OTLP-shaped JSON export (pull-based, no
+push). The collector stays pull-based — nothing is sent unless the caller asks:
+
+```js
+const otlp = metrics.toOTLP({ serviceName: 'api', timestampMs: Date.now() });
+// hand `otlp` to your own transport
+```
+
+Each series entry becomes a gauge data point (`asBool`/`asDouble`/`asString`
+depending on the value type). `serviceName` defaults to `'performance-helpers'`.
+
+## Trace context propagation
+
+`createOperationContext` accepts `traceId` and `spanId` for W3C trace context
+propagation:
+
+```js
+import { createOperationContext } from 'performance-helpers/powerOperationContext';
+const ctx = createOperationContext({ traceId, spanId, priority: 1 });
+```
+
 ## Errors do not blank the sink
 
 A source that throws is recorded under `errors` and the rest is still

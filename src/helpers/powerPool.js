@@ -315,12 +315,14 @@ class WorkerWrapper {
     }
   }
 
+  /** @param {...any} args */
   addEventListener(...args) {
-    return this._underlying.addEventListener(...args);
+    return this._underlying.addEventListener.apply(this._underlying, args);
   }
 
+  /** @param {...any} args */
   removeEventListener(...args) {
-    return this._underlying.removeEventListener(...args);
+    return this._underlying.removeEventListener.apply(this._underlying, args);
   }
 
   terminate() {
@@ -461,6 +463,7 @@ export class PowerPool {
         'idempotencyTtlMs',
         'priority',
         'priorityAgingMs',
+        'healthCheckIntervalMs',
       ],
       'PowerPool'
     );
@@ -504,11 +507,13 @@ export class PowerPool {
       readyTimeout = 0,
       autoScale = false,
       priorityAgingMs = 0,
+      healthCheckIntervalMs = 0,
     } = options;
     if (!Number.isFinite(priorityAgingMs) || priorityAgingMs < 0) {
       throw new RangeError('PowerPool: `priorityAgingMs` must be finite and >= 0');
     }
     this._priorityAgingMs = priorityAgingMs;
+    this._healthCheckIntervalMs = Math.max(0, Number(healthCheckIntervalMs) || 0);
     const maxTasksPerWorker =
       maxTasksPerWorkerOption === undefined && autoScale
         ? 1
@@ -5150,6 +5155,32 @@ export class PowerPool {
         /* best-effort */
       }
     }
+  }
+
+  /**
+   * Run a health check over the pool's workers.
+   *
+   * Returns an array of `{ index, pending, alive }` describing each worker.
+   * `alive` is `true` when the underlying worker object is present and not
+   * terminated. This is a read-only snapshot; it does not send a ping.
+   *
+   * @returns {Array<{index:number, pending:number, alive:boolean}>}
+   */
+  healthCheck() {
+    const workers = Array.isArray(this.workers) ? this.workers : [];
+    return workers.map((w, i) => ({
+      index: i,
+      pending: w && typeof w.tasks === 'number' ? w.tasks : 0,
+      alive: !!(w && w.worker && !w.exited),
+    }));
+  }
+
+  /**
+   * Alias for {@link PowerPool#healthCheck}.
+   * @returns {Array<{index:number, pending:number, alive:boolean}>}
+   */
+  ping() {
+    return this.healthCheck();
   }
 
   /**

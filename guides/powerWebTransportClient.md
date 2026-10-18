@@ -28,6 +28,11 @@ Reconnecting WebTransport client with **stream-based back-pressure**, heartbeats
 | `onError`                     | `Function`                      | —                         | Called with each transport error.                                                                                         |
 | `rtt`                         | `PowerHistogram`                | —                         | Histogram for heartbeat RTT. One is created when omitted.                                                                 |
 | `observability`               | `boolean` \| `MetricsCollector` | `false`                   | Opt in to metrics: `true` registers this helper in the shared collector, or pass a collector of your own. Off by default. |
+| `streamPriority`              | `number`                        | `0`                       | QUIC stream send priority (higher = more urgent). Passed to `createBidirectionalStream({ sendOrder })` when non-zero.     |
+| `sendOrder`                   | `number`                        | `0`                       | QUIC send order hint for partial reliability.                                                                             |
+| `datagrams`                   | `boolean`                       | `false`                   | Enable the datagram path when the transport exposes `transport.datagrams`.                                                |
+| `datagramFallback`            | `boolean`                       | `true`                    | Fall back to the bidirectional stream when datagrams are unavailable.                                                     |
+| `onDatagram`                  | `Function`                      | —                         | Called with each received datagram.                                                                                       |
 
 ## The problem this exists for
 
@@ -58,6 +63,34 @@ If the stream ends with a partial frame header or payload, strict decoder flushi
 ## Heartbeats
 
 Heartbeats are application-level because WebTransport has no native ping/pong. The client sends `{ __heartbeat: 'ping' }` in a framed JSON message at `heartbeatIntervalMs`; the peer replies with `{ __heartbeat: 'pong' }`. Control frames are consumed internally, matching replies clear only their own deadline and record RTT in `rtt`, and they are never passed to `onMessage`. If the deadline fires, the client counts a `heartbeatTimeout` and, if `reconnectOnHeartbeatTimeout` is set, closes the transport and reconnects.
+
+## QUIC stream priority
+
+`streamPriority` and `sendOrder` are forwarded to `createBidirectionalStream()` as
+`{ sendOrder }` when non-zero, so a high-priority stream can jump ahead of a
+bulk transfer on the same connection. They are hints, not guarantees — the
+platform decides how to honour them.
+
+## Datagrams
+
+When `datagrams: true` is set and the transport exposes `transport.datagrams`,
+the client starts a receive pump on open and delivers each datagram to
+`onDatagram`. Outbound datagrams go through `sendDatagram(data)`, which returns
+`true` on success:
+
+```js
+const client = new PowerWebTransportClient({
+  url: 'https://example.test/feed',
+  datagrams: true,
+  onDatagram: (value) => console.log('datagram', value),
+});
+await client.connect();
+await client.sendDatagram(new Uint8Array([1, 2, 3]));
+```
+
+Datagrams are unreliable and unordered. When the transport does not expose a
+datagram path and `datagramFallback` is enabled (the default), `sendDatagram()`
+falls back to `send()` over the bidirectional stream.
 
 ## Reconnection
 

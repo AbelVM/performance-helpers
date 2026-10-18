@@ -83,6 +83,11 @@ export const READY_STATE = Object.freeze({
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] - Opt in to
  *   metrics: `true` registers this helper in the shared collector, or pass a
  *   collector of your own. Off by default.
+ * @property {number} [streamPriority=0] - QUIC stream send priority (higher = more urgent).
+ * @property {number} [sendOrder=0] - QUIC send order hint for partial reliability.
+ * @property {boolean} [datagrams=false] - Enable the datagram path when available.
+ * @property {boolean} [datagramFallback=true] - Fall back to the bidirectional stream when datagrams are unavailable.
+ * @property {Function} [onDatagram] - Called with each received datagram.
  */
 
 /**
@@ -131,6 +136,11 @@ export class PowerWebTransportClient {
         'onError',
         'rtt',
         'observability',
+        'streamPriority',
+        'sendOrder',
+        'datagramFallback',
+        'onDatagram',
+        'datagrams',
       ],
       'PowerWebTransportClient'
     );
@@ -153,6 +163,11 @@ export class PowerWebTransportClient {
       onClose,
       onError,
       rtt,
+      onDatagram,
+      datagramFallback = true,
+      datagrams = false,
+      streamPriority = 0,
+      sendOrder = 0,
     } = options || {};
 
     if (typeof url !== 'string' || url === '') {
@@ -269,6 +284,13 @@ export class PowerWebTransportClient {
     this._connectionGeneration = 0;
 
     this.rtt = rtt instanceof PowerHistogram ? rtt : new PowerHistogram({ relativeAccuracy: 0.02 });
+    this._streamPriority = Number(streamPriority) || 0;
+    this._sendOrder = Number(sendOrder) || 0;
+    this._datagramFallback = datagramFallback !== false;
+    this._datagramsEnabled = datagrams === true;
+    this._onDatagram = typeof onDatagram === 'function' ? onDatagram : null;
+    this._datagramWriter = null;
+    this._datagramReader = null;
     this._counters = {
       sent: 0,
       received: 0,
@@ -326,6 +348,14 @@ export class PowerWebTransportClient {
         // ignore; reader is already closed or closing
       }
       this._reader = null;
+    }
+    if (this._datagramReader) {
+      try {
+        this._datagramReader.cancel().catch(() => {});
+      } catch {
+        // ignore — cancel() throws only when the reader is already closed
+      }
+      this._datagramReader = null;
     }
     if (this._writer) {
       try {
@@ -397,7 +427,36 @@ export class PowerWebTransportClient {
   }
 
   /**
-   * Register a lifecycle handler.
+   * Send a datagram (unreliable, unordered) when the transport supports it.
+   * Falls back to the bidirectional stream when datagrams are unavailable and
+   * `datagramFallback` is enabled.
+   * @param {any} data
+   * @returns {Promise<boolean>}
+   */
+  async sendDatagram(data) {
+    if (this._state !== READY_STATE.OPEN) return false;
+    const transport = this._transport;
+    const dg = transport && transport.datagrams;
+    if (dg && dg.writable) {
+      try {
+        const writer = dg.writable.getWriter ? dg.writable.getWriter() : null;
+        if (writer) {
+          await writer.ready;
+          await writer.write(data);
+          writer.releaseLock();
+          this._counters.sent += 1;
+          return true;
+        }
+      } catch (e) {
+        this._emit('error', e);
+      }
+    }
+    if (this._datagramFallback) {
+      return this.send(data);
+    }
+    return false;
+  }
+  /**
    * @param {'message'|'open'|'close'|'error'} type
    * @param {Function} handler
    * @returns {function():void}
@@ -553,6 +612,9 @@ export class PowerWebTransportClient {
     this._reconnectStartedAt = null;
     await this._startStreamPump(generation);
     if (generation !== this._connectionGeneration) return;
+    if (this._datagramsEnabled) {
+      this._startDatagramPump(generation);
+    }
     this._state = READY_STATE.OPEN;
     this._scheduleHeartbeat();
     this._emit('open', this);
@@ -568,7 +630,9 @@ export class PowerWebTransportClient {
     const transport = this._transport;
 
     // Create a bidirectional stream for the data path.
-    const stream = await transport.createBidirectionalStream?.();
+    const streamOpts = {};
+    if (this._sendOrder) streamOpts.sendOrder = this._sendOrder;
+    const stream = await transport.createBidirectionalStream?.(streamOpts);
     if (generation !== this._connectionGeneration || transport !== this._transport) return;
     if (!stream) {
       this._handleError(
@@ -640,6 +704,37 @@ export class PowerWebTransportClient {
 
     // Writer for outbound frames.
     this._writer = stream.writable.getWriter();
+  }
+
+  /**
+   * Start a datagram receive pump when the transport exposes datagrams.
+   * @param {number} generation
+   * @private
+   */
+  _startDatagramPump(generation) {
+    const transport = this._transport;
+    const dg = transport && transport.datagrams;
+    if (!dg || !dg.readable) return;
+    const reader = dg.readable.getReader();
+    this._datagramReader = reader;
+    const pump = async () => {
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (this._onDatagram) {
+            try {
+              this._onDatagram(value, this);
+            } catch (e) {
+              this._emit('error', e);
+            }
+          }
+        }
+      } catch (e) {
+        this._handleStreamFailure(e, generation, transport);
+      }
+    };
+    pump().catch(() => {});
   }
 
   /**

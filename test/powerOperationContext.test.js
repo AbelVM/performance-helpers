@@ -86,6 +86,20 @@ describe('runOperationContext / getOperationContext / withOperationContext', () 
     expect(() => runOperationContext(ctx, 5)).toThrow(TypeError);
   });
 
+  it('accepts traceId and spanId', () => {
+    const ctx = createOperationContext({
+      traceId: '0af7651916cd43dd8448eb211c80319c',
+      spanId: 'b7ad6b7169203331',
+    });
+    expect(ctx.traceId).toBe('0af7651916cd43dd8448eb211c80319c');
+    expect(ctx.spanId).toBe('b7ad6b7169203331');
+  });
+
+  it('rejects non-string traceId/spanId', () => {
+    expect(() => createOperationContext({ traceId: 1 })).toThrow(TypeError);
+    expect(() => createOperationContext({ spanId: 1 })).toThrow(TypeError);
+  });
+
   it('returns undefined outside any context', async () => {
     expect(getOperationContext()).toBeUndefined();
   });

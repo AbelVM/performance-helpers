@@ -688,6 +688,21 @@ try {
 }
 ```
 
+## Worker health check
+
+`pool.healthCheck()` (alias `pool.ping()`) returns a read-only snapshot array of
+`{ index, pending, alive }` describing each worker. `alive` is `true` when the
+underlying worker object is present and not terminated. The list is empty after
+`terminate()`/`shutdown()`.
+
+```js
+const health = pool.healthCheck();
+// [{ index: 0, pending: 3, alive: true }, ...]
+```
+
+The `healthCheckIntervalMs` constructor option (default `0`, disabled) is
+reserved for future periodic pinging.
+
 ## Disposal
 
 `PowerPool` implements `dispose()` and `[Symbol.dispose]`, so it works with

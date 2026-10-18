@@ -15,6 +15,7 @@ export class PowerWebSocketClient {
         isPrototypeOf(v: Object): boolean;
         propertyIsEnumerable(v: PropertyKey): boolean;
     };
+    /** @type {any[]} */
     /** @type {WritableStreamDefaultWriter|null} */
     /** @type {ReadableStreamDefaultReader|null} */
     /** @type {Promise<void>|null} */
@@ -170,6 +171,15 @@ export class PowerWebSocketClient {
     /**
      * @param {(err?: any) => void} done Settles the pending connect exactly once.
      * @private
+     */
+    /**
+     * Flush messages buffered while the socket was not open, in the order they
+     * were queued. Fire-and-forget: each `_transmit` is awaited in sequence so
+     * ordering and back-pressure are preserved, but `_handleOpen` does not wait
+     * for the flush to finish before resolving `connect()`.
+     *
+     * @private
+     * @returns {void}
      */
     /**
      * Read the streams tier's inbound frames until the stream ends.
@@ -561,6 +571,15 @@ export type WebSocketClientOptions = {
      * producer is paused by the high-water mark instead of queueing them.
      */
     dropOnBackpressure?: boolean | undefined;
+    /**
+     * - Maximum messages buffered while the
+     * socket is not open, so a send during a brief disconnect is not lost. `0`
+     * (default) disables queueing and preserves the previous behaviour (send
+     * returns `false` while closed). When the queue is full the oldest entry is
+     * dropped and `stats().droppedQueuedMessages` is incremented. Queued messages
+     * are flushed in order when the socket opens.
+     */
+    messageQueueSize?: number | undefined;
     /**
      * - Called with each decoded message.
      */

@@ -17,4 +17,22 @@
 - `PowerCache`: `load(snapshot)` prefill API accepting `[key, value]`, `[key, value, { ttl, weight }]`, `{ key, value, ttl?, weight? }` and `Map` entries; routes through `set()` so admission policy, TTL and weight apply; returns accepted count (M-05 / S-11).
 
 - `PowerBufferPool`: reusable `Uint8Array` buffer pool with size buckets, `acquire(size)`/`release(buf)`, per-bucket and total caps, zeroing on reuse, `stats()` and `using`/`await using` support (S-17).
-- `PowerBackpressure`: `highWaterMark` option — number of queued waiters at or above which `acquire()` rejects with `ERR_QUEUE_FULL` instead of queueing, for fail-fast overload protection. Default `Infinity` (disabled). Reported in `stats()` (S-30).
+- `MetricsCollector`: `toOTLP()` exporter hook returning an OTLP-shaped JSON export (pull-based, no push); `createOperationContext` accepts `traceId`/`spanId` for trace context propagation (S-05).
+
+- `PowerWebSocketClient`: message queue while disconnected via `messageQueueSize` option (default 0 = disabled); buffers sends while closed, flushes in order on open, drop-oldest on overflow with `droppedQueuedMessages` counter; cleared on user close/dispose (S-22).
+- `PowerChunker`: `highWaterMark` option on the streaming path pauses pulling when the pool queue reaches the threshold (default `Infinity` = disabled) (S-15).
+- `HyperLogLog`: sparse representation for small cardinalities (HLL++-style) — exact distinct counting until the sparse threshold is reached, then conversion to the dense register array. New `sparse` (default `true`) and `sparseThreshold` (default `registerCount * 4`) constructor options; `isDense` getter. Dense phase, public `registers`/`registerCount` contract and validation unchanged (BEAM-013 / S-01).
+
+- `PowerCron`: `timezone` option accepting a validated IANA time zone (throws `RangeError` on an invalid zone); exposed via the `timezone` getter (E-07).
+
+- `PowerDatagramChannel`: fragmentation for large datagrams via `fragmentSize`/`fragment` options; splits oversize datagrams into chunks, counts `fragmentedDatagrams`/`fragmentsSent` (S-25).
+- `PowerServo`: auto-tuning via `autoTune({ ku, pu, method })` (Ziegler-Nichols classic and Tyreus-Luyben), plus `tune()`/`autoTuneZN()` aliases and `autoTune` constructor option (S-28).
+- `PowerWebTransportClient`: QUIC stream prioritization via `streamPriority`/`sendOrder` options; datagram path via `datagrams`/`datagramFallback`/`onDatagram` and `sendDatagram()` (S-09, S-23).
+- `PowerPool`: worker health-check via `healthCheck()`/`ping()` returning per-worker `{ index, pending, alive }`, plus `healthCheckIntervalMs` option (M-06).
+
+- `PowerDefer`: `cancel(reason?)` + `cancelled` getter for cancelling a pending defer (S-16).
+- `PowerEventLoopMonitor`: `longTaskThreshold` option + `PerformanceObserver` long-task detection (S-34).
+- `MetricsCollector`: lazy `defaultMetrics` allocation via `Proxy` (M-03).
+- `PowerCircuit`: configurable `halfOpenProbes` for half-open trial calls (R-10).
+- `PowerBackpressure`: `highWaterMark` option — queued waiters at/above the threshold cause `acquire()` to reject with `ERR_QUEUE_FULL` instead of queueing; default `Infinity` (disabled) (S-30).
+- `PowerHeartbeat`: `keepProcessAlive`/unref support so the timer does not keep the process alive by default (BEAM-001).

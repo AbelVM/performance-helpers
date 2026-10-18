@@ -4,49 +4,57 @@
 export class HyperLogLog {
     /**
      * @param {number} [registerCount=64] - Number of registers. Must be a power of
-     *   two. The relative error is `1.04/sqrt(m)`, so 256 registers give ~6.5 %
-     *   and 1024 give ~3.2 %, at one byte per register.
-     *
-     *   **A parameter rather than a constant, because the shipped 64 is a
-     *   deliberate trade rather than a limit.** The audit that raised this
-     *   proposed replacing the sketch outright to reach a usable accuracy; raising
-     *   the register count reaches most of the way there for bytes this library
-     *   can afford, and `bench/claims.js cardinality` measures exactly how far.
+     *   two.
+     * @param {Object} [options]
+     * @param {boolean} [options.sparse=true] - Enable sparse representation for
+     *   small cardinalities (exact counting until the threshold is reached).
+     * @param {number} [options.sparseThreshold] - Distinct-count threshold at
+     *   which the sketch converts from sparse to dense. Defaults to
+     *   `registerCount * 4`.
      */
-    constructor(registerCount?: number);
-    /** @type {Uint8Array} One byte per register. Ranks run 1..27, so a byte —
-     *  not a nibble — is what this needs; the earlier "low nibble" comment was
-     *  wrong and would have capped the estimator at 15 leading zeros. */
+    constructor(registerCount?: number, options?: {
+        sparse?: boolean | undefined;
+        sparseThreshold?: number | undefined;
+    });
+    /** @type {Uint8Array} One byte per register (dense phase). */
     registers: Uint8Array;
     /** @type {number} */
     registerCount: number;
     /** @type {number} The bias constant for this register count. */
     _alpha: number;
-    /**
-     * Bits consumed by the bucket index, and the widest rank the remainder can
-     * produce. Both derived from the register count rather than hardcoded, so a
-     * count other than 64 is calibrated rather than merely tolerated.
-     * @type {number}
-     */
     _shift: number;
-    /** @type {number} */
     _maxRank: number;
+    _sparseEnabled: boolean;
+    _sparseThreshold: number;
+    /** @type {Set<number>|null} Distinct finalised hashes in sparse phase. */
+    _sparseSet: Set<number> | null;
+    /** @type {boolean} Whether the sketch has converted to dense. */
+    _dense: boolean;
     /**
-     * Add an element to the estimator. The argument may be a raw value: it is
-     * finalised internally, so `addHash(0)`, `addHash(1)` ... estimate correctly
-     * rather than saturating.
-     * @param {*} hash - A 32-bit hash value, or any value coercible to one.
+     * Add an element to the estimator.
+     * @param {*} hash
      * @returns {void}
      */
     addHash(hash: any): void;
     /**
+     * Convert the sparse set into dense registers.
+     * @private
+     * @returns {void}
+     */
+    private _convertToDense;
+    /**
      * Estimate the number of distinct elements added.
-     * @returns {number} Cardinality estimate.
+     * @returns {number}
      */
     cardinality(): number;
     /**
-     * Reset all registers to zero.
+     * Reset all registers to zero and return to sparse phase.
      * @returns {void}
      */
     reset(): void;
+    /**
+     * Whether the sketch is currently in dense mode.
+     * @returns {boolean}
+     */
+    get isDense(): boolean;
 }

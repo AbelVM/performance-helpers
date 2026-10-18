@@ -10,8 +10,10 @@
  * @param {number} [options.deadlineMs] Relative deadline from this call.
  * @param {Object} [options.retryBudget] Shared retry budget.
  * @param {string} [options.correlationId]
+ * @param {string} [options.traceId] W3C trace id (32 hex chars).
+ * @param {string} [options.spanId] W3C span id (16 hex chars).
  * @param {number} [options.priority=0]
- * @returns {{signal?: AbortSignal, deadlineAt?: number, retryBudget?: Object, correlationId?: string, priority: number}}
+ * @returns {{signal?: AbortSignal, deadlineAt?: number, retryBudget?: Object, correlationId?: string, traceId?: string, spanId?: string, priority: number}}
  */
 export function createOperationContext(options?: {
     signal?: AbortSignal | undefined;
@@ -19,12 +21,16 @@ export function createOperationContext(options?: {
     deadlineMs?: number | undefined;
     retryBudget?: Object | undefined;
     correlationId?: string | undefined;
+    traceId?: string | undefined;
+    spanId?: string | undefined;
     priority?: number | undefined;
 }): {
     signal?: AbortSignal;
     deadlineAt?: number;
     retryBudget?: Object;
     correlationId?: string;
+    traceId?: string;
+    spanId?: string;
     priority: number;
 };
 /**

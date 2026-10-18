@@ -140,6 +140,28 @@ hub.subscribe('feed', (m) => render(m), { maxQueue: 32, slowConsumer: 'drop-newe
 
 The same principle applies to `PowerPool` workers, which also send pre-framed payloads: use `sendFrame` whenever the bytes are already a frame, `send` for a plain value.
 
+## Message queue while disconnected
+
+By default a `send()` while the socket is not open returns `false`. Set
+`messageQueueSize` to buffer sends during a brief disconnect instead:
+
+```js
+const client = new PowerWebSocketClient({
+  url: 'wss://example.test/feed',
+  messageQueueSize: 64,
+});
+```
+
+- Buffered messages are flushed in order when the socket opens.
+- When the queue is full the oldest entry is dropped and
+  `stats().droppedQueuedMessages` is incremented.
+- A user-initiated `close()` clears the queue so messages are not flushed on a
+  reconnect that will never come.
+- `0` (default) disables queueing and preserves the previous behaviour.
+
+`stats()` reports `messageQueueSize`, `queuedMessages` and
+`droppedQueuedMessages`.
+
 ## Heartbeats
 
 A socket can sit in `OPEN` forever while nothing gets through — common behind proxies and load balancers, which drop idle connections without a close frame. So the client pings and treats silence as death:

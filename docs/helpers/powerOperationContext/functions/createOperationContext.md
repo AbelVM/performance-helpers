@@ -47,6 +47,18 @@ Shared retry budget.
 
 `AbortSignal`
 
+#### spanId?
+
+`string`
+
+W3C span id (16 hex chars).
+
+#### traceId?
+
+`string`
+
+W3C trace id (32 hex chars).
+
 ## Returns
 
 `object`
@@ -70,3 +82,11 @@ Shared retry budget.
 ### signal?
 
 > `optional` **signal?**: `AbortSignal`
+
+### spanId?
+
+> `optional` **spanId?**: `string`
+
+### traceId?
+
+> `optional` **traceId?**: `string`

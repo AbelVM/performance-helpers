@@ -110,6 +110,12 @@
 
 ***
 
+### \_droppedQueuedMessages
+
+> **\_droppedQueuedMessages**: `number`
+
+***
+
 ### \_heartbeatDeadline
 
 > **\_heartbeatDeadline**: `any`
@@ -179,6 +185,18 @@
 ### \_maxReconnectElapsedMs
 
 > **\_maxReconnectElapsedMs**: `number`
+
+***
+
+### \_messageQueue
+
+> **\_messageQueue**: `any`[]
+
+***
+
+### \_messageQueueSize
+
+> **\_messageQueueSize**: `number`
 
 ***
 

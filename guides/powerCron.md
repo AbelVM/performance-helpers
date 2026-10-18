@@ -49,6 +49,7 @@ there so a schedule that cannot keep up says so.
 | `onError`    | `(err) => void`                      | —          | Called when the task throws or rejects. Without it, errors are logged.                                                                                                                                                                                                                                                                                                                                                             |
 | `onFire`     | `(info) => void`                     | —          | Called after each run with `{ scheduledFor, ranAt, driftMs, missed }`.                                                                                                                                                                                                                                                                                                                                                             |
 | `unref`      | `boolean`                            | `true`     | Whether the pending timer is `unref`'d, so a cron alone does not keep a Node process alive.                                                                                                                                                                                                                                                                                                                                        |
+| `timezone`   | `string`                             | —          | IANA time zone (e.g. `Europe/Berlin`) used to interpret wall-clock boundaries. Validated up front — an invalid zone throws `RangeError`. Exposed via the `timezone` getter. Scheduling alignment is driven by the injected `now` clock.                                                                                                                                                                                            |
 
 ### Methods
 
@@ -68,6 +69,7 @@ there so a schedule that cannot keep up says so.
 | `fireCount`      | `number`         | How much work the schedule accounts for: one per invocation, **including `catch-up` replays**. Under `run-once` it counts the _periods covered_ rather than the single run that covered them, so it is not an invocation count there. |
 | `averageDriftMs` | `number`         | Mean lateness per fire; `0` before anything has run. A growing mean means the task cannot keep up.                                                                                                                                    |
 | `nextRunAt`      | `number \| null` | Epoch ms the next fire is aimed at; `null` when stopped.                                                                                                                                                                              |
+| `timezone`       | `string \| null` | The configured IANA time zone, or `null`.                                                                                                                                                                                             |
 
 ## Catch-up policy
 
@@ -127,9 +129,12 @@ on the host. With no `onError` configured, errors are logged rather than dropped
   loop open turns every "run this every minute" script into something that needs
   `process.exit()`. Pass `unref: false` if the cron alone should hold the process
   open.
-- **Not a calendar cron.** There is no `@daily` parsing, no timezone handling and
-  no calendar semantics — this is an interval scheduler that does not drift. Compose
-  it with a wall-clock check inside the task if calendar semantics are needed.
+- **Not a calendar cron.** There is no `@daily` parsing and no calendar semantics —
+  this is an interval scheduler that does not drift. The `timezone` option validates
+  and exposes an IANA zone for callers that want to interpret wall-clock boundaries
+  inside their task; scheduling alignment itself is driven by the injected `now`
+  clock. Compose it with a wall-clock check inside the task if calendar semantics
+  are needed.
   Overlap is controlled by the `overlap` option; see [Overlap](#overlap) above.
 
 ## See also

@@ -48,6 +48,7 @@ import {
  * @param {Object=} options.postOptions - Options forwarded to `postMessageBatch`.
  * @param {number=} options.chunkSize - Explicit chunk size to use. When omitted a heuristic is used.
  * @param {'light'|'medium'|'heavy'} [options.fnComplexity] - Hint about `fn` complexity to bias chunking.
+ * @param {number} [options.highWaterMark=Infinity] - Backpressure: pause pulling from a streaming iterable when the pool's queue reaches this depth. `Infinity` (default) disables pausing. Only affects the streaming (non-array) path.
  * @class PowerChunker
  * @public
  * @returns {PowerPool} The created `PowerPool` instance managing the chunked work.
@@ -62,7 +63,7 @@ export class PowerChunker {
   constructor(iterable, fn, options = {}) {
     assertKnownOptions(
       options,
-      ['poolOptions', 'postOptions', 'chunkSize', 'fnComplexity'],
+      ['poolOptions', 'postOptions', 'chunkSize', 'fnComplexity', 'highWaterMark'],
       'PowerChunker'
     );
     if (!iterable || typeof fn !== 'function') {
@@ -74,6 +75,7 @@ export class PowerChunker {
       postOptions = {},
       chunkSize: explicitChunkSize,
       fnComplexity: providedFnComplexity,
+      highWaterMark,
     } = options;
 
     // Detect if we can eagerly measure total size. For arrays we can compute
@@ -154,7 +156,8 @@ export class PowerChunker {
       pool,
       iterable,
       chunkSize,
-      Math.max(1, Math.max(1, poolSize ?? 1) * CHUNK_WINDOW_MULTIPLIER)
+      Math.max(1, Math.max(1, poolSize ?? 1) * CHUNK_WINDOW_MULTIPLIER),
+      highWaterMark
     );
     const drainPool = pool.drain.bind(pool);
     /**
@@ -429,10 +432,11 @@ function dispatchArrayChunksInWindows(pool, items, total, chunkSize, postOptions
  * @param {Iterable<any>} it
  * @param {number} csize
  * @param {number} windowChunks - Chunks posted per macrotask.
+ * @param {number} [highWaterMark=Infinity] - Pause pulling when the pool queue reaches this depth.
  * @returns {Promise<void>} Never rejects; iteration failures are reported on the
  *   pool's error bus, as they were when this ran synchronously.
  */
-function streamIterableIntoPool(pool, it, csize, windowChunks) {
+function streamIterableIntoPool(pool, it, csize, windowChunks, highWaterMark = Infinity) {
   let chunkIndex = 0;
   /** @type {any[]} */
   let cur = [];
@@ -477,6 +481,13 @@ function streamIterableIntoPool(pool, it, csize, windowChunks) {
     const pumpWindow = () => {
       if (pool?._terminated) {
         resolve();
+        return;
+      }
+      // Backpressure (S-15): pause the source when the pool is saturated, so an
+      // unbounded iterable cannot outrun the workers and pin memory.
+      const hwm = Number.isFinite(highWaterMark) ? highWaterMark : Infinity;
+      if (hwm > 0 && (pool?.queue?.length ?? 0) >= hwm) {
+        deferToMacrotask(pumpWindow);
         return;
       }
       let posted = 0;

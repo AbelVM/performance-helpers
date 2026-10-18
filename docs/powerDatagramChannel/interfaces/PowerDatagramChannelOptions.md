@@ -8,6 +8,24 @@
 
 ## Properties
 
+### fragment?
+
+> `optional` **fragment?**: `boolean`
+
+Enable fragmentation with the default
+  fragment size.
+
+***
+
+### fragmentSize?
+
+> `optional` **fragmentSize?**: `number`
+
+Fragment size for large datagrams. `0`
+  disables fragmentation. Defaults to `1024` when `fragment` is true.
+
+***
+
 ### maxDatagramSizeBytes?
 
 > `optional` **maxDatagramSizeBytes?**: `number`

@@ -215,6 +215,20 @@ The rule that separates the two cases:
 
 `PowerServo` passes that test. You compute the setpoint and the measurement, so the signal decision stays where it belongs, and what is shared is arithmetic that is identical everywhere.
 
+## Auto-tuning (Ziegler-Nichols / Tyreus-Luyben)
+
+`PowerServo` can derive its gains from an ultimate gain `ku` and ultimate period `pu`:
+
+```js
+const servo = new PowerServo({ setpoint: 0 });
+servo.autoTune({ ku: 2, pu: 4 }); // Ziegler-Nichols classic
+servo.autoTune({ ku: 2, pu: 4, method: 'tyreus' }); // Tyreus-Luyben
+servo.tune(2, 4); // alias
+servo.autoTuneZN(2, 4); // alias
+```
+
+Pass `autoTune: { ku, pu }` in the constructor to tune at construction time. `autoTune` returns `this` for chaining and throws `TypeError` on non-finite or non-positive `ku`/`pu`.
+
 ## Related
 
 - [PowerBackpressure](powerBackpressure.md) — loss-based AIMD on an outstanding count, for the case with no setpoint.

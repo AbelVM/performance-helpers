@@ -176,6 +176,40 @@ everything except the broken thing, so the failure is recorded under
 
 ***
 
+### toOTLP()
+
+> **toOTLP**(`options?`): `object`
+
+Export the current snapshot in OTLP (OpenTelemetry Protocol) JSON shape.
+
+This is a *hook*, not a push exporter: it returns a serialisable object the
+caller hands to their own transport. The collector stays pull-based (see the
+class docblock) — nothing is sent unless the caller asks.
+
+#### Parameters
+
+##### options?
+
+###### serviceName?
+
+`string`
+
+Resource attribute.
+
+###### timestampMs?
+
+`number`
+
+Observation timestamp.
+
+#### Returns
+
+`object`
+
+An OTLP `ExportMetricsServiceRequest`-shaped object.
+
+***
+
 ### unregister()
 
 > **unregister**(`name`): `boolean`

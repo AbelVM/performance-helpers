@@ -10,6 +10,10 @@
  *   while the transport is closed is refused immediately.
  * @property {boolean|(import('./metrics.js').MetricsCollector)} [observability] -
  *   Opt in to metrics. See `guides/metrics.md`.
+ * @property {number} [fragmentSize] - Fragment size for large datagrams. `0`
+ *   disables fragmentation. Defaults to `1024` when `fragment` is true.
+ * @property {boolean} [fragment] - Enable fragmentation with the default
+ *   fragment size.
  */
 /**
  * A bounded, drop-counting datagram channel.
@@ -44,6 +48,12 @@ export class PowerDatagramChannel {
      * Maximum datagrams buffered for sending when the transport is not ready.
      * @type {number}
      */
+    /**
+     * Fragment size for large datagrams. `0` disables fragmentation.
+     * @type {number}
+     */
+    /** @type {number} */
+    /** @type {number} */
     /**
      * Datagrams waiting to be sent. A plain array — the class reads `.length`,
      * `.push` and `.shift` only.
@@ -87,6 +97,19 @@ export class PowerDatagramChannel {
      * @throws {TypeError} When `datagram` exceeds `maxDatagramSizeBytes`.
      */
     send(datagram: string | ArrayBuffer | ArrayBufferView): boolean;
+    /**
+     * Fragment a large datagram into chunks and send each.
+     * @param {any} datagram
+     * @param {number} size
+     * @returns {boolean}
+     * @private
+     */
+    /**
+     * Coerce a datagram to a Uint8Array.
+     * @param {any} datagram
+     * @returns {Uint8Array}
+     * @private
+     */
     /**
      * Flush the internal queue to the transport.
      *
@@ -166,4 +189,14 @@ export type PowerDatagramChannelOptions = {
      * Opt in to metrics. See `guides/metrics.md`.
      */
     observability?: boolean | import("./metrics.js").MetricsCollector | undefined;
+    /**
+     * - Fragment size for large datagrams. `0`
+     * disables fragmentation. Defaults to `1024` when `fragment` is true.
+     */
+    fragmentSize?: number | undefined;
+    /**
+     * - Enable fragmentation with the default
+     * fragment size.
+     */
+    fragment?: boolean | undefined;
 };

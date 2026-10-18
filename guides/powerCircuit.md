@@ -8,11 +8,12 @@ Simple circuit breaker primitive to protect external services from cascading fai
 
 ## Options
 
-| Option       |          Type |        Default | Description                                                                                                                                                                                           |
-| ------------ | ------------: | -------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `threshold`  |      `number` |            `5` | Consecutive failure threshold to open the circuit.                                                                                                                                                    |
-| `timeout`    | `number` (ms) |        `30000` | **Base** milliseconds to keep the circuit open before allowing a trial (`half-open`) call. Consecutive trips grow this exponentially and jitter the result — see [The open window](#the-open-window). |
-| `maxTimeout` | `number` (ms) | `timeout * 16` | Ceiling for the grown open window.                                                                                                                                                                    |
+| Option           |          Type |        Default | Description                                                                                                                                                                                           |
+| ---------------- | ------------: | -------------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `threshold`      |      `number` |            `5` | Consecutive failure threshold to open the circuit.                                                                                                                                                    |
+| `timeout`        | `number` (ms) |        `30000` | **Base** milliseconds to keep the circuit open before allowing a trial (`half-open`) call. Consecutive trips grow this exponentially and jitter the result — see [The open window](#the-open-window). |
+| `maxTimeout`     | `number` (ms) | `timeout * 16` | Ceiling for the grown open window.                                                                                                                                                                    |
+| `halfOpenProbes` |      `number` |            `1` | How many concurrent trial calls are allowed while the circuit is half-open.                                                                                                                           |
 
 ### Options are validated, not coerced
 

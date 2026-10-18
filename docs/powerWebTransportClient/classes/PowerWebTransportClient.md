@@ -119,6 +119,30 @@ client.connect();
 
 ***
 
+### \_datagramFallback
+
+> **\_datagramFallback**: `boolean`
+
+***
+
+### \_datagramReader
+
+> **\_datagramReader**: `any`
+
+***
+
+### \_datagramsEnabled
+
+> **\_datagramsEnabled**: `boolean`
+
+***
+
+### \_datagramWriter
+
+> **\_datagramWriter**: `any`
+
+***
+
 ### \_heartbeatDeadline
 
 > **\_heartbeatDeadline**: `any`
@@ -201,6 +225,12 @@ client.connect();
 
 ***
 
+### \_onDatagram
+
+> **\_onDatagram**: `Function` \| `null`
+
+***
+
 ### \_pumpAbort
 
 > **\_pumpAbort**: `AbortController` \| `null`
@@ -255,9 +285,21 @@ client.connect();
 
 ***
 
+### \_sendOrder
+
+> **\_sendOrder**: `number`
+
+***
+
 ### \_state
 
 > **\_state**: `0` \| `1` \| `2` \| `3`
+
+***
+
+### \_streamPriority
+
+> **\_streamPriority**: `number`
 
 ***
 
@@ -449,8 +491,6 @@ Remove a registered handler.
 
 > **on**(`type`, `handler`): () => `void`
 
-Register a lifecycle handler.
-
 #### Parameters
 
 ##### type
@@ -502,6 +542,26 @@ Send a message, applying back-pressure.
 `Promise`\<`boolean`\>
 
 `true` when the frame was handed to the transport.
+
+***
+
+### sendDatagram()
+
+> **sendDatagram**(`data`): `Promise`\<`boolean`\>
+
+Send a datagram (unreliable, unordered) when the transport supports it.
+Falls back to the bidirectional stream when datagrams are unavailable and
+`datagramFallback` is enabled.
+
+#### Parameters
+
+##### data
+
+`any`
+
+#### Returns
+
+`Promise`\<`boolean`\>
 
 ***
 

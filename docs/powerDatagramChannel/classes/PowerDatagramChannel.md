@@ -71,6 +71,26 @@ An object with a `send(data)` method and an
 
 ***
 
+### \_fragmentedCount
+
+> **\_fragmentedCount**: `number`
+
+***
+
+### \_fragmentSize
+
+> **\_fragmentSize**: `number`
+
+Fragment size for large datagrams. `0` disables fragmentation.
+
+***
+
+### \_fragmentsSent
+
+> **\_fragmentsSent**: `number`
+
+***
+
 ### \_maxDatagramSizeBytes
 
 > **\_maxDatagramSizeBytes**: `number`

@@ -334,6 +334,56 @@ releases the instance deterministically at scope exit.
 
 ***
 
+### autoTune()
+
+> **autoTune**(`input`, `pu?`): `PowerServo`
+
+Auto-tune the controller gains using a Ziegler-Nichols (or Tyreus-Luyben)
+rule from an ultimate gain `ku` and ultimate period `pu`.
+
+#### Parameters
+
+##### input
+
+`any`
+
+Either `{ ku, pu, method? }` or a number
+  treated as `ku` (with `pu` from the second argument).
+
+##### pu?
+
+`number`
+
+Ultimate period (only when `input` is a number).
+
+#### Returns
+
+`PowerServo`
+
+***
+
+### autoTuneZN()
+
+> **autoTuneZN**(`ku`, `pu?`): `PowerServo`
+
+Alias for [PowerServo#autoTune](#autotune).
+
+#### Parameters
+
+##### ku
+
+`number`
+
+##### pu?
+
+`number`
+
+#### Returns
+
+`PowerServo`
+
+***
+
 ### dispose()
 
 > **dispose**(): `void`
@@ -410,3 +460,21 @@ A known input the output must react to
 `number`
 
 The control output `u`, clamped to `[min, max]`.
+
+***
+
+### tune()
+
+> **tune**(...`args`): `PowerServo`
+
+Alias for [PowerServo#autoTune](#autotune).
+
+#### Parameters
+
+##### args
+
+...`any`[]
+
+#### Returns
+
+`PowerServo`

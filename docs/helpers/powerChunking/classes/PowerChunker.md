@@ -73,6 +73,12 @@ Explicit chunk size to use. When omitted a heuristic is used.
 **options.fnComplexity**
 
 Hint about `fn` complexity to bias chunking.
+
+## Param
+
+**options.highWaterMark**
+
+Backpressure: pause pulling from a streaming iterable when the pool's queue reaches this depth. `Infinity` (default) disables pausing. Only affects the streaming (non-array) path.
  PowerChunker
 
 ## Constructors

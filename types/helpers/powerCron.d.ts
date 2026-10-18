@@ -44,6 +44,11 @@
  *   exercised without real timers. Defaults to `nowMs()`.
  * @property {boolean} [unref=true] - Whether the pending timer is `unref`'d, so
  *   a running cron does not by itself keep a Node process alive.
+ * @property {string} [timezone] - IANA time zone (e.g. `Europe/Berlin`) used to
+ *   interpret wall-clock boundaries. When set, the value is validated up front
+ *   (an invalid zone throws `RangeError`) and exposed via the `timezone` getter.
+ *   Scheduling alignment to wall-clock boundaries is driven by the injected
+ *   `now` clock, which remains the authoritative extension point.
  */
 /**
  * A drift-free cron-like scheduler built on `setTimeout` chaining.
@@ -136,6 +141,8 @@ export class PowerCron {
     get averageDriftMs(): number;
     /** @returns {number|null} Epoch ms the next fire is aimed at. */
     get nextRunAt(): number | null;
+    /** @returns {string|null} The configured IANA time zone, or `null`. */
+    get timezone(): string | null;
     /**
      * Arm the schedule. Idempotent.
      *
@@ -303,4 +310,12 @@ export type PowerCronOptions = {
      * a running cron does not by itself keep a Node process alive.
      */
     unref?: boolean | undefined;
+    /**
+     * - IANA time zone (e.g. `Europe/Berlin`) used to
+     * interpret wall-clock boundaries. When set, the value is validated up front
+     * (an invalid zone throws `RangeError`) and exposed via the `timezone` getter.
+     * Scheduling alignment to wall-clock boundaries is driven by the injected
+     * `now` clock, which remains the authoritative extension point.
+     */
+    timezone?: string | undefined;
 };

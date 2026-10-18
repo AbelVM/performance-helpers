@@ -1169,6 +1169,29 @@ export class PowerPool {
      * @returns {void}
      */
     /**
+     * Run a health check over the pool's workers.
+     *
+     * Returns an array of `{ index, pending, alive }` describing each worker.
+     * `alive` is `true` when the underlying worker object is present and not
+     * terminated. This is a read-only snapshot; it does not send a ping.
+     *
+     * @returns {Array<{index:number, pending:number, alive:boolean}>}
+     */
+    healthCheck(): Array<{
+        index: number;
+        pending: number;
+        alive: boolean;
+    }>;
+    /**
+     * Alias for {@link PowerPool#healthCheck}.
+     * @returns {Array<{index:number, pending:number, alive:boolean}>}
+     */
+    ping(): Array<{
+        index: number;
+        pending: number;
+        alive: boolean;
+    }>;
+    /**
      * Terminate the entire pool, clear queue and the reaper interval.
      */
     terminate(): void;

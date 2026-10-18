@@ -188,6 +188,22 @@ export class MetricsCollector {
         errors: Record<string, string>;
     };
     /**
+     * Export the current snapshot in OTLP (OpenTelemetry Protocol) JSON shape.
+     *
+     * This is a *hook*, not a push exporter: it returns a serialisable object the
+     * caller hands to their own transport. The collector stays pull-based (see the
+     * class docblock) — nothing is sent unless the caller asks.
+     *
+     * @param {Object} [options]
+     * @param {string} [options.serviceName='performance-helpers'] - Resource attribute.
+     * @param {number} [options.timestampMs=Date.now()] - Observation timestamp.
+     * @returns {object} An OTLP `ExportMetricsServiceRequest`-shaped object.
+     */
+    toOTLP(options?: {
+        serviceName?: string | undefined;
+        timestampMs?: number | undefined;
+    }): object;
+    /**
      * The registered source names.
      *
      * @returns {string[]}

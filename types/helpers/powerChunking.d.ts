@@ -37,6 +37,7 @@
  * @param {Object=} options.postOptions - Options forwarded to `postMessageBatch`.
  * @param {number=} options.chunkSize - Explicit chunk size to use. When omitted a heuristic is used.
  * @param {'light'|'medium'|'heavy'} [options.fnComplexity] - Hint about `fn` complexity to bias chunking.
+ * @param {number} [options.highWaterMark=Infinity] - Backpressure: pause pulling from a streaming iterable when the pool's queue reaches this depth. `Infinity` (default) disables pausing. Only affects the streaming (non-array) path.
  * @class PowerChunker
  * @public
  * @returns {PowerPool} The created `PowerPool` instance managing the chunked work.
