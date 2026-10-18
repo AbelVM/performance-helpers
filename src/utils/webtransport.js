@@ -104,7 +104,9 @@ export function detectWebTransportSupport(probe = {}) {
   // reading a not-yet-standard name off it is a type error three times over —
   // and the typecheck ratchet exists to stop that being answered by raising a
   // ceiling.
-  const globals = /** @type {any} */ (typeof globalThis !== 'undefined' ? globalThis : undefined);
+  const globals = /** @type {Record<string, unknown>} */ (
+    typeof globalThis !== 'undefined' ? globalThis : undefined
+  );
   const Ctor = scope.WebTransport ?? globals?.WebTransport;
   // `available` first, and everything else is conditioned on it. A build with no
   // constructor cannot have a transport, so the instance fields are `false`

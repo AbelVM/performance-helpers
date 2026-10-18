@@ -93,7 +93,7 @@ function getMacrotaskChannel() {
     // capability has to be probed on the value rather than asserted through a
     // type that only holds in one of them. `typecheck:ratchet` caught both
     // accesses at 292 against a 290 ceiling.
-    const port = /** @type {any} */ (_macrotaskChannel.port1);
+    const port = /** @type {{ unref?: () => void }} */ (_macrotaskChannel.port1);
     if (typeof port.unref === 'function') port.unref();
     return _macrotaskChannel;
   } catch {

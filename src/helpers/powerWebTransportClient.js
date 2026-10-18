@@ -523,7 +523,7 @@ export class PowerWebTransportClient {
   async _open() {
     return new Promise((resolve, reject) => {
       let settled = false;
-      const done = (/** @type {any} */ err) => {
+      const done = (/** @type {unknown} */ err) => {
         if (settled) return;
         settled = true;
         this._clearConnectTimer();
@@ -543,7 +543,7 @@ export class PowerWebTransportClient {
             this._handleClose({ code: transport.closeCode, reason: transport.closeReason });
             done();
           })
-          .catch((/** @type {any} */ e) => {
+          .catch((/** @type {unknown} */ e) => {
             if (generation !== this._connectionGeneration) return;
             this._handleError(e);
             done(e);
@@ -561,7 +561,7 @@ export class PowerWebTransportClient {
           .then(() => {
             return this._handleOpen(done, generation);
           })
-          .catch((/** @type {any} */ e) => {
+          .catch((/** @type {unknown} */ e) => {
             this._handleError(e);
             done(e);
           });
